@@ -21,83 +21,62 @@
 # SOFTWARE.
 
 cmake_minimum_required(VERSION 3.12)
+
+find_program(CMAKE_SLANG_COMPILER slangc DOC "Path to the slangc executable.")
+if(NOT CMAKE_SLANG_COMPILER)
+  message(FATAL_ERROR "slangc not found.")
+endif()
+
 set(EMBED_SPIRV_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 
 function(embed_spirv)
-  set(oneArgs OUTPUT_TARGET SPIRV_TARGET)
-  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES EMBEDDED_SYMBOL_NAMES)
+  # processes arguments given to a function, and defines a set of variables 
+  #   which hold the values of the respective options
+  set(oneArgs OUTPUT_TARGET)
+  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES EMBEDDED_SYMBOL_NAMES ENTRY_POINTS)
   cmake_parse_arguments(EMBED_SPIRV "" "${oneArgs}" "${multiArgs}" ${ARGN})
 
-#   if (EMBED_SPIRV_EMBEDDED_SYMBOL_NAMES)
-#     list(LENGTH EMBED_SPIRV_EMBEDDED_SYMBOL_NAMES NUM_NAMES)
-#     list(LENGTH EMBED_SPIRV_SOURCES NUM_SOURCES)
-#     if (NOT ${NUM_SOURCES} EQUAL ${NUM_NAMES})
-#       message(FATAL_ERROR
-#         "embed_ptx(): the number of names passed as EMBEDDED_SYMBOL_NAMES must \
-#         match the number of files in SOURCES."
-#       )
-#     endif()
-#   else()
-#     unset(EMBED_SPIRV_EMBEDDED_SYMBOL_NAMES)
-#     foreach(source ${EMBED_SPIRV_SOURCES})
-#       get_filename_component(name ${source} NAME_WE)
-#       list(APPEND EMBED_SPIRV_EMBEDDED_SYMBOL_NAMES ${name}_ptx)
-#     endforeach()
-#   endif()
+  list(LENGTH EMBED_SPIRV_ENTRY_POINTS NUM_ENTRY_POINTS)
+  
+  # For every entry point, compile the shader into SPIR.
+  # Store the resulting spirv files in a list
+  unset(EMBED_SPIRV_SLANG_OUTPUTS)
+  math(EXPR NUM_ENTRY_POINTS_MINUS_ONE "${NUM_ENTRY_POINTS}-1")
+  foreach(idx RANGE ${NUM_ENTRY_POINTS_MINUS_ONE})
+    list(GET EMBED_SPIRV_ENTRY_POINTS ${idx} EMBED_SPIRV_ENTRY_POINT)
+    
+    set(SPIRV_TARGET ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv)
 
-#   ## Find bin2c and CMake script to feed it ##
+    # Compile entry point to SPIRV
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv
+      COMMAND ${CMAKE_SLANG_COMPILER} 
+      -capability GL_EXT_ray_tracing
+      ${EMBED_SPIRV_SOURCES} 
+      -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv 
+      -entry ${EMBED_SPIRV_ENTRY_POINT}  
+      DEPENDS ${EMBED_SPIRV_SOURCES}
+      COMMENT "compile SPIRV entry point ${EMBED_SPIRV_ENTRY_POINT} from ${EMBED_SPIRV_SOURCES}"
+    )
+    list(APPEND EMBED_SPIRV_SLANG_OUTPUTS ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv)
+  endforeach()
 
-#   # We need to wrap bin2c with a script for multiple reasons:
-#   #   1. bin2c only converts a single file at a time
-#   #   2. bin2c has only standard out support, so we have to manually redirect to
-#   #      a cmake buffer
-#   #   3. We want to pack everything into a single output file, so we need to use
-#   #      the --name option
+  # Embed all spirv files as binary in a .c file
+  set(EMBED_SPIRV_RUN ${EMBED_SPIRV_DIR}/bin2c.cmake)
+  set(EMBED_SPIRV_C_FILE ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.c)
+  set(EMBED_SPIRV_H_FILE ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.h)
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.c
+    COMMAND ${CMAKE_COMMAND}
+      "-DINPUT_FILES=${EMBED_SPIRV_SLANG_OUTPUTS}"
+      "-DOUTPUT_C=${EMBED_SPIRV_C_FILE}"
+      "-DOUTPUT_H=${EMBED_SPIRV_H_FILE}"
+      -P ${EMBED_SPIRV_RUN}
+    VERBATIM
+    DEPENDS ${EMBED_SPIRV_SLANG_OUTPUTS}
+    COMMENT "Generating embedded SPIRV file: ${OUTPUT_FILE_NAME}"
+  )
 
-#   get_filename_component(CUDA_COMPILER_BIN "${CMAKE_CUDA_COMPILER}" DIRECTORY)
-#   find_program(BIN_TO_C NAMES bin2c PATHS ${CUDA_COMPILER_BIN})
-#   if(NOT BIN_TO_C)
-#     message(FATAL_ERROR
-#       "bin2c not found:\n"
-#       "  CMAKE_CUDA_COMPILER='${CMAKE_CUDA_COMPILER}'\n"
-#       "  CUDA_COMPILER_BIN='${CUDA_COMPILER_BIN}'\n"
-#       )
-#   endif()
-
-#   set(EMBED_SPIRV_RUN ${EMBED_SPIRV_DIR}/run_bin2c.cmake)
-
-#   ## Create SPIRV object target ##
-
-#   if (NOT EMBED_SPIRV_SPIRV_TARGET)
-#     set(SPIRV_TARGET ${EMBED_SPIRV_OUTPUT_TARGET}_ptx)
-#   else()
-#     set(SPIRV_TARGET ${EMBED_SPIRV_SPIRV_TARGET})
-#   endif()
-
-#   add_library(${SPIRV_TARGET} OBJECT)
-#   target_sources(${SPIRV_TARGET} PRIVATE ${EMBED_SPIRV_SOURCES})
-#   target_link_libraries(${SPIRV_TARGET} PRIVATE ${EMBED_SPIRV_SPIRV_LINK_LIBRARIES})
-#   set_property(TARGET ${SPIRV_TARGET} PROPERTY CUDA_SPIRV_COMPILATION ON)
-#   set_property(TARGET ${SPIRV_TARGET} PROPERTY CUDA_ARCHITECTURES OFF)
-#   target_compile_options(${SPIRV_TARGET} PRIVATE "-lineinfo")
-
-#   ## Create command to run the bin2c via the CMake script ##
-
-#   set(EMBED_SPIRV_C_FILE ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.c)
-#   get_filename_component(OUTPUT_FILE_NAME ${EMBED_SPIRV_C_FILE} NAME)
-#   add_custom_command(
-#     OUTPUT ${EMBED_SPIRV_C_FILE}
-#     COMMAND ${CMAKE_COMMAND}
-#       "-DBIN_TO_C_COMMAND=${BIN_TO_C}"
-#       "-DOBJECTS=$<TARGET_OBJECTS:${SPIRV_TARGET}>"
-#       "-DSYMBOL_NAMES=${EMBED_SPIRV_EMBEDDED_SYMBOL_NAMES}"
-#       "-DOUTPUT=${EMBED_SPIRV_C_FILE}"
-#       -P ${EMBED_SPIRV_RUN}
-#     VERBATIM
-#     DEPENDS $<TARGET_OBJECTS:${SPIRV_TARGET}> ${SPIRV_TARGET}
-#     COMMENT "Generating embedded SPIRV file: ${OUTPUT_FILE_NAME}"
-#   )
-
-#   add_library(${EMBED_SPIRV_OUTPUT_TARGET} OBJECT)
-#   target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_C_FILE})
+  add_library(${EMBED_SPIRV_OUTPUT_TARGET} OBJECT)
+  target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_C_FILE} ${EMBED_SPIRV_H_FILE})
 endfunction()

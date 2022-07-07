@@ -53,14 +53,34 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# include(embed_spirv)
+include(vkrt/cmake/embed_spirv.cmake)
+
+# TESTING
+embed_spirv(
+  OUTPUT_TARGET
+    deviceCode_spirv
+  ENTRY_POINTS
+    rayGenShader
+    missShader
+    closestHitShader
+    shadowRayHitShader
+    vertexMain
+    fragmentMain
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders.slang
+)
+
+add_custom_target(
+  run ALL
+  DEPENDS deviceCode_spirv
+)
 
 # ------------------------------------------------------------------
 # vkrt library itself
 # ------------------------------------------------------------------
-option(VKRT_BUILD_SHARED "Build VKRT as a shared library? (otherwise static)" OFF)
-set(BUILD_SHARED_LIBS ${VKRT_BUILD_SHARED}) # use 'VKRT_' naming convention
-add_subdirectory(vkrt)
+# option(VKRT_BUILD_SHARED "Build VKRT as a shared library? (otherwise static)" OFF)
+# set(BUILD_SHARED_LIBS ${VKRT_BUILD_SHARED}) # use 'VKRT_' naming convention
+# add_subdirectory(vkrt)
 
 # option(VKRT_BUILD_SAMPLES "Build the Samples?" ON)
 # add_compile_definitions(VKRT_BUILDING_ALL_SAMPLES)
