@@ -46,7 +46,7 @@ endif()
 # first, include some dependencies
 # ------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/vkrt/cmake/")
-if (OWL_IS_SUBPROJECT)
+if (VKRT_IS_SUBPROJECT)
   set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} PARENT_SCOPE)
 endif()
 
@@ -74,6 +74,8 @@ add_custom_target(
   run ALL
   DEPENDS deviceCode_spirv
 )
+
+add_subdirectory(3rdParty)
 
 # ------------------------------------------------------------------
 # vkrt library itself
