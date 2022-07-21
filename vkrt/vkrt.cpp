@@ -252,9 +252,9 @@ namespace vkrt {
     std::vector<MissProg*> missPrograms;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-    // vks::Buffer raygenShaderBindingTable;
-    // vks::Buffer missShaderBindingTable;
-    // vks::Buffer hitShaderBindingTable;
+    VkBuffer raygenShaderBindingTableBuffer;
+    VkBuffer missShaderBindingTableBuffer;
+    VkBuffer hitShaderBindingTableBuffer;
 
     /*! returns whether logging is enabled */
     inline static bool logging()
@@ -475,7 +475,8 @@ namespace vkrt {
       // Device properties also contain limits and sparse properties
       vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
       
-      VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
+      // VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
+      rayTracingPipelineProperties = {};
       rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
       VkPhysicalDeviceProperties2 deviceProperties2{};
       deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -1041,10 +1042,44 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
     context->pipeline);
 
+  auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t
+	{
+		VkBufferDeviceAddressInfoKHR bufferDeviceAI{};
+		bufferDeviceAI.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+		bufferDeviceAI.buffer = buffer;
+		return vkrt::vkGetBufferDeviceAddressKHR(device, &bufferDeviceAI);
+	};
+
+  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t 
+  {
+    return (value + alignment - 1) & ~(alignment - 1);
+  };
+
+  const uint32_t handleSizeAligned = alignedSize(
+    context->rayTracingPipelineProperties.shaderGroupHandleSize, 
+    context->rayTracingPipelineProperties.shaderGroupHandleAlignment);
+
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
+  raygenShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
+    context->logicalDevice, context->raygenShaderBindingTableBuffer);
+  raygenShaderSbtEntry.stride = handleSizeAligned;
+  raygenShaderSbtEntry.size = handleSizeAligned;
+
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
+  missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
+    context->logicalDevice, context->missShaderBindingTableBuffer);
+  missShaderSbtEntry.stride = handleSizeAligned;
+  missShaderSbtEntry.size = handleSizeAligned;
+
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
+  hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
+    context->logicalDevice, context->hitShaderBindingTableBuffer);
+  hitShaderSbtEntry.stride = handleSizeAligned;
+  hitShaderSbtEntry.size = handleSizeAligned;
+
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
+  // callableShaderSbtEntry.stride = handleSizeAligned;
+  // callableShaderSbtEntry.size = handleSizeAligned;
 
   vkrt::vkCmdTraceRaysKHR(
     context->graphicsCommandBuffer,

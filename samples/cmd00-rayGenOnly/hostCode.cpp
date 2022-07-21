@@ -86,6 +86,9 @@ int main(int ac, char **av)
     // Create the pipeline. Note that vkrt will (kindly) warn there are no geometry and no miss programs defined.
     vkrtBuildPipeline(vkrt);
 
+    // Build a shader binding table entry for the ray generation record.
+    vkrtBuildSBT(vkrt);
+
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
     // Now finally, cleanup
