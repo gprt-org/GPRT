@@ -25,6 +25,7 @@ embed_spirv(
     sample00-rayGenOnly-spv
   ENTRY_POINTS
     simpleRayGen
+    simpleMissProg
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )

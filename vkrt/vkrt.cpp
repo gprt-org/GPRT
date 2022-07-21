@@ -124,6 +124,45 @@ namespace vkrt {
     }
   };
 
+  struct MissProg {
+    VkShaderModule shaderModule;
+    VkPipelineShaderStageCreateInfo shaderStage{};
+    VkShaderModuleCreateInfo moduleCreateInfo{};
+    VkDevice logicalDevice;
+    
+    MissProg(VkDevice  _logicalDevice,
+          size_t sizeOfProgramBytes,
+          const char* programBytes,
+          size_t      sizeOfVarStruct,
+          VKRTVarDecl *vars,
+          int         numVars) {
+      std::cout<<"Miss program is being made!"<<std::endl;
+      
+      // store a reference to the logical device this module is made on
+      logicalDevice = _logicalDevice;
+      
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = sizeOfProgramBytes;
+      moduleCreateInfo.pCode = (uint32_t*)programBytes;
+
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
+        NULL, &shaderModule));
+
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+      shaderStage.module = shaderModule;
+      // note, this is a dumb quirk with current .spv tools... dxir supports
+      // multiple entry point names, but glslc -> spv does not...
+      // for now, assume the spirv entry point instruction is "main"
+      shaderStage.pName = "main"; 
+      assert(shaderStage.module != VK_NULL_HANDLE);
+    }
+    ~MissProg() {
+      std::cout<<"Miss program is being destroyed!"<<std::endl;
+      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    }
+  };
+
   struct Context {
     VkApplicationInfo appInfo;
 
@@ -152,6 +191,10 @@ namespace vkrt {
       uint32_t transfer;
     } queueFamilyIndices;
 
+    VkCommandBuffer graphicsCommandBuffer;
+    VkCommandBuffer computeCommandBuffer;
+    VkCommandBuffer transferCommandBuffer;
+
     /** @brief List of extensions supported by the chosen physical device */
     std::vector<std::string> supportedExtensions;
 
@@ -176,8 +219,8 @@ namespace vkrt {
     VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // not sure I need this one
     // Contains command buffers and semaphores to be presented to the queue
     VkSubmitInfo submitInfo;
-    // Command buffers used for rendering
-    std::vector<VkCommandBuffer> drawCmdBuffers;
+      // Command buffers used for rendering
+      // std::vector<VkCommandBuffer> drawCmdBuffers;
     // Global render pass for frame buffer writes
     VkRenderPass renderPass = VK_NULL_HANDLE;
     // List of available frame buffers (same as number of swap chain images)
@@ -206,6 +249,7 @@ namespace vkrt {
     VkPipelineLayout pipelineLayout;
 
     std::vector<RayGen*> raygenPrograms;
+    std::vector<MissProg*> missPrograms;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
     // vks::Buffer raygenShaderBindingTable;
@@ -682,6 +726,24 @@ namespace vkrt {
       graphicsCommandPool = createCommandPool(queueFamilyIndices.graphics);
       computeCommandPool = createCommandPool(queueFamilyIndices.compute);
       transferCommandPool = createCommandPool(queueFamilyIndices.transfer);
+
+      /// 5. Allocate command buffers
+      VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
+      cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+      cmdBufAllocateInfo.commandBufferCount = 1;
+      
+      cmdBufAllocateInfo.commandPool = graphicsCommandPool;
+      err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
+      if (err) throw std::runtime_error("Could not create graphics command buffer : \n" + errorString(err));
+
+      cmdBufAllocateInfo.commandPool = computeCommandPool;
+      err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
+      if (err) throw std::runtime_error("Could not create compute command buffer : \n" + errorString(err));
+
+      cmdBufAllocateInfo.commandPool = transferCommandPool;
+      err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
+      if (err) throw std::runtime_error("Could not create transfer command buffer : \n" + errorString(err));
     };
 
     ~Context() {
@@ -691,6 +753,9 @@ namespace vkrt {
       if (pipeline)
         vkDestroyPipeline(logicalDevice, pipeline, nullptr);
 
+      vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
+      vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
+      vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
       vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
       vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
       vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
@@ -773,11 +838,21 @@ namespace vkrt {
           shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
           shaderGroups.push_back(shaderGroup);
         }
-
       }
 
       // Miss group
       {
+        for (auto missprog : missPrograms) {
+          shaderStages.push_back(missprog->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
       }
 
       // Closest hit group
@@ -877,9 +952,49 @@ vkrtRayGenRelease(VKRTRayGen _rayGen)
   LOG("raygen destroyed...");
 }
 
+VKRT_API VKRTMissProg
+vkrtMissProgCreate(VKRTContext  _context,
+                  size_t sizeOfProgramBytes,
+                  const char* programBytes,
+                  size_t      sizeOfVarStruct,
+                  VKRTVarDecl *vars,
+                  int         numVars)
+{
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+
+  vkrt::MissProg *missProg = new vkrt::MissProg(
+    context->logicalDevice, sizeOfProgramBytes, programBytes,
+    sizeOfVarStruct, vars, numVars);
+  
+  context->missPrograms.push_back(missProg);
+  
+  LOG("miss program created...");
+  return (VKRTMissProg)missProg;
+}
+
+
+/*! sets the given miss program for the given ray type */
+VKRT_API void
+vkrtMissProgSet(VKRTContext  _context,
+               int rayType,
+               VKRTMissProg missProgToUse)
+{
+  throw std::runtime_error("Not implemented");
+}
+
+VKRT_API void 
+vkrtMissProgRelease(VKRTMissProg _missProg)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *missProg = (vkrt::MissProg*)_missProg;
+  delete missProg;
+  LOG("miss program destroyed...");
+}
+
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
-  
+  throw std::runtime_error("Not implemented");
 }
 
 VKRT_API void vkrtBuildPipeline(VKRTContext _context)
@@ -893,5 +1008,54 @@ VKRT_API void vkrtBuildPipeline(VKRTContext _context)
 VKRT_API void vkrtBuildSBT(VKRTContext _context, 
                            VKRTBuildSBTFlags flags)
 {
-
+  throw std::runtime_error("Not implemented");
 }
+
+/*! Executes a ray tracing pipeline with the given raygen program. 
+  This call will block until the raygen program returns. */
+VKRT_API void
+vkrtRayGenLaunch2D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dims_y)
+{
+  LOG_API_CALL();
+  vkrtRayGenLaunch3D(_context, _rayGen,dims_x,dims_y,1);
+}
+
+/*! 3D-launch variant of \see vkrtRayGenLaunch2D */
+VKRT_API void
+vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dims_y, int dims_z)
+{
+  LOG_API_CALL();
+  assert(_rayGen);
+
+  vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::RayGen *raygen = (vkrt::RayGen*)_rayGen;
+  VkResult err;
+
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  vkCmdBindPipeline(
+    context->graphicsCommandBuffer, 
+    VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->pipeline);
+
+  VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
+
+  vkrt::vkCmdTraceRaysKHR(
+    context->graphicsCommandBuffer,
+    &raygenShaderSbtEntry,
+    &missShaderSbtEntry,
+    &hitShaderSbtEntry,
+    &callableShaderSbtEntry,
+    dims_x,
+    dims_y,
+    dims_z);
+
+  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+}
+

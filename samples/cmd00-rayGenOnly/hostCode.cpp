@@ -39,6 +39,10 @@
 
 extern "C" char simpleRayGen_spv[];
 extern "C" uint32_t simpleRayGen_spv_size;
+extern "C" char simpleMissProg_spv[];
+extern "C" uint32_t simpleMissProg_spv_size;
+
+const int2 fbSize = {800,600};
 
 #include <iostream>
 int main(int ac, char **av) 
@@ -67,13 +71,25 @@ int main(int ac, char **av)
                         simpleRayGen_spv_size, simpleRayGen_spv,
                         sizeof(RayGenData),rayGenVars,-1);
 
+    VKRTVarDecl missProgVars[]
+        = {
+        { /* sentinel: */ nullptr }
+    };
+    VKRTMissProg missProg
+        = vkrtMissProgCreate(vkrt,
+                        simpleMissProg_spv_size, simpleMissProg_spv,
+                        sizeof(MissProgData),missProgVars,-1);
+
     // (re-)builds all optix programs, with current pipeline settings
     // vkrtBuildPrograms(vkrt);
 
     // Create the pipeline. Note that vkrt will (kindly) warn there are no geometry and no miss programs defined.
     vkrtBuildPipeline(vkrt);
 
+    vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+
     // Now finally, cleanup
+    vkrtMissProgRelease(missProg);
     vkrtRayGenRelease(rayGen);
     vkrtContextDestroy(vkrt);
 }

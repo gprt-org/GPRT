@@ -251,8 +251,32 @@ vkrtRayGenCreate(VKRTContext  context,
                 size_t      sizeOfVarStruct,
                 VKRTVarDecl *vars,
                 int         numVars);
-            // VKRTModule   module,
-            // const char *programName,
                 
 VKRT_API void 
 vkrtRayGenRelease(VKRTRayGen rayGen);
+
+VKRT_API VKRTMissProg
+vkrtMissProgCreate(VKRTContext  context,
+                  size_t sizeOfProgramBytes,
+                  const char* programBytes,
+                  size_t      sizeOfVarStruct,
+                  VKRTVarDecl *vars,
+                  int         numVars);
+
+/*! sets the given miss program for the given ray type */
+VKRT_API void
+vkrtMissProgSet(VKRTContext  context,
+               int rayType,
+               VKRTMissProg missProgToUse);
+
+VKRT_API void 
+vkrtMissProgRelease(VKRTMissProg missProg);
+
+/*! Executes a ray tracing pipeline with the given raygen program. 
+  This call will block until the raygen program returns. */
+VKRT_API void
+vkrtRayGenLaunch2D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_y);
+
+/*! 3D-launch variant of \see vkrtRayGenLaunch2D */
+VKRT_API void
+vkrtRayGenLaunch3D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_y, int dims_z);

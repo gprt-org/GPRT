@@ -29,3 +29,8 @@ struct RayGenData
   float3  color0;
   float3  color1;
 };
+
+struct MissProgData
+{
+  int placeholder;
+};

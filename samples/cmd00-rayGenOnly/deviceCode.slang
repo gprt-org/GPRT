@@ -28,3 +28,7 @@ void simpleRayGen()
 
 }
 
+[shader("miss")]
+void simpleMissProg()
+{
+}
