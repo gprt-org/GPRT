@@ -92,3 +92,20 @@ IF (NOT Vulkan_FOUND)
 ELSE()
   message(STATUS ${Vulkan_LIBRARY})
 ENDIF()
+
+# Find STB Image
+add_subdirectory(stb_image)
+
+# Find GLFW
+if(VKRT_BUILD_SAMPLES)
+  find_package(glfw3 QUIET)
+  set(OpenGL_GL_PREFERENCE "LEGACY")
+  #find_package(OpenGL QUIET)
+  find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS OpenGL)
+  if (NOT TARGET glfw)
+    if (OpenGL_FOUND)
+      message(STATUS "found opengl, building glfw")
+      add_subdirectory(glfw)
+    endif()
+  endif()
+endif()

@@ -20,12 +20,3 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
-
-struct RayGenData
-{
-  uint32_t *fbPtr;
-  int2  fbSize;
-  float3  color0;
-  float3  color1;
-};

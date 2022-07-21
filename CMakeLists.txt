@@ -34,6 +34,7 @@ endif()
 
 set(CMAKE_BUILD_TYPE_INIT "Release")
 
+# project command is required to come after cmake_minimum_required command.
 project(VKRT VERSION 1.0.0 LANGUAGES C CXX)
 
 if (NOT VKRT_IS_SUBPROJECT)
@@ -55,51 +56,31 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(vkrt/cmake/embed_spirv.cmake)
 
-# TESTING
-embed_spirv(
-  OUTPUT_TARGET
-    deviceCode_spirv
-  ENTRY_POINTS
-    rayGenShader
-    missShader
-    closestHitShader
-    shadowRayHitShader
-    vertexMain
-    fragmentMain
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders.slang
-)
-
-add_custom_target(
-  run ALL
-  DEPENDS deviceCode_spirv
-)
-
-add_subdirectory(3rdParty)
+option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 
 # ------------------------------------------------------------------
 # vkrt library itself
 # ------------------------------------------------------------------
-# option(VKRT_BUILD_SHARED "Build VKRT as a shared library? (otherwise static)" OFF)
-# set(BUILD_SHARED_LIBS ${VKRT_BUILD_SHARED}) # use 'VKRT_' naming convention
-# add_subdirectory(vkrt)
+option(VKRT_BUILD_SHARED "Build VKRT as a shared library? (otherwise static)" OFF)
+set(BUILD_SHARED_LIBS ${VKRT_BUILD_SHARED}) # use 'VKRT_' naming convention
+add_subdirectory(vkrt)
 
-# option(VKRT_BUILD_SAMPLES "Build the Samples?" ON)
+option(VKRT_BUILD_SAMPLES "Build the Samples?" ON)
 # add_compile_definitions(VKRT_BUILDING_ALL_SAMPLES)
 # option(VKRT_BUILD_ADVANCED_TESTS "Build the *advanced* test-cases?" OFF)
 
-# add_subdirectory(3rdParty)
+add_subdirectory(3rdParty)
 
-# # ------------------------------------------------------------------
-# # tutorial/samples
-# # ------------------------------------------------------------------
-# if (VKRT_BUILD_SAMPLES)
-#   add_subdirectory(samples)
-# endif()
+# ------------------------------------------------------------------
+# tutorial/samples
+# ------------------------------------------------------------------
+if (VKRT_BUILD_SAMPLES)
+  add_subdirectory(samples)
+endif()
 
-# if (VKRT_IS_SUBPROJECT)
-#   return()
-# endif()
+if (VKRT_IS_SUBPROJECT)
+  return()
+endif()
 
 # include(CTest)
 # if (BUILD_TESTING)

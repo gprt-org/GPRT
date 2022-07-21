@@ -20,12 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
+#pragma once
 
-struct RayGenData
-{
-  uint32_t *fbPtr;
-  int2  fbSize;
-  float3  color0;
-  float3  color1;
-};
+#ifdef SLANG_COMPILER
+#include "vkrt_device.h"
+#else 
+#include "vkrt_host.h"
+#endif
