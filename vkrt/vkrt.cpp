@@ -85,6 +85,164 @@ namespace vkrt {
   PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
   PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
 
+  struct Buffer {
+    VkDevice device;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkDescriptorBufferInfo descriptor;
+    VkDeviceSize size = 0;
+    VkDeviceSize alignment = 0;
+    void* mapped = nullptr;
+    /** @brief Usage flags to be filled by external source at buffer creation (to query at some later point) */
+    VkBufferUsageFlags usageFlags;
+    /** @brief Memory property flags to be filled by external source at buffer creation (to query at some later point) */
+    VkMemoryPropertyFlags memoryPropertyFlags;
+
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+
+    VkResult map(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    {
+      return vkMapMemory(device, memory, offset, size, 0, &mapped);
+    }
+    void unmap()
+    {
+      if (mapped)
+      {
+        vkUnmapMemory(device, memory);
+        mapped = nullptr;
+      }
+    }
+    VkResult bind(VkDeviceSize offset = 0)
+    {
+      return vkBindBufferMemory(device, buffer, memory, offset);
+    }
+    void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    {
+      descriptor.offset = offset;
+      descriptor.buffer = buffer;
+      descriptor.range = size;
+    }
+    void copyTo(void* data, VkDeviceSize size)
+    {
+      assert(mapped);
+      memcpy(mapped, data, size);
+    }
+    VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    {
+      VkMappedMemoryRange mappedRange = {};
+      mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      mappedRange.memory = memory;
+      mappedRange.offset = offset;
+      mappedRange.size = size;
+      return vkFlushMappedMemoryRanges(device, 1, &mappedRange);
+    }
+    VkResult invalidate(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    {
+      VkMappedMemoryRange mappedRange = {};
+      mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      mappedRange.memory = memory;
+      mappedRange.offset = offset;
+      mappedRange.size = size;
+      return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
+    }
+    void destroy()
+    {
+      if (buffer)
+      {
+        vkDestroyBuffer(device, buffer, nullptr);
+      }
+      if (memory)
+      {
+        vkFreeMemory(device, memory, nullptr);
+      }
+    }
+
+    /* Default Constructor */
+    Buffer() {};
+
+    Buffer(
+      VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
+      VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, 
+      VkDeviceSize _size, void *data = nullptr) 
+    {
+      device = logicalDevice;
+      memoryPropertyFlags = _memoryPropertyFlags;
+      size = _size;
+      usageFlags = _usageFlags;
+      memoryPropertyFlags = _memoryPropertyFlags;
+      
+      vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+      
+      auto getMemoryType = [this](
+        uint32_t typeBits, VkMemoryPropertyFlags properties, 
+        VkBool32 *memTypeFound = nullptr) -> uint32_t {
+        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+          if ((typeBits & 1) == 1) {
+            if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+              if (memTypeFound) {
+                *memTypeFound = true;
+              }
+              return i;
+            }
+          }
+          typeBits >>= 1;
+        }
+
+        if (memTypeFound) {
+          *memTypeFound = false;
+          return 0;
+        }
+        else {
+          throw std::runtime_error("Could not find a matching memory type");
+        }
+      };
+
+      // Create the buffer handle
+      VkBufferCreateInfo bufferCreateInfo {};
+      bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      bufferCreateInfo.usage = usageFlags;
+      bufferCreateInfo.size = size;
+      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
+      
+      // Create the memory backing up the buffer handle
+      VkMemoryRequirements memReqs;
+      VkMemoryAllocateInfo memAllocInfo {};
+      memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+      vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
+      memAllocInfo.allocationSize = memReqs.size;
+      // Find a memory type index that fits the properties of the buffer
+      memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+      // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also 
+      // need to enable the appropriate flag during allocation
+      VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
+      if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+        allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
+        allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+        memAllocInfo.pNext = &allocFlagsInfo;
+      }
+      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
+
+      alignment = memReqs.alignment;
+
+      // If a pointer to the buffer data has been passed, map the buffer and 
+      // copy over the data
+      if (data != nullptr) {
+        VK_CHECK_RESULT(map());
+        memcpy(mapped, data, size);
+        if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
+          flush();
+        unmap();
+      }
+
+      // Initialize a default descriptor that covers the whole buffer size
+      setupDescriptor();
+
+      // Attach the memory to the buffer object
+      VkResult err = bind();
+      if (err) throw std::runtime_error("failed to create buffer! : \n" + errorString(err));
+    }
+  };
+
   struct RayGen {
     VkShaderModule shaderModule;
     VkPipelineShaderStageCreateInfo shaderStage{};
@@ -252,9 +410,9 @@ namespace vkrt {
     std::vector<MissProg*> missPrograms;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-    VkBuffer raygenShaderBindingTableBuffer;
-    VkBuffer missShaderBindingTableBuffer;
-    VkBuffer hitShaderBindingTableBuffer;
+    vkrt::Buffer raygenShaderBindingTable;
+    vkrt::Buffer missShaderBindingTable;
+    vkrt::Buffer hitShaderBindingTable;
 
     /*! returns whether logging is enabled */
     inline static bool logging()
@@ -629,12 +787,15 @@ namespace vkrt {
         enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
       #endif
 
-      
-
-
+      VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
+      bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;  
+      bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
+      bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
+      bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
 
       VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
       accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+      accelerationStructureFeatures.pNext = &bufferDeviceAddressFeatures;
       
       VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
       rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
@@ -763,6 +924,37 @@ namespace vkrt {
       vkDestroyDevice(logicalDevice, nullptr);
       vkDestroyInstance(instance, nullptr);
     };
+
+    void buildSBT() {
+      auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+        return (value + alignment - 1) & ~(alignment - 1);
+      };
+
+      const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
+      const uint32_t handleSizeAligned = alignedSize(
+          rayTracingPipelineProperties.shaderGroupHandleSize, 
+          rayTracingPipelineProperties.shaderGroupHandleAlignment);
+      const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
+      const uint32_t sbtSize = groupCount * handleSizeAligned;
+
+      std::vector<uint8_t> shaderHandleStorage(sbtSize);
+      VkResult err = vkGetRayTracingShaderGroupHandlesKHR(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data()); 
+      if (err) throw std::runtime_error("failed to get ray tracing shader group handles! : \n" + errorString(err));
+
+      const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
+      missShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
+      hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
+
+      // Copy handles
+      raygenShaderBindingTable.map();
+      missShaderBindingTable.map();
+      hitShaderBindingTable.map();
+      memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
+      memcpy(missShaderBindingTable.mapped, shaderHandleStorage.data() + handleSizeAligned, handleSize);
+      memcpy(hitShaderBindingTable.mapped, shaderHandleStorage.data() + handleSizeAligned * 2, handleSize);
+    }
 
     void buildPipeline()
     {
@@ -1009,7 +1201,10 @@ VKRT_API void vkrtBuildPipeline(VKRTContext _context)
 VKRT_API void vkrtBuildSBT(VKRTContext _context, 
                            VKRTBuildSBTFlags flags)
 {
-  throw std::runtime_error("Not implemented");
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+  context->buildSBT();
+  LOG("SBT created...");
 }
 
 /*! Executes a ray tracing pipeline with the given raygen program. 
@@ -1061,19 +1256,19 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
   raygenShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->raygenShaderBindingTableBuffer);
+    context->logicalDevice, context->raygenShaderBindingTable.buffer);
   raygenShaderSbtEntry.stride = handleSizeAligned;
   raygenShaderSbtEntry.size = handleSizeAligned;
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->missShaderBindingTableBuffer);
+    context->logicalDevice, context->missShaderBindingTable.buffer);
   missShaderSbtEntry.stride = handleSizeAligned;
   missShaderSbtEntry.size = handleSizeAligned;
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->hitShaderBindingTableBuffer);
+    context->logicalDevice, context->hitShaderBindingTable.buffer);
   hitShaderSbtEntry.stride = handleSizeAligned;
   hitShaderSbtEntry.size = handleSizeAligned;
 
