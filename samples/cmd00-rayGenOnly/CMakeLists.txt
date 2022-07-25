@@ -22,18 +22,18 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    sample00-rayGenOnly-spv
+    sample00_deviceCode
   ENTRY_POINTS
     simpleRayGen
     simpleMissProg
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(sample00-rayGenOnly hostCode.cpp)
-target_link_libraries(sample00-rayGenOnly
+add_executable(sample00_rayGenOnly hostCode.cpp)
+target_link_libraries(sample00_rayGenOnly
   PRIVATE
-    sample00-rayGenOnly-spv
+  sample00_deviceCode
     vkrt::vkrt
     stb_image
 )

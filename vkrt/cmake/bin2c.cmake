@@ -17,6 +17,7 @@ foreach(bin ${INPUT_FILES})
   # Get short filename
   string(REGEX MATCH "([^/]+)$" filename ${bin})
   # Replace filename spaces & extension separator for C compatibility
+  # string(REGEX REPLACE "\\.| |-" "_" filename ${filename})
   string(REGEX REPLACE "\\.| |-" "_" filename ${filename})
   # Convert to lower case
   # string(TOLOWER ${filename} filename)

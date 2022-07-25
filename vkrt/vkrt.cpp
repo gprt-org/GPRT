@@ -26,6 +26,7 @@
 #include <vector>
 #include <assert.h>
 #include <fstream>
+#include <sstream>
 
 std::string errorString(VkResult errorCode)
 {
@@ -72,6 +73,55 @@ std::string errorString(VkResult errorCode)
   }                                                  \
 }
 
+VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
+			VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+			VkDebugUtilsMessageTypeFlagsEXT messageType,
+			const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+			void* pUserData)
+{
+  // Select prefix depending on flags passed to the callback
+  std::string prefix("");
+
+  if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
+    prefix = "VERBOSE: ";
+  }
+  else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+    prefix = "INFO: ";
+  }
+  else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+    prefix = "WARNING: ";
+  }
+  else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+    prefix = "ERROR: ";
+  }
+
+
+  // Display message to default output (console/logcat)
+  std::stringstream debugMessage;
+  debugMessage << prefix << "[" << pCallbackData->messageIdNumber << "][" << pCallbackData->pMessageIdName << "] : " << pCallbackData->pMessage;
+
+#if defined(__ANDROID__)
+  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+    LOGE("%s", debugMessage.str().c_str());
+  } else {
+    LOGD("%s", debugMessage.str().c_str());
+  }
+#else
+  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+    std::cerr << debugMessage.str() << "\n";
+  } else {
+    std::cout << debugMessage.str() << "\n";
+  }
+  fflush(stdout);
+#endif
+
+
+  // The return value of this callback controls whether the Vulkan call that caused the validation message will be aborted or not
+  // We return VK_FALSE as we DON'T want Vulkan calls that cause a validation message to abort
+  // If you instead want to have calls abort, pass in VK_TRUE and the function will return VK_ERROR_VALIDATION_FAILED_EXT 
+  return VK_FALSE;
+}
+
 namespace vkrt {
 
   PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
@@ -84,6 +134,10 @@ namespace vkrt {
   PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR;
   PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR;
   PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR;
+
+  PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
+  PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
+  VkDebugUtilsMessengerEXT debugUtilsMessenger;
 
   struct Buffer {
     VkDevice device;
@@ -273,7 +327,7 @@ namespace vkrt {
       // note, this is a dumb quirk with current .spv tools... dxir supports
       // multiple entry point names, but glslc -> spv does not...
       // for now, assume the spirv entry point instruction is "main"
-      shaderStage.pName = "main"; 
+      shaderStage.pName = "simpleRayGen"; 
       assert(shaderStage.module != VK_NULL_HANDLE);
     }
     ~RayGen() {
@@ -312,7 +366,7 @@ namespace vkrt {
       // note, this is a dumb quirk with current .spv tools... dxir supports
       // multiple entry point names, but glslc -> spv does not...
       // for now, assume the spirv entry point instruction is "main"
-      shaderStage.pName = "main"; 
+      shaderStage.pName = "simpleMissProg"; 
       assert(shaderStage.module != VK_NULL_HANDLE);
     }
     ~MissProg() {
@@ -365,8 +419,13 @@ namespace vkrt {
     void* deviceCreatepNextChain = nullptr;
     /** @brief Logical device, application's view of the physical device (GPU) */
     VkDevice logicalDevice;
+    
     // Handle to the device graphics queue that command buffers are submitted to
-    VkQueue queue;
+    VkQueue graphicsQueue;
+    VkQueue computeQueue;
+    VkQueue transferQueue;
+
+
     // Depth buffer format (selected during Vulkan initialization)
     VkFormat depthFormat;
     // Command buffer pool
@@ -434,6 +493,28 @@ namespace vkrt {
 #endif
     }
 
+    void setupDebugging(VkInstance instance, VkDebugReportFlagsEXT flags, VkDebugReportCallbackEXT callBack)
+		{
+			vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+			vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+			VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+			debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+			debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+			debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+			debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+			VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
+			assert(result == VK_SUCCESS);
+		}
+
+		void freeDebugCallback(VkInstance instance)
+		{
+			if (debugUtilsMessenger != VK_NULL_HANDLE)
+			{
+				vkDestroyDebugUtilsMessengerEXT(instance, debugUtilsMessenger, nullptr);
+			}
+		}
+
     Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
       appInfo.pApplicationName = "VKRT";
@@ -480,11 +561,18 @@ namespace vkrt {
         }
       }
 
+      VkValidationFeatureEnableEXT enabled[] = {VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT};
+      VkValidationFeaturesEXT      validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
+      validationFeatures.disabledValidationFeatureCount = 0;
+      validationFeatures.enabledValidationFeatureCount  = 1;
+      validationFeatures.pDisabledValidationFeatures    = nullptr;
+      validationFeatures.pEnabledValidationFeatures     = enabled;
 
       VkInstanceCreateInfo instanceCreateInfo{};
       instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
       instanceCreateInfo.pApplicationInfo = &appInfo;
-      instanceCreateInfo.pNext = VK_NULL_HANDLE;
+      //instanceCreateInfo.pNext = VK_NULL_HANDLE;
+      instanceCreateInfo.pNext = &validationFeatures;
 
       // uint32_t glfwExtensionCount = 0;
       // const char** glfwExtensions;
@@ -499,12 +587,12 @@ namespace vkrt {
         instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
       #endif
 
+      if (validation()){
+        instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+      }
+
       if (instanceExtensions.size() > 0)
       {
-        if (validation())
-        {
-          instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        }
         instanceCreateInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
         instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
       }
@@ -541,29 +629,39 @@ namespace vkrt {
         throw std::runtime_error("failed to create instance! : \n" + errorString(err));
       }
 
+      // err = createDebugUtilsMessenger(instance,
+      //     info.debug_callback,
+      //     info.debug_message_severity,
+      //     info.debug_message_type,
+      //     &instance.debug_messenger,
+      //     info.allocation_callbacks);
+      // if (err) {
+      //   throw std::runtime_error("failed to debug messenger callback! : \n" + errorString(err));
+      // }
+
       /// 2. Select a Physical Device
 
 
-      // // If requested, we enable the default validation layers for debugging
-      // if (validation())
-      // {
-      //   // The report flags determine what type of messages for the layers will be displayed
-      //   // For validating (debugging) an application the error and warning bits should suffice
-      //   VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-      //   // Additional flags include performance info, loader and layer debug messages, etc.
-      //   // vks::debug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
+      // If requested, we enable the default validation layers for debugging
+      if (validation())
+      {
+        // The report flags determine what type of messages for the layers will be displayed
+        // For validating (debugging) an application the error and warning bits should suffice
+        VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+        // Additional flags include performance info, loader and layer debug messages, etc.
+        // vks::debug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
 
-      //   vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-      //   vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+        vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+        vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
-      //   VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-      //   debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-      //   debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-      //   debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-      //   debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-      //   VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
-      //   assert(result == VK_SUCCESS);
-      // }
+        VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+        debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+        debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+        VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
+        assert(result == VK_SUCCESS);
+      }
 
       // Physical device
       uint32_t gpuCount = 0;
@@ -771,6 +869,8 @@ namespace vkrt {
       enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
       enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
 
+      enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+
       // Required for VK_KHR_ray_tracing_pipeline
       enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
 
@@ -906,6 +1006,11 @@ namespace vkrt {
       cmdBufAllocateInfo.commandPool = transferCommandPool;
       err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
       if (err) throw std::runtime_error("Could not create transfer command buffer : \n" + errorString(err));
+
+      /// 6. Get queue handles
+      vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
+      vkGetDeviceQueue(logicalDevice, queueFamilyIndices.compute, 0, &computeQueue);
+      vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
     };
 
     ~Context() {
@@ -924,6 +1029,8 @@ namespace vkrt {
       vkDestroyDevice(logicalDevice, nullptr);
       vkDestroyInstance(instance, nullptr);
     };
+
+    
 
     void buildSBT() {
       auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
@@ -1287,5 +1394,22 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     dims_z);
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+
+  VkSubmitInfo submitInfo;
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+  submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) throw std::runtime_error("failed to submit to queue! : \n" + errorString(err));
+
+  err = vkQueueWaitIdle(context->graphicsQueue);
+  if (err) throw std::runtime_error("failed to wait for queue idle! : \n" + errorString(err));
 }
 

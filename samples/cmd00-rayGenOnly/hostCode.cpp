@@ -37,10 +37,13 @@
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
   std::cout << VKRT_TERMINAL_DEFAULT;
 
-extern "C" char simpleRayGen_spv[];
-extern "C" uint32_t simpleRayGen_spv_size;
-extern "C" char simpleMissProg_spv[];
-extern "C" uint32_t simpleMissProg_spv_size;
+extern "C" char sample00_deviceCode_spv[];
+extern "C" uint32_t sample00_deviceCode_spv_size;
+
+// extern "C" char simpleRayGen_spv[];
+// extern "C" uint32_t simpleRayGen_spv_size;
+// extern "C" char simpleMissProg_spv[];
+// extern "C" uint32_t simpleMissProg_spv_size;
 
 const int2 fbSize = {800,600};
 
@@ -68,7 +71,7 @@ int main(int ac, char **av)
     // hold on to it with the "owl" context
     VKRTRayGen rayGen
         = vkrtRayGenCreate(vkrt,
-                        simpleRayGen_spv_size, simpleRayGen_spv,
+                        sample00_deviceCode_spv_size, sample00_deviceCode_spv,
                         sizeof(RayGenData),rayGenVars,-1);
 
     VKRTVarDecl missProgVars[]
@@ -77,7 +80,7 @@ int main(int ac, char **av)
     };
     VKRTMissProg missProg
         = vkrtMissProgCreate(vkrt,
-                        simpleMissProg_spv_size, simpleMissProg_spv,
+                        sample00_deviceCode_spv_size, sample00_deviceCode_spv,
                         sizeof(MissProgData),missProgVars,-1);
 
     // (re-)builds all optix programs, with current pipeline settings
