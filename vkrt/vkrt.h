@@ -22,7 +22,7 @@
 
 #pragma once
 
-#ifdef SLANG_COMPILER
+#ifdef VKRT_DEVICE
 #include "vkrt_device.h"
 #else 
 #include "vkrt_host.h"

@@ -45,7 +45,7 @@ extern "C" uint32_t deviceCode_spv_size;
 // extern "C" char simpleMissProg_spv[];
 // extern "C" uint32_t simpleMissProg_spv_size;
 
-const int2 fbSize = {800,600};
+const int2 fbSize = {1,1};
 
 #include <iostream>
 int main(int ac, char **av) 
@@ -55,8 +55,6 @@ int main(int ac, char **av)
     // Initialize Vulkan, and create a "vkrt device," a context to hold the
     // ray generation shader and output buffer. The "1" is the number of devices requested.
     VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
-
-    std::cout<< std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size) << std::endl;
 
     VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
     

@@ -143,6 +143,10 @@ namespace vkrt {
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
   VkDebugUtilsMessengerEXT debugUtilsMessenger;
 
+  PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT; 
+  PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT; 
+  VkDebugReportCallbackEXT debugReportCallback;
+
   struct Module {
     spv_context spvContext;
     std::string program;
@@ -588,20 +592,6 @@ namespace vkrt {
 #endif
     }
 
-    void setupDebugging(VkInstance instance, VkDebugReportFlagsEXT flags, VkDebugReportCallbackEXT callBack)
-		{
-			vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-			vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
-
-			VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-			debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-			debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-			debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-			debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-			VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
-			assert(result == VK_SUCCESS);
-		}
-
 		void freeDebugCallback(VkInstance instance)
 		{
 			if (debugUtilsMessenger != VK_NULL_HANDLE)
@@ -740,22 +730,42 @@ namespace vkrt {
       // If requested, we enable the default validation layers for debugging
       if (validation())
       {
-        // The report flags determine what type of messages for the layers will be displayed
-        // For validating (debugging) an application the error and warning bits should suffice
-        VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-        // Additional flags include performance info, loader and layer debug messages, etc.
-        // vks::debug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
+        
 
         vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
         vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
         VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
         debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
+                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | 
+                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | 
+                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
         debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
         debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
         VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
         assert(result == VK_SUCCESS);
+
+
+
+        // vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"));
+        // vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"));
+        
+        // The report flags determine what type of messages for the layers will be displayed
+        // For validating (debugging) an application the error and warning bits should suffice
+        // VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_INFORMATION_BIT_EXT;
+        // Additional flags include performance info, loader and layer debug messages, etc.
+        // vks::debug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
+        
+        // VkDebugReportCallbackCreateInfoEXT debugReportCI{};
+        // debugReportCI.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+        // debugReportCI.flags = debugReportFlags;
+        // debugReportCI.pfnCallback = debugReportCallback;
+        // debugReportCI.pUserData = nullptr;
+
+        // // debugReportCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+        // result = vkCreateDebugReportCallbackEXT(instance, &debugReportCI, nullptr, &debugReportCallback);
+        // assert(result == VK_SUCCESS);
       }
 
       // Physical device
@@ -1505,6 +1515,7 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     dims_z);
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  if (err) throw std::runtime_error("failed to end command buffer! : \n" + errorString(err));
 
   VkSubmitInfo submitInfo;
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

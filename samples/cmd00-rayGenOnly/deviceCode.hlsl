@@ -20,14 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//#include "deviceCode.h"
+#include "deviceCode.h"
 
 [shader("raygeneration")]
 void simpleRayGen()
 {
-  uint2 threadIdx = DispatchRaysIndex().xy;
-  if (threadIdx.x == 0 && threadIdx.y == 0)
-    printf("Hello from the raygen program!\n");
+  printf("Hello from the raygen program!\n");
+
+  // printf("Size of RayGenData: %d\n", sizeof(RayGenData));
 }
 
 struct Payload
@@ -38,7 +38,5 @@ struct Payload
 [shader("miss")]
 void simpleMissProg(inout Payload MyPayload)
 {
-  uint2 threadIdx = DispatchRaysIndex().xy;
-  if (threadIdx.x == 0 && threadIdx.y == 0)
-    printf("Hello from the miss program!\n");
+  printf("Hello from the miss program!\n");
 }

@@ -52,6 +52,8 @@ function(embed_spirv)
     -spirv
     -fspv-target-env=vulkan1.1spirv1.4
     -T lib_6_3
+    -I ${PROJECT_SOURCE_DIR}/vkrt
+    -D VKRT_DEVICE
     -fspv-extension=SPV_KHR_ray_tracing 
     -fspv-extension=SPV_KHR_ray_query 
     -fspv-extension=SPV_KHR_non_semantic_info

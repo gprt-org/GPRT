@@ -54,8 +54,7 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# include(vkrt/cmake/slang_embed_spirv.cmake)
-include(vkrt/cmake/dxc_hlsl_embed_spirv.cmake)
+include(vkrt/cmake/hlsl_embed_spirv.cmake)
 
 option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 

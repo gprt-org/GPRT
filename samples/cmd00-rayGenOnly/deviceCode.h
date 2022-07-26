@@ -24,7 +24,7 @@
 
 struct RayGenData
 {
-  uint32_t *fbPtr;
+  RWStructuredBuffer<uint32_t> fbPtr;
   int2  fbSize;
   float3  color0;
   float3  color1;
