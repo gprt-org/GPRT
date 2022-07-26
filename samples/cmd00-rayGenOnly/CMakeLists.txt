@@ -22,10 +22,7 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    sample00_deviceCode
-  ENTRY_POINTS
-    simpleRayGen
-    simpleMissProg
+    deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
@@ -33,7 +30,7 @@ embed_spirv(
 add_executable(sample00_rayGenOnly hostCode.cpp)
 target_link_libraries(sample00_rayGenOnly
   PRIVATE
-  sample00_deviceCode
+    deviceCode
     vkrt::vkrt
     stb_image
 )

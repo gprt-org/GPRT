@@ -28,6 +28,10 @@
 #include <fstream>
 #include <sstream>
 
+#include <regex>
+
+#include "3rdParty/SPIRV-Tools/include/spirv-tools/libspirv.h"
+
 std::string errorString(VkResult errorCode)
 {
   switch (errorCode)
@@ -138,6 +142,85 @@ namespace vkrt {
   PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
   VkDebugUtilsMessengerEXT debugUtilsMessenger;
+
+  struct Module {
+    spv_context spvContext;
+    std::string program;
+
+    Module(const char* spvCode) {
+      program = std::string(spvCode);
+      spvContext = spvContextCreate(SPV_ENV_UNIVERSAL_1_4);
+    }
+
+    ~Module() {
+      spvContextDestroy(spvContext);
+    }
+
+    spv_binary getBinary(std::string entryPoint) {
+      std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
+      std::smatch match;
+      std::string text = program;
+
+      std::string newProgram;
+      while (std::regex_search(text, match, re))
+      {
+        std::string line = match.str(0);
+        std::string otherEntryPoint = match.str(4);
+
+        if (match.str(4) == (std::string("%") + std::string(entryPoint)) ) {
+          newProgram += match.prefix().str() + match.str(0);
+          text = match.suffix().str();
+        }
+        else {
+          // Remove the other entry points. Currently, SPIRV doesn't support 
+          // multiple entry points in combination with debug printf
+          newProgram += match.prefix();
+          text = match.suffix().str();
+
+          // Remove the OpName %entrypoint "entrypoint" line
+          std::regex OpNameRE("( *)(OpName )(" + otherEntryPoint + ")( \"[A-Za-z]*\")");
+          std::smatch OpNameMatch;
+          std::string subtext = text;
+          if (!std::regex_search(subtext, OpNameMatch, OpNameRE)) throw std::runtime_error("Error editing SPIRV");
+          else {
+            // std::cout<<"Found OpName: "<< OpNameMatch.str(0) << " ... removing..."<<std::endl;
+            text = OpNameMatch.prefix().str() + OpNameMatch.suffix().str();
+          }
+
+          // Remove the entrypoint itself.
+          // found by %entrypoint = ... until the first occurance of OpFunctionEnd 
+          std::regex OpEntryPointRE("( *)(" + otherEntryPoint + " =[^]*?OpFunctionEnd)");
+          std::smatch OpEntryPointMatch;
+          subtext = text;
+          if (!std::regex_search(subtext, OpEntryPointMatch, OpEntryPointRE)) throw std::runtime_error("Error editing SPIRV");
+          else {
+            // std::cout<<"Found Entry Point: "<< OpEntryPointMatch.str(0) << " ... removing..."<<std::endl;
+            text = OpEntryPointMatch.prefix().str() + OpEntryPointMatch.suffix().str();
+          }
+        }
+      }
+      newProgram += text;
+
+      // std::cout<<"final program " << std::endl;
+      // std::cout<<newProgram<<std::endl;
+
+      // Now, assemble the IR
+      spv_binary binary = nullptr;
+      spv_diagnostic diagnostic = nullptr;
+      spvTextToBinary(spvContext, newProgram.c_str(), newProgram.size(), &binary, &diagnostic);
+      spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
+      if (diagnostic) {
+        spvDiagnosticPrint(diagnostic);
+        spvDiagnosticDestroy(diagnostic);
+      }
+
+      return binary;
+    }
+
+    void releaseBinary(spv_binary binary) {
+      spvBinaryDestroy(binary);
+    }
+  };
 
   struct Buffer {
     VkDevice device;
@@ -304,19 +387,21 @@ namespace vkrt {
     VkDevice logicalDevice;
     
     RayGen(VkDevice  _logicalDevice,
-          size_t sizeOfProgramBytes,
-          const char* programBytes,
-          size_t      sizeOfVarStruct,
-          VKRTVarDecl *vars,
-          int         numVars) {
+           Module *module,
+           const char* entryPoint,
+           size_t      sizeOfVarStruct,
+           VKRTVarDecl *vars,
+           int         numVars) {
       std::cout<<"Ray gen is being made!"<<std::endl;
+
+      spv_binary binary = module->getBinary(entryPoint);
       
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
       
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = sizeOfProgramBytes;
-      moduleCreateInfo.pCode = (uint32_t*)programBytes;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
 
       VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
         NULL, &shaderModule));
@@ -327,8 +412,10 @@ namespace vkrt {
       // note, this is a dumb quirk with current .spv tools... dxir supports
       // multiple entry point names, but glslc -> spv does not...
       // for now, assume the spirv entry point instruction is "main"
-      shaderStage.pName = "simpleRayGen"; 
+      shaderStage.pName = entryPoint; 
       assert(shaderStage.module != VK_NULL_HANDLE);
+
+      module->releaseBinary(binary);
     }
     ~RayGen() {
       std::cout<<"Ray gen is being destroyed!"<<std::endl;
@@ -343,19 +430,21 @@ namespace vkrt {
     VkDevice logicalDevice;
     
     MissProg(VkDevice  _logicalDevice,
-          size_t sizeOfProgramBytes,
-          const char* programBytes,
-          size_t      sizeOfVarStruct,
-          VKRTVarDecl *vars,
-          int         numVars) {
+             Module *module,
+             const char* entryPoint,
+             size_t      sizeOfVarStruct,
+             VKRTVarDecl *vars,
+             int         numVars) {
       std::cout<<"Miss program is being made!"<<std::endl;
+
+      spv_binary binary = module->getBinary(entryPoint);
       
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
       
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = sizeOfProgramBytes;
-      moduleCreateInfo.pCode = (uint32_t*)programBytes;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
 
       VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
         NULL, &shaderModule));
@@ -366,8 +455,10 @@ namespace vkrt {
       // note, this is a dumb quirk with current .spv tools... dxir supports
       // multiple entry point names, but glslc -> spv does not...
       // for now, assume the spirv entry point instruction is "main"
-      shaderStage.pName = "simpleMissProg"; 
+      shaderStage.pName = entryPoint; 
       assert(shaderStage.module != VK_NULL_HANDLE);
+
+      module->releaseBinary(binary);
     }
     ~MissProg() {
       std::cout<<"Miss program is being destroyed!"<<std::endl;
@@ -375,7 +466,11 @@ namespace vkrt {
     }
   };
 
+  
+
   struct Context {
+    
+    
     VkApplicationInfo appInfo;
 
     // Vulkan instance, stores all per-application states
@@ -1222,19 +1317,32 @@ VKRT_API void vkrtContextDestroy(VKRTContext _context)
   LOG("context destroyed...");
 }
 
+VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, const char* spvCode)
+{
+  LOG_API_CALL();
+
+  vkrt::Context *context = (vkrt::Context*)_context;
+
+  vkrt::Module *module = new vkrt::Module(spvCode);
+
+  LOG("module created...");
+  return (VKRTModule)module;
+}
+
 VKRT_API VKRTRayGen
-vkrtRayGenCreate(VKRTContext  _context,
-                size_t sizeOfProgramBytes,
-                const char* programBytes,
-                size_t      sizeOfVarStruct,
-                VKRTVarDecl *vars,
-                int         numVars)
+vkrtRayGenCreate(VKRTContext _context,
+                 VKRTModule  _module,
+                 const char  *programName,
+                 size_t       sizeOfVarStruct,
+                 VKRTVarDecl *vars,
+                 int          numVars)
 {
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::Module *module = (vkrt::Module*)_module;
 
   vkrt::RayGen *raygen = new vkrt::RayGen(
-    context->logicalDevice, sizeOfProgramBytes, programBytes,
+    context->logicalDevice, module, programName,
     sizeOfVarStruct, vars, numVars);
   
   context->raygenPrograms.push_back(raygen);
@@ -1253,18 +1361,19 @@ vkrtRayGenRelease(VKRTRayGen _rayGen)
 }
 
 VKRT_API VKRTMissProg
-vkrtMissProgCreate(VKRTContext  _context,
-                  size_t sizeOfProgramBytes,
-                  const char* programBytes,
-                  size_t      sizeOfVarStruct,
-                  VKRTVarDecl *vars,
-                  int         numVars)
+vkrtMissProgCreate(VKRTContext _context,
+                   VKRTModule  _module,
+                   const char  *programName,
+                   size_t       sizeOfVarStruct,
+                   VKRTVarDecl *vars,
+                   int          numVars)
 {
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::Module *module = (vkrt::Module*)_module;
 
   vkrt::MissProg *missProg = new vkrt::MissProg(
-    context->logicalDevice, sizeOfProgramBytes, programBytes,
+    context->logicalDevice, module, programName,
     sizeOfVarStruct, vars, numVars);
   
   context->missPrograms.push_back(missProg);
@@ -1296,6 +1405,8 @@ VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
   throw std::runtime_error("Not implemented");
 }
+
+
 
 VKRT_API void vkrtBuildPipeline(VKRTContext _context)
 {

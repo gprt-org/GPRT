@@ -47,7 +47,7 @@ ELSE(WIN32)
     )
 ENDIF(WIN32)
 
-target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY})
+target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY} SPIRV-Tools-static)
 set_target_properties(vkrt PROPERTIES LINKER_LANGUAGE CXX)
 
 target_include_directories(vkrt

@@ -23,6 +23,7 @@ foreach(bin ${INPUT_FILES})
   # string(TOLOWER ${filename} filename)
   # Read hex data from file
   file(READ ${bin} filedata HEX)
+  
   # Convert hex data for C compatibility
   string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," filedata ${filedata})
   # Append data to c file

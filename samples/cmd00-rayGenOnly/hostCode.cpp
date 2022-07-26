@@ -37,8 +37,8 @@
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
   std::cout << VKRT_TERMINAL_DEFAULT;
 
-extern "C" char sample00_deviceCode_spv[];
-extern "C" uint32_t sample00_deviceCode_spv_size;
+extern "C" char deviceCode_spv[];
+extern "C" uint32_t deviceCode_spv_size;
 
 // extern "C" char simpleRayGen_spv[];
 // extern "C" uint32_t simpleRayGen_spv_size;
@@ -56,8 +56,9 @@ int main(int ac, char **av)
     // ray generation shader and output buffer. The "1" is the number of devices requested.
     VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
 
-    // OWLModule module
-        // = owlModuleCreate(owl,deviceCode_ptx);
+    std::cout<< std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size) << std::endl;
+
+    VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
     
     VKRTVarDecl rayGenVars[]
         = {
@@ -70,8 +71,7 @@ int main(int ac, char **av)
     // Allocate room for one RayGen shader, create it, and
     // hold on to it with the "owl" context
     VKRTRayGen rayGen
-        = vkrtRayGenCreate(vkrt,
-                        sample00_deviceCode_spv_size, sample00_deviceCode_spv,
+        = vkrtRayGenCreate(vkrt, module, "simpleRayGen",
                         sizeof(RayGenData),rayGenVars,-1);
 
     VKRTVarDecl missProgVars[]
@@ -79,9 +79,8 @@ int main(int ac, char **av)
         { /* sentinel: */ nullptr }
     };
     VKRTMissProg missProg
-        = vkrtMissProgCreate(vkrt,
-                        sample00_deviceCode_spv_size, sample00_deviceCode_spv,
-                        sizeof(MissProgData),missProgVars,-1);
+        = vkrtMissProgCreate(vkrt, module, "simpleMissProg",
+                            sizeof(MissProgData),missProgVars,-1);
 
     // (re-)builds all optix programs, with current pipeline settings
     // vkrtBuildPrograms(vkrt);

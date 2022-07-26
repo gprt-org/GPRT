@@ -81,7 +81,7 @@ typedef struct _VKRTTexture       *VKRTTexture;
 typedef struct _VKRTGeom          *VKRTGeom;
 typedef struct _VKRTGeomType      *VKRTGeomType;
 typedef struct _VKRTVariable      *VKRTVariable;
-// typedef struct _VKRTModule        *VKRTModule; // Vulkan doesn't really have modules...
+typedef struct _VKRTModule        *VKRTModule;
 typedef struct _VKRTGroup         *VKRTGroup;
 typedef struct _VKRTRayGen        *VKRTRayGen;
 typedef struct _VKRTMissProg      *VKRTMissProg;
@@ -216,6 +216,7 @@ typedef struct _VKRTVarDecl {
   uint32_t    offset;
 } VKRTVarDecl;
 
+VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
 VKRT_API void vkrtBuildPrograms(VKRTContext context);
 VKRT_API void vkrtBuildPipeline(VKRTContext context);
 VKRT_API void vkrtBuildSBT(VKRTContext context,
@@ -246,22 +247,22 @@ vkrtContextDestroy(VKRTContext context);
 
 VKRT_API VKRTRayGen
 vkrtRayGenCreate(VKRTContext  context,
-                size_t sizeOfProgramBytes,
-                const char* programBytes,
-                size_t      sizeOfVarStruct,
-                VKRTVarDecl *vars,
-                int         numVars);
+                 VKRTModule module,
+                 const char *programName,
+                 size_t      sizeOfVarStruct,
+                 VKRTVarDecl *vars,
+                 int         numVars);
                 
 VKRT_API void 
 vkrtRayGenRelease(VKRTRayGen rayGen);
 
 VKRT_API VKRTMissProg
 vkrtMissProgCreate(VKRTContext  context,
-                  size_t sizeOfProgramBytes,
-                  const char* programBytes,
-                  size_t      sizeOfVarStruct,
-                  VKRTVarDecl *vars,
-                  int         numVars);
+                   VKRTModule module,
+                   const char *programName,
+                   size_t      sizeOfVarStruct,
+                   VKRTVarDecl *vars,
+                   int         numVars);
 
 /*! sets the given miss program for the given ray type */
 VKRT_API void

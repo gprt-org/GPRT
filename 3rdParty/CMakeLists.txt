@@ -109,3 +109,7 @@ if(VKRT_BUILD_SAMPLES)
     endif()
   endif()
 endif()
+
+# SPIRV tools
+add_subdirectory(SPIRV-Tools EXCLUDE_FROM_ALL)
+
