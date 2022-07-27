@@ -25,6 +25,7 @@ embed_spirv(
     deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.h
 )
 
 add_executable(sample00_rayGenOnly hostCode.cpp)
