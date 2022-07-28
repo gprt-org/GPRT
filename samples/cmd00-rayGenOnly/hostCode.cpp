@@ -59,8 +59,9 @@ int main(int ac, char **av)
     VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
     
     VKRTVarDecl rayGenVars[]
-        = {
-        { "data", VKRT_INT,    VKRT_OFFSETOF(RayGenData,data) },
+    = {
+        { "first", VKRT_UINT, VKRT_OFFSETOF(RayGenData, first) },
+        { "second", VKRT_FLOAT, VKRT_OFFSETOF(RayGenData, second) },
         { /* sentinel: */ nullptr }
     };
     // Allocate room for one RayGen shader, create it, and
@@ -70,7 +71,9 @@ int main(int ac, char **av)
                         sizeof(RayGenData),rayGenVars,-1);
 
     VKRTVarDecl missProgVars[]
-        = {
+    = {
+        { "third", VKRT_UINT64, VKRT_OFFSETOF(MissProgData, third) },
+        { "fourth", VKRT_UINT64, VKRT_OFFSETOF(MissProgData, fourth) },
         { /* sentinel: */ nullptr }
     };
     VKRTMissProg missProg
@@ -80,16 +83,32 @@ int main(int ac, char **av)
     // (re-)builds all optix programs, with current pipeline settings
     // vkrtBuildPrograms(vkrt);
 
-    // Create the pipeline. Note that vkrt will (kindly) warn there are no geometry and no miss programs defined.
+    // Create the pipeline. 
     vkrtBuildPipeline(vkrt);
+
+    // ------------------------------------------------------------------
+    // build Shader Binding Table (SBT) required to trace the groups
+    // ------------------------------------------------------------------
+    uint32_t first = 1337;
+    float second = 42.0f;
+    vkrtRayGenSetRaw(rayGen, "first", &first);
+    vkrtRayGenSetRaw(rayGen, "second", &second);
+
+    uint64_t third = 26;
+    uint64_t fourth = 7;
+    vkrtMissProgSetRaw(missProg, "third", &third);
+    vkrtMissProgSetRaw(missProg, "fourth", &fourth);
 
     // Build a shader binding table entry for the ray generation record.
     vkrtBuildSBT(vkrt);
-
-    int data = 42;
-    vkrtRayGenSetRaw(rayGen, "data", &data);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
+    first = 42;
+    second = 1337.0f;
+    vkrtRayGenSetRaw(rayGen, "first", &first);
+    vkrtRayGenSetRaw(rayGen, "second", &second);
+    vkrtBuildSBT(vkrt);
+    vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
     // Now finally, cleanup
     vkrtMissProgRelease(missProg);

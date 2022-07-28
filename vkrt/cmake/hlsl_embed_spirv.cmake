@@ -57,6 +57,7 @@ function(embed_spirv)
     -fspv-extension=SPV_KHR_ray_tracing 
     -fspv-extension=SPV_KHR_ray_query 
     -fspv-extension=SPV_KHR_non_semantic_info
+    -fspv-extension=SPV_KHR_physical_storage_buffer    
     ${EMBED_SPIRV_SOURCES} 
     > ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.spv 
     # -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.spv 

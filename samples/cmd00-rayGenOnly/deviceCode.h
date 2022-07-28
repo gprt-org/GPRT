@@ -26,10 +26,12 @@
 
 struct RayGenData
 {
-  int data;
+  uint32_t first;
+  float second;
 };
 
 struct MissProgData
 {
-  int placeholder;
+  uint32_t third;
+  uint32_t fourth;
 };

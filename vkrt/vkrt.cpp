@@ -31,6 +31,97 @@
 
 #include <regex>
 
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#endif
+
+
+#if defined(_MSC_VER)
+//&& !defined(__PRETTY_FUNCTION__)
+#  define __PRETTY_FUNCTION__ __FUNCTION__
+#endif
+
+#if 1
+# define LOG_API_CALL() /* ignore */
+#else 
+# define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
+#endif
+
+#define LOG(message)                            \
+  if (vkrt::Context::logging())                       \
+    std::cout                                   \
+      << VKRT_TERMINAL_LIGHT_BLUE                \
+      << "#vkrt: "                               \
+      << message                                \
+      << VKRT_TERMINAL_DEFAULT << std::endl
+
+#define LOG_OK(message)                         \
+  if (vkrt::Context::logging())                       \
+    std::cout                                   \
+      << VKRT_TERMINAL_BLUE                      \
+      << "#vkrt: "                               \
+      << message                                \
+      << VKRT_TERMINAL_DEFAULT << std::endl
+
+namespace detail {
+inline static std::string backtrace()
+{
+#ifdef __GNUC__
+    static const int max_frames = 16;
+
+    void* buffer[max_frames] = { 0 };
+    int cnt = ::backtrace(buffer,max_frames);
+
+    char** symbols = backtrace_symbols(buffer,cnt);
+
+    if (symbols) {
+      std::stringstream str;
+      for (int n = 1; n < cnt; ++n) // skip the 1st entry (address of this function)
+      {
+        str << symbols[n] << '\n';
+      }
+      free(symbols);
+      return str.str();
+    }
+    return "";
+#else
+    return "not implemented yet";
+#endif
+}
+
+inline void vkrtRaise_impl(std::string str)
+{
+  fprintf(stderr,"%s\n",str.c_str());
+#ifdef WIN32
+  if (IsDebuggerPresent())
+    DebugBreak();
+  else
+    assert(false);
+#else
+#ifndef NDEBUG
+  std::string bt = ::detail::backtrace();
+  fprintf(stderr,"%s\n",bt.c_str());
+#endif
+  raise(SIGINT);
+#endif
+}
+}
+
+#define VKRT_RAISE(MSG) ::detail::vkrtRaise_impl(MSG);
+
+#define VKRT_NOTIMPLEMENTED  { std::cerr<<std::string(__PRETTY_FUNCTION__) << " not implemented" << std::endl; assert(false);};
+
+
 #include "3rdParty/SPIRV-Tools/include/spirv-tools/libspirv.h"
 
 std::string errorString(VkResult errorCode)
@@ -1165,19 +1256,25 @@ namespace vkrt {
       vkDestroyInstance(instance, nullptr);
     };
 
-    
-
     void buildSBT() {
       auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
         return (value + alignment - 1) & ~(alignment - 1);
       };
 
+      auto align_to = [](uint64_t val, uint64_t align) -> uint64_t {
+        return ((val + align - 1) / align) * align;
+      };
+
       const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
-      const uint32_t handleSizeAligned = alignedSize(
-          rayTracingPipelineProperties.shaderGroupHandleSize, 
-          rayTracingPipelineProperties.shaderGroupHandleAlignment);
+      const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+      const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+      const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
+
+      // for the moment, just assume the max group size
+      const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+
       const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
-      const uint32_t sbtSize = groupCount * handleSizeAligned;
+      const uint32_t sbtSize = groupCount * handleSize;
 
       std::vector<uint8_t> shaderHandleStorage(sbtSize);
       VkResult err = vkGetRayTracingShaderGroupHandlesKHR(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data()); 
@@ -1185,17 +1282,78 @@ namespace vkrt {
 
       const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
       const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
-      missShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
-      hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, handleSize);
+      
 
-      // Copy handles
+      // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
+
+      int numRayGens = raygenPrograms.size();
+      int numMissProgs = missPrograms.size();
+      int numRayTypes = 1;
+
+      // Raygen records
+      if (raygenShaderBindingTable.size != recordSize * raygenPrograms.size()) {
+        raygenShaderBindingTable.destroy();
+      }
+      if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
+        raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+        bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
+      }
       raygenShaderBindingTable.map();
-      missShaderBindingTable.map();
-      hitShaderBindingTable.map();
       memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
-      memcpy(missShaderBindingTable.mapped, shaderHandleStorage.data() + handleSizeAligned, handleSize);
-      memcpy(hitShaderBindingTable.mapped, shaderHandleStorage.data() + handleSizeAligned * 2, handleSize);
+      for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
+        RayGen *raygen = raygenPrograms[idx];
+        size_t stride = recordSize;
+        size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
+        uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
+        for (auto &var : raygen->vars) {
+          size_t varOffset = var.second.decl.offset;
+          size_t varSize = var.second.decl.getSize();
+          std::cout<<"Embedding " << var.first << " into raygen SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
+          memcpy(params + varOffset, var.second.data, varSize);
+        }
+      }
+      raygenShaderBindingTable.unmap();
+
+      // Miss records
+      if (missShaderBindingTable.size != recordSize * missPrograms.size()) {
+        missShaderBindingTable.destroy();
+      }
+      if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
+        missShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+          bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
+      }
+      missShaderBindingTable.map();
+      memcpy(missShaderBindingTable.mapped, 
+        shaderHandleStorage.data() + handleSize * numRayGens, 
+        handleSize);
+      for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
+        MissProg *missprog = missPrograms[idx];
+        size_t stride = recordSize;
+        size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
+        uint8_t* params = ((uint8_t*) (missShaderBindingTable.mapped)) + offset;
+        for (auto &var : missprog->vars) {
+          size_t varOffset = var.second.decl.offset;
+          size_t varSize = var.second.decl.getSize();
+          std::cout<<"Embedding " << var.first << " into missprog SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
+          memcpy(params + varOffset, var.second.data, varSize);
+        }
+      }
+      missShaderBindingTable.unmap();
+
+      // Hit records
+      if (hitShaderBindingTable.size != recordSize * 1 /*TODO!*/) {
+        hitShaderBindingTable.destroy();
+      }
+      if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
+        hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, recordSize);
+      }
+      hitShaderBindingTable.map();
+      memcpy(hitShaderBindingTable.mapped, 
+          shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs), 
+          handleSize);
+      
+      // TODO: hit programs...
+      hitShaderBindingTable.unmap();
     }
 
     void buildPipeline()
@@ -1317,27 +1475,6 @@ namespace vkrt {
   };
 }
 
-#if 1
-# define LOG_API_CALL() /* ignore */
-#else 
-# define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
-#endif
-
-#define LOG(message)                            \
-  if (vkrt::Context::logging())                       \
-    std::cout                                   \
-      << VKRT_TERMINAL_LIGHT_BLUE                \
-      << "#vkrt: "                               \
-      << message                                \
-      << VKRT_TERMINAL_DEFAULT << std::endl
-
-#define LOG_OK(message)                         \
-  if (vkrt::Context::logging())                       \
-    std::cout                                   \
-      << VKRT_TERMINAL_BLUE                      \
-      << "#vkrt: "                               \
-      << message                                \
-      << VKRT_TERMINAL_DEFAULT << std::endl
 
 VKRT_API VKRTContext vkrtContextCreate(int32_t *requestedDeviceIDs,
                                     int      numRequestedDevices)
@@ -1429,7 +1566,7 @@ vkrtMissProgSet(VKRTContext  _context,
                int rayType,
                VKRTMissProg missProgToUse)
 {
-  throw std::runtime_error("Not implemented");
+  VKRT_NOTIMPLEMENTED;
 }
 
 VKRT_API void 
@@ -1443,7 +1580,7 @@ vkrtMissProgRelease(VKRTMissProg _missProg)
 
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
-  throw std::runtime_error("Not implemented");
+  VKRT_NOTIMPLEMENTED;
 }
 
 
@@ -1507,30 +1644,34 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   {
     return (value + alignment - 1) & ~(alignment - 1);
   };
+  
+  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
+  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
+  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
+  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t handleSizeAligned = alignedSize(
-    context->rayTracingPipelineProperties.shaderGroupHandleSize, 
-    context->rayTracingPipelineProperties.shaderGroupHandleAlignment);
+  // for the moment, just assume the max group size
+  const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
   raygenShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
     context->logicalDevice, context->raygenShaderBindingTable.buffer);
-  raygenShaderSbtEntry.stride = handleSizeAligned;
-  raygenShaderSbtEntry.size = handleSizeAligned;
+  raygenShaderSbtEntry.stride = recordSize;
+  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * 1; // only one
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
     context->logicalDevice, context->missShaderBindingTable.buffer);
-  missShaderSbtEntry.stride = handleSizeAligned;
-  missShaderSbtEntry.size = handleSizeAligned;
+  missShaderSbtEntry.stride = recordSize;
+  missShaderSbtEntry.size = missShaderSbtEntry.stride * 1; // only one
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
     context->logicalDevice, context->hitShaderBindingTable.buffer);
-  hitShaderSbtEntry.stride = handleSizeAligned;
-  hitShaderSbtEntry.size = handleSizeAligned;
+  hitShaderSbtEntry.stride = recordSize;
+  hitShaderSbtEntry.size = hitShaderSbtEntry.stride * 1; // only one
 
-  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{}; // empty
   // callableShaderSbtEntry.stride = handleSizeAligned;
   // callableShaderSbtEntry.size = handleSizeAligned;
 
@@ -1545,7 +1686,7 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     dims_z);
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-  if (err) throw std::runtime_error("failed to end command buffer! : \n" + errorString(err));
+  if (err) VKRT_RAISE("failed to end command buffer! : \n" + errorString(err));
 
   VkSubmitInfo submitInfo;
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1559,10 +1700,10 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) throw std::runtime_error("failed to submit to queue! : \n" + errorString(err));
+  if (err) VKRT_RAISE("failed to submit to queue! : \n" + errorString(err));
 
   err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err) throw std::runtime_error("failed to wait for queue idle! : \n" + errorString(err));
+  if (err) VKRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
 }
 
 
@@ -1576,6 +1717,16 @@ size_t VKRTVarDecl::getSize() const
   else if (type == VKRT_INT2) return sizeof(uint2);
   else if (type == VKRT_INT3) return sizeof(uint3);
   else if (type == VKRT_INT4) return sizeof(uint4);
+
+  else if (type == VKRT_INT64) return sizeof(int64_t);
+  else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
+  else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
+  else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
+  else if (type == VKRT_UINT64) return sizeof(uint64_t);
+  else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
+  else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
+  else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
+
   else if (type == VKRT_FLOAT) return sizeof(float);
   else if (type == VKRT_FLOAT2) return sizeof(float2);
   else if (type == VKRT_FLOAT3) return sizeof(float3);

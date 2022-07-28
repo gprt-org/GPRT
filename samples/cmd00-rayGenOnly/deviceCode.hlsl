@@ -22,13 +22,13 @@
 
 #include "deviceCode.h"
 
+[[vk::shader_record_ext]]
+ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
-void simpleRayGen(
-  uniform RayGenData raygenData
-)
+void simpleRayGen()
 {
-  printf("Hello from the raygen program!\n");
-  printf("Data field of RayGenData is: %d\n", raygenData.data);
+  // float test = vk::RawBufferLoad<float>(sbtData.addr, 4);
+  printf("Hello from the raygen program! %d %f \n", raygenSBTData.first, raygenSBTData.second);
 }
 
 struct Payload
@@ -36,8 +36,10 @@ struct Payload
   float4 color;
 };
 
+[[vk::shader_record_ext]]
+ConstantBuffer<MissProgData> missSBTData;
 [shader("miss")]
 void simpleMissProg(inout Payload MyPayload)
 {
-  printf("Hello from the miss program!\n");
+  printf("Hello from the miss program! %d %d \n", missSBTData.third, missSBTData.fourth);
 }
