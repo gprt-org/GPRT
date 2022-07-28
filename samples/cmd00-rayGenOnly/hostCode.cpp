@@ -87,7 +87,7 @@ int main(int ac, char **av)
     vkrtBuildSBT(vkrt);
 
     int data = 42;
-    vkrtRayGenSetRaw(rayGen, "fbSize", &data);
+    vkrtRayGenSetRaw(rayGen, "data", &data);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
 

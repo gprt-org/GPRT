@@ -24,7 +24,7 @@
 
 [shader("raygeneration")]
 void simpleRayGen(
-  // uniform RayGenData raygenData
+  uniform RayGenData raygenData
 )
 {
   printf("Hello from the raygen program!\n");
