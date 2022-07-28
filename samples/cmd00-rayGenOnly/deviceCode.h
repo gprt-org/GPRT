@@ -22,12 +22,11 @@
 
 #include "vkrt.h"
 
+// Note, none of these structures can have pointers...
+
 struct RayGenData
 {
-  RWStructuredBuffer<uint32_t> fbPtr;
-  int2  fbSize;
-  float3  color0;
-  float3  color1;
+  int data;
 };
 
 struct MissProgData

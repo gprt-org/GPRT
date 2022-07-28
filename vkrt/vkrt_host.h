@@ -210,11 +210,19 @@ typedef enum
   }
   VKRTDataType;
 
+  #define VKRT_USER_TYPE(userType) ((VKRTDataType)(VKRT_USER_TYPE_BEGIN+sizeof(userType)))
+
 typedef struct _VKRTVarDecl {
   const char *name;
-  VKRTDataType type;
+  VKRTDataType type; // note, also includes size if VKRT_USER_TYPE
   uint32_t    offset;
+  size_t getSize() const;
 } VKRTVarDecl;
+
+typedef struct _VKRTVarDef {
+  VKRTVarDecl decl;
+  void* data = nullptr;
+} VKRTVarDef;
 
 VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
 VKRT_API void vkrtBuildPrograms(VKRTContext context);
@@ -281,3 +289,36 @@ vkrtRayGenLaunch2D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_
 /*! 3D-launch variant of \see vkrtRayGenLaunch2D */
 VKRT_API void
 vkrtRayGenLaunch3D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_y, int dims_z);
+
+
+// ------------------------------------------------------------------
+// setters for "meta" types
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+// VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
+// VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
+// VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
+VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *val);
+
+// // setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSetTexture(VKRTGeom obj, const char *name, VKRTTexture val);
+// VKRT_API void vkrtGeomSetPointer(VKRTGeom obj, const char *name, const void *val);
+// VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
+
+// // setters for variables on "Params"s
+// VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
+// VKRT_API void vkrtParamsSetPointer(VKRTParams obj, const char *name, const void *val);
+// VKRT_API void vkrtParamsSetBuffer(VKRTParams obj, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtParamsSetGroup(VKRTParams obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtParamsSetRaw(VKRTParams obj, const char *name, const void *val);
+
+// setters for variables on "MissProg"s
+// VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
+// VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
+// VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
+VKRT_API void vkrtMissProgSetRaw(VKRTMissProg missprog, const char *name, const void *val);

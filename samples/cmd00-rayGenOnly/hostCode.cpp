@@ -60,10 +60,7 @@ int main(int ac, char **av)
     
     VKRTVarDecl rayGenVars[]
         = {
-        { "fbPtr",  VKRT_BUFPTR, VKRT_OFFSETOF(RayGenData,fbPtr) },
-        { "fbSize", VKRT_INT2,   VKRT_OFFSETOF(RayGenData,fbSize) },
-        { "color0", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,color0) },
-        { "color1", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,color1) },
+        { "data", VKRT_INT,    VKRT_OFFSETOF(RayGenData,data) },
         { /* sentinel: */ nullptr }
     };
     // Allocate room for one RayGen shader, create it, and
@@ -89,7 +86,10 @@ int main(int ac, char **av)
     // Build a shader binding table entry for the ray generation record.
     vkrtBuildSBT(vkrt);
 
+    int data = 42;
+    vkrtRayGenSetRaw(rayGen, "fbSize", &data);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+
 
     // Now finally, cleanup
     vkrtMissProgRelease(missProg);

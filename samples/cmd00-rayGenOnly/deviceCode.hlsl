@@ -23,11 +23,12 @@
 #include "deviceCode.h"
 
 [shader("raygeneration")]
-void simpleRayGen()
+void simpleRayGen(
+  // uniform RayGenData raygenData
+)
 {
   printf("Hello from the raygen program!\n");
-
-  // printf("Size of RayGenData: %d\n", sizeof(RayGenData));
+  printf("Data field of RayGenData is: %d\n", raygenData.data);
 }
 
 struct Payload

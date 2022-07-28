@@ -27,6 +27,7 @@
 #include <assert.h>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 
 #include <regex>
 
@@ -384,7 +385,12 @@ namespace vkrt {
     }
   };
 
-  struct RayGen {
+  struct SBTEntry {
+    // Map of the name of the variable to that variable declaration
+    std::unordered_map<std::string, VKRTVarDef> vars;
+  };
+
+  struct RayGen : public SBTEntry {
     VkShaderModule shaderModule;
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -394,8 +400,8 @@ namespace vkrt {
            Module *module,
            const char* entryPoint,
            size_t      sizeOfVarStruct,
-           VKRTVarDecl *vars,
-           int         numVars) {
+           std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
+    {
       std::cout<<"Ray gen is being made!"<<std::endl;
 
       spv_binary binary = module->getBinary(entryPoint);
@@ -407,19 +413,19 @@ namespace vkrt {
       moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
       moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
 
-      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
-        NULL, &shaderModule));
+      VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
+        NULL, &shaderModule);
+      if (err) throw std::runtime_error("failed to create shader module! : \n" + errorString(err));
 
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
       shaderStage.module = shaderModule;
-      // note, this is a dumb quirk with current .spv tools... dxir supports
-      // multiple entry point names, but glslc -> spv does not...
-      // for now, assume the spirv entry point instruction is "main"
       shaderStage.pName = entryPoint; 
       assert(shaderStage.module != VK_NULL_HANDLE);
 
       module->releaseBinary(binary);
+
+      vars = _vars;
     }
     ~RayGen() {
       std::cout<<"Ray gen is being destroyed!"<<std::endl;
@@ -427,7 +433,7 @@ namespace vkrt {
     }
   };
 
-  struct MissProg {
+  struct MissProg : public SBTEntry {
     VkShaderModule shaderModule;
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -437,8 +443,8 @@ namespace vkrt {
              Module *module,
              const char* entryPoint,
              size_t      sizeOfVarStruct,
-             VKRTVarDecl *vars,
-             int         numVars) {
+             std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
+    {
       std::cout<<"Miss program is being made!"<<std::endl;
 
       spv_binary binary = module->getBinary(entryPoint);
@@ -456,13 +462,12 @@ namespace vkrt {
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
       shaderStage.module = shaderModule;
-      // note, this is a dumb quirk with current .spv tools... dxir supports
-      // multiple entry point names, but glslc -> spv does not...
-      // for now, assume the spirv entry point instruction is "main"
       shaderStage.pName = entryPoint; 
       assert(shaderStage.module != VK_NULL_HANDLE);
 
       module->releaseBinary(binary);
+
+      vars = _vars;
     }
     ~MissProg() {
       std::cout<<"Miss program is being destroyed!"<<std::endl;
@@ -599,6 +604,32 @@ namespace vkrt {
 				vkDestroyDebugUtilsMessengerEXT(instance, debugUtilsMessenger, nullptr);
 			}
 		}
+
+    std::unordered_map<std::string, VKRTVarDef> checkAndPackVariables(const VKRTVarDecl *vars,
+                                                   int               numVars)
+    {
+      if (vars == nullptr && (numVars == 0 || numVars == -1))
+        return {};
+
+      // *copy* the vardecls here, so we can catch any potential memory
+      // *access errors early
+
+      assert(vars);
+      if (numVars == -1) {
+        // using -1 as count value for a variable list means the list is
+        // null-terminated... so just count it
+        for (numVars = 0; vars[numVars].name != nullptr; numVars++);
+      }
+      std::unordered_map<std::string, VKRTVarDef> varDefs;
+      for (int i=0;i<numVars;i++) {
+        assert(vars[i].name != nullptr);
+        varDefs[vars[i].name].decl = vars[i];
+
+        // allocate depending on the size of the variable...
+        varDefs[vars[i].name].data = malloc(vars[i].getSize());
+      }
+      return varDefs;
+    }
 
     Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -739,8 +770,7 @@ namespace vkrt {
         debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | 
-                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | 
-                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
+                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT ;
         debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
         debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
         VkResult result = vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
@@ -1353,7 +1383,7 @@ vkrtRayGenCreate(VKRTContext _context,
 
   vkrt::RayGen *raygen = new vkrt::RayGen(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, vars, numVars);
+    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
   
   context->raygenPrograms.push_back(raygen);
   
@@ -1384,7 +1414,7 @@ vkrtMissProgCreate(VKRTContext _context,
 
   vkrt::MissProg *missProg = new vkrt::MissProg(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, vars, numVars);
+    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
   
   context->missPrograms.push_back(missProg);
   
@@ -1535,3 +1565,81 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   if (err) throw std::runtime_error("failed to wait for queue idle! : \n" + errorString(err));
 }
 
+
+size_t VKRTVarDecl::getSize() const
+{
+       if (type == VKRT_INT) return sizeof(int32_t);
+  else if (type == VKRT_INT2) return sizeof(int2);
+  else if (type == VKRT_INT3) return sizeof(int3);
+  else if (type == VKRT_INT4) return sizeof(int4);
+  else if (type == VKRT_UINT) return sizeof(uint32_t);
+  else if (type == VKRT_INT2) return sizeof(uint2);
+  else if (type == VKRT_INT3) return sizeof(uint3);
+  else if (type == VKRT_INT4) return sizeof(uint4);
+  else if (type == VKRT_FLOAT) return sizeof(float);
+  else if (type == VKRT_FLOAT2) return sizeof(float2);
+  else if (type == VKRT_FLOAT3) return sizeof(float3);
+  else if (type == VKRT_FLOAT4) return sizeof(float4);
+  else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
+  else throw std::runtime_error("Unimplemented!");
+}
+
+// ------------------------------------------------------------------
+// setters for "meta" types
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+// VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
+// VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
+// VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
+VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void *val)
+{
+  LOG_API_CALL();
+  vkrt::RayGen *raygen = (vkrt::RayGen*)_rayGen;
+  assert(raygen);
+
+  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // 2. Get the expected size for this variable
+  size_t size = raygen->vars[name].decl.getSize();
+  
+  // 3. Assign the value to that variable
+  memcpy(raygen->vars[name].data, val, size);
+}
+
+// // setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSetTexture(VKRTGeom obj, const char *name, VKRTTexture val);
+// VKRT_API void vkrtGeomSetPointer(VKRTGeom obj, const char *name, const void *val);
+// VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
+
+// // setters for variables on "Params"s
+// VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
+// VKRT_API void vkrtParamsSetPointer(VKRTParams obj, const char *name, const void *val);
+// VKRT_API void vkrtParamsSetBuffer(VKRTParams obj, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtParamsSetGroup(VKRTParams obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtParamsSetRaw(VKRTParams obj, const char *name, const void *val);
+
+// setters for variables on "MissProg"s
+// VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
+// VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
+// VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
+// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
+VKRT_API void vkrtMissProgSetRaw(VKRTMissProg _missProg, const char *name, const void *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *missProg = (vkrt::MissProg*)_missProg;
+  assert(missProg);
+
+  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  assert(missProg->vars.find(std::string(name)) != missProg->vars.end());
+
+  // 2. Get the expected size for this variable
+  size_t size = missProg->vars[name].decl.getSize();
+  
+  // 3. Assign the value to that variable
+  memcpy(missProg->vars[name].data, val, size);
+}
