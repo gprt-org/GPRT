@@ -25,21 +25,24 @@
 [[vk::shader_record_ext]]
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
-void simpleRayGen()
-{
-  // float test = vk::RawBufferLoad<float>(sbtData.addr, 4);
-  printf("Hello from the raygen program! %d %f \n", raygenSBTData.first, raygenSBTData.second);
+void simpleRayGen() {
+  printf("Hello from the raygen program! %d %f \n", 
+    raygenSBTData.first, raygenSBTData.second);
 }
 
-struct Payload
-{
-  float4 color;
+struct Payload {
+  float4 tmp;
 };
 
 [[vk::shader_record_ext]]
 ConstantBuffer<MissProgData> missSBTData;
 [shader("miss")]
-void simpleMissProg(inout Payload MyPayload)
-{
-  printf("Hello from the miss program! %d %d \n", missSBTData.third, missSBTData.fourth);
+void simpleMissProg(inout Payload MyPayload) {
+  printf("Hello from the miss program! %d %d \n", 
+    missSBTData.third, missSBTData.fourth);
 }
+
+
+
+ // float test = vk::RawBufferLoad<float>(sbtData.addr, 4);
+ 

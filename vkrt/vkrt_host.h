@@ -292,6 +292,16 @@ vkrtMissProgSet(VKRTContext  context,
 VKRT_API void 
 vkrtMissProgRelease(VKRTMissProg missProg);
 
+/*! creates a buffer that uses host pinned memory; that memory is
+pinned on the host and accessible to all devices */
+VKRT_API VKRTBuffer
+vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count);
+
+/*! Releases all underlying Vulkan resources for the given buffer and frees any 
+  underlying memory*/
+VKRT_API void
+vkrtBufferRelease(VKRTBuffer buffer);
+
 /*! Executes a ray tracing pipeline with the given raygen program. 
   This call will block until the raygen program returns. */
 VKRT_API void

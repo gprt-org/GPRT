@@ -52,6 +52,12 @@ int main(int ac, char **av)
 {
     LOG("vkrt example '" << av[0] << "' starting up");
 
+    // ##################################################################
+    // set up all the *CODE* we want to run
+    // ##################################################################
+
+    LOG("building module, programs, and pipeline");
+    
     // Initialize Vulkan, and create a "vkrt device," a context to hold the
     // ray generation shader and output buffer. The "1" is the number of devices requested.
     VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
@@ -86,6 +92,16 @@ int main(int ac, char **av)
     // Create the pipeline. 
     vkrtBuildPipeline(vkrt);
 
+    // ------------------------------------------------------------------
+    // alloc buffers
+    // ------------------------------------------------------------------
+    LOG("allocating frame buffer");
+    // Create a frame buffer as page-locked, aka "pinned" memory.
+    // GPU writes to CPU memory directly (slow) but no transfers needed
+    VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
+                                            /*type:*/VKRT_INT,
+                                            /*size:*/fbSize.x*fbSize.y);
+                                            
     // ------------------------------------------------------------------
     // build Shader Binding Table (SBT) required to trace the groups
     // ------------------------------------------------------------------

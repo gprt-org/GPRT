@@ -360,6 +360,8 @@ namespace vkrt {
       assert(mapped);
       memcpy(mapped, data, size);
     }
+
+    /*! Guarantees that the host's writes are available to the device */
     VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
     {
       VkMappedMemoryRange mappedRange = {};
@@ -369,6 +371,8 @@ namespace vkrt {
       mappedRange.size = size;
       return vkFlushMappedMemoryRanges(device, 1, &mappedRange);
     }
+
+    /*! Guarantees that the buffer is written to by any pending device operations */
     VkResult invalidate(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
     {
       VkMappedMemoryRange mappedRange = {};
@@ -378,6 +382,8 @@ namespace vkrt {
       mappedRange.size = size;
       return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
     }
+
+    /*! Calls vkDestroy on the buffer, and frees underlying memory */
     void destroy()
     {
       if (buffer)
@@ -1578,6 +1584,35 @@ vkrtMissProgRelease(VKRTMissProg _missProg)
   LOG("miss program destroyed...");
 }
 
+VKRT_API VKRTBuffer
+vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count)
+{
+  LOG_API_CALL();
+  const VkBufferUsageFlags bufferUsageFlags = 
+    // means we can get this buffer's address with vkGetBufferDeviceAddress
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; 
+  const VkMemoryPropertyFlags memoryUsageFlags = 
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+  vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::Buffer *buffer = new vkrt::Buffer(
+    context->physicalDevice, context->logicalDevice,
+    bufferUsageFlags, memoryUsageFlags, 
+    getSize(type) * count 
+  );
+  LOG("buffer created");
+  return (VKRTBuffer)buffer;
+}
+
+VKRT_API void
+vkrtBufferRelease(VKRTBuffer _buffer)
+{
+  vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
+  buffer->destroy();
+  LOG("buffer released");
+}
+
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
   VKRT_NOTIMPLEMENTED;
@@ -1706,6 +1741,34 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   if (err) VKRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
 }
 
+
+size_t getSize(VKRTDataType type)
+{
+       if (type == VKRT_INT) return sizeof(int32_t);
+  else if (type == VKRT_INT2) return sizeof(int2);
+  else if (type == VKRT_INT3) return sizeof(int3);
+  else if (type == VKRT_INT4) return sizeof(int4);
+  else if (type == VKRT_UINT) return sizeof(uint32_t);
+  else if (type == VKRT_INT2) return sizeof(uint2);
+  else if (type == VKRT_INT3) return sizeof(uint3);
+  else if (type == VKRT_INT4) return sizeof(uint4);
+
+  else if (type == VKRT_INT64) return sizeof(int64_t);
+  else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
+  else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
+  else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
+  else if (type == VKRT_UINT64) return sizeof(uint64_t);
+  else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
+  else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
+  else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
+
+  else if (type == VKRT_FLOAT) return sizeof(float);
+  else if (type == VKRT_FLOAT2) return sizeof(float2);
+  else if (type == VKRT_FLOAT3) return sizeof(float3);
+  else if (type == VKRT_FLOAT4) return sizeof(float4);
+  else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
+  else throw std::runtime_error("Unimplemented!");
+}
 
 size_t VKRTVarDecl::getSize() const
 {
