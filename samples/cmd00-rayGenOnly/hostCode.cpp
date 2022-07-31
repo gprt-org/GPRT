@@ -127,6 +127,7 @@ int main(int ac, char **av)
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
     // Now finally, cleanup
+    vkrtBufferRelease(frameBuffer);
     vkrtMissProgRelease(missProg);
     vkrtRayGenRelease(rayGen);
     vkrtContextDestroy(vkrt);

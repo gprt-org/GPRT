@@ -28,6 +28,8 @@
 #include <sys/types.h>
 #include <stdint.h>
 
+#include <assert.h>
+
 #ifdef __cplusplus
 # include <cstddef> 
 #endif
@@ -221,13 +223,42 @@ typedef enum
   }
   VKRTDataType;
 
+  inline size_t getSize(VKRTDataType type)
+  {
+        if (type == VKRT_INT) return sizeof(int32_t);
+    else if (type == VKRT_INT2) return sizeof(int2);
+    else if (type == VKRT_INT3) return sizeof(int3);
+    else if (type == VKRT_INT4) return sizeof(int4);
+    else if (type == VKRT_UINT) return sizeof(uint32_t);
+    else if (type == VKRT_INT2) return sizeof(uint2);
+    else if (type == VKRT_INT3) return sizeof(uint3);
+    else if (type == VKRT_INT4) return sizeof(uint4);
+
+    else if (type == VKRT_INT64) return sizeof(int64_t);
+    else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
+    else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
+    else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
+    else if (type == VKRT_UINT64) return sizeof(uint64_t);
+    else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
+    else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
+    else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
+
+    else if (type == VKRT_BUFFER) return sizeof(int64_t);
+
+    else if (type == VKRT_FLOAT) return sizeof(float);
+    else if (type == VKRT_FLOAT2) return sizeof(float2);
+    else if (type == VKRT_FLOAT3) return sizeof(float3);
+    else if (type == VKRT_FLOAT4) return sizeof(float4);
+    else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
+    else assert(false); return -1;// std::runtime_error("Unimplemented!");
+  }
+
   #define VKRT_USER_TYPE(userType) ((VKRTDataType)(VKRT_USER_TYPE_BEGIN+sizeof(userType)))
 
 typedef struct _VKRTVarDecl {
   const char *name;
   VKRTDataType type; // note, also includes size if VKRT_USER_TYPE
   uint32_t    offset;
-  size_t getSize() const;
 } VKRTVarDecl;
 
 typedef struct _VKRTVarDef {

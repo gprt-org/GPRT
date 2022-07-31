@@ -723,7 +723,7 @@ namespace vkrt {
         varDefs[vars[i].name].decl = vars[i];
 
         // allocate depending on the size of the variable...
-        varDefs[vars[i].name].data = malloc(vars[i].getSize());
+        varDefs[vars[i].name].data = malloc(getSize(vars[i].type));
       }
       return varDefs;
     }
@@ -1313,7 +1313,7 @@ namespace vkrt {
         uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
         for (auto &var : raygen->vars) {
           size_t varOffset = var.second.decl.offset;
-          size_t varSize = var.second.decl.getSize();
+          size_t varSize = getSize(var.second.decl.type);
           std::cout<<"Embedding " << var.first << " into raygen SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
           memcpy(params + varOffset, var.second.data, varSize);
         }
@@ -1339,7 +1339,7 @@ namespace vkrt {
         uint8_t* params = ((uint8_t*) (missShaderBindingTable.mapped)) + offset;
         for (auto &var : missprog->vars) {
           size_t varOffset = var.second.decl.offset;
-          size_t varSize = var.second.decl.getSize();
+          size_t varSize = getSize(var.second.decl.type);
           std::cout<<"Embedding " << var.first << " into missprog SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
           memcpy(params + varOffset, var.second.data, varSize);
         }
@@ -1742,61 +1742,7 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
 }
 
 
-size_t getSize(VKRTDataType type)
-{
-       if (type == VKRT_INT) return sizeof(int32_t);
-  else if (type == VKRT_INT2) return sizeof(int2);
-  else if (type == VKRT_INT3) return sizeof(int3);
-  else if (type == VKRT_INT4) return sizeof(int4);
-  else if (type == VKRT_UINT) return sizeof(uint32_t);
-  else if (type == VKRT_INT2) return sizeof(uint2);
-  else if (type == VKRT_INT3) return sizeof(uint3);
-  else if (type == VKRT_INT4) return sizeof(uint4);
 
-  else if (type == VKRT_INT64) return sizeof(int64_t);
-  else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
-  else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
-  else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
-  else if (type == VKRT_UINT64) return sizeof(uint64_t);
-  else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
-  else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
-  else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
-
-  else if (type == VKRT_FLOAT) return sizeof(float);
-  else if (type == VKRT_FLOAT2) return sizeof(float2);
-  else if (type == VKRT_FLOAT3) return sizeof(float3);
-  else if (type == VKRT_FLOAT4) return sizeof(float4);
-  else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
-  else throw std::runtime_error("Unimplemented!");
-}
-
-size_t VKRTVarDecl::getSize() const
-{
-       if (type == VKRT_INT) return sizeof(int32_t);
-  else if (type == VKRT_INT2) return sizeof(int2);
-  else if (type == VKRT_INT3) return sizeof(int3);
-  else if (type == VKRT_INT4) return sizeof(int4);
-  else if (type == VKRT_UINT) return sizeof(uint32_t);
-  else if (type == VKRT_INT2) return sizeof(uint2);
-  else if (type == VKRT_INT3) return sizeof(uint3);
-  else if (type == VKRT_INT4) return sizeof(uint4);
-
-  else if (type == VKRT_INT64) return sizeof(int64_t);
-  else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
-  else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
-  else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
-  else if (type == VKRT_UINT64) return sizeof(uint64_t);
-  else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
-  else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
-  else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
-
-  else if (type == VKRT_FLOAT) return sizeof(float);
-  else if (type == VKRT_FLOAT2) return sizeof(float2);
-  else if (type == VKRT_FLOAT3) return sizeof(float3);
-  else if (type == VKRT_FLOAT4) return sizeof(float4);
-  else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
-  else throw std::runtime_error("Unimplemented!");
-}
 
 // ------------------------------------------------------------------
 // setters for "meta" types
@@ -1817,7 +1763,7 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void 
   assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
 
   // 2. Get the expected size for this variable
-  size_t size = raygen->vars[name].decl.getSize();
+  size_t size = getSize(raygen->vars[name].decl.type);
   
   // 3. Assign the value to that variable
   memcpy(raygen->vars[name].data, val, size);
@@ -1852,7 +1798,7 @@ VKRT_API void vkrtMissProgSetRaw(VKRTMissProg _missProg, const char *name, const
   assert(missProg->vars.find(std::string(name)) != missProg->vars.end());
 
   // 2. Get the expected size for this variable
-  size_t size = missProg->vars[name].decl.getSize();
+  size_t size = getSize(missProg->vars[name].decl.type);
   
   // 3. Assign the value to that variable
   memcpy(missProg->vars[name].data, val, size);
