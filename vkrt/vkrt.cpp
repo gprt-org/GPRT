@@ -1643,6 +1643,7 @@ vkrtBufferMap(VKRTBuffer _buffer, int deviceID)
   LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
   buffer->map();
+  buffer->invalidate();
 }
 
 VKRT_API void
@@ -1650,6 +1651,7 @@ vkrtBufferUnmap(VKRTBuffer _buffer, int deviceID)
 {
   LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
+  buffer->flush();
   buffer->unmap();
 }
 

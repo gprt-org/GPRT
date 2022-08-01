@@ -26,9 +26,13 @@
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
 void simpleRayGen() {
-  uint32_t test = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
-  printf("Hello from the raygen program! %d %d \n", 
-    raygenSBTData.fbPtr, test);
+  uint2 threadIdx = DispatchRaysIndex().xy;
+
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    uint32_t test = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
+    printf("Hello from the raygen program! %d %d \n", 
+      raygenSBTData.fbPtr, test);
+  }
 }
 
 struct Payload {
