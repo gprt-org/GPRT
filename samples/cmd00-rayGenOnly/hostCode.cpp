@@ -104,11 +104,11 @@ int main(int ac, char **av)
                                             /*type:*/VKRT_INT,
                                             /*size:*/fbSize.x*fbSize.y);
 
-    // std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
-    // vkrtBufferMap(frameBuffer);
-    // void* fb = vkrtBufferGetPointer(frameBuffer,0);
-    // memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
-    // vkrtBufferUnmap(frameBuffer);
+    std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
+    vkrtBufferMap(frameBuffer);
+    void* fb = vkrtBufferGetPointer(frameBuffer,0);
+    memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
+    vkrtBufferUnmap(frameBuffer);
                                             
     // ------------------------------------------------------------------
     // build Shader Binding Table (SBT) required to trace the groups

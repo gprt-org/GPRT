@@ -333,6 +333,8 @@ namespace vkrt {
 
     VkPhysicalDeviceMemoryProperties memoryProperties;
 
+    VkDeviceAddress address = 0;
+
     VkResult map(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
     {
       return vkMapMemory(device, memory, offset, size, 0, &mapped);
@@ -385,10 +387,10 @@ namespace vkrt {
 
     VkDeviceAddress getDeviceAddress()
     {
-      VkBufferDeviceAddressInfo info = {};
-      info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+      VkBufferDeviceAddressInfoKHR info = {};
+      info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
       info.buffer = buffer;
-      VkDeviceAddress addr = vkGetBufferDeviceAddress(device, &info);
+      VkDeviceAddress addr = vkGetBufferDeviceAddressKHR(device, &info);
       return addr;
     }
 
@@ -488,6 +490,10 @@ namespace vkrt {
       // Attach the memory to the buffer object
       VkResult err = bind();
       if (err) throw std::runtime_error("failed to create buffer! : \n" + errorString(err));
+
+      // means we can get this buffer's address with vkGetBufferDeviceAddress
+      if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
+        address = getDeviceAddress();
     }
   };
 
@@ -1804,7 +1810,7 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
   size_t size = sizeof(uint64_t);
   
   // 3. Assign the value to that variable
-  VkDeviceAddress addr = val->getDeviceAddress();
+  VkDeviceAddress addr = val->address;
   memcpy(raygen->vars[name].data, &addr, size);
 }
 

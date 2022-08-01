@@ -26,8 +26,8 @@
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
 void simpleRayGen() {
-  float test = vk::RawBufferLoad<float>(raygenSBTData.fbPtr, 4);
-  printf("Hello from the raygen program! %d %f \n", 
+  uint32_t test = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
+  printf("Hello from the raygen program! %d %d \n", 
     raygenSBTData.fbPtr, test);
 }
 
