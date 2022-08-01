@@ -28,6 +28,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+#include <vector>
+
 #define LOG(message)                                            \
   std::cout << VKRT_TERMINAL_BLUE;                               \
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
@@ -66,7 +68,7 @@ int main(int ac, char **av)
     
     VKRTVarDecl rayGenVars[]
     = {
-        { "first", VKRT_UINT, VKRT_OFFSETOF(RayGenData, first) },
+        { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
         { "second", VKRT_FLOAT, VKRT_OFFSETOF(RayGenData, second) },
         { /* sentinel: */ nullptr }
     };
@@ -101,13 +103,18 @@ int main(int ac, char **av)
     VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
                                             /*type:*/VKRT_INT,
                                             /*size:*/fbSize.x*fbSize.y);
+
+    // std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
+    // vkrtBufferMap(frameBuffer);
+    // void* fb = vkrtBufferGetPointer(frameBuffer,0);
+    // memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
+    // vkrtBufferUnmap(frameBuffer);
                                             
     // ------------------------------------------------------------------
     // build Shader Binding Table (SBT) required to trace the groups
     // ------------------------------------------------------------------
-    uint32_t first = 1337;
     float second = 42.0f;
-    vkrtRayGenSetRaw(rayGen, "first", &first);
+    vkrtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
     vkrtRayGenSetRaw(rayGen, "second", &second);
 
     uint64_t third = 26;
@@ -119,9 +126,7 @@ int main(int ac, char **av)
     vkrtBuildSBT(vkrt);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
-    first = 42;
     second = 1337.0f;
-    vkrtRayGenSetRaw(rayGen, "first", &first);
     vkrtRayGenSetRaw(rayGen, "second", &second);
     vkrtBuildSBT(vkrt);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);

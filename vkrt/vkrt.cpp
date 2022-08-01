@@ -383,6 +383,15 @@ namespace vkrt {
       return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
     }
 
+    VkDeviceAddress getDeviceAddress()
+    {
+      VkBufferDeviceAddressInfo info = {};
+      info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+      info.buffer = buffer;
+      VkDeviceAddress addr = vkGetBufferDeviceAddress(device, &info);
+      return addr;
+    }
+
     /*! Calls vkDestroy on the buffer, and frees underlying memory */
     void destroy()
     {
@@ -1608,9 +1617,34 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
 VKRT_API void
 vkrtBufferRelease(VKRTBuffer _buffer)
 {
+  LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
   buffer->destroy();
   LOG("buffer released");
+}
+
+VKRT_API void *
+vkrtBufferGetPointer(VKRTBuffer _buffer, int deviceID)
+{
+  LOG_API_CALL();
+  vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
+  return buffer->mapped;
+}
+
+VKRT_API void
+vkrtBufferMap(VKRTBuffer _buffer, int deviceID)
+{
+  LOG_API_CALL();
+  vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
+  buffer->map();
+}
+
+VKRT_API void
+vkrtBufferUnmap(VKRTBuffer _buffer, int deviceID)
+{
+  LOG_API_CALL();
+  vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
+  buffer->unmap();
 }
 
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
@@ -1751,7 +1785,29 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
 // setters for variables on "RayGen"s
 // VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
 // VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
-// VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
+VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuffer _val)
+{
+  LOG_API_CALL();
+  vkrt::RayGen *raygen = (vkrt::RayGen*)_rayGen;
+  assert(raygen);
+
+  vkrt::Buffer *val = (vkrt::Buffer*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // The found variable must be a buffer
+  assert(raygen->vars[name].decl.type == VKRT_BUFFER);
+
+  // Buffer pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+  
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->getDeviceAddress();
+  memcpy(raygen->vars[name].data, &addr, size);
+}
+
 // VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void *val)
 {

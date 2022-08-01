@@ -333,6 +333,27 @@ vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count)
 VKRT_API void
 vkrtBufferRelease(VKRTBuffer buffer);
 
+/*! returns the device pointer of the given pointer for the given
+  device ID. For host-pinned or managed memory buffers (where the
+  buffer is shared across all devices) this pointer should be the
+  same across all devices (and even be accessible on the host); for
+  device buffers each device *may* see this buffer under a different
+  address, and that address is not valid on the host. Note this
+  function is paricuarly useful for CUDA-interop; allowing to
+  cudaMemcpy to/from an owl buffer directly from CUDA code 
+  
+  // TODO! update for Vulkan...
+  */
+VKRT_API void *
+vkrtBufferGetPointer(VKRTBuffer buffer, int deviceID VKRT_IF_CPP(=0));
+
+
+VKRT_API void
+vkrtBufferMap(VKRTBuffer buffer, int deviceID VKRT_IF_CPP(=0));
+
+VKRT_API void
+vkrtBufferUnmap(VKRTBuffer buffer, int deviceID VKRT_IF_CPP(=0));
+
 /*! Executes a ray tracing pipeline with the given raygen program. 
   This call will block until the raygen program returns. */
 VKRT_API void
@@ -350,7 +371,7 @@ vkrtRayGenLaunch3D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_
 // setters for variables on "RayGen"s
 // VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
 // VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
-// VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
+VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
 // VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *val);
 

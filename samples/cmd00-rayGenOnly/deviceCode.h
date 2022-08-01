@@ -26,7 +26,7 @@
 
 struct RayGenData
 {
-  uint32_t first;
+  uint64_t fbPtr;
   float second;
 };
 
