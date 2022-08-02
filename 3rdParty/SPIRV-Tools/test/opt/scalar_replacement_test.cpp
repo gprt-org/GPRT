@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "source/opt/scalar_replacement_pass.h"
-
 #include <string>
 
 #include "gmock/gmock.h"
@@ -24,18 +22,6 @@
 namespace spvtools {
 namespace opt {
 namespace {
-
-using ScalarReplacementPassName = ::testing::Test;
-
-TEST_F(ScalarReplacementPassName, Default) {
-  auto srp = ScalarReplacementPass();
-  EXPECT_STREQ(srp.name(), "scalar-replacement=100");
-}
-
-TEST_F(ScalarReplacementPassName, Large) {
-  auto srp = ScalarReplacementPass(0xffffffffu);
-  EXPECT_STREQ(srp.name(), "scalar-replacement=4294967295");
-}
 
 using ScalarReplacementTest = PassTest<::testing::Test>;
 

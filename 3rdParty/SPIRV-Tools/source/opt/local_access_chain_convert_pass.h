@@ -95,8 +95,7 @@ class LocalAccessChainConvertPass : public MemPass {
                               Instruction* original_load);
 
   // Return true if all indices of access chain |acp| are OpConstant integers
-  // whose values can fit into an unsigned 32-bit value.
-  bool Is32BitConstantIndexAccessChain(const Instruction* acp) const;
+  bool IsConstantIndexAccessChain(const Instruction* acp) const;
 
   // Identify all function scope variables of target type which are
   // accessed only with loads, stores and access chains with constant
@@ -110,17 +109,6 @@ class LocalAccessChainConvertPass : public MemPass {
   //
   // Returns a status to indicate success or failure, and change or no change.
   Status ConvertLocalAccessChains(Function* func);
-
-  // Returns true one of the indexes in the |access_chain_inst| is definitly out
-  // of bounds.  If the size of the type or the value of the index is unknown,
-  // then it will be considered in-bounds.
-  bool AnyIndexIsOutOfBounds(const Instruction* access_chain_inst);
-
-  // Returns true if getting element |index| from |type| would be out-of-bounds.
-  // If |index| is nullptr or the size of the type are unknown, then it will be
-  // considered in-bounds.
-  bool IsIndexOutOfBounds(const analysis::Constant* index,
-                          const analysis::Type* type) const;
 
   // Initialize extensions allowlist
   void InitExtensions();

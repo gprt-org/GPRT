@@ -8897,7 +8897,6 @@ TEST_F(InstBindlessTest, UniformMatrixRefColumnMajor) {
  )";
 
   SetTargetEnv(SPV_ENV_VULKAN_1_2);
-  ValidatorOptions()->uniform_buffer_standard_layout = true;
   SetAssembleOptions(SPV_TEXT_TO_BINARY_OPTION_PRESERVE_NUMERIC_IDS);
   SinglePassRunAndMatch<InstBindlessCheckPass>(text, true, 7u, 23u, false,
                                                false, true, false, true);

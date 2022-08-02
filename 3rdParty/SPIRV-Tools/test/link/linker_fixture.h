@@ -208,10 +208,6 @@ class LinkerTest : public ::testing::Test {
   // Returns the accumulated error messages for the test.
   std::string GetErrorMessage() const { return error_message_; }
 
-  bool Validate(const spvtest::Binary& binary) {
-    return tools_.Validate(binary);
-  }
-
  private:
   spvtools::Context context_;
   spvtools::SpirvTools

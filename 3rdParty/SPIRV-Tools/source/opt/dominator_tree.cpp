@@ -59,9 +59,7 @@ static void DepthFirstSearch(const BBType* bb, SuccessorLambda successors,
                              PreLambda pre, PostLambda post) {
   // Ignore backedge operation.
   auto nop_backedge = [](const BBType*, const BBType*) {};
-  auto no_terminal_blocks = [](const BBType*) { return false; };
-  CFA<BBType>::DepthFirstTraversal(bb, successors, pre, post, nop_backedge,
-                                   no_terminal_blocks);
+  CFA<BBType>::DepthFirstTraversal(bb, successors, pre, post, nop_backedge);
 }
 
 // Wrapper around CFA::DepthFirstTraversal to provide an interface to perform

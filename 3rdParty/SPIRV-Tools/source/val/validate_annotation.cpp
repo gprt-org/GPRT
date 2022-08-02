@@ -136,8 +136,8 @@ std::string LogStringForDecoration(uint32_t decoration) {
       return "PerViewNV";
     case SpvDecorationPerTaskNV:
       return "PerTaskNV";
-    case SpvDecorationPerVertexKHR:
-      return "PerVertexKHR";
+    case SpvDecorationPerVertexNV:
+      return "PerVertexNV";
     case SpvDecorationNonUniform:
       return "NonUniform";
     case SpvDecorationRestrictPointer:
@@ -366,11 +366,6 @@ spv_result_t ValidateDecorationTarget(ValidationState_t& _, SpvDecoration dec,
           return fail(4670) << "storage class must be Input or Output";
         }
         break;
-      case SpvDecorationPerVertexKHR:
-        if (sc != SpvStorageClassInput) {
-          return fail(6777) << "storage class must be Input";
-        }
-        break;
       default:
         break;
     }
@@ -581,7 +576,7 @@ spv_result_t RegisterDecorations(ValidationState_t& _,
       // Word 1 is the group <id>. All subsequent words are target <id>s that
       // are going to be decorated with the decorations.
       const uint32_t decoration_group_id = inst->word(1);
-      std::set<Decoration>& group_decorations =
+      std::vector<Decoration>& group_decorations =
           _.id_decorations(decoration_group_id);
       for (size_t i = 2; i < inst->words().size(); ++i) {
         const uint32_t target_id = inst->word(i);
@@ -595,7 +590,7 @@ spv_result_t RegisterDecorations(ValidationState_t& _,
       // pairs. All decorations of the group should be applied to all the struct
       // members that are specified in the instructions.
       const uint32_t decoration_group_id = inst->word(1);
-      std::set<Decoration>& group_decorations =
+      std::vector<Decoration>& group_decorations =
           _.id_decorations(decoration_group_id);
       // Grammar checks ensures that the number of arguments to this instruction
       // is an odd number: 1 decoration group + (id,literal) pairs.

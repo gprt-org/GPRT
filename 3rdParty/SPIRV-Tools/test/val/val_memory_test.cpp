@@ -203,11 +203,9 @@ TEST_F(ValidateMemory, VulkanUniformOnIntBad) {
 )";
   CompileSuccessfully(src, SPV_ENV_VULKAN_1_1);
   ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\n"
+      HasSubstr("From Vulkan spec, section 14.5.2:\n"
                 "Variables identified with the Uniform storage class are used "
                 "to access transparent buffer backed resources. Such variables "
                 "must be typed as OpTypeStruct, or an array of this type"));
@@ -279,11 +277,9 @@ TEST_F(ValidateMemory, VulkanUniformOnRuntimeArrayOfArrayBad) {
 )";
   CompileSuccessfully(src, SPV_ENV_VULKAN_1_1);
   ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\n"
+      HasSubstr("From Vulkan spec, section 14.5.2:\n"
                 "Variables identified with the Uniform storage class are used "
                 "to access transparent buffer backed resources. Such variables "
                 "must be typed as OpTypeStruct, or an array of this type"));
@@ -322,11 +318,9 @@ TEST_F(ValidateMemory, VulkanUniformOnArrayOfArrayBad) {
 )";
   CompileSuccessfully(src, SPV_ENV_VULKAN_1_1);
   ASSERT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\n"
+      HasSubstr("From Vulkan spec, section 14.5.2:\n"
                 "Variables identified with the Uniform storage class are used "
                 "to access transparent buffer backed resources. Such variables "
                 "must be typed as OpTypeStruct, or an array of this type"));
@@ -839,8 +833,6 @@ TEST_F(ValidateMemory, VulkanPushConstantNotStructBad) {
 )";
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-PushConstant-06808"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("PushConstant OpVariable <id> '6[%6]' has illegal "
@@ -875,8 +867,6 @@ TEST_F(ValidateMemory, VulkanPushConstantArrayOfStructBad) {
 )";
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-PushConstant-06808"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("PushConstant OpVariable <id> '10[%10]' has illegal "
@@ -3500,8 +3490,6 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06925"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("In the Vulkan environment, cannot store to Uniform Blocks"));
@@ -3543,8 +3531,6 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06925"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("In the Vulkan environment, cannot store to Uniform Blocks"));
@@ -3617,8 +3603,6 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06925"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("In the Vulkan environment, cannot store to Uniform Blocks"));
@@ -3663,8 +3647,6 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06925"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("In the Vulkan environment, cannot store to Uniform Blocks"));
@@ -3705,8 +3687,6 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_1);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_1));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06925"));
   EXPECT_THAT(
       getDiagnosticString(),
       HasSubstr("In the Vulkan environment, cannot store to Uniform Blocks"));
@@ -4232,11 +4212,9 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_0);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_0));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\nVariables identified with "
+      HasSubstr("From Vulkan spec, section 14.5.2:\nVariables identified with "
                 "the StorageBuffer storage class are used to access "
                 "transparent buffer backed resources. Such variables must be "
                 "typed as OpTypeStruct, or an array of this type"));
@@ -4265,11 +4243,9 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_0);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_0));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\nVariables identified with "
+      HasSubstr("From Vulkan spec, section 14.5.2:\nVariables identified with "
                 "the StorageBuffer storage class are used to access "
                 "transparent buffer backed resources. Such variables must be "
                 "typed as OpTypeStruct, or an array of this type"));
@@ -4297,11 +4273,9 @@ OpFunctionEnd
 
   CompileSuccessfully(spirv, SPV_ENV_VULKAN_1_0);
   EXPECT_EQ(SPV_ERROR_INVALID_ID, ValidateInstructions(SPV_ENV_VULKAN_1_0));
-  EXPECT_THAT(getDiagnosticString(),
-              AnyVUID("VUID-StandaloneSpirv-Uniform-06807"));
   EXPECT_THAT(
       getDiagnosticString(),
-      HasSubstr("From Vulkan spec:\nVariables identified with "
+      HasSubstr("From Vulkan spec, section 14.5.2:\nVariables identified with "
                 "the StorageBuffer storage class are used to access "
                 "transparent buffer backed resources. Such variables must be "
                 "typed as OpTypeStruct, or an array of this type"));

@@ -35,8 +35,8 @@ bool HaveLayoutCompatibleMembers(ValidationState_t&, const Instruction*,
                                  const Instruction*);
 bool HaveSameLayoutDecorations(ValidationState_t&, const Instruction*,
                                const Instruction*);
-bool HasConflictingMemberOffsets(const std::set<Decoration>&,
-                                 const std::set<Decoration>&);
+bool HasConflictingMemberOffsets(const std::vector<Decoration>&,
+                                 const std::vector<Decoration>&);
 
 bool IsAllowedTypeOrArrayOfSame(ValidationState_t& _, const Instruction* type,
                                 std::initializer_list<uint32_t> allowed) {
@@ -105,8 +105,10 @@ bool HaveSameLayoutDecorations(ValidationState_t& _, const Instruction* type1,
          "type1 must be an OpTypeStruct instruction.");
   assert(type2->opcode() == SpvOpTypeStruct &&
          "type2 must be an OpTypeStruct instruction.");
-  const std::set<Decoration>& type1_decorations = _.id_decorations(type1->id());
-  const std::set<Decoration>& type2_decorations = _.id_decorations(type2->id());
+  const std::vector<Decoration>& type1_decorations =
+      _.id_decorations(type1->id());
+  const std::vector<Decoration>& type2_decorations =
+      _.id_decorations(type2->id());
 
   // TODO: Will have to add other check for arrays an matricies if we want to
   // handle them.
@@ -118,8 +120,8 @@ bool HaveSameLayoutDecorations(ValidationState_t& _, const Instruction* type1,
 }
 
 bool HasConflictingMemberOffsets(
-    const std::set<Decoration>& type1_decorations,
-    const std::set<Decoration>& type2_decorations) {
+    const std::vector<Decoration>& type1_decorations,
+    const std::vector<Decoration>& type2_decorations) {
   {
     // We are interested in conflicting decoration.  If a decoration is in one
     // list but not the other, then we will assume the code is correct.  We are
@@ -524,8 +526,8 @@ spv_result_t ValidateVariable(ValidationState_t& _, const Instruction* inst) {
     if (storage_class == SpvStorageClassPushConstant) {
       if (pointee->opcode() != SpvOpTypeStruct) {
         return _.diag(SPV_ERROR_INVALID_ID, inst)
-               << _.VkErrorID(6808) << "PushConstant OpVariable <id> '"
-               << _.getIdName(inst->id()) << "' has illegal type.\n"
+               << "PushConstant OpVariable <id> '" << _.getIdName(inst->id())
+               << "' has illegal type.\n"
                << "From Vulkan spec, Push Constant Interface section:\n"
                << "Such variables must be typed as OpTypeStruct";
       }
@@ -552,9 +554,9 @@ spv_result_t ValidateVariable(ValidationState_t& _, const Instruction* inst) {
     if (storage_class == SpvStorageClassUniform) {
       if (!IsAllowedTypeOrArrayOfSame(_, pointee, {SpvOpTypeStruct})) {
         return _.diag(SPV_ERROR_INVALID_ID, inst)
-               << _.VkErrorID(6807) << "Uniform OpVariable <id> '"
-               << _.getIdName(inst->id()) << "' has illegal type.\n"
-               << "From Vulkan spec:\n"
+               << "Uniform OpVariable <id> '" << _.getIdName(inst->id())
+               << "' has illegal type.\n"
+               << "From Vulkan spec, section 14.5.2:\n"
                << "Variables identified with the Uniform storage class are "
                << "used to access transparent buffer backed resources. Such "
                << "variables must be typed as OpTypeStruct, or an array of "
@@ -565,9 +567,9 @@ spv_result_t ValidateVariable(ValidationState_t& _, const Instruction* inst) {
     if (storage_class == SpvStorageClassStorageBuffer) {
       if (!IsAllowedTypeOrArrayOfSame(_, pointee, {SpvOpTypeStruct})) {
         return _.diag(SPV_ERROR_INVALID_ID, inst)
-               << _.VkErrorID(6807) << "StorageBuffer OpVariable <id> '"
-               << _.getIdName(inst->id()) << "' has illegal type.\n"
-               << "From Vulkan spec:\n"
+               << "StorageBuffer OpVariable <id> '" << _.getIdName(inst->id())
+               << "' has illegal type.\n"
+               << "From Vulkan spec, section 14.5.2:\n"
                << "Variables identified with the StorageBuffer storage class "
                   "are used to access transparent buffer backed resources. "
                   "Such variables must be typed as OpTypeStruct, or an array "
@@ -980,7 +982,6 @@ spv_result_t ValidateStore(ValidationState_t& _, const Instruction* inst) {
         }
         if (_.HasDecoration(base_type->id(), SpvDecorationBlock)) {
           return _.diag(SPV_ERROR_INVALID_ID, inst)
-                 << _.VkErrorID(6925)
                  << "In the Vulkan environment, cannot store to Uniform Blocks";
         }
       }

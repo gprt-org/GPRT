@@ -160,10 +160,6 @@ class Type {
 
   size_t ComputeHashValue(size_t hash, SeenTypes* seen) const;
 
-  // Returns the number of components in a composite type.  Returns 0 for a
-  // non-composite type.
-  uint64_t NumberOfComponents() const;
-
 // A bunch of methods for casting this type to a given type. Returns this if the
 // cast can be done, nullptr otherwise.
 // clang-format off
