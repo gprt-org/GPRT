@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include <vkrt_host.h>
-
 #include <iostream>
 #include <vector>
 #include <assert.h>
@@ -31,6 +30,11 @@
 
 #include <regex>
 
+#ifdef __GNUC__
+#include <execinfo.h>
+#include <sys/time.h>
+#include <signal.h>
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -53,7 +57,7 @@
 
 #if 1
 # define LOG_API_CALL() /* ignore */
-#else 
+#else
 # define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
 #endif
 
@@ -214,7 +218,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
 
   // The return value of this callback controls whether the Vulkan call that caused the validation message will be aborted or not
   // We return VK_FALSE as we DON'T want Vulkan calls that cause a validation message to abort
-  // If you instead want to have calls abort, pass in VK_TRUE and the function will return VK_ERROR_VALIDATION_FAILED_EXT 
+  // If you instead want to have calls abort, pass in VK_TRUE and the function will return VK_ERROR_VALIDATION_FAILED_EXT
   return VK_FALSE;
 }
 
@@ -235,8 +239,8 @@ namespace vkrt {
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
   VkDebugUtilsMessengerEXT debugUtilsMessenger;
 
-  PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT; 
-  PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT; 
+  PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
+  PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
   VkDebugReportCallbackEXT debugReportCallback;
 
   struct Module {
@@ -268,7 +272,7 @@ namespace vkrt {
           text = match.suffix().str();
         }
         else {
-          // Remove the other entry points. Currently, SPIRV doesn't support 
+          // Remove the other entry points. Currently, SPIRV doesn't support
           // multiple entry points in combination with debug printf
           newProgram += match.prefix();
           text = match.suffix().str();
@@ -284,7 +288,7 @@ namespace vkrt {
           }
 
           // Remove the entrypoint itself.
-          // found by %entrypoint = ... until the first occurance of OpFunctionEnd 
+          // found by %entrypoint = ... until the first occurance of OpFunctionEnd
           std::regex OpEntryPointRE("( *)(" + otherEntryPoint + " =[^]*?OpFunctionEnd)");
           std::smatch OpEntryPointMatch;
           subtext = text;
@@ -411,20 +415,20 @@ namespace vkrt {
     Buffer() {};
 
     Buffer(
-      VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
-      VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, 
-      VkDeviceSize _size, void *data = nullptr) 
+      VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
+      VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags,
+      VkDeviceSize _size, void *data = nullptr)
     {
       device = logicalDevice;
       memoryPropertyFlags = _memoryPropertyFlags;
       size = _size;
       usageFlags = _usageFlags;
       memoryPropertyFlags = _memoryPropertyFlags;
-      
+
       vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-      
+
       auto getMemoryType = [this](
-        uint32_t typeBits, VkMemoryPropertyFlags properties, 
+        uint32_t typeBits, VkMemoryPropertyFlags properties,
         VkBool32 *memTypeFound = nullptr) -> uint32_t {
         for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
           if ((typeBits & 1) == 1) {
@@ -453,7 +457,7 @@ namespace vkrt {
       bufferCreateInfo.usage = usageFlags;
       bufferCreateInfo.size = size;
       VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
-      
+
       // Create the memory backing up the buffer handle
       VkMemoryRequirements memReqs;
       VkMemoryAllocateInfo memAllocInfo {};
@@ -462,7 +466,7 @@ namespace vkrt {
       memAllocInfo.allocationSize = memReqs.size;
       // Find a memory type index that fits the properties of the buffer
       memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-      // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also 
+      // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
       // need to enable the appropriate flag during allocation
       VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
       if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
@@ -474,7 +478,7 @@ namespace vkrt {
 
       alignment = memReqs.alignment;
 
-      // If a pointer to the buffer data has been passed, map the buffer and 
+      // If a pointer to the buffer data has been passed, map the buffer and
       // copy over the data
       if (data != nullptr) {
         VK_CHECK_RESULT(map());
@@ -507,7 +511,7 @@ namespace vkrt {
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
-    
+
     RayGen(VkDevice  _logicalDevice,
            Module *module,
            const char* entryPoint,
@@ -517,22 +521,22 @@ namespace vkrt {
       std::cout<<"Ray gen is being made!"<<std::endl;
 
       spv_binary binary = module->getBinary(entryPoint);
-      
+
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
-      
+
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
       moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
       moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
 
-      VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
+      VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &shaderModule);
       if (err) throw std::runtime_error("failed to create shader module! : \n" + errorString(err));
 
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
       shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint; 
+      shaderStage.pName = entryPoint;
       assert(shaderStage.module != VK_NULL_HANDLE);
 
       module->releaseBinary(binary);
@@ -550,7 +554,7 @@ namespace vkrt {
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
-    
+
     MissProg(VkDevice  _logicalDevice,
              Module *module,
              const char* entryPoint,
@@ -560,21 +564,21 @@ namespace vkrt {
       std::cout<<"Miss program is being made!"<<std::endl;
 
       spv_binary binary = module->getBinary(entryPoint);
-      
+
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
-      
+
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
       moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
       moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
 
-      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, 
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &shaderModule));
 
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
       shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint; 
+      shaderStage.pName = entryPoint;
       assert(shaderStage.module != VK_NULL_HANDLE);
 
       module->releaseBinary(binary);
@@ -587,11 +591,11 @@ namespace vkrt {
     }
   };
 
-  
+
 
   struct Context {
-    
-    
+
+
     VkApplicationInfo appInfo;
 
     // Vulkan instance, stores all per-application states
@@ -607,7 +611,7 @@ namespace vkrt {
     VkPhysicalDeviceFeatures deviceFeatures;
     // Stores all available memory (type) properties for the physical device
     VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
-    
+
     /** @brief Queue family properties of the chosen physical device */
     std::vector<VkQueueFamilyProperties> queueFamilyProperties;
 
@@ -635,7 +639,7 @@ namespace vkrt {
     void* deviceCreatepNextChain = nullptr;
     /** @brief Logical device, application's view of the physical device (GPU) */
     VkDevice logicalDevice;
-    
+
     // Handle to the device graphics queue that command buffers are submitted to
     VkQueue graphicsQueue;
     VkQueue computeQueue;
@@ -776,9 +780,9 @@ namespace vkrt {
       }
 
       // Enabled requested instance extensions
-      if (enabledInstanceExtensions.size() > 0) 
+      if (enabledInstanceExtensions.size() > 0)
       {
-        for (const char * enabledExtension : enabledInstanceExtensions) 
+        for (const char * enabledExtension : enabledInstanceExtensions)
         {
           // Output message if requested extension is not available
           if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) == supportedInstanceExtensions.end())
@@ -873,15 +877,15 @@ namespace vkrt {
       // If requested, we enable the default validation layers for debugging
       if (validation())
       {
-        
+
 
         vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
         vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
         VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
         debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
-                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | 
+        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT ;
         debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
         debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
@@ -892,13 +896,13 @@ namespace vkrt {
 
         // vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"));
         // vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"));
-        
+
         // The report flags determine what type of messages for the layers will be displayed
         // For validating (debugging) an application the error and warning bits should suffice
         // VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_INFORMATION_BIT_EXT;
         // Additional flags include performance info, loader and layer debug messages, etc.
         // vks::debug::setupDebugging(instance, debugReportFlags, VK_NULL_HANDLE);
-        
+
         // VkDebugReportCallbackCreateInfoEXT debugReportCI{};
         // debugReportCI.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
         // debugReportCI.flags = debugReportFlags;
@@ -951,8 +955,8 @@ namespace vkrt {
         vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
         std::cout << "Device [" << i << "] : " << deviceProperties.deviceName << std::endl;
         std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
-        std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "." 
-          << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "." 
+        std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
+          << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
           << (deviceProperties.apiVersion & 0xfff) << "\n";
 
         // Get ray tracing pipeline properties
@@ -973,11 +977,11 @@ namespace vkrt {
       }
 
       physicalDevice = physicalDevices[selectedDevice];
-      
+
       // Store properties (including limits), features and memory properties of the physical device
       // Device properties also contain limits and sparse properties
       vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
-      
+
       // VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
       rayTracingPipelineProperties = {};
       rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
@@ -1018,15 +1022,15 @@ namespace vkrt {
       // Get queue family indices for the requested queue family types
       // Note that the indices may overlap depending on the implementation
 
-      auto getQueueFamilyIndex = 
-        [](VkQueueFlagBits queueFlags, 
-        std::vector<VkQueueFamilyProperties> queueFamilyProperties) -> uint32_t 
+      auto getQueueFamilyIndex =
+        [](VkQueueFlagBits queueFlags,
+        std::vector<VkQueueFamilyProperties> queueFamilyProperties) -> uint32_t
         {
           // Dedicated queue for compute
           // Try to find a queue family index that supports compute but not graphics
           if (queueFlags & VK_QUEUE_COMPUTE_BIT)
             for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
-              if ((queueFamilyProperties[i].queueFlags & queueFlags) && 
+              if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
                 ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0))
                 return i;
 
@@ -1034,11 +1038,11 @@ namespace vkrt {
           // Try to find a queue family index that supports transfer but not graphics and compute
           if (queueFlags & VK_QUEUE_TRANSFER_BIT)
             for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
-              if ((queueFamilyProperties[i].queueFlags & queueFlags) && 
-                  ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) && 
+              if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
+                  ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) &&
                   ((queueFamilyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) == 0))
                 return i;
-          
+
           // For other queue types or if no separate compute queue is present, return the first one to support the requested flags
           for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
             if (queueFamilyProperties[i].queueFlags & queueFlags)
@@ -1123,7 +1127,7 @@ namespace vkrt {
 
       // Required by VK_KHR_spirv_1_4
       enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
-      
+
       // if (useSwapChain)
       // {
       // 	// If the device will be used for presenting to a display via a swapchain we need to request the swapchain extension
@@ -1135,7 +1139,7 @@ namespace vkrt {
       #endif
 
       VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
-      bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;  
+      bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
       bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
       bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
       bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
@@ -1143,7 +1147,7 @@ namespace vkrt {
       VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
       accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
       accelerationStructureFeatures.pNext = &bufferDeviceAddressFeatures;
-      
+
       VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
       rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
       rtPipelineFeatures.rayTracingPipeline = true;
@@ -1154,7 +1158,7 @@ namespace vkrt {
       deviceFeatures2.pNext = &rtPipelineFeatures;
       vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 
-      
+
 
 
 
@@ -1218,9 +1222,9 @@ namespace vkrt {
       vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
 
       auto createCommandPool = [&](
-        uint32_t queueFamilyIndex, 
+        uint32_t queueFamilyIndex,
         VkCommandPoolCreateFlags createFlags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
-        -> VkCommandPool 
+        -> VkCommandPool
       {
         VkCommandPoolCreateInfo cmdPoolInfo = {};
         cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1230,7 +1234,7 @@ namespace vkrt {
         VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
         return cmdPool;
       };
-      
+
       /// 4. Create Command Pools
       graphicsCommandPool = createCommandPool(queueFamilyIndices.graphics);
       computeCommandPool = createCommandPool(queueFamilyIndices.compute);
@@ -1241,7 +1245,7 @@ namespace vkrt {
       cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
       cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
       cmdBufAllocateInfo.commandBufferCount = 1;
-      
+
       cmdBufAllocateInfo.commandPool = graphicsCommandPool;
       err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
       if (err) throw std::runtime_error("Could not create graphics command buffer : \n" + errorString(err));
@@ -1262,7 +1266,7 @@ namespace vkrt {
 
     ~Context() {
 
-      if (pipelineLayout) 
+      if (pipelineLayout)
         vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
       if (pipeline)
         vkDestroyPipeline(logicalDevice, pipeline, nullptr);
@@ -1298,12 +1302,12 @@ namespace vkrt {
       const uint32_t sbtSize = groupCount * handleSize;
 
       std::vector<uint8_t> shaderHandleStorage(sbtSize);
-      VkResult err = vkGetRayTracingShaderGroupHandlesKHR(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data()); 
+      VkResult err = vkGetRayTracingShaderGroupHandlesKHR(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
       if (err) throw std::runtime_error("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
       const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
       const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      
+
 
       // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
 
@@ -1316,7 +1320,7 @@ namespace vkrt {
         raygenShaderBindingTable.destroy();
       }
       if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
-        raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+        raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice,
         bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
       }
       raygenShaderBindingTable.map();
@@ -1340,12 +1344,12 @@ namespace vkrt {
         missShaderBindingTable.destroy();
       }
       if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
-        missShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+        missShaderBindingTable = Buffer(physicalDevice, logicalDevice,
           bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
       }
       missShaderBindingTable.map();
-      memcpy(missShaderBindingTable.mapped, 
-        shaderHandleStorage.data() + handleSize * numRayGens, 
+      memcpy(missShaderBindingTable.mapped,
+        shaderHandleStorage.data() + handleSize * numRayGens,
         handleSize);
       for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
         MissProg *missprog = missPrograms[idx];
@@ -1369,10 +1373,10 @@ namespace vkrt {
         hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, recordSize);
       }
       hitShaderBindingTable.map();
-      memcpy(hitShaderBindingTable.mapped, 
-          shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs), 
+      memcpy(hitShaderBindingTable.mapped,
+          shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
           handleSize);
-      
+
       // TODO: hit programs...
       hitShaderBindingTable.unmap();
     }
@@ -1385,7 +1389,7 @@ namespace vkrt {
       // pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
       pipelineLayoutCI.setLayoutCount = 0;
       pipelineLayoutCI.pSetLayouts = nullptr;
-      VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, 
+      VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI,
         nullptr, &pipelineLayout));
 
       /*
@@ -1395,7 +1399,7 @@ namespace vkrt {
 
       // auto loadShader = [context](std::string fileName, VkShaderStageFlagBits stage)-> VkPipelineShaderStageCreateInfo
       // {
-        
+
       //   auto loadShader = [](const char *fileName, VkDevice device) -> VkShaderModule
       // 	{
       // 		std::ifstream is(fileName, std::ios::binary | std::ios::in | std::ios::ate);
@@ -1428,7 +1432,7 @@ namespace vkrt {
       // 			return VK_NULL_HANDLE;
       // 		}
       // 	};
-      
+
       //   VkPipelineShaderStageCreateInfo shaderStage = {};
       //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       //   shaderStage.stage = stage;
@@ -1484,9 +1488,9 @@ namespace vkrt {
       rayTracingPipelineCI.pGroups = shaderGroups.data();
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1; // WHA!?
       rayTracingPipelineCI.layout = pipelineLayout;
-      
-      VkResult err = vkCreateRayTracingPipelinesKHR(logicalDevice, 
-        VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI, 
+
+      VkResult err = vkCreateRayTracingPipelinesKHR(logicalDevice,
+        VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI,
         nullptr, &pipeline
       );
       if (err) {
@@ -1542,14 +1546,14 @@ vkrtRayGenCreate(VKRTContext _context,
   vkrt::RayGen *raygen = new vkrt::RayGen(
     context->logicalDevice, module, programName,
     sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
-  
+
   context->raygenPrograms.push_back(raygen);
-  
+
   LOG("raygen created...");
   return (VKRTRayGen)raygen;
 }
 
-VKRT_API void 
+VKRT_API void
 vkrtRayGenRelease(VKRTRayGen _rayGen)
 {
   LOG_API_CALL();
@@ -1573,9 +1577,9 @@ vkrtMissProgCreate(VKRTContext _context,
   vkrt::MissProg *missProg = new vkrt::MissProg(
     context->logicalDevice, module, programName,
     sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
-  
+
   context->missPrograms.push_back(missProg);
-  
+
   LOG("miss program created...");
   return (VKRTMissProg)missProg;
 }
@@ -1590,7 +1594,7 @@ vkrtMissProgSet(VKRTContext  _context,
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void 
+VKRT_API void
 vkrtMissProgRelease(VKRTMissProg _missProg)
 {
   LOG_API_CALL();
@@ -1603,18 +1607,18 @@ VKRT_API VKRTBuffer
 vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count)
 {
   LOG_API_CALL();
-  const VkBufferUsageFlags bufferUsageFlags = 
+  const VkBufferUsageFlags bufferUsageFlags =
     // means we can get this buffer's address with vkGetBufferDeviceAddress
-    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT; 
-  const VkMemoryPropertyFlags memoryUsageFlags = 
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  const VkMemoryPropertyFlags memoryUsageFlags =
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
 
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Buffer *buffer = new vkrt::Buffer(
     context->physicalDevice, context->logicalDevice,
-    bufferUsageFlags, memoryUsageFlags, 
-    getSize(type) * count 
+    bufferUsageFlags, memoryUsageFlags,
+    getSize(type) * count
   );
   LOG("buffer created");
   return (VKRTBuffer)buffer;
@@ -1670,7 +1674,7 @@ VKRT_API void vkrtBuildPipeline(VKRTContext _context)
   LOG("pipeline created...");
 }
 
-VKRT_API void vkrtBuildSBT(VKRTContext _context, 
+VKRT_API void vkrtBuildSBT(VKRTContext _context,
                            VKRTBuildSBTFlags flags)
 {
   LOG_API_CALL();
@@ -1679,7 +1683,7 @@ VKRT_API void vkrtBuildSBT(VKRTContext _context,
   LOG("SBT created...");
 }
 
-/*! Executes a ray tracing pipeline with the given raygen program. 
+/*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
 VKRT_API void
 vkrtRayGenLaunch2D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dims_y)
@@ -1705,8 +1709,8 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   vkCmdBindPipeline(
-    context->graphicsCommandBuffer, 
-    VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->graphicsCommandBuffer,
+    VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
     context->pipeline);
 
   auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t
@@ -1717,11 +1721,11 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
 		return vkrt::vkGetBufferDeviceAddressKHR(device, &bufferDeviceAI);
 	};
 
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t 
+  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t
   {
     return (value + alignment - 1) & ~(alignment - 1);
   };
-  
+
   const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
   const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
@@ -1810,7 +1814,7 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
 
   // Buffer pointers are 64 bits
   size_t size = sizeof(uint64_t);
-  
+
   // 3. Assign the value to that variable
   VkDeviceAddress addr = val->address;
   memcpy(raygen->vars[name].data, &addr, size);
@@ -1828,7 +1832,7 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void 
 
   // 2. Get the expected size for this variable
   size_t size = getSize(raygen->vars[name].decl.type);
-  
+
   // 3. Assign the value to that variable
   memcpy(raygen->vars[name].data, val, size);
 }
@@ -1863,7 +1867,7 @@ VKRT_API void vkrtMissProgSetRaw(VKRTMissProg _missProg, const char *name, const
 
   // 2. Get the expected size for this variable
   size_t size = getSize(missProg->vars[name].decl.type);
-  
+
   // 3. Assign the value to that variable
   memcpy(missProg->vars[name].data, val, size);
 }

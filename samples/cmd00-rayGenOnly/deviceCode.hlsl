@@ -30,7 +30,7 @@ void simpleRayGen() {
 
   if (threadIdx.x == 0 && threadIdx.y == 0) {
     uint32_t test = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
-    printf("Hello from the raygen program! %d %d \n", 
+    printf("Hello from the raygen program! %d %d %d \n",
       raygenSBTData.fbPtr, test);
   }
 }
@@ -43,11 +43,10 @@ struct Payload {
 ConstantBuffer<MissProgData> missSBTData;
 [shader("miss")]
 void simpleMissProg(inout Payload MyPayload) {
-  printf("Hello from the miss program! %d %d \n", 
+  printf("Hello from the miss program! %d %d \n",
     missSBTData.third, missSBTData.fourth);
 }
 
 
 
  // float test = vk::RawBufferLoad<float>(sbtData.addr, 4);
- 

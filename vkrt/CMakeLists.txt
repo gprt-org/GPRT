@@ -32,20 +32,20 @@ set_target_properties(vkrt
     POSITION_INDEPENDENT_CODE ON
 )
 
-IF(WIN32)
-	# Nothing here (yet)
-ELSEIF(APPLE)
-	target_link_libraries(vkrt ${Vulkan_LIBRARY} "-framework AppKit" "-framework QuartzCore")
-ELSE(WIN32)
-	target_link_libraries(vkrt 
-        ${XCB_LIBRARIES} 
-        ${Vulkan_LIBRARY} 
-        ${Vulkan_LIBRARY} 
-        ${DIRECTFB_LIBRARIES} 
-        ${WAYLAND_CLIENT_LIBRARIES} 
-        ${CMAKE_THREAD_LIBS_INIT}
-    )
-ENDIF(WIN32)
+# IF(WIN32)
+# 	# Nothing here (yet)
+# ELSEIF(APPLE)
+# 	target_link_libraries(vkrt ${Vulkan_LIBRARY} "-framework AppKit" "-framework QuartzCore")
+# ELSE(WIN32)
+# 	target_link_libraries(vkrt
+#         ${XCB_LIBRARIES}
+#         ${Vulkan_LIBRARY}
+#         ${Vulkan_LIBRARY}
+#         ${DIRECTFB_LIBRARIES}
+#         ${WAYLAND_CLIENT_LIBRARIES}
+#         ${CMAKE_THREAD_LIBS_INIT}
+#     )
+# ENDIF(WIN32)
 
 target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY} SPIRV-Tools-static)
 set_target_properties(vkrt PROPERTIES LINKER_LANGUAGE CXX)
@@ -58,4 +58,3 @@ target_include_directories(vkrt
 )
 
 add_library(vkrt::vkrt ALIAS vkrt)
-

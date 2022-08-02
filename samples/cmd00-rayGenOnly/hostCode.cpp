@@ -50,7 +50,7 @@ extern "C" uint32_t deviceCode_spv_size;
 const int2 fbSize = {1,1};
 
 #include <iostream>
-int main(int ac, char **av) 
+int main(int ac, char **av)
 {
     LOG("vkrt example '" << av[0] << "' starting up");
 
@@ -59,13 +59,13 @@ int main(int ac, char **av)
     // ##################################################################
 
     LOG("building module, programs, and pipeline");
-    
+
     // Initialize Vulkan, and create a "vkrt device," a context to hold the
     // ray generation shader and output buffer. The "1" is the number of devices requested.
     VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
 
     VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
-    
+
     VKRTVarDecl rayGenVars[]
     = {
         { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
@@ -91,7 +91,7 @@ int main(int ac, char **av)
     // (re-)builds all optix programs, with current pipeline settings
     // vkrtBuildPrograms(vkrt);
 
-    // Create the pipeline. 
+    // Create the pipeline.
     vkrtBuildPipeline(vkrt);
 
     // ------------------------------------------------------------------
@@ -109,7 +109,7 @@ int main(int ac, char **av)
     void* fb = vkrtBufferGetPointer(frameBuffer,0);
     memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
     vkrtBufferUnmap(frameBuffer);
-                                            
+
     // ------------------------------------------------------------------
     // build Shader Binding Table (SBT) required to trace the groups
     // ------------------------------------------------------------------
@@ -130,6 +130,8 @@ int main(int ac, char **av)
     vkrtRayGenSetRaw(rayGen, "second", &second);
     vkrtBuildSBT(vkrt);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+
+
 
     // Now finally, cleanup
     vkrtBufferRelease(frameBuffer);
