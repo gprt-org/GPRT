@@ -106,7 +106,7 @@ typedef enum
    VKRT_INVALID_TYPE = 0,
 
    VKRT_BUFFER=10,
-   /*! a 64-bit int representing the number of elemnets in a buffer */
+   /*! a 64-bit int representing the number of elements in a buffer */
    VKRT_BUFFER_SIZE,
    VKRT_BUFFER_ID,
    VKRT_BUFFER_POINTER,
@@ -161,10 +161,10 @@ typedef enum
    VKRT_ULONG3,
    VKRT_ULONG4,
 
-   VKRT_UINT64   = VKRT_ULONG,
-   VKRT_UINT64_2 = VKRT_ULONG2,
-   VKRT_UINT64_3 = VKRT_ULONG3,
-   VKRT_UINT64_4 = VKRT_ULONG4,
+   VKRT_UINT64_T = VKRT_ULONG,
+   VKRT_UINT64_T2 = VKRT_ULONG2,
+   VKRT_UINT64_T3 = VKRT_ULONG3,
+   VKRT_UINT64_T4 = VKRT_ULONG4,
 
    VKRT_DOUBLE=1050,
    VKRT_DOUBLE2,
@@ -229,19 +229,31 @@ typedef enum
     else if (type == VKRT_INT2) return sizeof(int2);
     else if (type == VKRT_INT3) return sizeof(int3);
     else if (type == VKRT_INT4) return sizeof(int4);
+
     else if (type == VKRT_UINT) return sizeof(uint32_t);
-    else if (type == VKRT_INT2) return sizeof(uint2);
-    else if (type == VKRT_INT3) return sizeof(uint3);
-    else if (type == VKRT_INT4) return sizeof(uint4);
+    else if (type == VKRT_UINT2) return sizeof(uint2);
+    else if (type == VKRT_UINT3) return sizeof(uint3);
+    else if (type == VKRT_UINT4) return sizeof(uint4);
 
     else if (type == VKRT_INT64) return sizeof(int64_t);
     else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
     else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
     else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
-    else if (type == VKRT_UINT64) return sizeof(uint64_t);
-    else if (type == VKRT_UINT64_2) return sizeof(uint64_t) * 2;
-    else if (type == VKRT_UINT64_3) return sizeof(uint64_t) * 3;
-    else if (type == VKRT_UINT64_4) return sizeof(uint64_t) * 4;
+
+    else if (type == VKRT_UINT64_T) return sizeof(uint64_t);
+    else if (type == VKRT_UINT64_T2) return sizeof(uint64_t2);
+    else if (type == VKRT_UINT64_T3) return sizeof(uint64_t3);
+    else if (type == VKRT_UINT64_T4) return sizeof(uint64_t4);
+
+    else if (type == VKRT_LONG) return sizeof(int64_t);
+    else if (type == VKRT_LONG2) return sizeof(int64_t) * 2;
+    else if (type == VKRT_LONG3) return sizeof(int64_t) * 3;
+    else if (type == VKRT_LONG4) return sizeof(int64_t) * 4;
+    
+    else if (type == VKRT_LONG) return sizeof(uint64_t);
+    else if (type == VKRT_LONG2) return sizeof(uint64_t) * 2;
+    else if (type == VKRT_LONG3) return sizeof(uint64_t) * 3;
+    else if (type == VKRT_LONG4) return sizeof(uint64_t) * 4;
 
     else if (type == VKRT_BUFFER) return sizeof(int64_t);
 
@@ -249,6 +261,37 @@ typedef enum
     else if (type == VKRT_FLOAT2) return sizeof(float2);
     else if (type == VKRT_FLOAT3) return sizeof(float3);
     else if (type == VKRT_FLOAT4) return sizeof(float4);
+
+    else if (type == VKRT_DOUBLE) return sizeof(double);
+    else if (type == VKRT_DOUBLE2) return sizeof(double2);
+    else if (type == VKRT_DOUBLE3) return sizeof(double3);
+    else if (type == VKRT_DOUBLE4) return sizeof(double4);
+
+    else if (type == VKRT_CHAR) return sizeof(char);
+    else if (type == VKRT_CHAR2) return sizeof(char) * 2;
+    else if (type == VKRT_CHAR3) return sizeof(char) * 3;
+    else if (type == VKRT_CHAR4) return sizeof(char) * 4;
+
+    else if (type == VKRT_UCHAR) return sizeof(unsigned char);
+    else if (type == VKRT_UCHAR2) return sizeof(unsigned char) * 2;
+    else if (type == VKRT_UCHAR3) return sizeof(unsigned char) * 3;
+    else if (type == VKRT_UCHAR4) return sizeof(unsigned char) * 4;
+
+    else if (type == VKRT_SHORT) return sizeof(short);
+    else if (type == VKRT_SHORT2) return sizeof(short2);
+    else if (type == VKRT_SHORT3) return sizeof(short3);
+    else if (type == VKRT_SHORT4) return sizeof(short4);
+
+    else if (type == VKRT_USHORT) return sizeof(short);
+    else if (type == VKRT_USHORT2) return sizeof(short2);
+    else if (type == VKRT_USHORT3) return sizeof(short3);
+    else if (type == VKRT_USHORT4) return sizeof(short4);
+
+    else if (type == VKRT_BOOL) return sizeof(bool);
+    else if (type == VKRT_BOOL2) return sizeof(bool2);
+    else if (type == VKRT_BOOL3) return sizeof(bool3);
+    else if (type == VKRT_BOOL4) return sizeof(bool4);
+
     else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
     else assert(false); return -1;// std::runtime_error("Unimplemented!");
   }

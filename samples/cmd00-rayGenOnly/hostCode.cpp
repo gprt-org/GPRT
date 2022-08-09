@@ -80,8 +80,8 @@ int main(int ac, char **av)
 
     VKRTVarDecl missProgVars[]
     = {
-        { "third", VKRT_UINT64, VKRT_OFFSETOF(MissProgData, third) },
-        { "fourth", VKRT_UINT64, VKRT_OFFSETOF(MissProgData, fourth) },
+        { "third", VKRT_UINT64_T, VKRT_OFFSETOF(MissProgData, third) },
+        { "fourth", VKRT_UINT64_T, VKRT_OFFSETOF(MissProgData, fourth) },
         { /* sentinel: */ nullptr }
     };
     VKRTMissProg missProg
@@ -105,10 +105,8 @@ int main(int ac, char **av)
                                             /*size:*/fbSize.x*fbSize.y);
 
     std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
-    vkrtBufferMap(frameBuffer);
     void* fb = vkrtBufferGetPointer(frameBuffer,0);
     memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
-    vkrtBufferUnmap(frameBuffer);
 
     // ------------------------------------------------------------------
     // build Shader Binding Table (SBT) required to trace the groups
@@ -126,12 +124,14 @@ int main(int ac, char **av)
     vkrtBuildSBT(vkrt);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
+    fb = vkrtBufferGetPointer(frameBuffer,0);
+    memcpy(test.data(), fb, sizeof(uint32_t) * test.size());
+    std::cout<<"Read back "<<test[0] << std::endl;
+
     second = 1337.0f;
     vkrtRayGenSetRaw(rayGen, "second", &second);
     vkrtBuildSBT(vkrt);
     vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
-
-
 
     // Now finally, cleanup
     vkrtBufferRelease(frameBuffer);

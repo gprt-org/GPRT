@@ -1620,6 +1620,10 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
     bufferUsageFlags, memoryUsageFlags,
     getSize(type) * count
   );
+
+  // Pin the buffer to the host
+  buffer->map();
+  
   LOG("buffer created");
   return (VKRTBuffer)buffer;
 }
@@ -1647,7 +1651,6 @@ vkrtBufferMap(VKRTBuffer _buffer, int deviceID)
   LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
   buffer->map();
-  buffer->invalidate();
 }
 
 VKRT_API void
@@ -1655,7 +1658,6 @@ vkrtBufferUnmap(VKRTBuffer _buffer, int deviceID)
 {
   LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
-  buffer->flush();
   buffer->unmap();
 }
 

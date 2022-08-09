@@ -133,6 +133,18 @@ typedef Vector<float, 2> float2;
 typedef Vector<float, 3> float3;
 typedef Vector<float, 4> float4;
 
+typedef Vector<double, 2> double2;
+typedef Vector<double, 3> double3;
+typedef Vector<double, 4> double4;
+
+typedef Vector<short, 2> short2;
+typedef Vector<short, 3> short3;
+typedef Vector<short, 4> short4;
+
+typedef Vector<unsigned short, 2> ushort2;
+typedef Vector<unsigned short, 3> ushort3;
+typedef Vector<unsigned short, 4> ushort4;
+
 typedef Vector<int32_t, 2> int2;
 typedef Vector<int32_t, 3> int3;
 typedef Vector<int32_t, 4> int4;
@@ -140,6 +152,18 @@ typedef Vector<int32_t, 4> int4;
 typedef Vector<uint32_t, 2> uint2;
 typedef Vector<uint32_t, 3> uint3;
 typedef Vector<uint32_t, 4> uint4;
+
+typedef Vector<uint64_t, 2> uint64_t2;
+typedef Vector<uint64_t, 3> uint64_t3;
+typedef Vector<uint64_t, 4> uint64_t4;
+
+typedef Vector<int64_t, 2> int64_t2;
+typedef Vector<int64_t, 3> int64_t3;
+typedef Vector<int64_t, 4> int64_t4;
+
+typedef Vector<bool, 2> bool2;
+typedef Vector<bool, 3> bool3;
+typedef Vector<bool, 4> bool4;
 
 template <typename T, int ROWS, int COLS>
 struct Matrix
