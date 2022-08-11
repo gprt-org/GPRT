@@ -139,11 +139,21 @@ typedef enum
    VKRT_INT2,
    VKRT_INT3,
    VKRT_INT4,
+
+   VKRT_INT32_T   = VKRT_INT,
+   VKRT_INT32_T2 = VKRT_INT2,
+   VKRT_INT32_T3 = VKRT_INT3,
+   VKRT_INT32_T4 = VKRT_INT4,
    
    VKRT_UINT=1020,
    VKRT_UINT2,
    VKRT_UINT3,
    VKRT_UINT4,
+
+   VKRT_UINT32_T  = VKRT_UINT,
+   VKRT_UINT32_T2 = VKRT_UINT2,
+   VKRT_UINT32_T3 = VKRT_UINT3,
+   VKRT_UINT32_T4 = VKRT_UINT4,
    
    /* 64 bit integers */
    VKRT_LONG=1030,
@@ -151,10 +161,10 @@ typedef enum
    VKRT_LONG3,
    VKRT_LONG4,
 
-   VKRT_INT64   = VKRT_LONG,
-   VKRT_INT64_2 = VKRT_LONG2,
-   VKRT_INT64_3 = VKRT_LONG3,
-   VKRT_INT64_4 = VKRT_LONG4,
+   VKRT_INT64_T  = VKRT_LONG,
+   VKRT_INT64_T2 = VKRT_LONG2,
+   VKRT_INT64_T3 = VKRT_LONG3,
+   VKRT_INT64_T4 = VKRT_LONG4,
 
    VKRT_ULONG=1040,
    VKRT_ULONG2,
@@ -176,22 +186,42 @@ typedef enum
    VKRT_CHAR3,
    VKRT_CHAR4,
 
+   VKRT_INT8_T   = VKRT_CHAR,
+   VKRT_INT8_T2 = VKRT_CHAR2,
+   VKRT_INT8_T3 = VKRT_CHAR3,
+   VKRT_INT8_T4 = VKRT_CHAR4,
+
    /*! unsigend 8-bit integer */
    VKRT_UCHAR=1070,
    VKRT_UCHAR2,
    VKRT_UCHAR3,
    VKRT_UCHAR4,
 
+   VKRT_UINT8_T  = VKRT_UCHAR,
+   VKRT_UINT8_T2 = VKRT_UCHAR2,
+   VKRT_UINT8_T3 = VKRT_UCHAR3,
+   VKRT_UINT8_T4 = VKRT_UCHAR4,
+
    VKRT_SHORT=1080,
    VKRT_SHORT2,
    VKRT_SHORT3,
    VKRT_SHORT4,
+
+   VKRT_INT16_T  = VKRT_SHORT,
+   VKRT_INT16_T2 = VKRT_SHORT2,
+   VKRT_INT16_T3 = VKRT_SHORT3,
+   VKRT_INT16_T4 = VKRT_SHORT4,
 
    /*! unsigend 8-bit integer */
    VKRT_USHORT=1090,
    VKRT_USHORT2,
    VKRT_USHORT3,
    VKRT_USHORT4,
+
+   VKRT_UINT16_T  = VKRT_USHORT,
+   VKRT_UINT16_T2 = VKRT_USHORT2,
+   VKRT_UINT16_T3 = VKRT_USHORT3,
+   VKRT_UINT16_T4 = VKRT_USHORT4,
 
    VKRT_BOOL,
    VKRT_BOOL2,
@@ -225,73 +255,69 @@ typedef enum
 
   inline size_t getSize(VKRTDataType type)
   {
-        if (type == VKRT_INT) return sizeof(int32_t);
-    else if (type == VKRT_INT2) return sizeof(int2);
-    else if (type == VKRT_INT3) return sizeof(int3);
-    else if (type == VKRT_INT4) return sizeof(int4);
+         if (type == VKRT_INT8_T)  return sizeof(int8_t);
+    else if (type == VKRT_INT8_T2) return sizeof(int8_t) * 2;
+    else if (type == VKRT_INT8_T3) return sizeof(int8_t) * 3;
+    else if (type == VKRT_INT8_T4) return sizeof(int8_t) * 4;
 
-    else if (type == VKRT_UINT) return sizeof(uint32_t);
-    else if (type == VKRT_UINT2) return sizeof(uint2);
-    else if (type == VKRT_UINT3) return sizeof(uint3);
-    else if (type == VKRT_UINT4) return sizeof(uint4);
+    else if (type == VKRT_UINT8_T)  return sizeof(uint8_t);
+    else if (type == VKRT_UINT8_T2) return sizeof(uint8_t) * 2;
+    else if (type == VKRT_UINT8_T3) return sizeof(uint8_t) * 3;
+    else if (type == VKRT_UINT8_T4) return sizeof(uint8_t) * 4;
 
-    else if (type == VKRT_INT64) return sizeof(int64_t);
-    else if (type == VKRT_INT64_2) return sizeof(int64_t) * 2;
-    else if (type == VKRT_INT64_3) return sizeof(int64_t) * 3;
-    else if (type == VKRT_INT64_4) return sizeof(int64_t) * 4;
+    else if (type == VKRT_INT16_T)  return sizeof(int16_t);
+    else if (type == VKRT_INT16_T2) return sizeof(int16_t) * 2;
+    else if (type == VKRT_INT16_T3) return sizeof(int16_t) * 3;
+    else if (type == VKRT_INT16_T4) return sizeof(int16_t) * 4;
 
-    else if (type == VKRT_UINT64_T) return sizeof(uint64_t);
-    else if (type == VKRT_UINT64_T2) return sizeof(uint64_t2);
-    else if (type == VKRT_UINT64_T3) return sizeof(uint64_t3);
-    else if (type == VKRT_UINT64_T4) return sizeof(uint64_t4);
+    else if (type == VKRT_UINT16_T)  return sizeof(uint16_t);
+    else if (type == VKRT_UINT16_T2) return sizeof(uint16_t) * 2;
+    else if (type == VKRT_UINT16_T3) return sizeof(uint16_t) * 3;
+    else if (type == VKRT_UINT16_T4) return sizeof(uint16_t) * 4;
 
-    else if (type == VKRT_LONG) return sizeof(int64_t);
-    else if (type == VKRT_LONG2) return sizeof(int64_t) * 2;
-    else if (type == VKRT_LONG3) return sizeof(int64_t) * 3;
-    else if (type == VKRT_LONG4) return sizeof(int64_t) * 4;
+    else if (type == VKRT_INT32_T)  return sizeof(int32_t);
+    else if (type == VKRT_INT32_T2) return sizeof(int32_t) * 2;
+    else if (type == VKRT_INT32_T3) return sizeof(int32_t) * 3;
+    else if (type == VKRT_INT32_T4) return sizeof(int32_t) * 4;
+
+    else if (type == VKRT_UINT32_T)  return sizeof(uint32_t);
+    else if (type == VKRT_UINT32_T2) return sizeof(uint32_t) * 2;
+    else if (type == VKRT_UINT32_T3) return sizeof(uint32_t) * 3;
+    else if (type == VKRT_UINT32_T4) return sizeof(uint32_t) * 4;
+
+    else if (type == VKRT_INT64_T)  return sizeof(int64_t);
+    else if (type == VKRT_INT64_T2) return sizeof(int64_t) * 2;
+    else if (type == VKRT_INT64_T3) return sizeof(int64_t) * 3;
+    else if (type == VKRT_INT64_T4) return sizeof(int64_t) * 4;
+
+    else if (type == VKRT_UINT64_T)  return sizeof(uint64_t);
+    else if (type == VKRT_UINT64_T2) return sizeof(uint64_t) * 2;
+    else if (type == VKRT_UINT64_T3) return sizeof(uint64_t) * 3;
+    else if (type == VKRT_UINT64_T4) return sizeof(uint64_t) * 4;
     
-    else if (type == VKRT_LONG) return sizeof(uint64_t);
-    else if (type == VKRT_LONG2) return sizeof(uint64_t) * 2;
-    else if (type == VKRT_LONG3) return sizeof(uint64_t) * 3;
-    else if (type == VKRT_LONG4) return sizeof(uint64_t) * 4;
+    else if (type == VKRT_INT64_T)  return sizeof(uint64_t);
+    else if (type == VKRT_INT64_T2) return sizeof(uint64_t) * 2;
+    else if (type == VKRT_INT64_T3) return sizeof(uint64_t) * 3;
+    else if (type == VKRT_INT64_T4) return sizeof(uint64_t) * 4;
 
-    else if (type == VKRT_BUFFER) return sizeof(int64_t);
+    else if (type == VKRT_BUFFER) return sizeof(uint64_t);
 
     else if (type == VKRT_FLOAT) return sizeof(float);
-    else if (type == VKRT_FLOAT2) return sizeof(float2);
-    else if (type == VKRT_FLOAT3) return sizeof(float3);
-    else if (type == VKRT_FLOAT4) return sizeof(float4);
+    else if (type == VKRT_FLOAT2) return sizeof(float) * 2;
+    else if (type == VKRT_FLOAT3) return sizeof(float) * 3;
+    else if (type == VKRT_FLOAT4) return sizeof(float) * 4;
 
     else if (type == VKRT_DOUBLE) return sizeof(double);
-    else if (type == VKRT_DOUBLE2) return sizeof(double2);
-    else if (type == VKRT_DOUBLE3) return sizeof(double3);
-    else if (type == VKRT_DOUBLE4) return sizeof(double4);
-
-    else if (type == VKRT_CHAR) return sizeof(char);
-    else if (type == VKRT_CHAR2) return sizeof(char) * 2;
-    else if (type == VKRT_CHAR3) return sizeof(char) * 3;
-    else if (type == VKRT_CHAR4) return sizeof(char) * 4;
-
-    else if (type == VKRT_UCHAR) return sizeof(unsigned char);
-    else if (type == VKRT_UCHAR2) return sizeof(unsigned char) * 2;
-    else if (type == VKRT_UCHAR3) return sizeof(unsigned char) * 3;
-    else if (type == VKRT_UCHAR4) return sizeof(unsigned char) * 4;
-
-    else if (type == VKRT_SHORT) return sizeof(short);
-    else if (type == VKRT_SHORT2) return sizeof(short2);
-    else if (type == VKRT_SHORT3) return sizeof(short3);
-    else if (type == VKRT_SHORT4) return sizeof(short4);
-
-    else if (type == VKRT_USHORT) return sizeof(short);
-    else if (type == VKRT_USHORT2) return sizeof(short2);
-    else if (type == VKRT_USHORT3) return sizeof(short3);
-    else if (type == VKRT_USHORT4) return sizeof(short4);
+    else if (type == VKRT_DOUBLE2) return sizeof(double) * 2;
+    else if (type == VKRT_DOUBLE3) return sizeof(double) * 3;
+    else if (type == VKRT_DOUBLE4) return sizeof(double) * 4;
 
     else if (type == VKRT_BOOL) return sizeof(bool);
-    else if (type == VKRT_BOOL2) return sizeof(bool2);
-    else if (type == VKRT_BOOL3) return sizeof(bool3);
-    else if (type == VKRT_BOOL4) return sizeof(bool4);
+    else if (type == VKRT_BOOL2) return sizeof(bool) * 2;
+    else if (type == VKRT_BOOL3) return sizeof(bool) * 3;
+    else if (type == VKRT_BOOL4) return sizeof(bool) * 4;
 
+    // User Types have size encoded in their type enum
     else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
     else assert(false); return -1;// std::runtime_error("Unimplemented!");
   }
@@ -407,6 +433,448 @@ VKRT_API void
 vkrtRayGenLaunch3D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_y, int dims_z);
 
 
+#ifdef __cplusplus
+// ------------------------------------------------------------------
+// setters for variables of type "bool" (bools only on c++)
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1b(VKRTRayGen raygen, const char *name, bool val);
+VKRT_API void vkrtRayGenSet2b(VKRTRayGen raygen, const char *name, bool x, bool y);
+VKRT_API void vkrtRayGenSet3b(VKRTRayGen raygen, const char *name, bool x, bool y, bool z);
+VKRT_API void vkrtRayGenSet4b(VKRTRayGen raygen, const char *name, bool x, bool y, bool z, bool w);
+VKRT_API void vkrtRayGenSet2bv(VKRTRayGen raygen, const char *name, const bool *val);
+VKRT_API void vkrtRayGenSet3bv(VKRTRayGen raygen, const char *name, const bool *val);
+VKRT_API void vkrtRayGenSet4bv(VKRTRayGen raygen, const char *name, const bool *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1b(VKRTMissProg missprog, const char *name, bool val);
+VKRT_API void vkrtMissProgSet2b(VKRTMissProg missprog, const char *name, bool x, bool y);
+VKRT_API void vkrtMissProgSet3b(VKRTMissProg missprog, const char *name, bool x, bool y, bool z);
+VKRT_API void vkrtMissProgSet4b(VKRTMissProg missprog, const char *name, bool x, bool y, bool z, bool w);
+VKRT_API void vkrtMissProgSet2bv(VKRTMissProg missprog, const char *name, const bool *val);
+VKRT_API void vkrtMissProgSet3bv(VKRTMissProg missprog, const char *name, const bool *val);
+VKRT_API void vkrtMissProgSet4bv(VKRTMissProg missprog, const char *name, const bool *val);
+
+// // setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1b(OWLGeom var, const char *name, bool val);
+// VKRT_API void vkrtGeomSet2b(OWLGeom var, const char *name, bool x, bool y);
+// VKRT_API void vkrtGeomSet3b(OWLGeom var, const char *name, bool x, bool y, bool z);
+// VKRT_API void vkrtGeomSet4b(OWLGeom var, const char *name, bool x, bool y, bool z, bool w);
+// VKRT_API void vkrtGeomSet2bv(OWLGeom var, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet3bv(OWLGeom var, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet4bv(OWLGeom var, const char *name, const bool *val);
+
+// // setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1b(OWLParams var, const char *name, bool val);
+// VKRT_API void vkrtParamsSet2b(OWLParams var, const char *name, bool x, bool y);
+// VKRT_API void vkrtParamsSet3b(OWLParams var, const char *name, bool x, bool y, bool z);
+// VKRT_API void vkrtParamsSet4b(OWLParams var, const char *name, bool x, bool y, bool z, bool w);
+// VKRT_API void vkrtParamsSet2bv(OWLParams var, const char *name, const bool *val);
+// VKRT_API void vkrtParamsSet3bv(OWLParams var, const char *name, const bool *val);
+// VKRT_API void vkrtParamsSet4bv(OWLParams var, const char *name, const bool *val);
+#endif
+
+// ------------------------------------------------------------------
+// setters for variables of type "char"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1c(VKRTRayGen raygen, const char *name, int8_t val);
+VKRT_API void vkrtRayGenSet2c(VKRTRayGen raygen, const char *name, int8_t x, int8_t y);
+VKRT_API void vkrtRayGenSet3c(VKRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z);
+VKRT_API void vkrtRayGenSet4c(VKRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+VKRT_API void vkrtRayGenSet2cv(VKRTRayGen raygen, const char *name, const int8_t *val);
+VKRT_API void vkrtRayGenSet3cv(VKRTRayGen raygen, const char *name, const int8_t *val);
+VKRT_API void vkrtRayGenSet4cv(VKRTRayGen raygen, const char *name, const int8_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1c(VKRTMissProg missprog, const char *name, int8_t val);
+VKRT_API void vkrtMissProgSet2c(VKRTMissProg missprog, const char *name, int8_t x, int8_t y);
+VKRT_API void vkrtMissProgSet3c(VKRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z);
+VKRT_API void vkrtMissProgSet4c(VKRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+VKRT_API void vkrtMissProgSet2cv(VKRTMissProg missprog, const char *name, const int8_t *val);
+VKRT_API void vkrtMissProgSet3cv(VKRTMissProg missprog, const char *name, const int8_t *val);
+VKRT_API void vkrtMissProgSet4cv(VKRTMissProg missprog, const char *name, const int8_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1c(OWLGeom obj, const char *name, int8_t val);
+// VKRT_API void vkrtGeomSet2c(OWLGeom obj, const char *name, int8_t x, int8_t y);
+// VKRT_API void vkrtGeomSet3c(OWLGeom obj, const char *name, int8_t x, int8_t y, int8_t z);
+// VKRT_API void vkrtGeomSet4c(OWLGeom obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+// VKRT_API void vkrtGeomSet2cv(OWLGeom obj, const char *name, const char *val);
+// VKRT_API void vkrtGeomSet3cv(OWLGeom obj, const char *name, const char *val);
+// VKRT_API void vkrtGeomSet4cv(OWLGeom obj, const char *name, const char *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1c(OWLParams obj, const char *name, int8_t val);
+// VKRT_API void vkrtParamsSet2c(OWLParams obj, const char *name, int8_t x, int8_t y);
+// VKRT_API void vkrtParamsSet3c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z);
+// VKRT_API void vkrtParamsSet4c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+// VKRT_API void vkrtParamsSet2cv(OWLParams obj, const char *name, const char *val);
+// VKRT_API void vkrtParamsSet3cv(OWLParams obj, const char *name, const char *val);
+// VKRT_API void vkrtParamsSet4cv(OWLParams obj, const char *name, const char *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint8_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1uc(VKRTRayGen raygen, const char *name, uint8_t val);
+VKRT_API void vkrtRayGenSet2uc(VKRTRayGen raygen, const char *name, uint8_t x, uint8_t y);
+VKRT_API void vkrtRayGenSet3uc(VKRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z);
+VKRT_API void vkrtRayGenSet4uc(VKRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+VKRT_API void vkrtRayGenSet2ucv(VKRTRayGen raygen, const char *name, const uint8_t *val);
+VKRT_API void vkrtRayGenSet3ucv(VKRTRayGen raygen, const char *name, const uint8_t *val);
+VKRT_API void vkrtRayGenSet4ucv(VKRTRayGen raygen, const char *name, const uint8_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1uc(VKRTMissProg missprog, const char *name, uint8_t val);
+VKRT_API void vkrtMissProgSet2uc(VKRTMissProg missprog, const char *name, uint8_t x, uint8_t y);
+VKRT_API void vkrtMissProgSet3uc(VKRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z);
+VKRT_API void vkrtMissProgSet4uc(VKRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+VKRT_API void vkrtMissProgSet2ucv(VKRTMissProg missprog, const char *name, const uint8_t *val);
+VKRT_API void vkrtMissProgSet3ucv(VKRTMissProg missprog, const char *name, const uint8_t *val);
+VKRT_API void vkrtMissProgSet4ucv(VKRTMissProg missprog, const char *name, const uint8_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1uc(OWLGeom obj, const char *name, uint8_t val);
+// VKRT_API void vkrtGeomSet2uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y);
+// VKRT_API void vkrtGeomSet3uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
+// VKRT_API void vkrtGeomSet4uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+// VKRT_API void vkrtGeomSet2ucv(OWLGeom obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtGeomSet3ucv(OWLGeom obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtGeomSet4ucv(OWLGeom obj, const char *name, const uint8_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
+// VKRT_API void vkrtParamsSet2uc(OWLParams obj, const char *name, uint8_t x, uint8_t y);
+// VKRT_API void vkrtParamsSet3uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
+// VKRT_API void vkrtParamsSet4uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+// VKRT_API void vkrtParamsSet2ucv(OWLParams obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtParamsSet3ucv(OWLParams obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtParamsSet4ucv(OWLParams obj, const char *name, const uint8_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1s(VKRTRayGen raygen, const char *name, int16_t val);
+VKRT_API void vkrtRayGenSet2s(VKRTRayGen raygen, const char *name, int16_t x, int16_t y);
+VKRT_API void vkrtRayGenSet3s(VKRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z);
+VKRT_API void vkrtRayGenSet4s(VKRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+VKRT_API void vkrtRayGenSet2sv(VKRTRayGen raygen, const char *name, const int16_t *val);
+VKRT_API void vkrtRayGenSet3sv(VKRTRayGen raygen, const char *name, const int16_t *val);
+VKRT_API void vkrtRayGenSet4sv(VKRTRayGen raygen, const char *name, const int16_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1s(VKRTMissProg missprog, const char *name, int16_t val);
+VKRT_API void vkrtMissProgSet2s(VKRTMissProg missprog, const char *name, int16_t x, int16_t y);
+VKRT_API void vkrtMissProgSet3s(VKRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z);
+VKRT_API void vkrtMissProgSet4s(VKRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+VKRT_API void vkrtMissProgSet2sv(VKRTMissProg missprog, const char *name, const int16_t *val);
+VKRT_API void vkrtMissProgSet3sv(VKRTMissProg missprog, const char *name, const int16_t *val);
+VKRT_API void vkrtMissProgSet4sv(VKRTMissProg missprog, const char *name, const int16_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1s(OWLGeom obj, const char *name, int16_t val);
+// VKRT_API void vkrtGeomSet2s(OWLGeom obj, const char *name, int16_t x, int16_t y);
+// VKRT_API void vkrtGeomSet3s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z);
+// VKRT_API void vkrtGeomSet4s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+// VKRT_API void vkrtGeomSet2sv(OWLGeom obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtGeomSet3sv(OWLGeom obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtGeomSet4sv(OWLGeom obj, const char *name, const int16_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1s(OWLParams obj, const char *name, int16_t val);
+// VKRT_API void vkrtParamsSet2s(OWLParams obj, const char *name, int16_t x, int16_t y);
+// VKRT_API void vkrtParamsSet3s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z);
+// VKRT_API void vkrtParamsSet4s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+// VKRT_API void vkrtParamsSet2sv(OWLParams obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtParamsSet3sv(OWLParams obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtParamsSet4sv(OWLParams obj, const char *name, const int16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1us(VKRTRayGen raygen, const char *name, uint16_t val);
+VKRT_API void vkrtRayGenSet2us(VKRTRayGen raygen, const char *name, uint16_t x, uint16_t y);
+VKRT_API void vkrtRayGenSet3us(VKRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z);
+VKRT_API void vkrtRayGenSet4us(VKRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+VKRT_API void vkrtRayGenSet2usv(VKRTRayGen raygen, const char *name, const uint16_t *val);
+VKRT_API void vkrtRayGenSet3usv(VKRTRayGen raygen, const char *name, const uint16_t *val);
+VKRT_API void vkrtRayGenSet4usv(VKRTRayGen raygen, const char *name, const uint16_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1us(VKRTMissProg missprog, const char *name, uint16_t val);
+VKRT_API void vkrtMissProgSet2us(VKRTMissProg missprog, const char *name, uint16_t x, uint16_t y);
+VKRT_API void vkrtMissProgSet3us(VKRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z);
+VKRT_API void vkrtMissProgSet4us(VKRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+VKRT_API void vkrtMissProgSet2usv(VKRTMissProg missprog, const char *name, const uint16_t *val);
+VKRT_API void vkrtMissProgSet3usv(VKRTMissProg missprog, const char *name, const uint16_t *val);
+VKRT_API void vkrtMissProgSet4usv(VKRTMissProg missprog, const char *name, const uint16_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1us(OWLGeom obj, const char *name, uint16_t val);
+// VKRT_API void vkrtGeomSet2us(OWLGeom obj, const char *name, uint16_t x, uint16_t y);
+// VKRT_API void vkrtGeomSet3us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
+// VKRT_API void vkrtGeomSet4us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+// VKRT_API void vkrtGeomSet2usv(OWLGeom obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtGeomSet3usv(OWLGeom obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtGeomSet4usv(OWLGeom obj, const char *name, const uint16_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
+// VKRT_API void vkrtParamsSet2us(OWLParams obj, const char *name, uint16_t x, uint16_t y);
+// VKRT_API void vkrtParamsSet3us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
+// VKRT_API void vkrtParamsSet4us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+// VKRT_API void vkrtParamsSet2usv(OWLParams obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtParamsSet3usv(OWLParams obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtParamsSet4usv(OWLParams obj, const char *name, const uint16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1i(VKRTRayGen raygen, const char *name, int32_t val);
+VKRT_API void vkrtRayGenSet2i(VKRTRayGen raygen, const char *name, int32_t x, int32_t y);
+VKRT_API void vkrtRayGenSet3i(VKRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z);
+VKRT_API void vkrtRayGenSet4i(VKRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+VKRT_API void vkrtRayGenSet2iv(VKRTRayGen raygen, const char *name, const int32_t *val);
+VKRT_API void vkrtRayGenSet3iv(VKRTRayGen raygen, const char *name, const int32_t *val);
+VKRT_API void vkrtRayGenSet4iv(VKRTRayGen raygen, const char *name, const int32_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1i(VKRTMissProg missprog, const char *name, int32_t val);
+VKRT_API void vkrtMissProgSet2i(VKRTMissProg missprog, const char *name, int32_t x, int32_t y);
+VKRT_API void vkrtMissProgSet3i(VKRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z);
+VKRT_API void vkrtMissProgSet4i(VKRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+VKRT_API void vkrtMissProgSet2iv(VKRTMissProg missprog, const char *name, const int32_t *val);
+VKRT_API void vkrtMissProgSet3iv(VKRTMissProg missprog, const char *name, const int32_t *val);
+VKRT_API void vkrtMissProgSet4iv(VKRTMissProg missprog, const char *name, const int32_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1i(OWLGeom obj, const char *name, int32_t val);
+// VKRT_API void vkrtGeomSet2i(OWLGeom obj, const char *name, int32_t x, int32_t y);
+// VKRT_API void vkrtGeomSet3i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z);
+// VKRT_API void vkrtGeomSet4i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+// VKRT_API void vkrtGeomSet2iv(OWLGeom obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtGeomSet3iv(OWLGeom obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtGeomSet4iv(OWLGeom obj, const char *name, const int32_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1i(OWLParams obj, const char *name, int32_t val);
+// VKRT_API void vkrtParamsSet2i(OWLParams obj, const char *name, int32_t x, int32_t y);
+// VKRT_API void vkrtParamsSet3i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z);
+// VKRT_API void vkrtParamsSet4i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+// VKRT_API void vkrtParamsSet2iv(OWLParams obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtParamsSet3iv(OWLParams obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtParamsSet4iv(OWLParams obj, const char *name, const int32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint32_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1ui(VKRTRayGen raygen, const char *name, uint32_t val);
+VKRT_API void vkrtRayGenSet2ui(VKRTRayGen raygen, const char *name, uint32_t x, uint32_t y);
+VKRT_API void vkrtRayGenSet3ui(VKRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z);
+VKRT_API void vkrtRayGenSet4ui(VKRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+VKRT_API void vkrtRayGenSet2uiv(VKRTRayGen raygen, const char *name, const uint32_t *val);
+VKRT_API void vkrtRayGenSet3uiv(VKRTRayGen raygen, const char *name, const uint32_t *val);
+VKRT_API void vkrtRayGenSet4uiv(VKRTRayGen raygen, const char *name, const uint32_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1ui(VKRTMissProg missprog, const char *name, uint32_t val);
+VKRT_API void vkrtMissProgSet2ui(VKRTMissProg missprog, const char *name, uint32_t x, uint32_t y);
+VKRT_API void vkrtMissProgSet3ui(VKRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z);
+VKRT_API void vkrtMissProgSet4ui(VKRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+VKRT_API void vkrtMissProgSet2uiv(VKRTMissProg missprog, const char *name, const uint32_t *val);
+VKRT_API void vkrtMissProgSet3uiv(VKRTMissProg missprog, const char *name, const uint32_t *val);
+VKRT_API void vkrtMissProgSet4uiv(VKRTMissProg missprog, const char *name, const uint32_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1ui(OWLGeom obj, const char *name, uint32_t val);
+// VKRT_API void vkrtGeomSet2ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y);
+// VKRT_API void vkrtGeomSet3ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
+// VKRT_API void vkrtGeomSet4ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+// VKRT_API void vkrtGeomSet2uiv(OWLGeom obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtGeomSet3uiv(OWLGeom obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtGeomSet4uiv(OWLGeom obj, const char *name, const uint32_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
+// VKRT_API void vkrtParamsSet2ui(OWLParams obj, const char *name, uint32_t x, uint32_t y);
+// VKRT_API void vkrtParamsSet3ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
+// VKRT_API void vkrtParamsSet4ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+// VKRT_API void vkrtParamsSet2uiv(OWLParams obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtParamsSet3uiv(OWLParams obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtParamsSet4uiv(OWLParams obj, const char *name, const uint32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "float"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1f(VKRTRayGen raygen, const char *name, float val);
+VKRT_API void vkrtRayGenSet2f(VKRTRayGen raygen, const char *name, float x, float y);
+VKRT_API void vkrtRayGenSet3f(VKRTRayGen raygen, const char *name, float x, float y, float z);
+VKRT_API void vkrtRayGenSet4f(VKRTRayGen raygen, const char *name, float x, float y, float z, float w);
+VKRT_API void vkrtRayGenSet2fv(VKRTRayGen raygen, const char *name, const float *val);
+VKRT_API void vkrtRayGenSet3fv(VKRTRayGen raygen, const char *name, const float *val);
+VKRT_API void vkrtRayGenSet4fv(VKRTRayGen raygen, const char *name, const float *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1f(VKRTMissProg missprog, const char *name, float val);
+VKRT_API void vkrtMissProgSet2f(VKRTMissProg missprog, const char *name, float x, float y);
+VKRT_API void vkrtMissProgSet3f(VKRTMissProg missprog, const char *name, float x, float y, float z);
+VKRT_API void vkrtMissProgSet4f(VKRTMissProg missprog, const char *name, float x, float y, float z, float w);
+VKRT_API void vkrtMissProgSet2fv(VKRTMissProg missprog, const char *name, const float *val);
+VKRT_API void vkrtMissProgSet3fv(VKRTMissProg missprog, const char *name, const float *val);
+VKRT_API void vkrtMissProgSet4fv(VKRTMissProg missprog, const char *name, const float *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1f(OWLGeom obj, const char *name, float val);
+// VKRT_API void vkrtGeomSet2f(OWLGeom obj, const char *name, float x, float y);
+// VKRT_API void vkrtGeomSet3f(OWLGeom obj, const char *name, float x, float y, float z);
+// VKRT_API void vkrtGeomSet4f(OWLGeom obj, const char *name, float x, float y, float z, float w);
+// VKRT_API void vkrtGeomSet2fv(OWLGeom obj, const char *name, const float *val);
+// VKRT_API void vkrtGeomSet3fv(OWLGeom obj, const char *name, const float *val);
+// VKRT_API void vkrtGeomSet4fv(OWLGeom obj, const char *name, const float *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1f(OWLParams obj, const char *name, float val);
+// VKRT_API void vkrtParamsSet2f(OWLParams obj, const char *name, float x, float y);
+// VKRT_API void vkrtParamsSet3f(OWLParams obj, const char *name, float x, float y, float z);
+// VKRT_API void vkrtParamsSet4f(OWLParams obj, const char *name, float x, float y, float z, float w);
+// VKRT_API void vkrtParamsSet2fv(OWLParams obj, const char *name, const float *val);
+// VKRT_API void vkrtParamsSet3fv(OWLParams obj, const char *name, const float *val);
+// VKRT_API void vkrtParamsSet4fv(OWLParams obj, const char *name, const float *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "double"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1d(VKRTRayGen raygen, const char *name, double val);
+VKRT_API void vkrtRayGenSet2d(VKRTRayGen raygen, const char *name, double x, double y);
+VKRT_API void vkrtRayGenSet3d(VKRTRayGen raygen, const char *name, double x, double y, double z);
+VKRT_API void vkrtRayGenSet4d(VKRTRayGen raygen, const char *name, double x, double y, double z, double w);
+VKRT_API void vkrtRayGenSet2dv(VKRTRayGen raygen, const char *name, const double *val);
+VKRT_API void vkrtRayGenSet3dv(VKRTRayGen raygen, const char *name, const double *val);
+VKRT_API void vkrtRayGenSet4dv(VKRTRayGen raygen, const char *name, const double *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1d(VKRTMissProg missprog, const char *name, double val);
+VKRT_API void vkrtMissProgSet2d(VKRTMissProg missprog, const char *name, double x, double y);
+VKRT_API void vkrtMissProgSet3d(VKRTMissProg missprog, const char *name, double x, double y, double z);
+VKRT_API void vkrtMissProgSet4d(VKRTMissProg missprog, const char *name, double x, double y, double z, double w);
+VKRT_API void vkrtMissProgSet2dv(VKRTMissProg missprog, const char *name, const double *val);
+VKRT_API void vkrtMissProgSet3dv(VKRTMissProg missprog, const char *name, const double *val);
+VKRT_API void vkrtMissProgSet4dv(VKRTMissProg missprog, const char *name, const double *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1d(OWLGeom obj, const char *name, double val);
+// VKRT_API void vkrtGeomSet2d(OWLGeom obj, const char *name, double x, double y);
+// VKRT_API void vkrtGeomSet3d(OWLGeom obj, const char *name, double x, double y, double z);
+// VKRT_API void vkrtGeomSet4d(OWLGeom obj, const char *name, double x, double y, double z, double w);
+// VKRT_API void vkrtGeomSet2dv(OWLGeom obj, const char *name, const double *val);
+// VKRT_API void vkrtGeomSet3dv(OWLGeom obj, const char *name, const double *val);
+// VKRT_API void vkrtGeomSet4dv(OWLGeom obj, const char *name, const double *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1d(OWLParams obj, const char *name, double val);
+// VKRT_API void vkrtParamsSet2d(OWLParams obj, const char *name, double x, double y);
+// VKRT_API void vkrtParamsSet3d(OWLParams obj, const char *name, double x, double y, double z);
+// VKRT_API void vkrtParamsSet4d(OWLParams obj, const char *name, double x, double y, double z, double w);
+// VKRT_API void vkrtParamsSet2dv(OWLParams obj, const char *name, const double *val);
+// VKRT_API void vkrtParamsSet3dv(OWLParams obj, const char *name, const double *val);
+// VKRT_API void vkrtParamsSet4dv(OWLParams obj, const char *name, const double *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1l(VKRTRayGen raygen, const char *name, int64_t val);
+VKRT_API void vkrtRayGenSet2l(VKRTRayGen raygen, const char *name, int64_t x, int64_t y);
+VKRT_API void vkrtRayGenSet3l(VKRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z);
+VKRT_API void vkrtRayGenSet4l(VKRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+VKRT_API void vkrtRayGenSet2lv(VKRTRayGen raygen, const char *name, const int64_t *val);
+VKRT_API void vkrtRayGenSet3lv(VKRTRayGen raygen, const char *name, const int64_t *val);
+VKRT_API void vkrtRayGenSet4lv(VKRTRayGen raygen, const char *name, const int64_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1l(VKRTMissProg missprog, const char *name, int64_t val);
+VKRT_API void vkrtMissProgSet2l(VKRTMissProg missprog, const char *name, int64_t x, int64_t y);
+VKRT_API void vkrtMissProgSet3l(VKRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z);
+VKRT_API void vkrtMissProgSet4l(VKRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+VKRT_API void vkrtMissProgSet2lv(VKRTMissProg missprog, const char *name, const int64_t *val);
+VKRT_API void vkrtMissProgSet3lv(VKRTMissProg missprog, const char *name, const int64_t *val);
+VKRT_API void vkrtMissProgSet4lv(VKRTMissProg missprog, const char *name, const int64_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1l(OWLGeom obj, const char *name, int64_t val);
+// VKRT_API void vkrtGeomSet2l(OWLGeom obj, const char *name, int64_t x, int64_t y);
+// VKRT_API void vkrtGeomSet3l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z);
+// VKRT_API void vkrtGeomSet4l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+// VKRT_API void vkrtGeomSet2lv(OWLGeom obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtGeomSet3lv(OWLGeom obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtGeomSet4lv(OWLGeom obj, const char *name, const int64_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1l(OWLParams obj, const char *name, int64_t val);
+// VKRT_API void vkrtParamsSet2l(OWLParams obj, const char *name, int64_t x, int64_t y);
+// VKRT_API void vkrtParamsSet3l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z);
+// VKRT_API void vkrtParamsSet4l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+// VKRT_API void vkrtParamsSet2lv(OWLParams obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtParamsSet3lv(OWLParams obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtParamsSet4lv(OWLParams obj, const char *name, const int64_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1ul(VKRTRayGen raygen, const char *name, uint64_t val);
+VKRT_API void vkrtRayGenSet2ul(VKRTRayGen raygen, const char *name, uint64_t x, uint64_t y);
+VKRT_API void vkrtRayGenSet3ul(VKRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z);
+VKRT_API void vkrtRayGenSet4ul(VKRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+VKRT_API void vkrtRayGenSet2ulv(VKRTRayGen raygen, const char *name, const uint64_t *val);
+VKRT_API void vkrtRayGenSet3ulv(VKRTRayGen raygen, const char *name, const uint64_t *val);
+VKRT_API void vkrtRayGenSet4ulv(VKRTRayGen raygen, const char *name, const uint64_t *val);
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1ul(VKRTMissProg missprog, const char *name, uint64_t val);
+VKRT_API void vkrtMissProgSet2ul(VKRTMissProg missprog, const char *name, uint64_t x, uint64_t y);
+VKRT_API void vkrtMissProgSet3ul(VKRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z);
+VKRT_API void vkrtMissProgSet4ul(VKRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+VKRT_API void vkrtMissProgSet2ulv(VKRTMissProg missprog, const char *name, const uint64_t *val);
+VKRT_API void vkrtMissProgSet3ulv(VKRTMissProg missprog, const char *name, const uint64_t *val);
+VKRT_API void vkrtMissProgSet4ulv(VKRTMissProg missprog, const char *name, const uint64_t *val);
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1ul(OWLGeom obj, const char *name, uint64_t val);
+// VKRT_API void vkrtGeomSet2ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y);
+// VKRT_API void vkrtGeomSet3ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
+// VKRT_API void vkrtGeomSet4ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+// VKRT_API void vkrtGeomSet2ulv(OWLGeom obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtGeomSet3ulv(OWLGeom obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtGeomSet4ulv(OWLGeom obj, const char *name, const uint64_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
+// VKRT_API void vkrtParamsSet2ul(OWLParams obj, const char *name, uint64_t x, uint64_t y);
+// VKRT_API void vkrtParamsSet3ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
+// VKRT_API void vkrtParamsSet4ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+// VKRT_API void vkrtParamsSet2ulv(OWLParams obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtParamsSet3ulv(OWLParams obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtParamsSet4ulv(OWLParams obj, const char *name, const uint64_t *val);
+
 // ------------------------------------------------------------------
 // setters for "meta" types
 // ------------------------------------------------------------------
@@ -435,6 +903,6 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *
 // setters for variables on "MissProg"s
 // VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
 // VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
-// VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
+VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
 // VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
 VKRT_API void vkrtMissProgSetRaw(VKRTMissProg missprog, const char *name, const void *val);

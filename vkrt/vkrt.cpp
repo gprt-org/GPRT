@@ -1311,8 +1311,8 @@ namespace vkrt {
 
       // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
 
-      int numRayGens = raygenPrograms.size();
-      int numMissProgs = missPrograms.size();
+      size_t numRayGens = raygenPrograms.size();
+      size_t numMissProgs = missPrograms.size();
       int numRayTypes = 1;
 
       // Raygen records
@@ -1589,7 +1589,7 @@ vkrtMissProgCreate(VKRTContext _context,
 VKRT_API void
 vkrtMissProgSet(VKRTContext  _context,
                int rayType,
-               VKRTMissProg missProgToUse)
+               VKRTMissProg _missProgToUse)
 {
   VKRT_NOTIMPLEMENTED;
 }
@@ -1789,6 +1789,1812 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   if (err) VKRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
 }
 
+std::pair<size_t, void*> vkrtGetVariable(
+  vkrt::SBTEntry *entry, std::string name, VKRTDataType type
+) {
+  auto found = entry->vars.find(std::string(name));
+
+  // 1. Figure out if the variable "name" exists 
+  assert(found != entry->vars.end());
+  
+  // 2. Assert the types match 
+  assert(found->second.decl.type == type);
+
+  std::pair<size_t, void*> variable;
+
+  // 3. Get the expected size for this variable. 
+  variable.first = getSize(found->second.decl.type);
+
+  // 4. Get the pointer to the SBT. 
+  variable.second = found->second.data;
+
+  return variable;
+}
+
+#ifdef __cplusplus
+// ------------------------------------------------------------------
+// setters for variables of type "bool" (bools only on c++)
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1b(VKRTRayGen _raygen, const char *name, bool x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL);
+  bool val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2b(VKRTRayGen _raygen, const char *name, bool x, bool y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  bool val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3b(VKRTRayGen _raygen, const char *name, bool x, bool y, bool z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  bool val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4b(VKRTRayGen _raygen, const char *name, bool x, bool y, bool z, bool w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  bool val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2bv(VKRTRayGen _raygen, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3bv(VKRTRayGen _raygen, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4bv(VKRTRayGen _raygen, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1b(VKRTMissProg _missprog, const char *name, bool x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL);
+  bool val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2b(VKRTMissProg _missprog, const char *name, bool x, bool y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  bool val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3b(VKRTMissProg _missprog, const char *name, bool x, bool y, bool z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  bool val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4b(VKRTMissProg _missprog, const char *name, bool x, bool y, bool z, bool w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  bool val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2bv(VKRTMissProg _missprog, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3bv(VKRTMissProg _missprog, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4bv(VKRTMissProg _missprog, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// // setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1b(OWLGeom var, const char *name, bool val);
+// VKRT_API void vkrtGeomSet2b(OWLGeom var, const char *name, bool x, bool y);
+// VKRT_API void vkrtGeomSet3b(OWLGeom var, const char *name, bool x, bool y, bool z);
+// VKRT_API void vkrtGeomSet4b(OWLGeom var, const char *name, bool x, bool y, bool z, bool w);
+// VKRT_API void vkrtGeomSet2bv(OWLGeom var, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet3bv(OWLGeom var, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet4bv(OWLGeom var, const char *name, const bool *val);
+
+// // setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1b(OWLParams var, const char *name, bool val);
+// VKRT_API void vkrtParamsSet2b(OWLParams var, const char *name, bool x, bool y);
+// VKRT_API void vkrtParamsSet3b(OWLParams var, const char *name, bool x, bool y, bool z);
+// VKRT_API void vkrtParamsSet4b(OWLParams var, const char *name, bool x, bool y, bool z, bool w);
+// VKRT_API void vkrtParamsSet2bv(OWLParams var, const char *name, const bool *val);
+// VKRT_API void vkrtParamsSet3bv(OWLParams var, const char *name, const bool *val);
+// VKRT_API void vkrtParamsSet4bv(OWLParams var, const char *name, const bool *val);
+#endif
+
+// ------------------------------------------------------------------
+// setters for variables of type "char"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1c(VKRTRayGen _raygen, const char *name, int8_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  int8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2c(VKRTRayGen _raygen, const char *name, int8_t x, int8_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  int8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3c(VKRTRayGen _raygen, const char *name, int8_t x, int8_t y, int8_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  int8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4c(VKRTRayGen _raygen, const char *name, int8_t x, int8_t y, int8_t z, int8_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  int8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2cv(VKRTRayGen _raygen, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3cv(VKRTRayGen _raygen, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4cv(VKRTRayGen _raygen, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1c(VKRTMissProg _missprog, const char *name, int8_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  int8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2c(VKRTMissProg _missprog, const char *name, int8_t x, int8_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  int8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3c(VKRTMissProg _missprog, const char *name, int8_t x, int8_t y, int8_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  int8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4c(VKRTMissProg _missprog, const char *name, int8_t x, int8_t y, int8_t z, int8_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  int8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2cv(VKRTMissProg _missprog, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3cv(VKRTMissProg _missprog, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4cv(VKRTMissProg _missprog, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1c(OWLGeom obj, const char *name, char val);
+// VKRT_API void vkrtGeomSet2c(OWLGeom obj, const char *name, char x, char y);
+// VKRT_API void vkrtGeomSet3c(OWLGeom obj, const char *name, char x, char y, char z);
+// VKRT_API void vkrtGeomSet4c(OWLGeom obj, const char *name, char x, char y, char z, char w);
+// VKRT_API void vkrtGeomSet2cv(OWLGeom obj, const char *name, const char *val);
+// VKRT_API void vkrtGeomSet3cv(OWLGeom obj, const char *name, const char *val);
+// VKRT_API void vkrtGeomSet4cv(OWLGeom obj, const char *name, const char *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1c(OWLParams obj, const char *name, char val);
+// VKRT_API void vkrtParamsSet2c(OWLParams obj, const char *name, char x, char y);
+// VKRT_API void vkrtParamsSet3c(OWLParams obj, const char *name, char x, char y, char z);
+// VKRT_API void vkrtParamsSet4c(OWLParams obj, const char *name, char x, char y, char z, char w);
+// VKRT_API void vkrtParamsSet2cv(OWLParams obj, const char *name, const char *val);
+// VKRT_API void vkrtParamsSet3cv(OWLParams obj, const char *name, const char *val);
+// VKRT_API void vkrtParamsSet4cv(OWLParams obj, const char *name, const char *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint8_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1uc(VKRTRayGen _raygen, const char *name, uint8_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  uint8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2uc(VKRTRayGen _raygen, const char *name, uint8_t x, uint8_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  uint8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3uc(VKRTRayGen _raygen, const char *name, uint8_t x, uint8_t y, uint8_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  uint8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4uc(VKRTRayGen _raygen, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  uint8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2ucv(VKRTRayGen _raygen, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3ucv(VKRTRayGen _raygen, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4ucv(VKRTRayGen _raygen, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1uc(VKRTMissProg _missprog, const char *name, uint8_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  uint8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2uc(VKRTMissProg _missprog, const char *name, uint8_t x, uint8_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  uint8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3uc(VKRTMissProg _missprog, const char *name, uint8_t x, uint8_t y, uint8_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  uint8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4uc(VKRTMissProg _missprog, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  uint8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2ucv(VKRTMissProg _missprog, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3ucv(VKRTMissProg _missprog, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4ucv(VKRTMissProg _missprog, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1uc(OWLGeom obj, const char *name, uint8_t val);
+// VKRT_API void vkrtGeomSet2uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y);
+// VKRT_API void vkrtGeomSet3uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
+// VKRT_API void vkrtGeomSet4uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+// VKRT_API void vkrtGeomSet2ucv(OWLGeom obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtGeomSet3ucv(OWLGeom obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtGeomSet4ucv(OWLGeom obj, const char *name, const uint8_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
+// VKRT_API void vkrtParamsSet2uc(OWLParams obj, const char *name, uint8_t x, uint8_t y);
+// VKRT_API void vkrtParamsSet3uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
+// VKRT_API void vkrtParamsSet4uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+// VKRT_API void vkrtParamsSet2ucv(OWLParams obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtParamsSet3ucv(OWLParams obj, const char *name, const uint8_t *val);
+// VKRT_API void vkrtParamsSet4ucv(OWLParams obj, const char *name, const uint8_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1s(VKRTRayGen _raygen, const char *name, int16_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T);
+  int16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2s(VKRTRayGen _raygen, const char *name, int16_t x, int16_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  int16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3s(VKRTRayGen _raygen, const char *name, int16_t x, int16_t y, int16_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  int16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4s(VKRTRayGen _raygen, const char *name, int16_t x, int16_t y, int16_t z, int16_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  int16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2sv(VKRTRayGen _raygen, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3sv(VKRTRayGen _raygen, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4sv(VKRTRayGen _raygen, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1s(VKRTMissProg _missprog, const char *name, int16_t val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2s(VKRTMissProg _missprog, const char *name, int16_t x, int16_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  int16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3s(VKRTMissProg _missprog, const char *name, int16_t x, int16_t y, int16_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  int16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4s(VKRTMissProg _missprog, const char *name, int16_t x, int16_t y, int16_t z, int16_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  int16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2sv(VKRTMissProg _missprog, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3sv(VKRTMissProg _missprog, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4sv(VKRTMissProg _missprog, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1s(OWLGeom obj, const char *name, int16_t val);
+// VKRT_API void vkrtGeomSet2s(OWLGeom obj, const char *name, int16_t x, int16_t y);
+// VKRT_API void vkrtGeomSet3s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z);
+// VKRT_API void vkrtGeomSet4s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+// VKRT_API void vkrtGeomSet2sv(OWLGeom obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtGeomSet3sv(OWLGeom obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtGeomSet4sv(OWLGeom obj, const char *name, const int16_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1s(OWLParams obj, const char *name, int16_t val);
+// VKRT_API void vkrtParamsSet2s(OWLParams obj, const char *name, int16_t x, int16_t y);
+// VKRT_API void vkrtParamsSet3s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z);
+// VKRT_API void vkrtParamsSet4s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+// VKRT_API void vkrtParamsSet2sv(OWLParams obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtParamsSet3sv(OWLParams obj, const char *name, const int16_t *val);
+// VKRT_API void vkrtParamsSet4sv(OWLParams obj, const char *name, const int16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1us(VKRTRayGen _raygen, const char *name, uint16_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T);
+  uint16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2us(VKRTRayGen _raygen, const char *name, uint16_t x, uint16_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  uint16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3us(VKRTRayGen _raygen, const char *name, uint16_t x, uint16_t y, uint16_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  uint16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4us(VKRTRayGen _raygen, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  uint16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2usv(VKRTRayGen _raygen, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3usv(VKRTRayGen _raygen, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4usv(VKRTRayGen _raygen, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1us(VKRTMissProg _missprog, const char *name, uint16_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T);
+  uint16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2us(VKRTMissProg _missprog, const char *name, uint16_t x, uint16_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  uint16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3us(VKRTMissProg _missprog, const char *name, uint16_t x, uint16_t y, uint16_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  uint16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4us(VKRTMissProg _missprog, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  uint16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2usv(VKRTMissProg _missprog, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3usv(VKRTMissProg _missprog, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4usv(VKRTMissProg _missprog, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1us(OWLGeom obj, const char *name, uint16_t val);
+// VKRT_API void vkrtGeomSet2us(OWLGeom obj, const char *name, uint16_t x, uint16_t y);
+// VKRT_API void vkrtGeomSet3us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
+// VKRT_API void vkrtGeomSet4us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+// VKRT_API void vkrtGeomSet2usv(OWLGeom obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtGeomSet3usv(OWLGeom obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtGeomSet4usv(OWLGeom obj, const char *name, const uint16_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
+// VKRT_API void vkrtParamsSet2us(OWLParams obj, const char *name, uint16_t x, uint16_t y);
+// VKRT_API void vkrtParamsSet3us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
+// VKRT_API void vkrtParamsSet4us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+// VKRT_API void vkrtParamsSet2usv(OWLParams obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtParamsSet3usv(OWLParams obj, const char *name, const uint16_t *val);
+// VKRT_API void vkrtParamsSet4usv(OWLParams obj, const char *name, const uint16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1i(VKRTRayGen _raygen, const char *name, int32_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T);
+  int32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2i(VKRTRayGen _raygen, const char *name, int32_t x, int32_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  int32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3i(VKRTRayGen _raygen, const char *name, int32_t x, int32_t y, int32_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  int32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4i(VKRTRayGen _raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  int32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2iv(VKRTRayGen _raygen, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3iv(VKRTRayGen _raygen, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4iv(VKRTRayGen _raygen, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1i(VKRTMissProg _missprog, const char *name, int32_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T);
+  int32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2i(VKRTMissProg _missprog, const char *name, int32_t x, int32_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  int32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3i(VKRTMissProg _missprog, const char *name, int32_t x, int32_t y, int32_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  int32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4i(VKRTMissProg _missprog, const char *name, int32_t x, int32_t y, int32_t z, int32_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  int32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2iv(VKRTMissProg _missprog, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3iv(VKRTMissProg _missprog, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4iv(VKRTMissProg _missprog, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1i(OWLGeom obj, const char *name, int32_t val);
+// VKRT_API void vkrtGeomSet2i(OWLGeom obj, const char *name, int32_t x, int32_t y);
+// VKRT_API void vkrtGeomSet3i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z);
+// VKRT_API void vkrtGeomSet4i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+// VKRT_API void vkrtGeomSet2iv(OWLGeom obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtGeomSet3iv(OWLGeom obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtGeomSet4iv(OWLGeom obj, const char *name, const int32_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1i(OWLParams obj, const char *name, int32_t val);
+// VKRT_API void vkrtParamsSet2i(OWLParams obj, const char *name, int32_t x, int32_t y);
+// VKRT_API void vkrtParamsSet3i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z);
+// VKRT_API void vkrtParamsSet4i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+// VKRT_API void vkrtParamsSet2iv(OWLParams obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtParamsSet3iv(OWLParams obj, const char *name, const int32_t *val);
+// VKRT_API void vkrtParamsSet4iv(OWLParams obj, const char *name, const int32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint32_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1ui(VKRTRayGen _raygen, const char *name, uint32_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T);
+  uint32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2ui(VKRTRayGen _raygen, const char *name, uint32_t x, uint32_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  uint32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3ui(VKRTRayGen _raygen, const char *name, uint32_t x, uint32_t y, uint32_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  uint32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4ui(VKRTRayGen _raygen, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  uint32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2uiv(VKRTRayGen _raygen, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3uiv(VKRTRayGen _raygen, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4uiv(VKRTRayGen _raygen, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1ui(VKRTMissProg _missprog, const char *name, uint32_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T);
+  uint32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2ui(VKRTMissProg _missprog, const char *name, uint32_t x, uint32_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  uint32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3ui(VKRTMissProg _missprog, const char *name, uint32_t x, uint32_t y, uint32_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  uint32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4ui(VKRTMissProg _missprog, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  uint32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2uiv(VKRTMissProg _missprog, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3uiv(VKRTMissProg _missprog, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4uiv(VKRTMissProg _missprog, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1ui(OWLGeom obj, const char *name, uint32_t val);
+// VKRT_API void vkrtGeomSet2ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y);
+// VKRT_API void vkrtGeomSet3ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
+// VKRT_API void vkrtGeomSet4ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+// VKRT_API void vkrtGeomSet2uiv(OWLGeom obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtGeomSet3uiv(OWLGeom obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtGeomSet4uiv(OWLGeom obj, const char *name, const uint32_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
+// VKRT_API void vkrtParamsSet2ui(OWLParams obj, const char *name, uint32_t x, uint32_t y);
+// VKRT_API void vkrtParamsSet3ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
+// VKRT_API void vkrtParamsSet4ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+// VKRT_API void vkrtParamsSet2uiv(OWLParams obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtParamsSet3uiv(OWLParams obj, const char *name, const uint32_t *val);
+// VKRT_API void vkrtParamsSet4uiv(OWLParams obj, const char *name, const uint32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "float"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1f(VKRTRayGen _raygen, const char *name, float x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT);
+  float val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2f(VKRTRayGen _raygen, const char *name, float x, float y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  float val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3f(VKRTRayGen _raygen, const char *name, float x, float y, float z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  float val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4f(VKRTRayGen _raygen, const char *name, float x, float y, float z, float w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  float val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2fv(VKRTRayGen _raygen, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3fv(VKRTRayGen _raygen, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4fv(VKRTRayGen _raygen, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1f(VKRTMissProg _missprog, const char *name, float x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT);
+  float val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2f(VKRTMissProg _missprog, const char *name, float x, float y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  float val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3f(VKRTMissProg _missprog, const char *name, float x, float y, float z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  float val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4f(VKRTMissProg _missprog, const char *name, float x, float y, float z, float w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  float val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2fv(VKRTMissProg _missprog, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3fv(VKRTMissProg _missprog, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4fv(VKRTMissProg _missprog, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1f(OWLGeom obj, const char *name, float val);
+// VKRT_API void vkrtGeomSet2f(OWLGeom obj, const char *name, float x, float y);
+// VKRT_API void vkrtGeomSet3f(OWLGeom obj, const char *name, float x, float y, float z);
+// VKRT_API void vkrtGeomSet4f(OWLGeom obj, const char *name, float x, float y, float z, float w);
+// VKRT_API void vkrtGeomSet2fv(OWLGeom obj, const char *name, const float *val);
+// VKRT_API void vkrtGeomSet3fv(OWLGeom obj, const char *name, const float *val);
+// VKRT_API void vkrtGeomSet4fv(OWLGeom obj, const char *name, const float *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1f(OWLParams obj, const char *name, float val);
+// VKRT_API void vkrtParamsSet2f(OWLParams obj, const char *name, float x, float y);
+// VKRT_API void vkrtParamsSet3f(OWLParams obj, const char *name, float x, float y, float z);
+// VKRT_API void vkrtParamsSet4f(OWLParams obj, const char *name, float x, float y, float z, float w);
+// VKRT_API void vkrtParamsSet2fv(OWLParams obj, const char *name, const float *val);
+// VKRT_API void vkrtParamsSet3fv(OWLParams obj, const char *name, const float *val);
+// VKRT_API void vkrtParamsSet4fv(OWLParams obj, const char *name, const float *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "double"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1d(VKRTRayGen _raygen, const char *name, double x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE);
+  double val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2d(VKRTRayGen _raygen, const char *name, double x, double y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  double val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3d(VKRTRayGen _raygen, const char *name, double x, double y, double z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  double val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4d(VKRTRayGen _raygen, const char *name, double x, double y, double z, double w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  double val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2dv(VKRTRayGen _raygen, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3dv(VKRTRayGen _raygen, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4dv(VKRTRayGen _raygen, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1d(VKRTMissProg _missprog, const char *name, double x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE);
+  double val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2d(VKRTMissProg _missprog, const char *name, double x, double y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  double val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3d(VKRTMissProg _missprog, const char *name, double x, double y, double z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  double val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4d(VKRTMissProg _missprog, const char *name, double x, double y, double z, double w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  double val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2dv(VKRTMissProg _missprog, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3dv(VKRTMissProg _missprog, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4dv(VKRTMissProg _missprog, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1d(OWLGeom obj, const char *name, double val);
+// VKRT_API void vkrtGeomSet2d(OWLGeom obj, const char *name, double x, double y);
+// VKRT_API void vkrtGeomSet3d(OWLGeom obj, const char *name, double x, double y, double z);
+// VKRT_API void vkrtGeomSet4d(OWLGeom obj, const char *name, double x, double y, double z, double w);
+// VKRT_API void vkrtGeomSet2dv(OWLGeom obj, const char *name, const double *val);
+// VKRT_API void vkrtGeomSet3dv(OWLGeom obj, const char *name, const double *val);
+// VKRT_API void vkrtGeomSet4dv(OWLGeom obj, const char *name, const double *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1d(OWLParams obj, const char *name, double val);
+// VKRT_API void vkrtParamsSet2d(OWLParams obj, const char *name, double x, double y);
+// VKRT_API void vkrtParamsSet3d(OWLParams obj, const char *name, double x, double y, double z);
+// VKRT_API void vkrtParamsSet4d(OWLParams obj, const char *name, double x, double y, double z, double w);
+// VKRT_API void vkrtParamsSet2dv(OWLParams obj, const char *name, const double *val);
+// VKRT_API void vkrtParamsSet3dv(OWLParams obj, const char *name, const double *val);
+// VKRT_API void vkrtParamsSet4dv(OWLParams obj, const char *name, const double *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1l(VKRTRayGen _raygen, const char *name, int64_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T);
+  int64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2l(VKRTRayGen _raygen, const char *name, int64_t x, int64_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  int64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3l(VKRTRayGen _raygen, const char *name, int64_t x, int64_t y, int64_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  int64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4l(VKRTRayGen _raygen, const char *name, int64_t x, int64_t y, int64_t z, int64_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  int64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2lv(VKRTRayGen _raygen, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3lv(VKRTRayGen _raygen, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4lv(VKRTRayGen _raygen, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1l(VKRTMissProg _missprog, const char *name, int64_t x)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T);
+  int64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2l(VKRTMissProg _missprog, const char *name, int64_t x, int64_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  int64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3l(VKRTMissProg _missprog, const char *name, int64_t x, int64_t y, int64_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  int64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4l(VKRTMissProg _missprog, const char *name, int64_t x, int64_t y, int64_t z, int64_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  int64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2lv(VKRTMissProg _missprog, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3lv(VKRTMissProg _missprog, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4lv(VKRTMissProg _missprog, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1l(OWLGeom obj, const char *name, int64_t val);
+// VKRT_API void vkrtGeomSet2l(OWLGeom obj, const char *name, int64_t x, int64_t y);
+// VKRT_API void vkrtGeomSet3l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z);
+// VKRT_API void vkrtGeomSet4l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+// VKRT_API void vkrtGeomSet2lv(OWLGeom obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtGeomSet3lv(OWLGeom obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtGeomSet4lv(OWLGeom obj, const char *name, const int64_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1l(OWLParams obj, const char *name, int64_t val);
+// VKRT_API void vkrtParamsSet2l(OWLParams obj, const char *name, int64_t x, int64_t y);
+// VKRT_API void vkrtParamsSet3l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z);
+// VKRT_API void vkrtParamsSet4l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+// VKRT_API void vkrtParamsSet2lv(OWLParams obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtParamsSet3lv(OWLParams obj, const char *name, const int64_t *val);
+// VKRT_API void vkrtParamsSet4lv(OWLParams obj, const char *name, const int64_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+VKRT_API void vkrtRayGenSet1ul(VKRTRayGen _raygen, const char *name, uint64_t x) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T);
+  uint64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2ul(VKRTRayGen _raygen, const char *name, uint64_t x, uint64_t y) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  uint64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3ul(VKRTRayGen _raygen, const char *name, uint64_t x, uint64_t y, uint64_t z) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  uint64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4ul(VKRTRayGen _raygen, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  uint64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet2ulv(VKRTRayGen _raygen, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet3ulv(VKRTRayGen _raygen, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtRayGenSet4ulv(VKRTRayGen _raygen, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+// setters for variables on "MissProg"s
+VKRT_API void vkrtMissProgSet1ul(VKRTMissProg _missprog, const char *name, uint64_t val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2ul(VKRTMissProg _missprog, const char *name, uint64_t x, uint64_t y)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  uint64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3ul(VKRTMissProg _missprog, const char *name, uint64_t x, uint64_t y, uint64_t z)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  uint64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4ul(VKRTMissProg _missprog, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  uint64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet2ulv(VKRTMissProg _missprog, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet3ulv(VKRTMissProg _missprog, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtMissProgSet4ulv(VKRTMissProg _missprog, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1ul(OWLGeom obj, const char *name, uint64_t val);
+// VKRT_API void vkrtGeomSet2ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y);
+// VKRT_API void vkrtGeomSet3ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
+// VKRT_API void vkrtGeomSet4ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+// VKRT_API void vkrtGeomSet2ulv(OWLGeom obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtGeomSet3ulv(OWLGeom obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtGeomSet4ulv(OWLGeom obj, const char *name, const uint64_t *val);
+
+// setters for variables on "Params"s
+// VKRT_API void vkrtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
+// VKRT_API void vkrtParamsSet2ul(OWLParams obj, const char *name, uint64_t x, uint64_t y);
+// VKRT_API void vkrtParamsSet3ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
+// VKRT_API void vkrtParamsSet4ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+// VKRT_API void vkrtParamsSet2ulv(OWLParams obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtParamsSet3ulv(OWLParams obj, const char *name, const uint64_t *val);
+// VKRT_API void vkrtParamsSet4ulv(OWLParams obj, const char *name, const uint64_t *val);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1797,8 +3603,8 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
 // ------------------------------------------------------------------
 
 // setters for variables on "RayGen"s
-// VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
-// VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
+// VKRT_API void vkrtRayGenSetTexture(VKRTRayGen _raygen, const char *name, VKRTTexture val) 
+// VKRT_API void vkrtRayGenSetPointer(VKRTRayGen _raygen, const char *name, const void *val) 
 VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuffer _val)
 {
   LOG_API_CALL();
@@ -1822,7 +3628,7 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
   memcpy(raygen->vars[name].data, &addr, size);
 }
 
-// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
+// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen _raygen, const char *name, VKRTGroup val);
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void *val)
 {
   LOG_API_CALL();
@@ -1854,17 +3660,40 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void 
 // VKRT_API void vkrtParamsSetRaw(VKRTParams obj, const char *name, const void *val);
 
 // setters for variables on "MissProg"s
-// VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
-// VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
-// VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
+// VKRT_API void vkrtMissProgSetTexture(VKRTMissProg _missprog, const char *name, VKRTTexture val)
+
+// VKRT_API void vkrtMissProgSetPointer(VKRTMissProg _missprog, const char *name, const void *val);
+VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg _missProg, const char *name, VKRTBuffer _val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *missprog = (vkrt::MissProg*)_missProg;
+  assert(missprog);
+
+  vkrt::Buffer *val = (vkrt::Buffer*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(missprog->vars.find(std::string(name)) != missprog->vars.end());
+
+  // The found variable must be a buffer
+  assert(missprog->vars[name].decl.type == VKRT_BUFFER);
+
+  // Buffer pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(missprog->vars[name].data, &addr, size);
+}
+
+// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg _missprog, const char *name, VKRTGroup val);
 VKRT_API void vkrtMissProgSetRaw(VKRTMissProg _missProg, const char *name, const void *val)
 {
   LOG_API_CALL();
   vkrt::MissProg *missProg = (vkrt::MissProg*)_missProg;
   assert(missProg);
 
-  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  // 1. Figure out if the variable "name" exists
   assert(missProg->vars.find(std::string(name)) != missProg->vars.end());
 
   // 2. Get the expected size for this variable
