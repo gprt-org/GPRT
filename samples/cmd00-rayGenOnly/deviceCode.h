@@ -23,15 +23,12 @@
 #include "vkrt.h"
 
 // Note, none of these structures can have pointers...
-
+// Also note! HLSL aligns to float4 boundaries
 struct RayGenData
 {
   uint64_t fbPtr;
-  float second;
-};
+  int2 fbSize;
 
-struct MissProgData
-{
-  uint32_t third;
-  uint32_t fourth;
+  float3 color0; float pad1; // note the padding here
+  float3 color1; float pad2; // note the padding here
 };

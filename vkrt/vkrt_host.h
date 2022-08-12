@@ -336,7 +336,11 @@ typedef struct _VKRTVarDef {
 } VKRTVarDef;
 
 VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
+
+/*! technically this is currently a no-op, but we have this function around to 
+  match OWL */
 VKRT_API void vkrtBuildPrograms(VKRTContext context);
+
 VKRT_API void vkrtBuildPipeline(VKRTContext context);
 VKRT_API void vkrtBuildSBT(VKRTContext context,
                          VKRTBuildSBTFlags flags VKRT_IF_CPP(=VKRT_SBT_ALL));

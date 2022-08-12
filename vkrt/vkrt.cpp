@@ -1316,69 +1316,80 @@ namespace vkrt {
       int numRayTypes = 1;
 
       // Raygen records
-      if (raygenShaderBindingTable.size != recordSize * raygenPrograms.size()) {
-        raygenShaderBindingTable.destroy();
-      }
-      if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
-        raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice,
-        bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
-      }
-      raygenShaderBindingTable.map();
-      memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
-      for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
-        RayGen *raygen = raygenPrograms[idx];
-        size_t stride = recordSize;
-        size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-        uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
-        for (auto &var : raygen->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          std::cout<<"Embedding " << var.first << " into raygen SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
-          memcpy(params + varOffset, var.second.data, varSize);
+      if (raygenPrograms.size() > 0) {
+        if (raygenShaderBindingTable.size != recordSize * raygenPrograms.size()) {
+          raygenShaderBindingTable.destroy();
         }
+        if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
+          raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice,
+          bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
+        }
+        raygenShaderBindingTable.map();
+        memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
+        for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
+          RayGen *raygen = raygenPrograms[idx];
+          size_t stride = recordSize;
+          size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
+          uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
+          for (auto &var : raygen->vars) {
+            size_t varOffset = var.second.decl.offset;
+            size_t varSize = getSize(var.second.decl.type);
+            std::cout<<"Embedding " << var.first << " into raygen SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
+            memcpy(params + varOffset, var.second.data, varSize);
+          }
+        }
+        raygenShaderBindingTable.unmap();
       }
-      raygenShaderBindingTable.unmap();
 
       // Miss records
-      if (missShaderBindingTable.size != recordSize * missPrograms.size()) {
-        missShaderBindingTable.destroy();
-      }
-      if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
-        missShaderBindingTable = Buffer(physicalDevice, logicalDevice,
-          bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
-      }
-      missShaderBindingTable.map();
-      memcpy(missShaderBindingTable.mapped,
-        shaderHandleStorage.data() + handleSize * numRayGens,
-        handleSize);
-      for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
-        MissProg *missprog = missPrograms[idx];
-        size_t stride = recordSize;
-        size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-        uint8_t* params = ((uint8_t*) (missShaderBindingTable.mapped)) + offset;
-        for (auto &var : missprog->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          std::cout<<"Embedding " << var.first << " into missprog SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
-          memcpy(params + varOffset, var.second.data, varSize);
+      if (missPrograms.size() > 0) {
+        if (missShaderBindingTable.size != recordSize * missPrograms.size()) {
+          missShaderBindingTable.destroy();
         }
+        if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
+          missShaderBindingTable = Buffer(physicalDevice, logicalDevice,
+            bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
+        }
+        missShaderBindingTable.map();
+        memcpy(missShaderBindingTable.mapped,
+          shaderHandleStorage.data() + handleSize * numRayGens,
+          handleSize);
+        for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
+          MissProg *missprog = missPrograms[idx];
+          size_t stride = recordSize;
+          size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
+          uint8_t* params = ((uint8_t*) (missShaderBindingTable.mapped)) + offset;
+          for (auto &var : missprog->vars) {
+            size_t varOffset = var.second.decl.offset;
+            size_t varSize = getSize(var.second.decl.type);
+            std::cout<<"Embedding " << var.first << " into missprog SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
+            memcpy(params + varOffset, var.second.data, varSize);
+          }
+        }
+        missShaderBindingTable.unmap();
       }
-      missShaderBindingTable.unmap();
 
       // Hit records
-      if (hitShaderBindingTable.size != recordSize * 1 /*TODO!*/) {
-        hitShaderBindingTable.destroy();
-      }
-      if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
-        hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, recordSize);
-      }
-      hitShaderBindingTable.map();
-      memcpy(hitShaderBindingTable.mapped,
-          shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
-          handleSize);
+      // if (hitgroupPrograms.size() > 0) {
+        if (hitShaderBindingTable.size != recordSize * 1 /*TODO!*/) {
+          hitShaderBindingTable.destroy();
+        }
+        if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
+          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, recordSize);
+        }
+        hitShaderBindingTable.map();
+        memcpy(hitShaderBindingTable.mapped,
+            shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
+            handleSize);
 
-      // TODO: hit programs...
-      hitShaderBindingTable.unmap();
+        // TODO: hit programs...
+        hitShaderBindingTable.unmap();
+      }
+    // }
+
+    void buildPrograms()
+    {
+      // At the moment, we don't actually build our programs here. 
     }
 
     void buildPipeline()
@@ -1396,52 +1407,6 @@ namespace vkrt {
         Setup ray tracing shader groups
       */
       std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-
-      // auto loadShader = [context](std::string fileName, VkShaderStageFlagBits stage)-> VkPipelineShaderStageCreateInfo
-      // {
-
-      //   auto loadShader = [](const char *fileName, VkDevice device) -> VkShaderModule
-      // 	{
-      // 		std::ifstream is(fileName, std::ios::binary | std::ios::in | std::ios::ate);
-
-      // 		if (is.is_open())
-      // 		{
-      // 			size_t size = is.tellg();
-      // 			is.seekg(0, std::ios::beg);
-      // 			char* shaderCode = new char[size];
-      // 			is.read(shaderCode, size);
-      // 			is.close();
-
-      // 			assert(size > 0);
-
-      // 			VkShaderModule shaderModule;
-      // 			VkShaderModuleCreateInfo moduleCreateInfo{};
-      // 			moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      // 			moduleCreateInfo.codeSize = size;
-      // 			moduleCreateInfo.pCode = (uint32_t*)shaderCode;
-
-      // 			VK_CHECK_RESULT(vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderModule));
-
-      // 			delete[] shaderCode;
-
-      // 			return shaderModule;
-      // 		}
-      // 		else
-      // 		{
-      // 			std::cerr << "Error: Could not open shader file \"" << fileName << "\"" << "\n";
-      // 			return VK_NULL_HANDLE;
-      // 		}
-      // 	};
-
-      //   VkPipelineShaderStageCreateInfo shaderStage = {};
-      //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      //   shaderStage.stage = stage;
-      //   shaderStage.module = loadShader(fileName.c_str(), context->logicalDevice);
-      //   shaderStage.pName = "main";
-      //   assert(shaderStage.module != VK_NULL_HANDLE);
-      //   context->shaderModules.push_back(shaderStage.module);
-      //   return shaderStage;
-      // };
 
       // Ray generation groups
       {
@@ -1663,7 +1628,10 @@ vkrtBufferUnmap(VKRTBuffer _buffer, int deviceID)
 
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
-  VKRT_NOTIMPLEMENTED;
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+  context->buildPrograms();
+  LOG("programs built...");
 }
 
 
@@ -1743,16 +1711,19 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * 1; // only one
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
-  missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->missShaderBindingTable.buffer);
-  missShaderSbtEntry.stride = recordSize;
-  missShaderSbtEntry.size = missShaderSbtEntry.stride * 1; // only one
-
+  if (context->missPrograms.size() > 0) {
+    missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
+      context->logicalDevice, context->missShaderBindingTable.buffer);
+    missShaderSbtEntry.stride = recordSize;
+    missShaderSbtEntry.size = missShaderSbtEntry.stride * 1; // only one
+  }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
+  // if (context->hitGroupPrograms.size() > 0) {
   hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
     context->logicalDevice, context->hitShaderBindingTable.buffer);
   hitShaderSbtEntry.stride = recordSize;
   hitShaderSbtEntry.size = hitShaderSbtEntry.stride * 1; // only one
+  // }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{}; // empty
   // callableShaderSbtEntry.stride = handleSizeAligned;

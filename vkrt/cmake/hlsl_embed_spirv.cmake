@@ -25,14 +25,18 @@ cmake_minimum_required(VERSION 3.12)
 set(Vulkan_BIN_DIR ${Vulkan_INCLUDE_DIR}/../bin)
 
 # set(CMAKE_DXC_COMPILER ${Vulkan_BIN_DIR}/dxc)
-set(CMAKE_DXC_COMPILER C:/Users/natevm/git/DirectXShaderCompiler/build/Debug/bin/dxc)
+# set(CMAKE_DXC_COMPILER C:/Users/natevm/git/DirectXShaderCompiler/build/Debug/bin/dxc)
+# Ideally we'd use the DXC that comes with Vulkan, but we need vk::RayBufferStore, which is ToT atm...
+find_program(CMAKE_DXC_COMPILER dxc 
+  DOC "Path to the dxc executable." 
+  HINTS ${Vulkan_BIN_DIR}
+  NO_DEFAULT_PATH
+)
 
 set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
 set(CMAKE_SPIRV_ASSEMBLER ${Vulkan_BIN_DIR}/spirv-as)
 set(CMAKE_SPIRV_DISASSEMBLER ${Vulkan_BIN_DIR}/spirv-dis)
 
-# find_program(CMAKE_DXC_COMPILER dxc DOC "Path to the dxc executable." 
-    # HINTS ${Vulkan_BIN_DIR})
 if(NOT CMAKE_DXC_COMPILER)
   message(FATAL_ERROR "dxc not found.")
 endif()

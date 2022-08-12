@@ -42,101 +42,103 @@
 extern "C" char deviceCode_spv[];
 extern "C" uint32_t deviceCode_spv_size;
 
-// extern "C" char simpleRayGen_spv[];
-// extern "C" uint32_t simpleRayGen_spv_size;
-// extern "C" char simpleMissProg_spv[];
-// extern "C" uint32_t simpleMissProg_spv_size;
-
-const int2 fbSize = {1,1};
+// When run, this program produces this PNG as output.
+// In this case the correct result is a red and light gray checkerboard,
+// as nothing is actually rendered
+const char *outFileName = "s00-rayGenOnly.png";
+// image resolution
+const int2 fbSize = {800,600};
 
 #include <iostream>
 int main(int ac, char **av)
 {
-    LOG("vkrt example '" << av[0] << "' starting up");
+  // The output window will show comments for many of the methods called.
+  // Walking through the code line by line with a debugger is educational.
+  LOG("vkrt example '" << av[0] << "' starting up");
 
-    // ##################################################################
-    // set up all the *CODE* we want to run
-    // ##################################################################
+  // ##################################################################
+  // set up all the *CODE* we want to run
+  // ##################################################################
 
-    LOG("building module, programs, and pipeline");
+  LOG("building module, programs, and pipeline");
 
-    // Initialize Vulkan, and create a "vkrt device," a context to hold the
-    // ray generation shader and output buffer. The "1" is the number of devices requested.
-    VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
+  // Initialize Vulkan, and create a "vkrt device," a context to hold the
+  // ray generation shader and output buffer. The "1" is the number of devices requested.
+  VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
 
-    VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
+  // SPIR-V is the intermediate code that the GPU deviceCode.hlsl shader program is converted into.
+  // You can see the machine-centric SPIR-V code in
+  // build\samples\cmd00-rayGenOnly\deviceCode.spv
+  // We store this SPIR-V intermediate code representation in a VKRT module.
+  VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
 
-    VKRTVarDecl rayGenVars[]
+  VKRTVarDecl rayGenVars[]
     = {
-        { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
-        { "second", VKRT_FLOAT, VKRT_OFFSETOF(RayGenData, second) },
-        { /* sentinel: */ nullptr }
-    };
-    // Allocate room for one RayGen shader, create it, and
-    // hold on to it with the "owl" context
-    VKRTRayGen rayGen
-        = vkrtRayGenCreate(vkrt, module, "simpleRayGen",
-                        sizeof(RayGenData),rayGenVars,-1);
+      { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
+      { "fbSize", VKRT_INT2, VKRT_OFFSETOF(RayGenData, fbSize) },
+      { "color0", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color0) },
+      { "color1", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color1) },
+      { /* sentinel: */ nullptr }
+  };
 
-    VKRTVarDecl missProgVars[]
-    = {
-        { "third", VKRT_UINT64_T, VKRT_OFFSETOF(MissProgData, third) },
-        { "fourth", VKRT_UINT64_T, VKRT_OFFSETOF(MissProgData, fourth) },
-        { /* sentinel: */ nullptr }
-    };
-    VKRTMissProg missProg
-        = vkrtMissProgCreate(vkrt, module, "simpleMissProg",
-                            sizeof(MissProgData),missProgVars,-1);
+  std::cout<<"Sizeof raygendata " << sizeof(RayGenData) << std::endl;
+  std::cout<<"Sizeof int2 " << sizeof(int2) << std::endl;
+  // Allocate room for one RayGen shader, create it, and
+  // hold on to it with the "owl" context
+  VKRTRayGen rayGen
+      = vkrtRayGenCreate(vkrt, module, "simpleRayGen",
+                      sizeof(RayGenData),rayGenVars,-1);
 
-    // (re-)builds all optix programs, with current pipeline settings
-    // vkrtBuildPrograms(vkrt);
+  // (re-)builds all optix programs, with current pipeline settings
+  vkrtBuildPrograms(vkrt);
 
-    // Create the pipeline.
-    vkrtBuildPipeline(vkrt);
+  // Create the pipeline.
+  vkrtBuildPipeline(vkrt);
 
-    // ------------------------------------------------------------------
-    // alloc buffers
-    // ------------------------------------------------------------------
-    LOG("allocating frame buffer");
-    // Create a frame buffer as page-locked, aka "pinned" memory.
-    // GPU writes to CPU memory directly (slow) but no transfers needed
-    VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
-                                            /*type:*/VKRT_INT,
-                                            /*size:*/fbSize.x*fbSize.y);
+  // ------------------------------------------------------------------
+  // alloc buffers
+  // ------------------------------------------------------------------
+  LOG("allocating frame buffer");
+  // Create a frame buffer as page-locked, aka "pinned" memory.
+  // GPU writes to CPU memory directly (slow) but no transfers needed
+  VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
+                                          /*type:*/VKRT_INT,
+                                          /*size:*/fbSize.x*fbSize.y);
 
-    std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
-    void* fb = vkrtBufferGetPointer(frameBuffer,0);
-    memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
+  // std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
+  // void* fb = vkrtBufferGetPointer(frameBuffer,0);
+  // memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
 
-    // ------------------------------------------------------------------
-    // build Shader Binding Table (SBT) required to trace the groups
-    // ------------------------------------------------------------------
-    float second = 42.0f;
-    vkrtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-    vkrtRayGenSetRaw(rayGen, "second", &second);
+  // ------------------------------------------------------------------
+  // build Shader Binding Table (SBT) required to trace the groups
+  // ------------------------------------------------------------------
+  vkrtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
+  vkrtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
+  vkrtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
+  vkrtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
+  // Build a shader binding table entry for the ray generation record.
+  vkrtBuildSBT(vkrt);
 
-    uint64_t third = 26;
-    uint64_t fourth = 7;
-    vkrtMissProgSetRaw(missProg, "third", &third);
-    vkrtMissProgSetRaw(missProg, "fourth", &fourth);
+  // ##################################################################
+  // now that everything is ready: launch it ....
+  // ##################################################################
+  LOG("executing the launch ...");
+  vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
 
-    // Build a shader binding table entry for the ray generation record.
-    vkrtBuildSBT(vkrt);
-    vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  const uint32_t *fb = (const uint32_t*)vkrtBufferGetPointer(frameBuffer,0);
+  stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
+                 fb,fbSize.x*sizeof(uint32_t));
+  LOG_OK("written rendered frame buffer to file "<<outFileName);
 
-    fb = vkrtBufferGetPointer(frameBuffer,0);
-    memcpy(test.data(), fb, sizeof(uint32_t) * test.size());
-    std::cout<<"Read back "<<test[0] << std::endl;
+  // ##################################################################
+  // and finally, clean up
+  // ##################################################################
 
-    second = 1337.0f;
-    vkrtRayGenSetRaw(rayGen, "second", &second);
-    vkrtBuildSBT(vkrt);
-    vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+  LOG("cleaning up ...");
+  vkrtBufferRelease(frameBuffer);
+  vkrtRayGenRelease(rayGen);
+  vkrtContextDestroy(vkrt);
 
-    // Now finally, cleanup
-    vkrtBufferRelease(frameBuffer);
-    vkrtMissProgRelease(missProg);
-    vkrtRayGenRelease(rayGen);
-    vkrtContextDestroy(vkrt);
+  LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }
-

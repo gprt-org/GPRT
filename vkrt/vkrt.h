@@ -23,7 +23,7 @@
 #pragma once
 
 #ifdef VKRT_DEVICE
-#include "vkrt_device.h"
+#include "vkrt_device.hlsli"
 #else 
 #include "vkrt_host.h"
 #endif
