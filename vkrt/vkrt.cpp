@@ -591,6 +591,49 @@ namespace vkrt {
     }
   };
 
+  struct GeomType : public SBTEntry {
+    VkShaderModule shaderModule;
+    VkPipelineShaderStageCreateInfo shaderStage{};
+    VkShaderModuleCreateInfo moduleCreateInfo{};
+    VkDevice logicalDevice;
+
+    GeomType(VkDevice  _logicalDevice,
+             Module *module,
+             const char* entryPoint,
+             size_t      sizeOfVarStruct,
+             std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
+    {
+      std::cout<<"Geom type is being made!"<<std::endl;
+
+      spv_binary binary = module->getBinary(entryPoint);
+
+      // store a reference to the logical device this module is made on
+      logicalDevice = _logicalDevice;
+
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
+
+      // this doesn't make much sense... should really be creating these modules as programs are set.
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
+        NULL, &shaderModule));
+
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+      shaderStage.module = shaderModule;
+      shaderStage.pName = entryPoint;
+      assert(shaderStage.module != VK_NULL_HANDLE);
+
+      module->releaseBinary(binary);
+
+      vars = _vars;
+    }
+    ~GeomType() {
+      std::cout<<"Geom type is being destroyed!"<<std::endl;
+      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    }
+  };
+
 
 
   struct Context {
