@@ -22,8 +22,8 @@
 
 #include <vulkan/vulkan.h>
 
-#include "slang.h"
-#include "slang-cpp-types.h"
+#include "hlsl++.h"
+using namespace hlslpp;
 
 #include <sys/types.h>
 #include <stdint.h>

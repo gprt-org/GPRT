@@ -27,23 +27,23 @@
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
 void simpleRayGen() {
-  uint2 pixelID = DispatchRaysIndex().xy;
+//   uint2 pixelID = DispatchRaysIndex().xy;
 
-  RaytracingAccelerationStructure test = vkrt::getAccelHandle(raygenSBTData.fbPtr);
+//   if (pixelID.x == 0 && pixelID.y == 0) {
+//     uint32_t test1 = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
+//     printf("Hello from your first raygen program!\n");
+//     printf("Size of RayGenData %d\n", sizeof(RayGenData));
+//     printf("Color 0 %f %f %f\n", raygenSBTData.color0.x, raygenSBTData.color0.y, raygenSBTData.color0.z);
+//     printf("Color 1 %f %f %f\n", raygenSBTData.color1.x, raygenSBTData.color1.y, raygenSBTData.color1.z);
+//   }
 
-  if (pixelID.x == 0 && pixelID.y == 0) {
-    uint32_t test1 = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
-    printf("Hello from your first raygen program!\n");
-    printf("Size of accel %d\n", sizeof(float));
-  }
+//   // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
+//   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+//   // alternate pattern, showing that pixel (0,0) is in the upper left corner
+//   // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
+//   const float3 color = (pattern & 1) ? raygenSBTData.color1 : raygenSBTData.color0;
 
-  // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
-  int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  // alternate pattern, showing that pixel (0,0) is in the upper left corner
-  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? raygenSBTData.color1 : raygenSBTData.color0;
-
-  // find the frame buffer location (x + width*y) and put the "computed" result there
-  const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
-  vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(color));
+//   // find the frame buffer location (x + width*y) and put the "computed" result there
+//   const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
+//   vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(color));
 }

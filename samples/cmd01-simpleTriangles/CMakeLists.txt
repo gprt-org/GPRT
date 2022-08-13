@@ -20,5 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangles)
+embed_spirv(
+  OUTPUT_TARGET
+    sample01_deviceCode
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
+
+add_executable(sample01_simpleTriangles hostCode.cpp)
+target_link_libraries(sample01_simpleTriangles
+  PRIVATE
+    sample01_deviceCode
+    vkrt::vkrt
+    stb_image
+)

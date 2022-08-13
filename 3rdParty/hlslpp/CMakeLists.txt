@@ -20,5 +20,5 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangles)
+add_library(hlslpp INTERFACE)
+target_include_directories(hlslpp INTERFACE ${CMAKE_CURRENT_LIST_DIR})

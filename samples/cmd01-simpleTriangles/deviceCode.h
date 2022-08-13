@@ -21,29 +21,36 @@
 // SOFTWARE.
 
 #include "vkrt.h"
-#include "deviceCode.h"
 
-[[vk::shader_record_ext]]
-ConstantBuffer<RayGenData> raygenSBTData;
-[shader("raygeneration")]
-void simpleRayGen() {
-  uint2 pixelID = DispatchRaysIndex().xy;
+/* variables for the triangle mesh geometry */
+struct TrianglesGeomData
+{
+  /*! base color we use for the entire mesh */
+  float3 color; float pad;
+  /*! array/buffer of vertex indices */
+  uint64_t index; // vec3i*
+  /*! array/buffer of vertex positions */
+  uint64_t vertex; // vec3f *
+};
 
-  RaytracingAccelerationStructure test = vkrt::getAccelHandle(raygenSBTData.fbPtr);
+struct RayGenData
+{
+  uint64_t fbPtr;
+  int2 fbSize;
+  // OptixTraversableHandle world;
+  uint64_t world; // RaytracingAccelerationStructure*
 
-  if (pixelID.x == 0 && pixelID.y == 0) {
-    uint32_t test1 = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
-    printf("Hello from your first raygen program!\n");
-    printf("Size of accel %d\n", sizeof(float));
-  }
+  struct { 
+    float3 pos;    float pad1;
+    float3 dir_00; float pad2;
+    float3 dir_du; float pad3;
+    float3 dir_dv; float pad4;
+  } camera;
+};
 
-  // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
-  int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  // alternate pattern, showing that pixel (0,0) is in the upper left corner
-  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? raygenSBTData.color1 : raygenSBTData.color0;
-
-  // find the frame buffer location (x + width*y) and put the "computed" result there
-  const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
-  vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(color));
-}
+/* variables for the miss program */
+struct MissProgData
+{
+  float3  color0;  float pad1;
+  float3  color1;  float pad2;
+};

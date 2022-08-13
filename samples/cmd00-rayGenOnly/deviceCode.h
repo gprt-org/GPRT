@@ -22,10 +22,10 @@
 
 #include "vkrt.h"
 
-// Note, none of these structures can have pointers...
-// Also note! HLSL aligns to float4 boundaries
+// note! HLSL aligns to float4 boundaries!
 struct RayGenData
 {
+  // pointers are represented using uint64_t
   uint64_t fbPtr;
   int2 fbSize;
 

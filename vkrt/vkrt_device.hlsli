@@ -34,4 +34,7 @@ namespace vkrt {
       (make_8bit(color.z) << 16) +
       (0xffU << 24);
   }
+
+  [[vk::ext_instruction(4447)]]
+  RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 };

@@ -28,8 +28,6 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
-#include <vector>
-
 #define LOG(message)                                            \
   std::cout << VKRT_TERMINAL_BLUE;                               \
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
@@ -39,8 +37,7 @@
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
   std::cout << VKRT_TERMINAL_DEFAULT;
 
-extern "C" char deviceCode_spv[];
-extern "C" uint32_t deviceCode_spv_size;
+extern "C" char sample00_deviceCode_spv[];
 
 // When run, this program produces this PNG as output.
 // In this case the correct result is a red and light gray checkerboard,
@@ -70,7 +67,7 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a VKRT module.
-  VKRTModule module = vkrtModuleCreate(vkrt,std::string(deviceCode_spv, deviceCode_spv + deviceCode_spv_size).c_str());
+  VKRTModule module = vkrtModuleCreate(vkrt,sample00_deviceCode_spv);
 
   VKRTVarDecl rayGenVars[]
     = {
@@ -104,10 +101,6 @@ int main(int ac, char **av)
   VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
                                           /*type:*/VKRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
-
-  // std::vector<uint32_t> test(fbSize.x * fbSize.y, 42);
-  // void* fb = vkrtBufferGetPointer(frameBuffer,0);
-  // memcpy(fb, test.data(), sizeof(uint32_t) * test.size());
 
   // ------------------------------------------------------------------
   // build Shader Binding Table (SBT) required to trace the groups

@@ -22,7 +22,7 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    deviceCode
+    sample00_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
     # For whatever reason, including a .h in the spv causes a VK_INITIALIZATION_FAILED (-3) when creating shader modules
@@ -32,7 +32,7 @@ embed_spirv(
 add_executable(sample00_rayGenOnly hostCode.cpp)
 target_link_libraries(sample00_rayGenOnly
   PRIVATE
-    deviceCode
+    sample00_deviceCode
     vkrt::vkrt
     stb_image
 )
