@@ -309,6 +309,7 @@ typedef enum
     else if (type == VKRT_INT64_T4) return sizeof(uint64_t) * 4;
 
     else if (type == VKRT_BUFFER) return sizeof(uint64_t);
+    else if (type == VKRT_BUFPTR) return sizeof(uint64_t);
 
     else if (type == VKRT_FLOAT) return sizeof(float);
     else if (type == VKRT_FLOAT2) return sizeof(float) * 2;
@@ -376,6 +377,12 @@ vkrtContextCreate(int32_t *requestedDeviceIDs VKRT_IF_CPP(=nullptr),
 VKRT_API void
 vkrtContextDestroy(VKRTContext context);
 
+/*! set number of ray types to be used in this context; this should be
+  done before any programs, pipelines, geometries, etc get
+  created */
+VKRT_API void
+vkrtContextSetRayTypeCount(VKRTContext context,
+                           size_t numRayTypes);
 
 VKRT_API VKRTRayGen
 vkrtRayGenCreate(VKRTContext  context,

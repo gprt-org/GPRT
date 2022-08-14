@@ -550,7 +550,8 @@ namespace vkrt {
 
       vars = _vars;
     }
-    ~RayGen() {
+    ~RayGen() {}
+    void destroy() {
       std::cout<<"Ray gen is being destroyed!"<<std::endl;
       vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     }
@@ -592,52 +593,84 @@ namespace vkrt {
 
       vars = _vars;
     }
-    ~MissProg() {
+    ~MissProg() {}
+    void destroy() {
       std::cout<<"Miss program is being destroyed!"<<std::endl;
       vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     }
   };
 
   struct GeomType : public SBTEntry {
-    VkShaderModule shaderModule;
-    VkPipelineShaderStageCreateInfo shaderStage{};
-    VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
-
+    std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
+    
     GeomType(VkDevice  _logicalDevice,
-             Module *module,
-             const char* entryPoint,
+             uint32_t numRayTypes,
              size_t      sizeOfVarStruct,
              std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
     {
       std::cout<<"Geom type is being made!"<<std::endl;
-
-      spv_binary binary = module->getBinary(entryPoint);
+      closestHitShaderStages.resize(numRayTypes, {});
 
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
-
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
-      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
-
-      // this doesn't make much sense... should really be creating these modules as programs are set.
-      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
-        NULL, &shaderModule));
-
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-      shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint;
-      assert(shaderStage.module != VK_NULL_HANDLE);
-
-      module->releaseBinary(binary);
-
       vars = _vars;
     }
     ~GeomType() {
       std::cout<<"Geom type is being destroyed!"<<std::endl;
-      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+      // vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    }
+
+    void setClosestHit(int rayType,
+                       Module *module,
+                       const char* entryPoint) 
+    {
+      spv_binary binary = module->getBinary(entryPoint);
+      VkShaderModuleCreateInfo moduleCreateInfo{};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary->code;
+
+      VkShaderModule shaderModule;
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
+        NULL, &shaderModule));
+
+      closestHitShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      closestHitShaderStages[rayType].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+      closestHitShaderStages[rayType].module = shaderModule;
+      closestHitShaderStages[rayType].pName = entryPoint;
+      assert(closestHitShaderStages[rayType].module != VK_NULL_HANDLE);
+
+      module->releaseBinary(binary);
+    }
+
+    void setAnyHit(int rayType,
+                       Module *module,
+                       const char* entryPoint) 
+    {
+      std::cout<<"TODO! Create a shader module for this any hit program"<<std::endl;
+    }
+
+    void setIntersectProg(int rayType,
+                       Module *module,
+                       const char* entryPoint) 
+    {
+      std::cout<<"TODO! Create a shader module for this intersect program"<<std::endl;
+    }
+
+    void setBoundsProg(Module *module,
+                       const char* entryPoint) 
+    {
+      std::cout<<"TODO! Create a shader module for this bounds program"<<std::endl;
+    }
+
+    void destroy() {
+      std::cout<<"geom type is being destroyed!"<<std::endl;
+      for (uint32_t i = 0; i < closestHitShaderStages.size(); ++i) {
+        if (closestHitShaderStages[i].module)
+          vkDestroyShaderModule(logicalDevice, 
+            closestHitShaderStages[i].module, nullptr);
+      }
     }
   };
 
@@ -730,8 +763,8 @@ namespace vkrt {
     std::vector<VkFence> waitFences;
 
     // ray tracing pipeline and layout
-    VkPipeline pipeline;
-    VkPipelineLayout pipelineLayout;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 
     std::vector<RayGen*> raygenPrograms;
     std::vector<MissProg*> missPrograms;
@@ -740,6 +773,8 @@ namespace vkrt {
     vkrt::Buffer raygenShaderBindingTable;
     vkrt::Buffer missShaderBindingTable;
     vkrt::Buffer hitShaderBindingTable;
+
+    uint32_t numRayTypes = 1;
 
     /*! returns whether logging is enabled */
     inline static bool logging()
@@ -1595,6 +1630,7 @@ vkrtRayGenDestroy(VKRTRayGen _rayGen)
 {
   LOG_API_CALL();
   vkrt::RayGen *rayGen = (vkrt::RayGen*)_rayGen;
+  rayGen->destroy();
   delete rayGen;
   LOG("raygen destroyed...");
 }
@@ -1636,8 +1672,92 @@ vkrtMissProgDestroy(VKRTMissProg _missProg)
 {
   LOG_API_CALL();
   vkrt::MissProg *missProg = (vkrt::MissProg*)_missProg;
+  missProg->destroy();
   delete missProg;
   LOG("miss program destroyed...");
+}
+
+VKRT_API VKRTGeomType
+vkrtGeomTypeCreate(VKRTContext  _context,
+                   VKRTGeomKind kind,
+                   size_t       sizeOfVarStruct,
+                   VKRTVarDecl  *vars,
+                   int          numVars)
+{
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+
+  vkrt::GeomType *geomType = new vkrt::GeomType(
+    context->logicalDevice, context->numRayTypes,
+    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
+
+  LOG("geom type created...");
+  return (VKRTGeomType)geomType;
+}
+
+VKRT_API void 
+vkrtGeomTypeDestroy(VKRTGeomType _geomType)
+{
+  LOG_API_CALL();
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+  geomType->destroy();
+  delete geomType;
+  LOG("geom type destroyed...");
+}
+
+VKRT_API void
+vkrtGeomTypeSetClosestHit(VKRTGeomType _geomType,
+                          int rayType,
+                          VKRTModule _module,
+                          const char *progName)
+{
+  LOG_API_CALL();
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+  vkrt::Module *module = (vkrt::Module*)_module;
+
+  geomType->setClosestHit(rayType, module, progName);
+  LOG("assigning closest hit program to geom type...");
+}
+
+VKRT_API void
+vkrtGeomTypeSetAnyHit(VKRTGeomType _geomType,
+                          int rayType,
+                          VKRTModule _module,
+                          const char *progName)
+{
+  LOG_API_CALL();
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+  vkrt::Module *module = (vkrt::Module*)_module;
+
+  geomType->setAnyHit(rayType, module, progName);
+  LOG("assigning any hit program to geom type...");
+}
+
+VKRT_API void
+vkrtGeomTypeSetIntersectProg(VKRTGeomType _geomType,
+                          int rayType,
+                          VKRTModule _module,
+                          const char *progName)
+{
+  LOG_API_CALL();
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+  vkrt::Module *module = (vkrt::Module*)_module;
+
+  geomType->setIntersectProg(rayType, module, progName);
+  LOG("assigning intersect program to geom type...");
+}
+
+VKRT_API void
+vkrtGeomTypeSetBoundsProg(VKRTGeomType _geomType,
+                          VKRTModule _module,
+                          const char *progName)
+{
+  LOG_API_CALL();
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+  vkrt::Module *module = (vkrt::Module*)_module;
+
+  geomType->setBoundsProg(module, progName);
+  LOG("assigning bounds program to geom type...");
 }
 
 VKRT_API VKRTBuffer
