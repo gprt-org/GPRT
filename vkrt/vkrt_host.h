@@ -253,6 +253,14 @@ typedef enum
   }
   VKRTDataType;
 
+typedef enum
+  {
+   VKRT_USER,
+   VKRT_TRIANGLES,
+  //  VKRT_CURVES
+  }
+  VKRTGeomKind;
+
   inline size_t getSize(VKRTDataType type)
   {
          if (type == VKRT_INT8_T)  return sizeof(int8_t);
@@ -336,6 +344,7 @@ typedef struct _VKRTVarDef {
 } VKRTVarDef;
 
 VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
+VKRT_API void vkrtModuleDestroy(VKRTModule module);
 
 /*! technically this is currently a no-op, but we have this function around to 
   match OWL */
@@ -377,7 +386,7 @@ vkrtRayGenCreate(VKRTContext  context,
                  int         numVars);
                 
 VKRT_API void 
-vkrtRayGenRelease(VKRTRayGen rayGen);
+vkrtRayGenDestroy(VKRTRayGen rayGen);
 
 VKRT_API VKRTMissProg
 vkrtMissProgCreate(VKRTContext  context,
@@ -394,17 +403,50 @@ vkrtMissProgSet(VKRTContext  context,
                VKRTMissProg missProgToUse);
 
 VKRT_API void 
-vkrtMissProgRelease(VKRTMissProg missProg);
+vkrtMissProgDestroy(VKRTMissProg missProg);
+
+VKRT_API VKRTGeomType
+vkrtGeomTypeCreate(VKRTContext  context,
+                   VKRTGeomKind kind,
+                   size_t       sizeOfVarStruct,
+                   VKRTVarDecl  *vars,
+                   int          numVars);
+
+VKRT_API void 
+vkrtGeomTypeDestroy(VKRTGeomType geomType);
+
+VKRT_API void
+vkrtGeomTypeSetClosestHit(VKRTGeomType type,
+                          int rayType,
+                          VKRTModule module,
+                          const char *progName);
+
+VKRT_API void
+vkrtGeomTypeSetAnyHit(VKRTGeomType type,
+                      int rayType,
+                      VKRTModule module,
+                      const char *progName);
+
+VKRT_API void
+vkrtGeomTypeSetIntersectProg(VKRTGeomType type,
+                             int rayType,
+                             VKRTModule module,
+                             const char *progName);
+
+VKRT_API void
+vkrtGeomTypeSetBoundsProg(VKRTGeomType type,
+                          VKRTModule module,
+                          const char *progName);
 
 /*! creates a buffer that uses host pinned memory; that memory is
 pinned on the host and accessible to all devices */
 VKRT_API VKRTBuffer
 vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count);
 
-/*! Releases all underlying Vulkan resources for the given buffer and frees any 
+/*! Destroys all underlying Vulkan resources for the given buffer and frees any 
   underlying memory*/
 VKRT_API void
-vkrtBufferRelease(VKRTBuffer buffer);
+vkrtBufferDestroy(VKRTBuffer buffer);
 
 /*! returns the device pointer of the given pointer for the given
   device ID. For host-pinned or managed memory buffers (where the

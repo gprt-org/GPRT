@@ -341,7 +341,12 @@ namespace vkrt {
 
     VkResult map(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
     {
-      return vkMapMemory(device, memory, offset, size, 0, &mapped);
+      if (mapped) {
+        return VK_SUCCESS;
+      }
+      else {
+        return vkMapMemory(device, memory, offset, size, 0, &mapped);
+      }
     }
     void unmap()
     {
@@ -413,6 +418,8 @@ namespace vkrt {
 
     /* Default Constructor */
     Buffer() {};
+    
+    ~Buffer() {};
 
     Buffer(
       VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
@@ -637,8 +644,6 @@ namespace vkrt {
 
 
   struct Context {
-
-
     VkApplicationInfo appInfo;
 
     // Vulkan instance, stores all per-application states
@@ -1168,6 +1173,8 @@ namespace vkrt {
       // Required for VK_KHR_ray_tracing_pipeline
       enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
 
+      enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
       // Required by VK_KHR_spirv_1_4
       enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
 
@@ -1196,9 +1203,14 @@ namespace vkrt {
       rtPipelineFeatures.rayTracingPipeline = true;
       rtPipelineFeatures.pNext = &accelerationStructureFeatures;
 
+      VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
+      rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+      rtQueryFeatures.rayQuery = VK_TRUE;
+      rtQueryFeatures.pNext = &rtPipelineFeatures;
+
       VkPhysicalDeviceFeatures2 deviceFeatures2{};
       deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      deviceFeatures2.pNext = &rtPipelineFeatures;
+      deviceFeatures2.pNext = &rtQueryFeatures;
       vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 
 
@@ -1307,13 +1319,15 @@ namespace vkrt {
       vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
     };
 
-    ~Context() {
-
+    void destroy() {
       if (pipelineLayout)
         vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
       if (pipeline)
         vkDestroyPipeline(logicalDevice, pipeline, nullptr);
 
+      raygenShaderBindingTable.destroy();
+      missShaderBindingTable.destroy();
+      hitShaderBindingTable.destroy();
       vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
       vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
       vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
@@ -1321,8 +1335,12 @@ namespace vkrt {
       vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
       vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
       vkDestroyDevice(logicalDevice, nullptr);
+
+      freeDebugCallback(instance);
       vkDestroyInstance(instance, nullptr);
-    };
+    }
+
+    ~Context() {};
 
     void buildSBT() {
       auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
@@ -1348,8 +1366,14 @@ namespace vkrt {
       VkResult err = vkGetRayTracingShaderGroupHandlesKHR(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
       if (err) throw std::runtime_error("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
-      const VkBufferUsageFlags bufferUsageFlags = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      const VkBufferUsageFlags bufferUsageFlags = 
+        // means we can use this buffer as a SBT
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      const VkMemoryPropertyFlags memoryUsageFlags = 
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
 
 
       // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
@@ -1365,7 +1389,7 @@ namespace vkrt {
         }
         if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
           raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice,
-          bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
+            bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
         }
         raygenShaderBindingTable.map();
         memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
@@ -1522,7 +1546,7 @@ VKRT_API void vkrtContextDestroy(VKRTContext _context)
 {
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
-  // context->releaseAll();
+  context->destroy();
   delete context;
   LOG("context destroyed...");
 }
@@ -1530,13 +1554,18 @@ VKRT_API void vkrtContextDestroy(VKRTContext _context)
 VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, const char* spvCode)
 {
   LOG_API_CALL();
-
   vkrt::Context *context = (vkrt::Context*)_context;
-
   vkrt::Module *module = new vkrt::Module(spvCode);
-
   LOG("module created...");
   return (VKRTModule)module;
+}
+
+VKRT_API void vkrtModuleDestroy(VKRTModule _module)
+{
+  LOG_API_CALL();
+  vkrt::Module *module = (vkrt::Module*)_module;
+  delete module;
+  LOG("module destroyed...");
 }
 
 VKRT_API VKRTRayGen
@@ -1562,7 +1591,7 @@ vkrtRayGenCreate(VKRTContext _context,
 }
 
 VKRT_API void
-vkrtRayGenRelease(VKRTRayGen _rayGen)
+vkrtRayGenDestroy(VKRTRayGen _rayGen)
 {
   LOG_API_CALL();
   vkrt::RayGen *rayGen = (vkrt::RayGen*)_rayGen;
@@ -1603,7 +1632,7 @@ vkrtMissProgSet(VKRTContext  _context,
 }
 
 VKRT_API void
-vkrtMissProgRelease(VKRTMissProg _missProg)
+vkrtMissProgDestroy(VKRTMissProg _missProg)
 {
   LOG_API_CALL();
   vkrt::MissProg *missProg = (vkrt::MissProg*)_missProg;
@@ -1637,12 +1666,13 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
 }
 
 VKRT_API void
-vkrtBufferRelease(VKRTBuffer _buffer)
+vkrtBufferDestroy(VKRTBuffer _buffer)
 {
   LOG_API_CALL();
   vkrt::Buffer *buffer = (vkrt::Buffer*)_buffer;
   buffer->destroy();
-  LOG("buffer released");
+  delete buffer;
+  LOG("buffer destroyed");
 }
 
 VKRT_API void *

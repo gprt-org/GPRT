@@ -121,7 +121,7 @@ int main(int ac, char **av)
   LOG("done with launch, writing frame buffer to " << outFileName);
   const uint32_t *fb = (const uint32_t*)vkrtBufferGetPointer(frameBuffer,0);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
-                 fb,fbSize.x*sizeof(uint32_t));
+                 fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);
 
   // ##################################################################
@@ -129,8 +129,9 @@ int main(int ac, char **av)
   // ##################################################################
 
   LOG("cleaning up ...");
-  vkrtBufferRelease(frameBuffer);
-  vkrtRayGenRelease(rayGen);
+  vkrtBufferDestroy(frameBuffer);
+  vkrtRayGenDestroy(rayGen);
+  vkrtModuleDestroy(module);
   vkrtContextDestroy(vkrt);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
