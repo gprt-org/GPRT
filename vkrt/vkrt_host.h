@@ -86,7 +86,7 @@ typedef struct _VKRTGeom          *VKRTGeom;
 typedef struct _VKRTGeomType      *VKRTGeomType;
 typedef struct _VKRTVariable      *VKRTVariable;
 typedef struct _VKRTModule        *VKRTModule;
-typedef struct _VKRTGroup         *VKRTGroup;
+typedef struct _VKRTAccel         *VKRTAccel;
 typedef struct _VKRTRayGen        *VKRTRayGen;
 typedef struct _VKRTMissProg      *VKRTMissProg;
 
@@ -130,7 +130,7 @@ typedef enum
    VKRT_BUFFER_POINTER,
    VKRT_BUFPTR=VKRT_BUFFER_POINTER,
 
-   VKRT_GROUP=20,
+   VKRT_ACCEL=20,
 
    /*! implicit variable of type integer that specifies the *index*
      of the given device. this variable type is implicit in the
@@ -501,11 +501,10 @@ VKRT_API void
 vkrtMissProgDestroy(VKRTMissProg missProg);
 
 // ------------------------------------------------------------------
-/*! create a new group (which handles the acceleration strucure) for
-  triangle geometries.
+/*! create a new acceleration structure for AABB geometries.
 
-  \param numGeometries Number of geometries in this group, must be
-  non-zero.
+  \param numGeometries Number of geometries in this acceleration structure, must 
+  be non-zero.
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
   geometries. Every geom in this array must be a valid vkrt geometry
@@ -514,19 +513,18 @@ vkrtMissProgDestroy(VKRTMissProg missProg);
 
   \param flags reserved for future use
 */
-VKRT_API VKRTGroup
-vkrtUserGeomGroupCreate(VKRTContext context,
-                       size_t       numGeometries,
-                       VKRTGeom    *arrayOfChildGeoms,
-                       unsigned int flags VKRT_IF_CPP(=0));
+VKRT_API VKRTAccel
+vkrtAABBAccelCreate(VKRTContext context,
+                    size_t       numGeometries,
+                    VKRTGeom    *arrayOfChildGeoms,
+                    unsigned int flags VKRT_IF_CPP(=0));
 
 
 // ------------------------------------------------------------------
-/*! create a new group (which handles the acceleration strucure) for
-  triangle geometries.
+/*! create a new acceleration structure for triangle geometries.
 
-  \param numGeometries Number of geometries in this group, must be
-  non-zero.
+  \param numGeometries Number of geometries in this acceleration structure, must 
+  be non-zero.
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
   geometries. Every geom in this array must be a valid vkrt geometry
@@ -535,8 +533,8 @@ vkrtUserGeomGroupCreate(VKRTContext context,
 
   \param flags reserved for future use
 */
-VKRT_API VKRTGroup
-vkrtTrianglesGeomGroupCreate(VKRTContext context,
+VKRT_API VKRTAccel
+vkrtTrianglesAccelCreate(VKRTContext context,
                             size_t     numGeometries,
                             VKRTGeom   *initValues,
                             unsigned int flags VKRT_IF_CPP(=0));
@@ -544,11 +542,10 @@ vkrtTrianglesGeomGroupCreate(VKRTContext context,
 
 
 // // ------------------------------------------------------------------
-// /*! create a new group (which handles the acceleration strucure) for
-//   "curves" geometries.
+// /*! create a new acceleration structure for "curves" geometries.
 
-//   \param numGeometries Number of geometries in this group, must be
-//   non-zero.
+//   \param numGeometries Number of geometries in this acceleration structure, 
+//   must be non-zero.
 
 //   \param arrayOfChildGeoms A array of 'numGeometries' child
 //   geometries. Every geom in this array must be a valid vkrt geometry
@@ -561,75 +558,73 @@ vkrtTrianglesGeomGroupCreate(VKRTContext context,
 //   vkrtEnableCurves() before curves are used; in particular, curves
 //   _have_ to already be enabled when the pipeline gets compiled.
 // */
-// VKRT_API VKRTGroup
-// vkrtCurvesGeomGroupCreate(VKRTContext context,
+// VKRT_API VKRTAccel
+// vkrtCurvesAccelCreate(VKRTContext context,
 //                          size_t     numCurveGeometries,
 //                          VKRTGeom   *curveGeometries,
 //                          unsigned int flags VKRT_IF_CPP(=0));
 
 // ------------------------------------------------------------------
-/*! create a new instance group with given number of instances. The
-  child groups and their instance IDs and/or transforms can either
-  be specified "in bulk" as part of this call, or can be set later on
-  with individual calls to \see vkrtInstanceGroupSetChild and \see
-  vkrtInstanceGroupSetTransform. Note however, that in the case of
-  having millions of instances in a group it will be *much* more
-  efficient to set them in bulk open creation, than in millions of
-  individual API calls.
+/*! create a new instance acceleration structure with given number of 
+  instances. The child acceleration structures and their instance IDs 
+  and/or transforms can either be specified "in bulk" as part of this 
+  call, or can be set later on with individual calls to 
+  \see vkrtInstanceAccelSetChild and \see vkrtInstanceAccelSetTransform. 
+  Note however, that in the case of having millions of instances in an accel 
+  it will be *much* more efficient to set them in bulk open creation, than 
+  in millions of individual API calls.
 
-  Either or all of initGroups, initTranforms, or initInstanceIDs may
+  Either or all of initAccels, initTranforms, or initInstanceIDs may
   be null, in which case the values used for the 'th child will be an
-  uninitialized (invalid) group, a unit transform, and 'i', respectively.
-  If initGroups was null, make sure to set all of the child groups
-  with \see vkrtInstanceGroupSetChild before using this group, or
+  uninitialized (invalid) accels, a unit transform, and 'i', respectively.
+  If initAccels was null, make sure to set all of the child accels
+  with \see vkrtInstanceAccelSetChild before using this accel, or
   it will crash.
 */
-VKRT_API VKRTGroup
-vkrtInstanceGroupCreate(VKRTContext context,
-                       
-                       /*! number of instances in this group */
+VKRT_API VKRTAccel
+vkrtInstanceAccelCreate(VKRTContext context,
+                       /*! number of instances in this acceleration structure */
                        size_t     numInstances,
                        
-                       /*! the initial list of owl groups to use by
-                         the instances in this group; must be either
+                       /*! the initial list of vkrt accels to use by
+                         the instances in this accel; must be either
                          null, or an array of the size
                          'numInstances', the i'th instance in this
-                         group will be an instance of the i'th
+                         accel will be an instance of the i'th
                          element in this list. If null, you must
                          set all the children individually before
-                         using this group. */
-                       const VKRTGroup *initGroups      VKRT_IF_CPP(= nullptr),
+                         using this accel. */
+                       const VKRTAccel *initAccels      VKRT_IF_CPP(= nullptr),
 
                        /*! instance IDs to use for the instance in
-                         this group; must be eithe rnull, or an
-                         array of size numInstnaces. If null, the
-                         i'th child of this instance group will use
+                         this accel; must be either null, or an
+                         array of size numInstances. If null, the
+                         i'th child of this instance accel will use
                          instanceID=i, otherwise, it will use the
-                         user-provided instnace ID from this
+                         user-provided instance ID from this
                          list. Specifying an instanceID will affect
-                         what value 'optixGetInstanceID' will return
+                         what value 'InstanceID()' will return
                          in a CH program that refers to the given
                          instance */
                        const uint32_t *initInstanceIDs VKRT_IF_CPP(= nullptr),
                        
                        /*! initial list of transforms that this
-                         instance group will use; must be either
-                         null, or an array of size numInstnaces, of
+                         instance accel will use; must be either
+                         null, or an array of size numInstances, of
                          the format specified */
                        const float    *initTransforms  VKRT_IF_CPP(= nullptr),
                        VKRTMatrixFormat matrixFormat    VKRT_IF_CPP(=VKRT_MATRIX_FORMAT_ROW_MAJOR),
 
-                       /*! A combination of OptixBuildFlags.  The default
-                         of 0 means to use VKRT default build flags.*/
+                       /*! Reserved for future use */
                        unsigned int buildFlags VKRT_IF_CPP(=0)
                        );
 
 VKRT_API void
-vkrtGroupDestroy(VKRTGroup group);
+vkrtAccelDestroy(VKRTAccel accel);
 
-VKRT_API void vkrtGroupBuildAccel(VKRTGroup group);
+VKRT_API void vkrtAccelBuild(VKRTAccel accel);
 
-VKRT_API void vkrtGroupRefitAccel(VKRTGroup group);
+VKRT_API void vkrtAccelRefit(VKRTAccel accel);
 
 VKRT_API VKRTGeomType
 vkrtGeomTypeCreate(VKRTContext  context,
@@ -1160,26 +1155,26 @@ VKRT_API void vkrtGeomSet4ulv(VKRTGeom geom, const char *name, const uint64_t *v
 // VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
 // VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
 VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
-VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
+VKRT_API void vkrtRayGenSetAccel(VKRTRayGen raygen, const char *name, VKRTAccel val);
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *val);
 
 // // setters for variables on "Geom"s
 // VKRT_API void vkrtGeomSetTexture(VKRTGeom obj, const char *name, VKRTTexture val);
 // VKRT_API void vkrtGeomSetPointer(VKRTGeom obj, const char *name, const void *val);
 VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
-VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
+VKRT_API void vkrtGeomSetAccel(VKRTGeom obj, const char *name, VKRTAccel val);
 VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
 
 // // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
 // VKRT_API void vkrtParamsSetPointer(VKRTParams obj, const char *name, const void *val);
 // VKRT_API void vkrtParamsSetBuffer(VKRTParams obj, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtParamsSetGroup(VKRTParams obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtParamsSetAccel(VKRTParams obj, const char *name, VKRTAccel val);
 // VKRT_API void vkrtParamsSetRaw(VKRTParams obj, const char *name, const void *val);
 
 // setters for variables on "MissProg"s
 // VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
 // VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
 VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
-VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
+VKRT_API void vkrtMissProgSetAccel(VKRTMissProg missprog, const char *name, VKRTAccel val);
 VKRT_API void vkrtMissProgSetRaw(VKRTMissProg missprog, const char *name, const void *val);

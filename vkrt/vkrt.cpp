@@ -506,12 +506,12 @@ namespace vkrt {
     }
   };
 
-  struct Group {
+  struct Accel {
     VkDeviceAddress address = 0;
 
-    Group() {};
+    Accel() {};
     
-    ~Group() {};
+    ~Accel() {};
   };
 
   struct SBTEntry {
@@ -2035,8 +2035,8 @@ VKRT_API void vkrtBuildPrograms(VKRTContext _context)
   LOG("programs built...");
 }
 
-VKRT_API VKRTGroup
-vkrtUserGeomGroupCreate(VKRTContext context,
+VKRT_API VKRTAccel
+vkrtAABBAccelCreate(VKRTContext context,
                        size_t       numGeometries,
                        VKRTGeom    *arrayOfChildGeoms,
                        unsigned int flags)
@@ -2045,8 +2045,8 @@ vkrtUserGeomGroupCreate(VKRTContext context,
   return nullptr;
 }
 
-VKRT_API VKRTGroup
-vkrtTrianglesGeomGroupCreate(VKRTContext context,
+VKRT_API VKRTAccel
+vkrtTrianglesAccelCreate(VKRTContext context,
                             size_t     numGeometries,
                             VKRTGeom   *initValues,
                             unsigned int flags)
@@ -2055,8 +2055,8 @@ vkrtTrianglesGeomGroupCreate(VKRTContext context,
   return nullptr;
 }
 
-VKRT_API VKRTGroup
-vkrtCurvesGeomGroupCreate(VKRTContext context,
+VKRT_API VKRTAccel
+vkrtCurvesAccelCreate(VKRTContext context,
                          size_t     numCurveGeometries,
                          VKRTGeom   *curveGeometries,
                          unsigned int flags)
@@ -2065,10 +2065,10 @@ vkrtCurvesGeomGroupCreate(VKRTContext context,
   return nullptr;
 }
 
-VKRT_API VKRTGroup
-vkrtInstanceGroupCreate(VKRTContext context,
+VKRT_API VKRTAccel
+vkrtInstanceAccelCreate(VKRTContext context,
                        size_t     numInstances,
-                       const VKRTGroup *initGroups,
+                       const VKRTAccel *initAccels,
                        const uint32_t *initInstanceIDs,
                        const float    *initTransforms,
                        VKRTMatrixFormat matrixFormat,
@@ -2080,17 +2080,17 @@ vkrtInstanceGroupCreate(VKRTContext context,
 }
 
 VKRT_API void
-vkrtGroupDestroy(VKRTGroup group)
+vkrtAccelDestroy(VKRTAccel accel)
 {
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void vkrtGroupBuildAccel(VKRTGroup group)
+VKRT_API void vkrtAccelBuild(VKRTAccel accel)
 {
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void vkrtGroupRefitAccel(VKRTGroup group)
+VKRT_API void vkrtAccelRefit(VKRTAccel accel)
 {
   VKRT_NOTIMPLEMENTED;
 }
@@ -4717,22 +4717,22 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
   memcpy(raygen->vars[name].data, &addr, size);
 }
 
-VKRT_API void vkrtRayGenSetGroup(VKRTRayGen _raygen, const char *name, VKRTGroup _val)
+VKRT_API void vkrtRayGenSetAccel(VKRTRayGen _raygen, const char *name, VKRTAccel _val)
 {
   LOG_API_CALL();
   vkrt::RayGen *raygen = (vkrt::RayGen*)_raygen;
   assert(raygen);
 
-  vkrt::Group *val = (vkrt::Group*)_val;
+  vkrt::Accel *val = (vkrt::Accel*)_val;
   assert(val);
 
   // 1. Figure out if the variable "name" exists
   assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
 
-  // The found variable must be a group
-  assert(raygen->vars[name].decl.type == VKRT_GROUP);
+  // The found variable must be an acceleration structure
+  assert(raygen->vars[name].decl.type == VKRT_ACCEL);
 
-  // Group pointers are 64 bits
+  // Acceleration structure pointers are 64 bits
   size_t size = sizeof(uint64_t);
 
   // 3. Assign the value to that variable
@@ -4783,22 +4783,22 @@ VKRT_API void vkrtGeomSetBuffer(VKRTGeom _geom, const char *name, VKRTBuffer _va
   memcpy(geom->vars[name].data, &addr, size);
 }
 
-VKRT_API void vkrtGeomSetGroup(VKRTGeom _geom, const char *name, VKRTGroup _val)
+VKRT_API void vkrtGeomSetAccel(VKRTGeom _geom, const char *name, VKRTAccel _val)
 {
   LOG_API_CALL();
   vkrt::Geom *geom = (vkrt::Geom*)_geom;
   assert(geom);
 
-  vkrt::Group *val = (vkrt::Group*)_val;
+  vkrt::Accel *val = (vkrt::Accel*)_val;
   assert(val);
 
   // 1. Figure out if the variable "name" exists
   assert(geom->vars.find(std::string(name)) != geom->vars.end());
 
-  // The found variable must be a group
-  assert(geom->vars[name].decl.type == VKRT_GROUP);
+  // The found variable must be an acceleration structure
+  assert(geom->vars[name].decl.type == VKRT_ACCEL);
 
-  // Group pointers are 64 bits
+  // Acceleration structure pointers are 64 bits
   size_t size = sizeof(uint64_t);
 
   // 3. Assign the value to that variable
@@ -4826,7 +4826,7 @@ VKRT_API void vkrtGeomSetRaw(VKRTGeom _geom, const char *name, const void *val)
 // VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
 // VKRT_API void vkrtParamsSetPointer(VKRTParams obj, const char *name, const void *val);
 // VKRT_API void vkrtParamsSetBuffer(VKRTParams obj, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtParamsSetGroup(VKRTParams obj, const char *name, VKRTGroup val);
+// VKRT_API void vkrtParamsSetAccel(VKRTParams obj, const char *name, VKRTAccel val);
 // VKRT_API void vkrtParamsSetRaw(VKRTParams obj, const char *name, const void *val);
 
 // setters for variables on "MissProg"s
@@ -4856,22 +4856,22 @@ VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg _missProg, const char *name, VK
   memcpy(missprog->vars[name].data, &addr, size);
 }
 
-VKRT_API void vkrtMissProgSetGroup(VKRTMissProg _missprog, const char *name, VKRTGroup _val)
+VKRT_API void vkrtMissProgSetAccel(VKRTMissProg _missprog, const char *name, VKRTAccel _val)
 {
   LOG_API_CALL();
   vkrt::MissProg *missprog = (vkrt::MissProg*)_missprog;
   assert(missprog);
 
-  vkrt::Group *val = (vkrt::Group*)_val;
+  vkrt::Accel *val = (vkrt::Accel*)_val;
   assert(val);
 
   // 1. Figure out if the variable "name" exists
   assert(missprog->vars.find(std::string(name)) != missprog->vars.end());
 
-  // The found variable must be a group
-  assert(missprog->vars[name].decl.type == VKRT_GROUP);
+  // The found variable must be an acceleration structure
+  assert(missprog->vars[name].decl.type == VKRT_ACCEL);
 
-  // Group pointers are 64 bits
+  // Acceleration structure pointers are 64 bits
   size_t size = sizeof(uint64_t);
 
   // 3. Assign the value to that variable

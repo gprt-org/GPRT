@@ -134,12 +134,12 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
-  VKRTGroup trianglesGroup
-    = vkrtTrianglesGeomGroupCreate(context,1,&trianglesGeom);
-  vkrtGroupBuildAccel(trianglesGroup);
-  VKRTGroup world
-    = vkrtInstanceGroupCreate(context,1,&trianglesGroup);
-  vkrtGroupBuildAccel(world);
+  VKRTAccel trianglesAccel
+    = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
+  vkrtAccelBuild(trianglesAccel);
+  VKRTAccel world
+    = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
+  vkrtAccelBuild(world);
 
   // ##################################################################
   // set miss and raygen program required for SBT
@@ -171,7 +171,7 @@ int main(int ac, char **av)
   VKRTVarDecl rayGenVars[] = {
     { "fbPtr",         VKRT_BUFPTR, VKRT_OFFSETOF(RayGenData,fbPtr)},
     { "fbSize",        VKRT_INT2,   VKRT_OFFSETOF(RayGenData,fbSize)},
-    { "world",         VKRT_GROUP,  VKRT_OFFSETOF(RayGenData,world)},
+    { "world",         VKRT_ACCEL,  VKRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_00)},
     { "camera.dir_du", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_du)},
@@ -201,7 +201,7 @@ int main(int ac, char **av)
   vkrtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
   // vkrtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
   vkrtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
-  vkrtRayGenSetGroup (rayGen,"world",        world);
+  vkrtRayGenSetAccel (rayGen,"world",        world);
   // vkrtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
   // vkrtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
   // vkrtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
@@ -246,8 +246,8 @@ int main(int ac, char **av)
   vkrtBufferDestroy(frameBuffer);
   vkrtRayGenDestroy(rayGen);
   vkrtMissProgDestroy(missProg);
-  vkrtGroupDestroy(trianglesGroup);
-  vkrtGroupDestroy(world);
+  vkrtAccelDestroy(trianglesAccel);
+  vkrtAccelDestroy(world);
   vkrtGeomDestroy(trianglesGeom);
   vkrtGeomTypeDestroy(trianglesGeomType);
   vkrtModuleDestroy(module);
