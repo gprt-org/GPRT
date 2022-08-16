@@ -22,11 +22,9 @@
 
 #include <vkrt_host.h>
 #include <iostream>
-#include <vector>
 #include <assert.h>
 #include <fstream>
 #include <sstream>
-#include <unordered_map>
 
 #include <regex>
 
@@ -508,6 +506,14 @@ namespace vkrt {
     }
   };
 
+  struct Group {
+    VkDeviceAddress address = 0;
+
+    Group() {};
+    
+    ~Group() {};
+  };
+
   struct SBTEntry {
     // Map of the name of the variable to that variable declaration
     std::unordered_map<std::string, VKRTVarDef> vars;
@@ -600,6 +606,19 @@ namespace vkrt {
     }
   };
 
+  // forward declarations...
+  struct Geom; 
+  struct GeomType; 
+  struct TrianglesGeom;
+  struct TrianglesGeomType;
+  struct UserGeom;
+  struct UserGeomType;
+  
+  /* An abstraction for any sort of geometry type - describes the
+     programs to use, and structure of the SBT records, when building
+     shader binding tables (SBTs) with geometries of this type. This
+     will later get subclassed into triangle geometries, user/custom
+     primitive geometry types, etc */
   struct GeomType : public SBTEntry {
     VkDevice logicalDevice;
     std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
@@ -616,11 +635,12 @@ namespace vkrt {
       logicalDevice = _logicalDevice;
       vars = _vars;
     }
-    ~GeomType() {
+    ~GeomType() 
+    {
       std::cout<<"Geom type is being destroyed!"<<std::endl;
       // vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     }
-
+    
     void setClosestHit(int rayType,
                        Module *module,
                        const char* entryPoint) 
@@ -672,9 +692,112 @@ namespace vkrt {
             closestHitShaderStages[i].module, nullptr);
       }
     }
+    
+    virtual Geom* createGeom() { return nullptr; };
   };
 
+  /*! An actual geometry object with primitives - this class is still
+    abstract, and will get fleshed out in its derived classes
+    (UserGeom, TrianglesGeom, ...) */
+  struct Geom : public SBTEntry {
+    Geom() : SBTEntry() {};
+    ~Geom() {};
 
+    void destroy(){}
+
+    /*! This acts as a template that describes this geometry's variables and
+        programs. */
+    GeomType* geomType;
+  };
+
+  struct TrianglesGeom : public Geom {
+    struct {
+      size_t count  = 0;
+      size_t stride = 0;
+      size_t offset = 0;
+      vkrt::Buffer* buffer;
+    } index;
+
+    struct {
+      size_t count  = 0;
+      size_t stride = 0;
+      size_t offset = 0;
+      std::vector<vkrt::Buffer*> buffers;
+    } vertex;
+
+    TrianglesGeom(TrianglesGeomType* _geomType) : Geom() {
+      geomType = (GeomType*)_geomType;
+
+      // Allocate the variables for this geometry, using our geomType vars as 
+      // the template.
+      std::vector<VKRTVarDecl> varDecls = getDecls(geomType->vars);
+      vars = checkAndPackVariables(varDecls.data(), varDecls.size());
+    };
+    ~TrianglesGeom() {};
+
+    void setVertices(
+      vkrt::Buffer* vertices,
+      size_t count,
+      size_t stride,
+      size_t offset) 
+    {
+      // assuming no motion blurred triangles for now, so we assume 1 buffer
+      vertex.buffers.resize(1);
+      vertex.buffers[0] = vertices;
+      vertex.count = count;
+      vertex.stride = stride;
+      vertex.offset = offset;
+    }
+
+    void setIndices(
+      vkrt::Buffer* indices,
+      size_t count,
+      size_t stride,
+      size_t offset) 
+    {
+      index.buffer = indices;
+      index.count = count;
+      index.stride = stride;
+      index.offset = offset;
+    }
+  };
+
+  struct TrianglesGeomType : public GeomType {
+    TrianglesGeomType(
+      VkDevice logicalDevice,
+      uint32_t numRayTypes,
+      size_t   sizeOfVarStruct,
+      std::unordered_map<std::string, VKRTVarDef> vars) : 
+      GeomType(logicalDevice, numRayTypes, sizeOfVarStruct, vars)
+    {}
+    ~TrianglesGeomType() {}
+
+    Geom* createGeom()  
+    {
+      return new TrianglesGeom(this);
+    }
+  };
+
+  struct UserGeom : public Geom {
+    UserGeom(UserGeomType* _geomType) : Geom() {
+      geomType = (GeomType*)_geomType;
+    };
+    ~UserGeom() {};
+  };
+
+  struct UserGeomType : public GeomType {
+    UserGeomType(VkDevice  _logicalDevice,
+             uint32_t numRayTypes,
+             size_t      sizeOfVarStruct,
+             std::unordered_map<std::string, VKRTVarDef> _vars) : 
+             GeomType(_logicalDevice, numRayTypes, sizeOfVarStruct, _vars)
+    {}
+    ~UserGeomType() {}
+    Geom* createGeom() 
+    {
+      return new UserGeom(this);
+    }
+  };
 
   struct Context {
     VkApplicationInfo appInfo;
@@ -803,32 +926,6 @@ namespace vkrt {
 				vkDestroyDebugUtilsMessengerEXT(instance, debugUtilsMessenger, nullptr);
 			}
 		}
-
-    std::unordered_map<std::string, VKRTVarDef> checkAndPackVariables(const VKRTVarDecl *vars,
-                                                   int               numVars)
-    {
-      if (vars == nullptr && (numVars == 0 || numVars == -1))
-        return {};
-
-      // *copy* the vardecls here, so we can catch any potential memory
-      // *access errors early
-
-      assert(vars);
-      if (numVars == -1) {
-        // using -1 as count value for a variable list means the list is
-        // null-terminated... so just count it
-        for (numVars = 0; vars[numVars].name != nullptr; numVars++);
-      }
-      std::unordered_map<std::string, VKRTVarDef> varDefs;
-      for (int i=0;i<numVars;i++) {
-        assert(vars[i].name != nullptr);
-        varDefs[vars[i].name].decl = vars[i];
-
-        // allocate depending on the size of the variable...
-        varDefs[vars[i].name].data = malloc(getSize(vars[i].type));
-      }
-      return varDefs;
-    }
 
     Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1565,6 +1662,7 @@ namespace vkrt {
       }
     }
   };
+
 }
 
 
@@ -1603,6 +1701,76 @@ VKRT_API void vkrtModuleDestroy(VKRTModule _module)
   LOG("module destroyed...");
 }
 
+VKRT_API VKRTGeom
+vkrtGeomCreate(VKRTContext  _context,
+              VKRTGeomType _geomType)
+{
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::GeomType *geomType = (vkrt::GeomType*)_geomType;
+
+  // depending on what the geomType is, we'll use this inherited "createGeom"
+  // function to construct the appropriate geometry
+  vkrt::Geom *geometry = geomType->createGeom();
+  return (VKRTGeom)geometry;
+  LOG("geometry created...");
+}
+
+VKRT_API void 
+vkrtGeomDestroy(VKRTGeom _geometry)
+{
+  LOG_API_CALL();
+  vkrt::Geom *geometry = (vkrt::Geom*)_geometry;
+  geometry->destroy();
+  delete geometry;
+  LOG("geometry destroyed...");
+}
+
+// ==================================================================
+// "Triangles" functions
+// ==================================================================
+VKRT_API void vkrtTrianglesSetVertices(VKRTGeom _triangles,
+                                      VKRTBuffer _vertices,
+                                      size_t count,
+                                      size_t stride,
+                                      size_t offset)
+{
+  LOG_API_CALL();
+  vkrt::TrianglesGeom *triangles = (vkrt::TrianglesGeom*)_triangles;
+  vkrt::Buffer *vertices = (vkrt::Buffer*)_vertices;
+  triangles->setVertices(vertices, count, stride, offset);
+  LOG("Setting triangle vertices...");
+}
+// VKRT_API void vkrtTrianglesSetMotionVertices(VKRTGeom triangles,
+//                                            /*! number of vertex arrays
+//                                                passed here, the first
+//                                                of those is for t=0,
+//                                                thelast for t=1,
+//                                                everything is linearly
+//                                                interpolated
+//                                                in-between */
+//                                            size_t    numKeys,
+//                                            VKRTBuffer *vertexArrays,
+//                                            size_t count,
+//                                            size_t stride,
+//                                            size_t offset)
+// {
+//   VKRT_NOTIMPLEMENTED;
+// }
+
+VKRT_API void vkrtTrianglesSetIndices(VKRTGeom _triangles,
+                                     VKRTBuffer _indices,
+                                     size_t count,
+                                     size_t stride,
+                                     size_t offset)
+{
+  LOG_API_CALL();
+  vkrt::TrianglesGeom *triangles = (vkrt::TrianglesGeom*)_triangles;
+  vkrt::Buffer *indices = (vkrt::Buffer*)_indices;
+  triangles->setIndices(indices, count, stride, offset);
+  LOG("Setting triangle indices...");
+}
+
 VKRT_API VKRTRayGen
 vkrtRayGenCreate(VKRTContext _context,
                  VKRTModule  _module,
@@ -1617,7 +1785,7 @@ vkrtRayGenCreate(VKRTContext _context,
 
   vkrt::RayGen *raygen = new vkrt::RayGen(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
+    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
 
   context->raygenPrograms.push_back(raygen);
 
@@ -1649,7 +1817,7 @@ vkrtMissProgCreate(VKRTContext _context,
 
   vkrt::MissProg *missProg = new vkrt::MissProg(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
+    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
 
   context->missPrograms.push_back(missProg);
 
@@ -1687,9 +1855,23 @@ vkrtGeomTypeCreate(VKRTContext  _context,
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
 
-  vkrt::GeomType *geomType = new vkrt::GeomType(
-    context->logicalDevice, context->numRayTypes,
-    sizeOfVarStruct, context->checkAndPackVariables(vars, numVars));
+  vkrt::GeomType *geomType = nullptr;
+
+  switch(kind) {
+    case VKRT_TRIANGLES:
+      geomType = new vkrt::TrianglesGeomType(
+        context->logicalDevice, context->numRayTypes,
+        sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+        break;
+    case VKRT_USER:
+      geomType = new vkrt::UserGeomType(
+        context->logicalDevice, context->numRayTypes,
+        sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+        break;
+    default:
+      VKRT_NOTIMPLEMENTED;
+      break;
+  }
 
   LOG("geom type created...");
   return (VKRTGeomType)geomType;
@@ -1785,6 +1967,30 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
   return (VKRTBuffer)buffer;
 }
 
+VKRT_API VKRTBuffer
+vkrtDeviceBufferCreate(VKRTContext _context, VKRTDataType type, size_t count, const void* init)
+{
+  std::cout<<"Todo, remove host visible bit... substitute for some staging mechanism..."<<std::endl;
+  LOG_API_CALL();
+  const VkBufferUsageFlags bufferUsageFlags =
+    // means we can get this buffer's address with vkGetBufferDeviceAddress
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // means most efficient for device access
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+  vkrt::Context *context = (vkrt::Context*)_context;
+  vkrt::Buffer *buffer = new vkrt::Buffer(
+    context->physicalDevice, context->logicalDevice,
+    bufferUsageFlags, memoryUsageFlags,
+    getSize(type) * count
+  );
+  
+  LOG("buffer created");
+  return (VKRTBuffer)buffer;
+}
+
 VKRT_API void
 vkrtBufferDestroy(VKRTBuffer _buffer)
 {
@@ -1819,6 +2025,8 @@ vkrtBufferUnmap(VKRTBuffer _buffer, int deviceID)
   buffer->unmap();
 }
 
+
+
 VKRT_API void vkrtBuildPrograms(VKRTContext _context)
 {
   LOG_API_CALL();
@@ -1827,7 +2035,65 @@ VKRT_API void vkrtBuildPrograms(VKRTContext _context)
   LOG("programs built...");
 }
 
+VKRT_API VKRTGroup
+vkrtUserGeomGroupCreate(VKRTContext context,
+                       size_t       numGeometries,
+                       VKRTGeom    *arrayOfChildGeoms,
+                       unsigned int flags)
+{
+  VKRT_NOTIMPLEMENTED;
+  return nullptr;
+}
 
+VKRT_API VKRTGroup
+vkrtTrianglesGeomGroupCreate(VKRTContext context,
+                            size_t     numGeometries,
+                            VKRTGeom   *initValues,
+                            unsigned int flags)
+{
+  VKRT_NOTIMPLEMENTED;
+  return nullptr;
+}
+
+VKRT_API VKRTGroup
+vkrtCurvesGeomGroupCreate(VKRTContext context,
+                         size_t     numCurveGeometries,
+                         VKRTGeom   *curveGeometries,
+                         unsigned int flags)
+{
+  VKRT_NOTIMPLEMENTED;
+  return nullptr;
+}
+
+VKRT_API VKRTGroup
+vkrtInstanceGroupCreate(VKRTContext context,
+                       size_t     numInstances,
+                       const VKRTGroup *initGroups,
+                       const uint32_t *initInstanceIDs,
+                       const float    *initTransforms,
+                       VKRTMatrixFormat matrixFormat,
+                       unsigned int buildFlags
+                       )
+{
+  VKRT_NOTIMPLEMENTED;
+  return nullptr;
+}
+
+VKRT_API void
+vkrtGroupDestroy(VKRTGroup group)
+{
+  VKRT_NOTIMPLEMENTED;
+}
+
+VKRT_API void vkrtGroupBuildAccel(VKRTGroup group)
+{
+  VKRT_NOTIMPLEMENTED;
+}
+
+VKRT_API void vkrtGroupRefitAccel(VKRTGroup group)
+{
+  VKRT_NOTIMPLEMENTED;
+}
 
 VKRT_API void vkrtBuildPipeline(VKRTContext _context)
 {
@@ -2118,14 +2384,73 @@ VKRT_API void vkrtMissProgSet4bv(VKRTMissProg _missprog, const char *name, const
 }
 
 
-// // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1b(OWLGeom var, const char *name, bool val);
-// VKRT_API void vkrtGeomSet2b(OWLGeom var, const char *name, bool x, bool y);
-// VKRT_API void vkrtGeomSet3b(OWLGeom var, const char *name, bool x, bool y, bool z);
-// VKRT_API void vkrtGeomSet4b(OWLGeom var, const char *name, bool x, bool y, bool z, bool w);
-// VKRT_API void vkrtGeomSet2bv(OWLGeom var, const char *name, const bool *val);
-// VKRT_API void vkrtGeomSet3bv(OWLGeom var, const char *name, const bool *val);
-// VKRT_API void vkrtGeomSet4bv(OWLGeom var, const char *name, const bool *val);
+// setters for variables on "Geom"s
+VKRT_API void vkrtGeomSet1b(VKRTGeom _geom, const char *name, bool x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL);
+  bool val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2b(VKRTGeom _geom, const char *name, bool x, bool y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  bool val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3b(VKRTGeom _geom, const char *name, bool x, bool y, bool z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  bool val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4b(VKRTGeom _geom, const char *name, bool x, bool y, bool z, bool w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  bool val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2bv(VKRTGeom _geom, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3bv(VKRTGeom _geom, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4bv(VKRTGeom _geom, const char *name, const bool *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_BOOL4);
+  memcpy(var.second, &val, var.first);
+}
 
 // // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1b(OWLParams var, const char *name, bool val);
@@ -2280,13 +2605,73 @@ VKRT_API void vkrtMissProgSet4cv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1c(OWLGeom obj, const char *name, char val);
-// VKRT_API void vkrtGeomSet2c(OWLGeom obj, const char *name, char x, char y);
-// VKRT_API void vkrtGeomSet3c(OWLGeom obj, const char *name, char x, char y, char z);
-// VKRT_API void vkrtGeomSet4c(OWLGeom obj, const char *name, char x, char y, char z, char w);
-// VKRT_API void vkrtGeomSet2cv(OWLGeom obj, const char *name, const char *val);
-// VKRT_API void vkrtGeomSet3cv(OWLGeom obj, const char *name, const char *val);
-// VKRT_API void vkrtGeomSet4cv(OWLGeom obj, const char *name, const char *val);
+VKRT_API void vkrtGeomSet1c(VKRTGeom _geom, const char *name, int8_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  int8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2c(VKRTGeom _geom, const char *name, int8_t x, int8_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  int8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3c(VKRTGeom _geom, const char *name, int8_t x, int8_t y, int8_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  int8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4c(VKRTGeom _geom, const char *name, int8_t x, int8_t y, int8_t z, int8_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  int8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2cv(VKRTGeom _geom, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3cv(VKRTGeom _geom, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4cv(VKRTGeom _geom, const char *name, const int8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1c(OWLParams obj, const char *name, char val);
@@ -2307,7 +2692,7 @@ VKRT_API void vkrtRayGenSet1uc(VKRTRayGen _raygen, const char *name, uint8_t x)
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T);
   uint8_t val[] = {x};
   memcpy(var.second, &val, var.first);
 }
@@ -2317,7 +2702,7 @@ VKRT_API void vkrtRayGenSet2uc(VKRTRayGen _raygen, const char *name, uint8_t x, 
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
   uint8_t val[] = {x, y};
   memcpy(var.second, &val, var.first);
 }
@@ -2327,7 +2712,7 @@ VKRT_API void vkrtRayGenSet3uc(VKRTRayGen _raygen, const char *name, uint8_t x, 
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
   uint8_t val[] = {x, y, z};
   memcpy(var.second, &val, var.first);
 }
@@ -2337,7 +2722,7 @@ VKRT_API void vkrtRayGenSet4uc(VKRTRayGen _raygen, const char *name, uint8_t x, 
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
   uint8_t val[] = {x, y, z, w};
   memcpy(var.second, &val, var.first);
 }
@@ -2347,7 +2732,7 @@ VKRT_API void vkrtRayGenSet2ucv(VKRTRayGen _raygen, const char *name, const uint
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
   memcpy(var.second, &val, var.first);
 }
 
@@ -2356,7 +2741,7 @@ VKRT_API void vkrtRayGenSet3ucv(VKRTRayGen _raygen, const char *name, const uint
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
   memcpy(var.second, &val, var.first);
 }
 
@@ -2365,7 +2750,7 @@ VKRT_API void vkrtRayGenSet4ucv(VKRTRayGen _raygen, const char *name, const uint
   LOG_API_CALL();
   vkrt::RayGen *entry = (vkrt::RayGen*)_raygen;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
   memcpy(var.second, &val, var.first);
 }
 
@@ -2376,7 +2761,7 @@ VKRT_API void vkrtMissProgSet1uc(VKRTMissProg _missprog, const char *name, uint8
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T);
   uint8_t val[] = {x};
   memcpy(var.second, &val, var.first);
 }
@@ -2386,7 +2771,7 @@ VKRT_API void vkrtMissProgSet2uc(VKRTMissProg _missprog, const char *name, uint8
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
   uint8_t val[] = {x, y};
   memcpy(var.second, &val, var.first);
 }
@@ -2396,7 +2781,7 @@ VKRT_API void vkrtMissProgSet3uc(VKRTMissProg _missprog, const char *name, uint8
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
   uint8_t val[] = {x, y, z};
   memcpy(var.second, &val, var.first);
 }
@@ -2406,7 +2791,7 @@ VKRT_API void vkrtMissProgSet4uc(VKRTMissProg _missprog, const char *name, uint8
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
   uint8_t val[] = {x, y, z, w};
   memcpy(var.second, &val, var.first);
 }
@@ -2416,7 +2801,7 @@ VKRT_API void vkrtMissProgSet2ucv(VKRTMissProg _missprog, const char *name, cons
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T2);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
   memcpy(var.second, &val, var.first);
 }
 
@@ -2425,7 +2810,7 @@ VKRT_API void vkrtMissProgSet3ucv(VKRTMissProg _missprog, const char *name, cons
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T3);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
   memcpy(var.second, &val, var.first);
 }
 
@@ -2434,19 +2819,79 @@ VKRT_API void vkrtMissProgSet4ucv(VKRTMissProg _missprog, const char *name, cons
   LOG_API_CALL();
   vkrt::MissProg *entry = (vkrt::MissProg*)_missprog;
   assert(entry);
-  auto var = vkrtGetVariable(entry, name, VKRT_INT8_T4);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
   memcpy(var.second, &val, var.first);
 }
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1uc(OWLGeom obj, const char *name, uint8_t val);
-// VKRT_API void vkrtGeomSet2uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y);
-// VKRT_API void vkrtGeomSet3uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
-// VKRT_API void vkrtGeomSet4uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-// VKRT_API void vkrtGeomSet2ucv(OWLGeom obj, const char *name, const uint8_t *val);
-// VKRT_API void vkrtGeomSet3ucv(OWLGeom obj, const char *name, const uint8_t *val);
-// VKRT_API void vkrtGeomSet4ucv(OWLGeom obj, const char *name, const uint8_t *val);
+VKRT_API void vkrtGeomSet1uc(VKRTGeom _geom, const char *name, uint8_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T);
+  uint8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2uc(VKRTGeom _geom, const char *name, uint8_t x, uint8_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
+  uint8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3uc(VKRTGeom _geom, const char *name, uint8_t x, uint8_t y, uint8_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
+  uint8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4uc(VKRTGeom _geom, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
+  uint8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2ucv(VKRTGeom _geom, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3ucv(VKRTGeom _geom, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4ucv(VKRTGeom _geom, const char *name, const uint8_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
@@ -2599,13 +3044,73 @@ VKRT_API void vkrtMissProgSet4sv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1s(OWLGeom obj, const char *name, int16_t val);
-// VKRT_API void vkrtGeomSet2s(OWLGeom obj, const char *name, int16_t x, int16_t y);
-// VKRT_API void vkrtGeomSet3s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z);
-// VKRT_API void vkrtGeomSet4s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-// VKRT_API void vkrtGeomSet2sv(OWLGeom obj, const char *name, const int16_t *val);
-// VKRT_API void vkrtGeomSet3sv(OWLGeom obj, const char *name, const int16_t *val);
-// VKRT_API void vkrtGeomSet4sv(OWLGeom obj, const char *name, const int16_t *val);
+VKRT_API void vkrtGeomSet1s(VKRTGeom _geom, const char *name, int16_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T);
+  int16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2s(VKRTGeom _geom, const char *name, int16_t x, int16_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  int16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3s(VKRTGeom _geom, const char *name, int16_t x, int16_t y, int16_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  int16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4s(VKRTGeom _geom, const char *name, int16_t x, int16_t y, int16_t z, int16_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  int16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2sv(VKRTGeom _geom, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3sv(VKRTGeom _geom, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4sv(VKRTGeom _geom, const char *name, const int16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1s(OWLParams obj, const char *name, int16_t val);
@@ -2759,13 +3264,73 @@ VKRT_API void vkrtMissProgSet4usv(VKRTMissProg _missprog, const char *name, cons
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1us(OWLGeom obj, const char *name, uint16_t val);
-// VKRT_API void vkrtGeomSet2us(OWLGeom obj, const char *name, uint16_t x, uint16_t y);
-// VKRT_API void vkrtGeomSet3us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
-// VKRT_API void vkrtGeomSet4us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-// VKRT_API void vkrtGeomSet2usv(OWLGeom obj, const char *name, const uint16_t *val);
-// VKRT_API void vkrtGeomSet3usv(OWLGeom obj, const char *name, const uint16_t *val);
-// VKRT_API void vkrtGeomSet4usv(OWLGeom obj, const char *name, const uint16_t *val);
+VKRT_API void vkrtGeomSet1us(VKRTGeom _geom, const char *name, uint16_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T);
+  uint16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2us(VKRTGeom _geom, const char *name, uint16_t x, uint16_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  uint16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3us(VKRTGeom _geom, const char *name, uint16_t x, uint16_t y, uint16_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  uint16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4us(VKRTGeom _geom, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  uint16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2usv(VKRTGeom _geom, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3usv(VKRTGeom _geom, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4usv(VKRTGeom _geom, const char *name, const uint16_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
@@ -2919,13 +3484,73 @@ VKRT_API void vkrtMissProgSet4iv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1i(OWLGeom obj, const char *name, int32_t val);
-// VKRT_API void vkrtGeomSet2i(OWLGeom obj, const char *name, int32_t x, int32_t y);
-// VKRT_API void vkrtGeomSet3i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z);
-// VKRT_API void vkrtGeomSet4i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-// VKRT_API void vkrtGeomSet2iv(OWLGeom obj, const char *name, const int32_t *val);
-// VKRT_API void vkrtGeomSet3iv(OWLGeom obj, const char *name, const int32_t *val);
-// VKRT_API void vkrtGeomSet4iv(OWLGeom obj, const char *name, const int32_t *val);
+VKRT_API void vkrtGeomSet1i(VKRTGeom _geom, const char *name, int32_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T);
+  int32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2i(VKRTGeom _geom, const char *name, int32_t x, int32_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  int32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3i(VKRTGeom _geom, const char *name, int32_t x, int32_t y, int32_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  int32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4i(VKRTGeom _geom, const char *name, int32_t x, int32_t y, int32_t z, int32_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  int32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2iv(VKRTGeom _geom, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3iv(VKRTGeom _geom, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4iv(VKRTGeom _geom, const char *name, const int32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1i(OWLParams obj, const char *name, int32_t val);
@@ -3079,13 +3704,73 @@ VKRT_API void vkrtMissProgSet4uiv(VKRTMissProg _missprog, const char *name, cons
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1ui(OWLGeom obj, const char *name, uint32_t val);
-// VKRT_API void vkrtGeomSet2ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y);
-// VKRT_API void vkrtGeomSet3ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
-// VKRT_API void vkrtGeomSet4ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-// VKRT_API void vkrtGeomSet2uiv(OWLGeom obj, const char *name, const uint32_t *val);
-// VKRT_API void vkrtGeomSet3uiv(OWLGeom obj, const char *name, const uint32_t *val);
-// VKRT_API void vkrtGeomSet4uiv(OWLGeom obj, const char *name, const uint32_t *val);
+VKRT_API void vkrtGeomSet1ui(VKRTGeom _geom, const char *name, uint32_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T);
+  uint32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2ui(VKRTGeom _geom, const char *name, uint32_t x, uint32_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  uint32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3ui(VKRTGeom _geom, const char *name, uint32_t x, uint32_t y, uint32_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  uint32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4ui(VKRTGeom _geom, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  uint32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2uiv(VKRTGeom _geom, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3uiv(VKRTGeom _geom, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4uiv(VKRTGeom _geom, const char *name, const uint32_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
@@ -3239,13 +3924,73 @@ VKRT_API void vkrtMissProgSet4fv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1f(OWLGeom obj, const char *name, float val);
-// VKRT_API void vkrtGeomSet2f(OWLGeom obj, const char *name, float x, float y);
-// VKRT_API void vkrtGeomSet3f(OWLGeom obj, const char *name, float x, float y, float z);
-// VKRT_API void vkrtGeomSet4f(OWLGeom obj, const char *name, float x, float y, float z, float w);
-// VKRT_API void vkrtGeomSet2fv(OWLGeom obj, const char *name, const float *val);
-// VKRT_API void vkrtGeomSet3fv(OWLGeom obj, const char *name, const float *val);
-// VKRT_API void vkrtGeomSet4fv(OWLGeom obj, const char *name, const float *val);
+VKRT_API void vkrtGeomSet1f(VKRTGeom _geom, const char *name, float x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT);
+  float val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2f(VKRTGeom _geom, const char *name, float x, float y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  float val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3f(VKRTGeom _geom, const char *name, float x, float y, float z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  float val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4f(VKRTGeom _geom, const char *name, float x, float y, float z, float w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  float val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2fv(VKRTGeom _geom, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3fv(VKRTGeom _geom, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4fv(VKRTGeom _geom, const char *name, const float *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_FLOAT4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1f(OWLParams obj, const char *name, float val);
@@ -3399,13 +4144,73 @@ VKRT_API void vkrtMissProgSet4dv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1d(OWLGeom obj, const char *name, double val);
-// VKRT_API void vkrtGeomSet2d(OWLGeom obj, const char *name, double x, double y);
-// VKRT_API void vkrtGeomSet3d(OWLGeom obj, const char *name, double x, double y, double z);
-// VKRT_API void vkrtGeomSet4d(OWLGeom obj, const char *name, double x, double y, double z, double w);
-// VKRT_API void vkrtGeomSet2dv(OWLGeom obj, const char *name, const double *val);
-// VKRT_API void vkrtGeomSet3dv(OWLGeom obj, const char *name, const double *val);
-// VKRT_API void vkrtGeomSet4dv(OWLGeom obj, const char *name, const double *val);
+VKRT_API void vkrtGeomSet1d(VKRTGeom _geom, const char *name, double x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE);
+  double val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2d(VKRTGeom _geom, const char *name, double x, double y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  double val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3d(VKRTGeom _geom, const char *name, double x, double y, double z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  double val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4d(VKRTGeom _geom, const char *name, double x, double y, double z, double w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  double val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2dv(VKRTGeom _geom, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3dv(VKRTGeom _geom, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4dv(VKRTGeom _geom, const char *name, const double *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_DOUBLE4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1d(OWLParams obj, const char *name, double val);
@@ -3559,13 +4364,73 @@ VKRT_API void vkrtMissProgSet4lv(VKRTMissProg _missprog, const char *name, const
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1l(OWLGeom obj, const char *name, int64_t val);
-// VKRT_API void vkrtGeomSet2l(OWLGeom obj, const char *name, int64_t x, int64_t y);
-// VKRT_API void vkrtGeomSet3l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z);
-// VKRT_API void vkrtGeomSet4l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-// VKRT_API void vkrtGeomSet2lv(OWLGeom obj, const char *name, const int64_t *val);
-// VKRT_API void vkrtGeomSet3lv(OWLGeom obj, const char *name, const int64_t *val);
-// VKRT_API void vkrtGeomSet4lv(OWLGeom obj, const char *name, const int64_t *val);
+VKRT_API void vkrtGeomSet1l(VKRTGeom _geom, const char *name, int64_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T);
+  int64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2l(VKRTGeom _geom, const char *name, int64_t x, int64_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  int64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3l(VKRTGeom _geom, const char *name, int64_t x, int64_t y, int64_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  int64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4l(VKRTGeom _geom, const char *name, int64_t x, int64_t y, int64_t z, int64_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  int64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2lv(VKRTGeom _geom, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3lv(VKRTGeom _geom, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4lv(VKRTGeom _geom, const char *name, const int64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_INT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1l(OWLParams obj, const char *name, int64_t val);
@@ -3717,13 +4582,73 @@ VKRT_API void vkrtMissProgSet4ulv(VKRTMissProg _missprog, const char *name, cons
 
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1ul(OWLGeom obj, const char *name, uint64_t val);
-// VKRT_API void vkrtGeomSet2ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y);
-// VKRT_API void vkrtGeomSet3ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
-// VKRT_API void vkrtGeomSet4ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-// VKRT_API void vkrtGeomSet2ulv(OWLGeom obj, const char *name, const uint64_t *val);
-// VKRT_API void vkrtGeomSet3ulv(OWLGeom obj, const char *name, const uint64_t *val);
-// VKRT_API void vkrtGeomSet4ulv(OWLGeom obj, const char *name, const uint64_t *val);
+VKRT_API void vkrtGeomSet1ul(VKRTGeom _geom, const char *name, uint64_t x)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T);
+  uint64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2ul(VKRTGeom _geom, const char *name, uint64_t x, uint64_t y)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  uint64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3ul(VKRTGeom _geom, const char *name, uint64_t x, uint64_t y, uint64_t z)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  uint64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4ul(VKRTGeom _geom, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  uint64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet2ulv(VKRTGeom _geom, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet3ulv(VKRTGeom _geom, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+VKRT_API void vkrtGeomSet4ulv(VKRTGeom _geom, const char *name, const uint64_t *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *entry = (vkrt::Geom*)_geom;
+  assert(entry);
+  auto var = vkrtGetVariable(entry, name, VKRT_UINT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
@@ -3792,7 +4717,29 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
   memcpy(raygen->vars[name].data, &addr, size);
 }
 
-// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen _raygen, const char *name, VKRTGroup val);
+VKRT_API void vkrtRayGenSetGroup(VKRTRayGen _raygen, const char *name, VKRTGroup _val)
+{
+  LOG_API_CALL();
+  vkrt::RayGen *raygen = (vkrt::RayGen*)_raygen;
+  assert(raygen);
+
+  vkrt::Group *val = (vkrt::Group*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // The found variable must be a group
+  assert(raygen->vars[name].decl.type == VKRT_GROUP);
+
+  // Group pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(raygen->vars[name].data, &addr, size);
+}
+
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void *val)
 {
   LOG_API_CALL();
@@ -3810,11 +4757,70 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen _rayGen, const char *name, const void 
 }
 
 // // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSetTexture(VKRTGeom obj, const char *name, VKRTTexture val);
-// VKRT_API void vkrtGeomSetPointer(VKRTGeom obj, const char *name, const void *val);
-// VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
-// VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
+// VKRT_API void vkrtGeomSetTexture(VKRTGeom _geom, const char *name, VKRTTexture val);
+// VKRT_API void vkrtGeomSetPointer(VKRTGeom _geom, const char *name, const void *val);
+VKRT_API void vkrtGeomSetBuffer(VKRTGeom _geom, const char *name, VKRTBuffer _val) 
+{
+  LOG_API_CALL();
+  vkrt::Geom *geom = (vkrt::Geom*)_geom;
+  assert(geom);
+
+  vkrt::Buffer *val = (vkrt::Buffer*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(geom->vars.find(std::string(name)) != geom->vars.end());
+
+  // The found variable must be a buffer
+  assert(geom->vars[name].decl.type == VKRT_BUFFER || 
+         geom->vars[name].decl.type == VKRT_BUFPTR);
+
+  // Buffer pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(geom->vars[name].data, &addr, size);
+}
+
+VKRT_API void vkrtGeomSetGroup(VKRTGeom _geom, const char *name, VKRTGroup _val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *geom = (vkrt::Geom*)_geom;
+  assert(geom);
+
+  vkrt::Group *val = (vkrt::Group*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(geom->vars.find(std::string(name)) != geom->vars.end());
+
+  // The found variable must be a group
+  assert(geom->vars[name].decl.type == VKRT_GROUP);
+
+  // Group pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(geom->vars[name].data, &addr, size);
+}
+
+VKRT_API void vkrtGeomSetRaw(VKRTGeom _geom, const char *name, const void *val)
+{
+  LOG_API_CALL();
+  vkrt::Geom *geom = (vkrt::Geom*)_geom;
+  assert(geom);
+
+  // 1. Figure out if the variable "name" exists
+  assert(geom->vars.find(std::string(name)) != geom->vars.end());
+
+  // 2. Get the expected size for this variable
+  size_t size = getSize(geom->vars[name].decl.type);
+
+  // 3. Assign the value to that variable
+  memcpy(geom->vars[name].data, val, size);
+}
 
 // // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
@@ -3850,7 +4856,29 @@ VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg _missProg, const char *name, VK
   memcpy(missprog->vars[name].data, &addr, size);
 }
 
-// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg _missprog, const char *name, VKRTGroup val);
+VKRT_API void vkrtMissProgSetGroup(VKRTMissProg _missprog, const char *name, VKRTGroup _val)
+{
+  LOG_API_CALL();
+  vkrt::MissProg *missprog = (vkrt::MissProg*)_missprog;
+  assert(missprog);
+
+  vkrt::Group *val = (vkrt::Group*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(missprog->vars.find(std::string(name)) != missprog->vars.end());
+
+  // The found variable must be a group
+  assert(missprog->vars[name].decl.type == VKRT_GROUP);
+
+  // Group pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(missprog->vars[name].data, &addr, size);
+}
+
 VKRT_API void vkrtMissProgSetRaw(VKRTMissProg _missProg, const char *name, const void *val)
 {
   LOG_API_CALL();

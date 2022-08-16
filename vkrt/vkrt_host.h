@@ -29,6 +29,8 @@ using namespace hlslpp;
 #include <stdint.h>
 
 #include <assert.h>
+#include <unordered_map>
+#include <vector>
 
 #ifdef __cplusplus
 # include <cstddef> 
@@ -100,6 +102,22 @@ typedef enum
   VKRT_SBT_MISSPROGS = 0x4,
   VKRT_SBT_ALL   = 0x7
 } VKRTBuildSBTFlags;
+
+/*! enum that specifies the different possible memory layouts for
+  passing transformation matrices */
+typedef enum
+  {
+   /*! A 4x3-float column-major matrix format, where a matrix is
+     specified through four float3's, the first three being the basis
+     vectors of the linear transform, and the fourth one the
+     translation part. */
+   VKRT_MATRIX_FORMAT_COLUMN_MAJOR=0,
+   
+   /*! 3x4-float *row-major* layout as preferred by vulkan matching VkTransformMatrixKHR; 
+     not that, in this case, it doesn't matter if it's a 4x3 or 4x4 matrix, 
+     as the last row in a 4x4 row major matrix can simply be ignored */
+   VKRT_MATRIX_FORMAT_ROW_MAJOR
+  } VKRTMatrixFormat;
 
 typedef enum
   {
@@ -344,8 +362,78 @@ typedef struct _VKRTVarDef {
   void* data = nullptr;
 } VKRTVarDef;
 
+inline std::unordered_map<std::string, VKRTVarDef> checkAndPackVariables(
+  const VKRTVarDecl *vars, int numVars)
+{
+  if (vars == nullptr && (numVars == 0 || numVars == -1))
+    return {};
+
+  // *copy* the vardecls here, so we can catch any potential memory
+  // *access errors early
+
+  assert(vars);
+  if (numVars == -1) {
+    // using -1 as count value for a variable list means the list is
+    // null-terminated... so just count it
+    for (numVars = 0; vars[numVars].name != nullptr; numVars++);
+  }
+  std::unordered_map<std::string, VKRTVarDef> varDefs;
+  for (int i=0;i<numVars;i++) {
+    assert(vars[i].name != nullptr);
+    varDefs[vars[i].name].decl = vars[i];
+
+    // allocate depending on the size of the variable...
+    varDefs[vars[i].name].data = malloc(getSize(vars[i].type));
+  }
+  return varDefs;
+}
+
+inline std::vector<VKRTVarDecl> getDecls(
+  std::unordered_map<std::string, VKRTVarDef> vars) 
+{
+  std::vector<VKRTVarDecl> decls;
+  for (auto &it : vars) {
+    decls.push_back(it.second.decl);
+  }
+  return decls;
+}
+
 VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
 VKRT_API void vkrtModuleDestroy(VKRTModule module);
+
+VKRT_API VKRTGeom
+vkrtGeomCreate(VKRTContext  context,
+              VKRTGeomType type);
+
+VKRT_API void 
+vkrtGeomDestroy(VKRTGeom geometry);
+
+// ==================================================================
+// "Triangles" functions
+// ==================================================================
+VKRT_API void vkrtTrianglesSetVertices(VKRTGeom triangles,
+                                      VKRTBuffer vertices,
+                                      size_t count,
+                                      size_t stride,
+                                      size_t offset);
+// VKRT_API void vkrtTrianglesSetMotionVertices(VKRTGeom triangles,
+//                                            /*! number of vertex arrays
+//                                                passed here, the first
+//                                                of those is for t=0,
+//                                                thelast for t=1,
+//                                                everything is linearly
+//                                                interpolated
+//                                                in-between */
+//                                            size_t    numKeys,
+//                                            VKRTBuffer *vertexArrays,
+//                                            size_t count,
+//                                            size_t stride,
+//                                            size_t offset);
+VKRT_API void vkrtTrianglesSetIndices(VKRTGeom triangles,
+                                     VKRTBuffer indices,
+                                     size_t count,
+                                     size_t stride,
+                                     size_t offset);
 
 /*! technically this is currently a no-op, but we have this function around to 
   match OWL */
@@ -412,6 +500,137 @@ vkrtMissProgSet(VKRTContext  context,
 VKRT_API void 
 vkrtMissProgDestroy(VKRTMissProg missProg);
 
+// ------------------------------------------------------------------
+/*! create a new group (which handles the acceleration strucure) for
+  triangle geometries.
+
+  \param numGeometries Number of geometries in this group, must be
+  non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid vkrt geometry
+  created with vkrtGeomCreate, and must be of a VKRT_GEOM_USER
+  type.
+
+  \param flags reserved for future use
+*/
+VKRT_API VKRTGroup
+vkrtUserGeomGroupCreate(VKRTContext context,
+                       size_t       numGeometries,
+                       VKRTGeom    *arrayOfChildGeoms,
+                       unsigned int flags VKRT_IF_CPP(=0));
+
+
+// ------------------------------------------------------------------
+/*! create a new group (which handles the acceleration strucure) for
+  triangle geometries.
+
+  \param numGeometries Number of geometries in this group, must be
+  non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid vkrt geometry
+  created with vkrtGeomCreate, and must be of a VKRT_GEOM_TRIANGLES
+  type.
+
+  \param flags reserved for future use
+*/
+VKRT_API VKRTGroup
+vkrtTrianglesGeomGroupCreate(VKRTContext context,
+                            size_t     numGeometries,
+                            VKRTGeom   *initValues,
+                            unsigned int flags VKRT_IF_CPP(=0));
+
+
+
+// // ------------------------------------------------------------------
+// /*! create a new group (which handles the acceleration strucure) for
+//   "curves" geometries.
+
+//   \param numGeometries Number of geometries in this group, must be
+//   non-zero.
+
+//   \param arrayOfChildGeoms A array of 'numGeometries' child
+//   geometries. Every geom in this array must be a valid vkrt geometry
+//   created with vkrtGeomCreate, and must be of a VKRT_GEOM_CURVES
+//   type.
+
+//   \param flags reserved for future use
+
+//   Note that in order to use curves geometries you _have_ to call
+//   vkrtEnableCurves() before curves are used; in particular, curves
+//   _have_ to already be enabled when the pipeline gets compiled.
+// */
+// VKRT_API VKRTGroup
+// vkrtCurvesGeomGroupCreate(VKRTContext context,
+//                          size_t     numCurveGeometries,
+//                          VKRTGeom   *curveGeometries,
+//                          unsigned int flags VKRT_IF_CPP(=0));
+
+// ------------------------------------------------------------------
+/*! create a new instance group with given number of instances. The
+  child groups and their instance IDs and/or transforms can either
+  be specified "in bulk" as part of this call, or can be set later on
+  with individual calls to \see vkrtInstanceGroupSetChild and \see
+  vkrtInstanceGroupSetTransform. Note however, that in the case of
+  having millions of instances in a group it will be *much* more
+  efficient to set them in bulk open creation, than in millions of
+  individual API calls.
+
+  Either or all of initGroups, initTranforms, or initInstanceIDs may
+  be null, in which case the values used for the 'th child will be an
+  uninitialized (invalid) group, a unit transform, and 'i', respectively.
+  If initGroups was null, make sure to set all of the child groups
+  with \see vkrtInstanceGroupSetChild before using this group, or
+  it will crash.
+*/
+VKRT_API VKRTGroup
+vkrtInstanceGroupCreate(VKRTContext context,
+                       
+                       /*! number of instances in this group */
+                       size_t     numInstances,
+                       
+                       /*! the initial list of owl groups to use by
+                         the instances in this group; must be either
+                         null, or an array of the size
+                         'numInstances', the i'th instance in this
+                         group will be an instance of the i'th
+                         element in this list. If null, you must
+                         set all the children individually before
+                         using this group. */
+                       const VKRTGroup *initGroups      VKRT_IF_CPP(= nullptr),
+
+                       /*! instance IDs to use for the instance in
+                         this group; must be eithe rnull, or an
+                         array of size numInstnaces. If null, the
+                         i'th child of this instance group will use
+                         instanceID=i, otherwise, it will use the
+                         user-provided instnace ID from this
+                         list. Specifying an instanceID will affect
+                         what value 'optixGetInstanceID' will return
+                         in a CH program that refers to the given
+                         instance */
+                       const uint32_t *initInstanceIDs VKRT_IF_CPP(= nullptr),
+                       
+                       /*! initial list of transforms that this
+                         instance group will use; must be either
+                         null, or an array of size numInstnaces, of
+                         the format specified */
+                       const float    *initTransforms  VKRT_IF_CPP(= nullptr),
+                       VKRTMatrixFormat matrixFormat    VKRT_IF_CPP(=VKRT_MATRIX_FORMAT_ROW_MAJOR),
+
+                       /*! A combination of OptixBuildFlags.  The default
+                         of 0 means to use VKRT default build flags.*/
+                       unsigned int buildFlags VKRT_IF_CPP(=0)
+                       );
+
+VKRT_API void
+vkrtGroupDestroy(VKRTGroup group);
+
+VKRT_API void vkrtGroupBuildAccel(VKRTGroup group);
+
+VKRT_API void vkrtGroupRefitAccel(VKRTGroup group);
+
 VKRT_API VKRTGeomType
 vkrtGeomTypeCreate(VKRTContext  context,
                    VKRTGeomKind kind,
@@ -449,6 +668,11 @@ vkrtGeomTypeSetBoundsProg(VKRTGeomType type,
 pinned on the host and accessible to all devices */
 VKRT_API VKRTBuffer
 vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count);
+
+/*! creates a device buffer where every device has its own local copy
+  of the given buffer */
+VKRT_API VKRTBuffer
+vkrtDeviceBufferCreate(VKRTContext context, VKRTDataType type, size_t count, const void* init);
 
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any 
   underlying memory*/
@@ -509,14 +733,14 @@ VKRT_API void vkrtMissProgSet2bv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet3bv(VKRTMissProg missprog, const char *name, const bool *val);
 VKRT_API void vkrtMissProgSet4bv(VKRTMissProg missprog, const char *name, const bool *val);
 
-// // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1b(OWLGeom var, const char *name, bool val);
-// VKRT_API void vkrtGeomSet2b(OWLGeom var, const char *name, bool x, bool y);
-// VKRT_API void vkrtGeomSet3b(OWLGeom var, const char *name, bool x, bool y, bool z);
-// VKRT_API void vkrtGeomSet4b(OWLGeom var, const char *name, bool x, bool y, bool z, bool w);
-// VKRT_API void vkrtGeomSet2bv(OWLGeom var, const char *name, const bool *val);
-// VKRT_API void vkrtGeomSet3bv(OWLGeom var, const char *name, const bool *val);
-// VKRT_API void vkrtGeomSet4bv(OWLGeom var, const char *name, const bool *val);
+// setters for variables on "Geom"s
+// VKRT_API void vkrtGeomSet1b(VKRTGeom geom, const char *name, bool val);
+// VKRT_API void vkrtGeomSet2b(VKRTGeom geom, const char *name, bool x, bool y);
+// VKRT_API void vkrtGeomSet3b(VKRTGeom geom, const char *name, bool x, bool y, bool z);
+// VKRT_API void vkrtGeomSet4b(VKRTGeom geom, const char *name, bool x, bool y, bool z, bool w);
+// VKRT_API void vkrtGeomSet2bv(VKRTGeom geom, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet3bv(VKRTGeom geom, const char *name, const bool *val);
+// VKRT_API void vkrtGeomSet4bv(VKRTGeom geom, const char *name, const bool *val);
 
 // // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1b(OWLParams var, const char *name, bool val);
@@ -551,22 +775,22 @@ VKRT_API void vkrtMissProgSet3cv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4cv(VKRTMissProg missprog, const char *name, const int8_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1c(OWLGeom obj, const char *name, int8_t val);
-// VKRT_API void vkrtGeomSet2c(OWLGeom obj, const char *name, int8_t x, int8_t y);
-// VKRT_API void vkrtGeomSet3c(OWLGeom obj, const char *name, int8_t x, int8_t y, int8_t z);
-// VKRT_API void vkrtGeomSet4c(OWLGeom obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-// VKRT_API void vkrtGeomSet2cv(OWLGeom obj, const char *name, const char *val);
-// VKRT_API void vkrtGeomSet3cv(OWLGeom obj, const char *name, const char *val);
-// VKRT_API void vkrtGeomSet4cv(OWLGeom obj, const char *name, const char *val);
+VKRT_API void vkrtGeomSet1c(VKRTGeom geom, const char *name, int8_t val);
+VKRT_API void vkrtGeomSet2c(VKRTGeom geom, const char *name, int8_t x, int8_t y);
+VKRT_API void vkrtGeomSet3c(VKRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z);
+VKRT_API void vkrtGeomSet4c(VKRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+VKRT_API void vkrtGeomSet2cv(VKRTGeom geom, const char *name, const int8_t *val);
+VKRT_API void vkrtGeomSet3cv(VKRTGeom geom, const char *name, const int8_t *val);
+VKRT_API void vkrtGeomSet4cv(VKRTGeom geom, const char *name, const int8_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1c(OWLParams obj, const char *name, int8_t val);
 // VKRT_API void vkrtParamsSet2c(OWLParams obj, const char *name, int8_t x, int8_t y);
 // VKRT_API void vkrtParamsSet3c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z);
 // VKRT_API void vkrtParamsSet4c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-// VKRT_API void vkrtParamsSet2cv(OWLParams obj, const char *name, const char *val);
-// VKRT_API void vkrtParamsSet3cv(OWLParams obj, const char *name, const char *val);
-// VKRT_API void vkrtParamsSet4cv(OWLParams obj, const char *name, const char *val);
+// VKRT_API void vkrtParamsSet2cv(OWLParams obj, const char *name, const int8_t *val);
+// VKRT_API void vkrtParamsSet3cv(OWLParams obj, const char *name, const int8_t *val);
+// VKRT_API void vkrtParamsSet4cv(OWLParams obj, const char *name, const int8_t *val);
 
 // ------------------------------------------------------------------
 // setters for variables of type "uint8_t"
@@ -591,13 +815,13 @@ VKRT_API void vkrtMissProgSet3ucv(VKRTMissProg missprog, const char *name, const
 VKRT_API void vkrtMissProgSet4ucv(VKRTMissProg missprog, const char *name, const uint8_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1uc(OWLGeom obj, const char *name, uint8_t val);
-// VKRT_API void vkrtGeomSet2uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y);
-// VKRT_API void vkrtGeomSet3uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
-// VKRT_API void vkrtGeomSet4uc(OWLGeom obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-// VKRT_API void vkrtGeomSet2ucv(OWLGeom obj, const char *name, const uint8_t *val);
-// VKRT_API void vkrtGeomSet3ucv(OWLGeom obj, const char *name, const uint8_t *val);
-// VKRT_API void vkrtGeomSet4ucv(OWLGeom obj, const char *name, const uint8_t *val);
+VKRT_API void vkrtGeomSet1uc(VKRTGeom geom, const char *name, uint8_t val);
+VKRT_API void vkrtGeomSet2uc(VKRTGeom geom, const char *name, uint8_t x, uint8_t y);
+VKRT_API void vkrtGeomSet3uc(VKRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z);
+VKRT_API void vkrtGeomSet4uc(VKRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+VKRT_API void vkrtGeomSet2ucv(VKRTGeom geom, const char *name, const uint8_t *val);
+VKRT_API void vkrtGeomSet3ucv(VKRTGeom geom, const char *name, const uint8_t *val);
+VKRT_API void vkrtGeomSet4ucv(VKRTGeom geom, const char *name, const uint8_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
@@ -631,13 +855,13 @@ VKRT_API void vkrtMissProgSet3sv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4sv(VKRTMissProg missprog, const char *name, const int16_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1s(OWLGeom obj, const char *name, int16_t val);
-// VKRT_API void vkrtGeomSet2s(OWLGeom obj, const char *name, int16_t x, int16_t y);
-// VKRT_API void vkrtGeomSet3s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z);
-// VKRT_API void vkrtGeomSet4s(OWLGeom obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-// VKRT_API void vkrtGeomSet2sv(OWLGeom obj, const char *name, const int16_t *val);
-// VKRT_API void vkrtGeomSet3sv(OWLGeom obj, const char *name, const int16_t *val);
-// VKRT_API void vkrtGeomSet4sv(OWLGeom obj, const char *name, const int16_t *val);
+VKRT_API void vkrtGeomSet1s(VKRTGeom geom, const char *name, int16_t val);
+VKRT_API void vkrtGeomSet2s(VKRTGeom geom, const char *name, int16_t x, int16_t y);
+VKRT_API void vkrtGeomSet3s(VKRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z);
+VKRT_API void vkrtGeomSet4s(VKRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+VKRT_API void vkrtGeomSet2sv(VKRTGeom geom, const char *name, const int16_t *val);
+VKRT_API void vkrtGeomSet3sv(VKRTGeom geom, const char *name, const int16_t *val);
+VKRT_API void vkrtGeomSet4sv(VKRTGeom geom, const char *name, const int16_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1s(OWLParams obj, const char *name, int16_t val);
@@ -671,13 +895,13 @@ VKRT_API void vkrtMissProgSet3usv(VKRTMissProg missprog, const char *name, const
 VKRT_API void vkrtMissProgSet4usv(VKRTMissProg missprog, const char *name, const uint16_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1us(OWLGeom obj, const char *name, uint16_t val);
-// VKRT_API void vkrtGeomSet2us(OWLGeom obj, const char *name, uint16_t x, uint16_t y);
-// VKRT_API void vkrtGeomSet3us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
-// VKRT_API void vkrtGeomSet4us(OWLGeom obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-// VKRT_API void vkrtGeomSet2usv(OWLGeom obj, const char *name, const uint16_t *val);
-// VKRT_API void vkrtGeomSet3usv(OWLGeom obj, const char *name, const uint16_t *val);
-// VKRT_API void vkrtGeomSet4usv(OWLGeom obj, const char *name, const uint16_t *val);
+VKRT_API void vkrtGeomSet1us(VKRTGeom geom, const char *name, uint16_t val);
+VKRT_API void vkrtGeomSet2us(VKRTGeom geom, const char *name, uint16_t x, uint16_t y);
+VKRT_API void vkrtGeomSet3us(VKRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z);
+VKRT_API void vkrtGeomSet4us(VKRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+VKRT_API void vkrtGeomSet2usv(VKRTGeom geom, const char *name, const uint16_t *val);
+VKRT_API void vkrtGeomSet3usv(VKRTGeom geom, const char *name, const uint16_t *val);
+VKRT_API void vkrtGeomSet4usv(VKRTGeom geom, const char *name, const uint16_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
@@ -711,13 +935,13 @@ VKRT_API void vkrtMissProgSet3iv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4iv(VKRTMissProg missprog, const char *name, const int32_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1i(OWLGeom obj, const char *name, int32_t val);
-// VKRT_API void vkrtGeomSet2i(OWLGeom obj, const char *name, int32_t x, int32_t y);
-// VKRT_API void vkrtGeomSet3i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z);
-// VKRT_API void vkrtGeomSet4i(OWLGeom obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-// VKRT_API void vkrtGeomSet2iv(OWLGeom obj, const char *name, const int32_t *val);
-// VKRT_API void vkrtGeomSet3iv(OWLGeom obj, const char *name, const int32_t *val);
-// VKRT_API void vkrtGeomSet4iv(OWLGeom obj, const char *name, const int32_t *val);
+VKRT_API void vkrtGeomSet1i(VKRTGeom geom, const char *name, int32_t val);
+VKRT_API void vkrtGeomSet2i(VKRTGeom geom, const char *name, int32_t x, int32_t y);
+VKRT_API void vkrtGeomSet3i(VKRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z);
+VKRT_API void vkrtGeomSet4i(VKRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+VKRT_API void vkrtGeomSet2iv(VKRTGeom geom, const char *name, const int32_t *val);
+VKRT_API void vkrtGeomSet3iv(VKRTGeom geom, const char *name, const int32_t *val);
+VKRT_API void vkrtGeomSet4iv(VKRTGeom geom, const char *name, const int32_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1i(OWLParams obj, const char *name, int32_t val);
@@ -751,13 +975,13 @@ VKRT_API void vkrtMissProgSet3uiv(VKRTMissProg missprog, const char *name, const
 VKRT_API void vkrtMissProgSet4uiv(VKRTMissProg missprog, const char *name, const uint32_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1ui(OWLGeom obj, const char *name, uint32_t val);
-// VKRT_API void vkrtGeomSet2ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y);
-// VKRT_API void vkrtGeomSet3ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
-// VKRT_API void vkrtGeomSet4ui(OWLGeom obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-// VKRT_API void vkrtGeomSet2uiv(OWLGeom obj, const char *name, const uint32_t *val);
-// VKRT_API void vkrtGeomSet3uiv(OWLGeom obj, const char *name, const uint32_t *val);
-// VKRT_API void vkrtGeomSet4uiv(OWLGeom obj, const char *name, const uint32_t *val);
+VKRT_API void vkrtGeomSet1ui(VKRTGeom geom, const char *name, uint32_t val);
+VKRT_API void vkrtGeomSet2ui(VKRTGeom geom, const char *name, uint32_t x, uint32_t y);
+VKRT_API void vkrtGeomSet3ui(VKRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z);
+VKRT_API void vkrtGeomSet4ui(VKRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+VKRT_API void vkrtGeomSet2uiv(VKRTGeom geom, const char *name, const uint32_t *val);
+VKRT_API void vkrtGeomSet3uiv(VKRTGeom geom, const char *name, const uint32_t *val);
+VKRT_API void vkrtGeomSet4uiv(VKRTGeom geom, const char *name, const uint32_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
@@ -791,13 +1015,13 @@ VKRT_API void vkrtMissProgSet3fv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4fv(VKRTMissProg missprog, const char *name, const float *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1f(OWLGeom obj, const char *name, float val);
-// VKRT_API void vkrtGeomSet2f(OWLGeom obj, const char *name, float x, float y);
-// VKRT_API void vkrtGeomSet3f(OWLGeom obj, const char *name, float x, float y, float z);
-// VKRT_API void vkrtGeomSet4f(OWLGeom obj, const char *name, float x, float y, float z, float w);
-// VKRT_API void vkrtGeomSet2fv(OWLGeom obj, const char *name, const float *val);
-// VKRT_API void vkrtGeomSet3fv(OWLGeom obj, const char *name, const float *val);
-// VKRT_API void vkrtGeomSet4fv(OWLGeom obj, const char *name, const float *val);
+VKRT_API void vkrtGeomSet1f(VKRTGeom geom, const char *name, float val);
+VKRT_API void vkrtGeomSet2f(VKRTGeom geom, const char *name, float x, float y);
+VKRT_API void vkrtGeomSet3f(VKRTGeom geom, const char *name, float x, float y, float z);
+VKRT_API void vkrtGeomSet4f(VKRTGeom geom, const char *name, float x, float y, float z, float w);
+VKRT_API void vkrtGeomSet2fv(VKRTGeom geom, const char *name, const float *val);
+VKRT_API void vkrtGeomSet3fv(VKRTGeom geom, const char *name, const float *val);
+VKRT_API void vkrtGeomSet4fv(VKRTGeom geom, const char *name, const float *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1f(OWLParams obj, const char *name, float val);
@@ -831,13 +1055,13 @@ VKRT_API void vkrtMissProgSet3dv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4dv(VKRTMissProg missprog, const char *name, const double *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1d(OWLGeom obj, const char *name, double val);
-// VKRT_API void vkrtGeomSet2d(OWLGeom obj, const char *name, double x, double y);
-// VKRT_API void vkrtGeomSet3d(OWLGeom obj, const char *name, double x, double y, double z);
-// VKRT_API void vkrtGeomSet4d(OWLGeom obj, const char *name, double x, double y, double z, double w);
-// VKRT_API void vkrtGeomSet2dv(OWLGeom obj, const char *name, const double *val);
-// VKRT_API void vkrtGeomSet3dv(OWLGeom obj, const char *name, const double *val);
-// VKRT_API void vkrtGeomSet4dv(OWLGeom obj, const char *name, const double *val);
+VKRT_API void vkrtGeomSet1d(VKRTGeom geom, const char *name, double val);
+VKRT_API void vkrtGeomSet2d(VKRTGeom geom, const char *name, double x, double y);
+VKRT_API void vkrtGeomSet3d(VKRTGeom geom, const char *name, double x, double y, double z);
+VKRT_API void vkrtGeomSet4d(VKRTGeom geom, const char *name, double x, double y, double z, double w);
+VKRT_API void vkrtGeomSet2dv(VKRTGeom geom, const char *name, const double *val);
+VKRT_API void vkrtGeomSet3dv(VKRTGeom geom, const char *name, const double *val);
+VKRT_API void vkrtGeomSet4dv(VKRTGeom geom, const char *name, const double *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1d(OWLParams obj, const char *name, double val);
@@ -871,13 +1095,13 @@ VKRT_API void vkrtMissProgSet3lv(VKRTMissProg missprog, const char *name, const 
 VKRT_API void vkrtMissProgSet4lv(VKRTMissProg missprog, const char *name, const int64_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1l(OWLGeom obj, const char *name, int64_t val);
-// VKRT_API void vkrtGeomSet2l(OWLGeom obj, const char *name, int64_t x, int64_t y);
-// VKRT_API void vkrtGeomSet3l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z);
-// VKRT_API void vkrtGeomSet4l(OWLGeom obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-// VKRT_API void vkrtGeomSet2lv(OWLGeom obj, const char *name, const int64_t *val);
-// VKRT_API void vkrtGeomSet3lv(OWLGeom obj, const char *name, const int64_t *val);
-// VKRT_API void vkrtGeomSet4lv(OWLGeom obj, const char *name, const int64_t *val);
+VKRT_API void vkrtGeomSet1l(VKRTGeom geom, const char *name, int64_t val);
+VKRT_API void vkrtGeomSet2l(VKRTGeom geom, const char *name, int64_t x, int64_t y);
+VKRT_API void vkrtGeomSet3l(VKRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z);
+VKRT_API void vkrtGeomSet4l(VKRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+VKRT_API void vkrtGeomSet2lv(VKRTGeom geom, const char *name, const int64_t *val);
+VKRT_API void vkrtGeomSet3lv(VKRTGeom geom, const char *name, const int64_t *val);
+VKRT_API void vkrtGeomSet4lv(VKRTGeom geom, const char *name, const int64_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1l(OWLParams obj, const char *name, int64_t val);
@@ -911,13 +1135,13 @@ VKRT_API void vkrtMissProgSet3ulv(VKRTMissProg missprog, const char *name, const
 VKRT_API void vkrtMissProgSet4ulv(VKRTMissProg missprog, const char *name, const uint64_t *val);
 
 // setters for variables on "Geom"s
-// VKRT_API void vkrtGeomSet1ul(OWLGeom obj, const char *name, uint64_t val);
-// VKRT_API void vkrtGeomSet2ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y);
-// VKRT_API void vkrtGeomSet3ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
-// VKRT_API void vkrtGeomSet4ul(OWLGeom obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-// VKRT_API void vkrtGeomSet2ulv(OWLGeom obj, const char *name, const uint64_t *val);
-// VKRT_API void vkrtGeomSet3ulv(OWLGeom obj, const char *name, const uint64_t *val);
-// VKRT_API void vkrtGeomSet4ulv(OWLGeom obj, const char *name, const uint64_t *val);
+VKRT_API void vkrtGeomSet1ul(VKRTGeom geom, const char *name, uint64_t val);
+VKRT_API void vkrtGeomSet2ul(VKRTGeom geom, const char *name, uint64_t x, uint64_t y);
+VKRT_API void vkrtGeomSet3ul(VKRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z);
+VKRT_API void vkrtGeomSet4ul(VKRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+VKRT_API void vkrtGeomSet2ulv(VKRTGeom geom, const char *name, const uint64_t *val);
+VKRT_API void vkrtGeomSet3ulv(VKRTGeom geom, const char *name, const uint64_t *val);
+VKRT_API void vkrtGeomSet4ulv(VKRTGeom geom, const char *name, const uint64_t *val);
 
 // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
@@ -936,15 +1160,15 @@ VKRT_API void vkrtMissProgSet4ulv(VKRTMissProg missprog, const char *name, const
 // VKRT_API void vkrtRayGenSetTexture(VKRTRayGen raygen, const char *name, VKRTTexture val);
 // VKRT_API void vkrtRayGenSetPointer(VKRTRayGen raygen, const char *name, const void *val);
 VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen raygen, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
+VKRT_API void vkrtRayGenSetGroup(VKRTRayGen raygen, const char *name, VKRTGroup val);
 VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *val);
 
 // // setters for variables on "Geom"s
 // VKRT_API void vkrtGeomSetTexture(VKRTGeom obj, const char *name, VKRTTexture val);
 // VKRT_API void vkrtGeomSetPointer(VKRTGeom obj, const char *name, const void *val);
-// VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
-// VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
+VKRT_API void vkrtGeomSetBuffer(VKRTGeom obj, const char *name, VKRTBuffer val);
+VKRT_API void vkrtGeomSetGroup(VKRTGeom obj, const char *name, VKRTGroup val);
+VKRT_API void vkrtGeomSetRaw(VKRTGeom obj, const char *name, const void *val);
 
 // // setters for variables on "Params"s
 // VKRT_API void vkrtParamsSetTexture(VKRTParams obj, const char *name, VKRTTexture val);
@@ -957,5 +1181,5 @@ VKRT_API void vkrtRayGenSetRaw(VKRTRayGen raygen, const char *name, const void *
 // VKRT_API void vkrtMissProgSetTexture(VKRTMissProg missprog, const char *name, VKRTTexture val);
 // VKRT_API void vkrtMissProgSetPointer(VKRTMissProg missprog, const char *name, const void *val);
 VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg missprog, const char *name, VKRTBuffer val);
-// VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
+VKRT_API void vkrtMissProgSetGroup(VKRTMissProg missprog, const char *name, VKRTGroup val);
 VKRT_API void vkrtMissProgSetRaw(VKRTMissProg missprog, const char *name, const void *val);
