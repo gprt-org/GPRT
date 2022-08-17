@@ -2,6 +2,7 @@
 textures
 *#
 .#*
+bld
 bin
 dbg
 *.user*
