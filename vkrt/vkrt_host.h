@@ -30,10 +30,11 @@ using namespace hlslpp;
 
 #include <assert.h>
 #include <unordered_map>
+#include <string>
 #include <vector>
 
 #ifdef __cplusplus
-# include <cstddef> 
+# include <cstddef>
 #endif
 
 #if defined(_MSC_VER)
@@ -112,9 +113,9 @@ typedef enum
      vectors of the linear transform, and the fourth one the
      translation part. */
    VKRT_MATRIX_FORMAT_COLUMN_MAJOR=0,
-   
-   /*! 3x4-float *row-major* layout as preferred by vulkan matching VkTransformMatrixKHR; 
-     not that, in this case, it doesn't matter if it's a 4x3 or 4x4 matrix, 
+
+   /*! 3x4-float *row-major* layout as preferred by vulkan matching VkTransformMatrixKHR;
+     not that, in this case, it doesn't matter if it's a 4x3 or 4x4 matrix,
      as the last row in a 4x4 row major matrix can simply be ignored */
    VKRT_MATRIX_FORMAT_ROW_MAJOR
   } VKRTMatrixFormat;
@@ -146,8 +147,8 @@ typedef enum
    /* all types that are naively copyable should be below this value,
       all that aren't should be above */
    _VKRT_BEGIN_COPYABLE_TYPES = 1000,
-   
-   
+
+
    VKRT_FLOAT=1000,
    VKRT_FLOAT2,
    VKRT_FLOAT3,
@@ -162,7 +163,7 @@ typedef enum
    VKRT_INT32_T2 = VKRT_INT2,
    VKRT_INT32_T3 = VKRT_INT3,
    VKRT_INT32_T4 = VKRT_INT4,
-   
+
    VKRT_UINT=1020,
    VKRT_UINT2,
    VKRT_UINT3,
@@ -172,7 +173,7 @@ typedef enum
    VKRT_UINT32_T2 = VKRT_UINT2,
    VKRT_UINT32_T3 = VKRT_UINT3,
    VKRT_UINT32_T4 = VKRT_UINT4,
-   
+
    /* 64 bit integers */
    VKRT_LONG=1030,
    VKRT_LONG2,
@@ -198,7 +199,7 @@ typedef enum
    VKRT_DOUBLE2,
    VKRT_DOUBLE3,
    VKRT_DOUBLE4,
-    
+
    VKRT_CHAR=1060,
    VKRT_CHAR2,
    VKRT_CHAR3,
@@ -245,7 +246,7 @@ typedef enum
    VKRT_BOOL2,
    VKRT_BOOL3,
    VKRT_BOOL4,
-   
+
    /*! just another name for a 64-bit data type - unlike
      VKRT_BUFFER_POINTER's (which gets translated from VKRTBuffer's
      to actual device-side poiners) these VKRT_RAW_POINTER types get
@@ -320,7 +321,7 @@ typedef enum
     else if (type == VKRT_UINT64_T2) return sizeof(uint64_t) * 2;
     else if (type == VKRT_UINT64_T3) return sizeof(uint64_t) * 3;
     else if (type == VKRT_UINT64_T4) return sizeof(uint64_t) * 4;
-    
+
     else if (type == VKRT_INT64_T)  return sizeof(uint64_t);
     else if (type == VKRT_INT64_T2) return sizeof(uint64_t) * 2;
     else if (type == VKRT_INT64_T3) return sizeof(uint64_t) * 3;
@@ -389,7 +390,7 @@ inline std::unordered_map<std::string, VKRTVarDef> checkAndPackVariables(
 }
 
 inline std::vector<VKRTVarDecl> getDecls(
-  std::unordered_map<std::string, VKRTVarDef> vars) 
+  std::unordered_map<std::string, VKRTVarDef> vars)
 {
   std::vector<VKRTVarDecl> decls;
   for (auto &it : vars) {
@@ -405,7 +406,7 @@ VKRT_API VKRTGeom
 vkrtGeomCreate(VKRTContext  context,
               VKRTGeomType type);
 
-VKRT_API void 
+VKRT_API void
 vkrtGeomDestroy(VKRTGeom geometry);
 
 // ==================================================================
@@ -435,7 +436,7 @@ VKRT_API void vkrtTrianglesSetIndices(VKRTGeom triangles,
                                      size_t stride,
                                      size_t offset);
 
-/*! technically this is currently a no-op, but we have this function around to 
+/*! technically this is currently a no-op, but we have this function around to
   match OWL */
 VKRT_API void vkrtBuildPrograms(VKRTContext context);
 
@@ -443,7 +444,7 @@ VKRT_API void vkrtBuildPipeline(VKRTContext context);
 VKRT_API void vkrtBuildSBT(VKRTContext context,
                          VKRTBuildSBTFlags flags VKRT_IF_CPP(=VKRT_SBT_ALL));
 
-/*! creates a new device context with the gives list of devices. 
+/*! creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
   list "0,1,2,...."; if numDevices <= 0 it automatically refers to
@@ -479,8 +480,8 @@ vkrtRayGenCreate(VKRTContext  context,
                  size_t      sizeOfVarStruct,
                  VKRTVarDecl *vars,
                  int         numVars);
-                
-VKRT_API void 
+
+VKRT_API void
 vkrtRayGenDestroy(VKRTRayGen rayGen);
 
 VKRT_API VKRTMissProg
@@ -497,13 +498,13 @@ vkrtMissProgSet(VKRTContext  context,
                int rayType,
                VKRTMissProg missProgToUse);
 
-VKRT_API void 
+VKRT_API void
 vkrtMissProgDestroy(VKRTMissProg missProg);
 
 // ------------------------------------------------------------------
 /*! create a new acceleration structure for AABB geometries.
 
-  \param numGeometries Number of geometries in this acceleration structure, must 
+  \param numGeometries Number of geometries in this acceleration structure, must
   be non-zero.
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
@@ -523,7 +524,7 @@ vkrtAABBAccelCreate(VKRTContext context,
 // ------------------------------------------------------------------
 /*! create a new acceleration structure for triangle geometries.
 
-  \param numGeometries Number of geometries in this acceleration structure, must 
+  \param numGeometries Number of geometries in this acceleration structure, must
   be non-zero.
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
@@ -544,7 +545,7 @@ vkrtTrianglesAccelCreate(VKRTContext context,
 // // ------------------------------------------------------------------
 // /*! create a new acceleration structure for "curves" geometries.
 
-//   \param numGeometries Number of geometries in this acceleration structure, 
+//   \param numGeometries Number of geometries in this acceleration structure,
 //   must be non-zero.
 
 //   \param arrayOfChildGeoms A array of 'numGeometries' child
@@ -565,13 +566,13 @@ vkrtTrianglesAccelCreate(VKRTContext context,
 //                          unsigned int flags VKRT_IF_CPP(=0));
 
 // ------------------------------------------------------------------
-/*! create a new instance acceleration structure with given number of 
-  instances. The child acceleration structures and their instance IDs 
-  and/or transforms can either be specified "in bulk" as part of this 
-  call, or can be set later on with individual calls to 
-  \see vkrtInstanceAccelSetChild and \see vkrtInstanceAccelSetTransform. 
-  Note however, that in the case of having millions of instances in an accel 
-  it will be *much* more efficient to set them in bulk open creation, than 
+/*! create a new instance acceleration structure with given number of
+  instances. The child acceleration structures and their instance IDs
+  and/or transforms can either be specified "in bulk" as part of this
+  call, or can be set later on with individual calls to
+  \see vkrtInstanceAccelSetChild and \see vkrtInstanceAccelSetTransform.
+  Note however, that in the case of having millions of instances in an accel
+  it will be *much* more efficient to set them in bulk open creation, than
   in millions of individual API calls.
 
   Either or all of initAccels, initTranforms, or initInstanceIDs may
@@ -585,7 +586,7 @@ VKRT_API VKRTAccel
 vkrtInstanceAccelCreate(VKRTContext context,
                        /*! number of instances in this acceleration structure */
                        size_t     numInstances,
-                       
+
                        /*! the initial list of vkrt accels to use by
                          the instances in this accel; must be either
                          null, or an array of the size
@@ -607,7 +608,7 @@ vkrtInstanceAccelCreate(VKRTContext context,
                          in a CH program that refers to the given
                          instance */
                        const uint32_t *initInstanceIDs VKRT_IF_CPP(= nullptr),
-                       
+
                        /*! initial list of transforms that this
                          instance accel will use; must be either
                          null, or an array of size numInstances, of
@@ -633,7 +634,7 @@ vkrtGeomTypeCreate(VKRTContext  context,
                    VKRTVarDecl  *vars,
                    int          numVars);
 
-VKRT_API void 
+VKRT_API void
 vkrtGeomTypeDestroy(VKRTGeomType geomType);
 
 VKRT_API void
@@ -669,7 +670,7 @@ vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count)
 VKRT_API VKRTBuffer
 vkrtDeviceBufferCreate(VKRTContext context, VKRTDataType type, size_t count, const void* init);
 
-/*! Destroys all underlying Vulkan resources for the given buffer and frees any 
+/*! Destroys all underlying Vulkan resources for the given buffer and frees any
   underlying memory*/
 VKRT_API void
 vkrtBufferDestroy(VKRTBuffer buffer);
@@ -681,8 +682,8 @@ vkrtBufferDestroy(VKRTBuffer buffer);
   device buffers each device *may* see this buffer under a different
   address, and that address is not valid on the host. Note this
   function is paricuarly useful for CUDA-interop; allowing to
-  cudaMemcpy to/from an owl buffer directly from CUDA code 
-  
+  cudaMemcpy to/from an owl buffer directly from CUDA code
+
   // TODO! update for Vulkan...
   */
 VKRT_API void *
@@ -695,7 +696,7 @@ vkrtBufferMap(VKRTBuffer buffer, int deviceID VKRT_IF_CPP(=0));
 VKRT_API void
 vkrtBufferUnmap(VKRTBuffer buffer, int deviceID VKRT_IF_CPP(=0));
 
-/*! Executes a ray tracing pipeline with the given raygen program. 
+/*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
 VKRT_API void
 vkrtRayGenLaunch2D(VKRTContext context, VKRTRayGen rayGen, int dims_x, int dims_y);
