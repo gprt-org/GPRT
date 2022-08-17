@@ -12,13 +12,13 @@ and [here for
 Windows](https://drive.google.com/file/d/1Flwpq7eKv8wVt-1F8jYt_oeSbNGRKFJG/view?usp=sharing).
 
 VKRT used CMake for configuration. For a build directory, `bld`, in the top
-directory of this repository it can be configured with:
+directory of this repository it can be configured with
 
 ```shell
 cmake ..
 ```
 
-And built with:
+And built with
 
 ```shell
 make all
@@ -27,4 +27,10 @@ make all
 ## Linux-Specific Build Instructions
 
 The Linux version currently requires shared library compilation, which can be
-enabled with `-DVKRT_BUILD_SHARED=ON` in the CMake command above.
+enabled with
+
+```shell
+-DVKRT_BUILD_SHARED=ON
+```
+
+in the CMake command above.
