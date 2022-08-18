@@ -508,7 +508,8 @@ namespace vkrt {
 
   struct Accel {
     VkDeviceAddress address = 0;
-
+    VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
+    
     Accel() {};
     
     ~Accel() {};
@@ -2046,12 +2047,24 @@ vkrtAABBAccelCreate(VKRTContext context,
 }
 
 VKRT_API VKRTAccel
-vkrtTrianglesAccelCreate(VKRTContext context,
+vkrtTrianglesAccelCreate(VKRTContext _context,
                             size_t     numGeometries,
                             VKRTGeom   *initValues,
                             unsigned int flags)
 {
-  VKRT_NOTIMPLEMENTED;
+  LOG_API_CALL();
+  vkrt::Context *context = (vkrt::Context*)_context;
+
+  vkrt::Accel *accel = new vkrt::Accel();
+
+  VkAccelerationStructureDeviceAddressInfoKHR accelerationStructureDeviceAddressInfo = {};
+  accelerationStructureDeviceAddressInfo.accelerationStructure = accel->accelerationStructure;
+  accel->address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(
+    context->logicalDevice,
+    &accelerationStructureDeviceAddressInfo
+  );
+
+
   return nullptr;
 }
 

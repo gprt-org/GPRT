@@ -239,7 +239,7 @@ int main(int ac, char **av)
   // and finally, clean up
   // ##################################################################
 
-  LOG("destroying devicegroup ...");
+  LOG("cleaning up ...");
 
   vkrtBufferDestroy(vertexBuffer);
   vkrtBufferDestroy(indexBuffer);
