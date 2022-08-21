@@ -66,6 +66,20 @@ int3 indices[NUM_INDICES] =
     { 4,0,2 }, { 4,2,6 }
   };
 
+float geometryTransform[3][4] = 
+  {
+    1.0f, 0.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f
+  };
+
+float instanceTransform[3][4] = 
+  {
+    1.0f, 0.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f
+  };
+
 const char *outFileName = "s01-simpleTriangles.png";
 const int2 fbSize = {800,600};
 const float3 lookFrom = {-4.f,-3.f,-2.f};
@@ -115,6 +129,10 @@ int main(int ac, char **av)
     = vkrtDeviceBufferCreate(context,VKRT_FLOAT3,NUM_VERTICES,vertices);
   VKRTBuffer indexBuffer
     = vkrtDeviceBufferCreate(context,VKRT_INT3,NUM_INDICES,indices);
+  VKRTBuffer geometryTransformBuffer
+    = vkrtDeviceBufferCreate(context,VKRT_TRANSFORM,1,geometryTransform);
+  VKRTBuffer instanceTransformBuffer
+    = vkrtDeviceBufferCreate(context,VKRT_TRANSFORM,1,instanceTransform);
   VKRTBuffer frameBuffer
     = vkrtHostPinnedBufferCreate(context,VKRT_INT,fbSize.x*fbSize.y);
   
@@ -122,9 +140,11 @@ int main(int ac, char **av)
     = vkrtGeomCreate(context,trianglesGeomType);
 
   vkrtTrianglesSetVertices(trianglesGeom,vertexBuffer,
-                          NUM_VERTICES,sizeof(float3),0);
+                           NUM_VERTICES,sizeof(float3),0);
   vkrtTrianglesSetIndices(trianglesGeom,indexBuffer,
-                         NUM_INDICES,sizeof(int3),0);
+                          NUM_INDICES,sizeof(int3),0);
+  vkrtTrianglesSetTransform(trianglesGeom,
+                          geometryTransformBuffer,0);
 
   vkrtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
   vkrtGeomSetBuffer(trianglesGeom,"index",indexBuffer);

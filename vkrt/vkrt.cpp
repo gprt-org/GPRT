@@ -505,16 +505,7 @@ namespace vkrt {
         address = getDeviceAddress();
     }
   };
-
-  struct Accel {
-    VkDeviceAddress address = 0;
-    VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
-    
-    Accel() {};
-    
-    ~Accel() {};
-  };
-
+ 
   struct SBTEntry {
     // Map of the name of the variable to that variable declaration
     std::unordered_map<std::string, VKRTVarDef> vars;
@@ -716,7 +707,7 @@ namespace vkrt {
       size_t count  = 0;
       size_t stride = 0;
       size_t offset = 0;
-      vkrt::Buffer* buffer;
+      vkrt::Buffer* buffer = nullptr;
     } index;
 
     struct {
@@ -726,8 +717,19 @@ namespace vkrt {
       std::vector<vkrt::Buffer*> buffers;
     } vertex;
 
+    struct {
+      vkrt::Buffer* buffer = nullptr;
+      size_t offset = 0;
+    } transform;
+
     TrianglesGeom(TrianglesGeomType* _geomType) : Geom() {
       geomType = (GeomType*)_geomType;
+
+      VkTransformMatrixKHR transformMatrix = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f
+      };
 
       // Allocate the variables for this geometry, using our geomType vars as 
       // the template.
@@ -760,6 +762,16 @@ namespace vkrt {
       index.count = count;
       index.stride = stride;
       index.offset = offset;
+    }
+
+    void setTransform(
+      vkrt::Buffer* transformBuffer,
+      size_t offset) 
+    {
+      // assuming no motion blurred triangles for now, so we assume 1 transform 
+      // buffer
+      transform.buffer = transformBuffer;
+      transform.offset = offset;
     }
   };
 
@@ -799,6 +811,138 @@ namespace vkrt {
       return new UserGeom(this);
     }
   };
+
+  struct Accel {
+    VkPhysicalDevice physicalDevice;
+    VkDevice logicalDevice;
+    VkDeviceAddress address = 0;
+    VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
+    
+    Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice) {
+      this->physicalDevice = physicalDevice;
+      this->logicalDevice = logicalDevice;
+    };
+    
+    ~Accel() {};
+
+    virtual void build() { };
+  };
+
+  struct TrianglesAccel : public Accel {
+    std::vector<TrianglesGeom*> geometries; 
+
+    // todo, accept this in constructor
+    VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+
+    TrianglesAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
+      size_t numGeometries, TrianglesGeom* geometries) : Accel(physicalDevice, logicalDevice) 
+    {
+      this->geometries.resize(numGeometries);
+      memcpy(this->geometries.data(), geometries, sizeof(VKRTGeom*) * numGeometries);
+    };
+    
+    ~TrianglesAccel() {};
+
+    void build() {
+      std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries(geometries.size());
+      std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR; 
+        //   means, anyhit shader is disabled
+
+        // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR; 
+        //   means, anyhit should only be called once.
+        //   If absent, then an anyhit shader might be called more than once...
+        geom.flags = 0;
+        geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geom.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+
+        // vertex data
+        geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geom.geometry.triangles.vertexData.deviceAddress = 
+          geometries[gid]->vertex.buffers[0]->address + geometries[gid]->vertex.offset;
+        geom.geometry.triangles.vertexData.hostAddress = nullptr;
+        geom.geometry.triangles.vertexStride = geometries[gid]->vertex.stride;
+        geom.geometry.triangles.maxVertex = geometries[gid]->vertex.count;
+
+        // index data
+        geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+        geom.geometry.triangles.indexData.hostAddress = nullptr;
+        geom.geometry.triangles.indexData.deviceAddress = 
+          geometries[gid]->index.buffer->address + geometries[gid]->index.offset;
+        maxPrimitiveCounts[gid] = geometries[gid]->index.count / 3;
+        
+        // transform data
+        geom.geometry.triangles.transformData.deviceAddress = 
+          geometries[gid]->transform.buffer->address + geometries[gid]->transform.offset;
+        geom.geometry.triangles.transformData.hostAddress = nullptr;
+      }
+
+      // Get size info
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+      accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      accelerationStructureBuildGeometryInfo.flags = flags;
+      accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+      accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+
+      VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+      accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+      vkGetAccelerationStructureBuildSizesKHR(
+        logicalDevice,
+        VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &accelerationStructureBuildGeometryInfo,
+        maxPrimitiveCounts.data(),
+        &accelerationStructureBuildSizesInfo
+      );
+
+      VkBufferUsageFlags bufferUsageFlags = 
+        // means we can use this buffer as a means of storing an acceleration structure
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      
+      const VkMemoryPropertyFlags memoryUsageFlags =
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; 
+      
+      vkrt::Buffer *buffer = new vkrt::Buffer(
+        physicalDevice, logicalDevice,
+        bufferUsageFlags, memoryUsageFlags,
+        accelerationStructureBuildSizesInfo.accelerationStructureSize
+      );
+
+      VKRT_NOTIMPLEMENTED;
+      
+      // VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      // accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      // accelerationStructureCreateInfo.buffer = bottomLevelAS.buffer;
+      // accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      // accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      // vkCreateAccelerationStructureKHR(
+      //   context->logicalDevice,
+      //   &accelerationStructureCreateInfo, 
+      //   nullptr,
+      //   &accel->accelerationStructure
+      // );
+
+      // VkAccelerationStructureDeviceAddressInfoKHR accelerationStructureDeviceAddressInfo = {};
+      // accelerationStructureDeviceAddressInfo.accelerationStructure = accel->accelerationStructure;
+      // accel->address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(
+      //   context->logicalDevice,
+      //   &accelerationStructureDeviceAddressInfo
+      // );
+    }
+  };
+
+
+
+
+
+
 
   struct Context {
     VkApplicationInfo appInfo;
@@ -1772,6 +1916,17 @@ VKRT_API void vkrtTrianglesSetIndices(VKRTGeom _triangles,
   LOG("Setting triangle indices...");
 }
 
+VKRT_API void vkrtTrianglesSetTransform(VKRTGeom _triangles,
+                                        VKRTBuffer _transforms,
+                                        size_t offset)
+{
+  LOG_API_CALL();
+  vkrt::TrianglesGeom *triangles = (vkrt::TrianglesGeom*)_triangles;
+  vkrt::Buffer *transforms = (vkrt::Buffer*)_transforms;
+  triangles->setTransform(transforms, offset);
+  LOG("Setting triangles transform...");
+}
+
 VKRT_API VKRTRayGen
 vkrtRayGenCreate(VKRTContext _context,
                  VKRTModule  _module,
@@ -1944,7 +2099,7 @@ vkrtGeomTypeSetBoundsProg(VKRTGeomType _geomType,
 }
 
 VKRT_API VKRTBuffer
-vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count)
+vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -1964,6 +2119,10 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
   // Pin the buffer to the host
   buffer->map();
   
+  if (init) {
+    void* mapped = buffer->mapped;
+    memcpy(mapped, init, getSize(type) * count);
+  }
   LOG("buffer created");
   return (VKRTBuffer)buffer;
 }
@@ -1988,6 +2147,14 @@ vkrtDeviceBufferCreate(VKRTContext _context, VKRTDataType type, size_t count, co
     getSize(type) * count
   );
   
+  if (init) {
+    // NOTE, this mapping mechanism wont work for large buffers...
+    std::cout<<"WARNING: in vkrtDeviceBufferCreate, need to replace map functionality with a staging function."<<std::endl;
+    buffer->map();
+    void* mapped = buffer->mapped;
+    memcpy(mapped, init, getSize(type) * count);
+    buffer->unmap();
+  }
   LOG("buffer created");
   return (VKRTBuffer)buffer;
 }
@@ -2049,23 +2216,15 @@ vkrtAABBAccelCreate(VKRTContext context,
 VKRT_API VKRTAccel
 vkrtTrianglesAccelCreate(VKRTContext _context,
                             size_t     numGeometries,
-                            VKRTGeom   *initValues,
+                            VKRTGeom   *arrayOfChildGeoms,
                             unsigned int flags)
 {
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
-
-  vkrt::Accel *accel = new vkrt::Accel();
-
-  VkAccelerationStructureDeviceAddressInfoKHR accelerationStructureDeviceAddressInfo = {};
-  accelerationStructureDeviceAddressInfo.accelerationStructure = accel->accelerationStructure;
-  accel->address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(
-    context->logicalDevice,
-    &accelerationStructureDeviceAddressInfo
-  );
-
-
-  return nullptr;
+  vkrt::TrianglesAccel *accel = new 
+    vkrt::TrianglesAccel(context->physicalDevice, context->logicalDevice, 
+      numGeometries, (vkrt::TrianglesGeom*)arrayOfChildGeoms);
+  return (VKRTAccel)accel;
 }
 
 VKRT_API VKRTAccel
@@ -2098,9 +2257,10 @@ vkrtAccelDestroy(VKRTAccel accel)
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void vkrtAccelBuild(VKRTAccel accel)
+VKRT_API void vkrtAccelBuild(VKRTAccel _accel)
 {
-  VKRT_NOTIMPLEMENTED;
+  vkrt::Accel *accel = (vkrt::Accel*)_accel;
+  accel->build();
 }
 
 VKRT_API void vkrtAccelRefit(VKRTAccel accel)

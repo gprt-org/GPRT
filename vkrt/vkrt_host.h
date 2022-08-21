@@ -263,6 +263,9 @@ typedef enum
 
    /* matrix formats */
    VKRT_AFFINE3F=1300,
+   
+   /* A type matching VkTransformMatrixKHR, row major 3x4 */
+   VKRT_TRANSFORM=1400,
 
    /*! at least for now, use that for buffers with user-defined types:
      type then is "VKRT_USER_TYPE_BEGIN+sizeof(elementtype). Note
@@ -344,6 +347,10 @@ typedef enum
     else if (type == VKRT_BOOL2) return sizeof(bool) * 2;
     else if (type == VKRT_BOOL3) return sizeof(bool) * 3;
     else if (type == VKRT_BOOL4) return sizeof(bool) * 4;
+
+    else if (type == VKRT_BUFFER) return sizeof(uint64_t);
+    else if (type == VKRT_ACCEL) return sizeof(uint64_t);
+    else if (type == VKRT_TRANSFORM) return sizeof(float) * 3 * 4;
 
     // User Types have size encoded in their type enum
     else if (type > VKRT_USER_TYPE_BEGIN) return type - VKRT_USER_TYPE_BEGIN;
@@ -435,6 +442,10 @@ VKRT_API void vkrtTrianglesSetIndices(VKRTGeom triangles,
                                      size_t count,
                                      size_t stride,
                                      size_t offset);
+
+VKRT_API void vkrtTrianglesSetTransform(VKRTGeom triangles,
+                                        VKRTBuffer transforms,
+                                        size_t offset);
 
 /*! technically this is currently a no-op, but we have this function around to
   match OWL */
@@ -537,7 +548,7 @@ vkrtAABBAccelCreate(VKRTContext context,
 VKRT_API VKRTAccel
 vkrtTrianglesAccelCreate(VKRTContext context,
                             size_t     numGeometries,
-                            VKRTGeom   *initValues,
+                            VKRTGeom   *arrayOfChildGeoms,
                             unsigned int flags VKRT_IF_CPP(=0));
 
 
@@ -663,12 +674,14 @@ vkrtGeomTypeSetBoundsProg(VKRTGeomType type,
 /*! creates a buffer that uses host pinned memory; that memory is
 pinned on the host and accessible to all devices */
 VKRT_API VKRTBuffer
-vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count);
+vkrtHostPinnedBufferCreate(VKRTContext context, VKRTDataType type, size_t count, 
+  const void* init VKRT_IF_CPP(= nullptr));
 
 /*! creates a device buffer where every device has its own local copy
   of the given buffer */
 VKRT_API VKRTBuffer
-vkrtDeviceBufferCreate(VKRTContext context, VKRTDataType type, size_t count, const void* init);
+vkrtDeviceBufferCreate(VKRTContext context, VKRTDataType type, size_t count, 
+  const void* init VKRT_IF_CPP(= nullptr));
 
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any
   underlying memory*/
