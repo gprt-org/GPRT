@@ -443,10 +443,6 @@ VKRT_API void vkrtTrianglesSetIndices(VKRTGeom triangles,
                                      size_t stride,
                                      size_t offset);
 
-VKRT_API void vkrtTrianglesSetTransform(VKRTGeom triangles,
-                                        VKRTBuffer transforms,
-                                        size_t offset);
-
 /*! technically this is currently a no-op, but we have this function around to
   match OWL */
 VKRT_API void vkrtBuildPrograms(VKRTContext context);
@@ -551,7 +547,12 @@ vkrtTrianglesAccelCreate(VKRTContext context,
                             VKRTGeom   *arrayOfChildGeoms,
                             unsigned int flags VKRT_IF_CPP(=0));
 
-
+VKRT_API void 
+vkrtTrianglesAccelSetTransforms(VKRTAccel trianglesAccel,
+                                VKRTBuffer transforms//,
+                                // size_t offset, // maybe I can support these too?
+                                // size_t stride  // maybe I can support these too?
+                                );
 
 // // ------------------------------------------------------------------
 // /*! create a new acceleration structure for "curves" geometries.
@@ -578,58 +579,41 @@ vkrtTrianglesAccelCreate(VKRTContext context,
 
 // ------------------------------------------------------------------
 /*! create a new instance acceleration structure with given number of
-  instances. The child acceleration structures and their instance IDs
-  and/or transforms can either be specified "in bulk" as part of this
-  call, or can be set later on with individual calls to
-  \see vkrtInstanceAccelSetChild and \see vkrtInstanceAccelSetTransform.
-  Note however, that in the case of having millions of instances in an accel
-  it will be *much* more efficient to set them in bulk open creation, than
-  in millions of individual API calls.
+  instances. 
+  
+  \param numAccels Number of acceleration structures instantiated in the leaves
+  of this acceleration structure, must be non-zero.
 
-  Either or all of initAccels, initTranforms, or initInstanceIDs may
-  be null, in which case the values used for the 'th child will be an
-  uninitialized (invalid) accels, a unit transform, and 'i', respectively.
-  If initAccels was null, make sure to set all of the child accels
-  with \see vkrtInstanceAccelSetChild before using this accel, or
-  it will crash.
+  \param arrayOfAccels A array of 'numInstances' child
+  acceleration structures. No accel in this array can be an instance accel.  
+
+  \param flags reserved for future use
 */
 VKRT_API VKRTAccel
 vkrtInstanceAccelCreate(VKRTContext context,
-                       /*! number of instances in this acceleration structure */
-                       size_t     numInstances,
+                        size_t numAccels,
+                        VKRTAccel *arrayOfAccels,
+                        unsigned int flags VKRT_IF_CPP(=0));
 
-                       /*! the initial list of vkrt accels to use by
-                         the instances in this accel; must be either
-                         null, or an array of the size
-                         'numInstances', the i'th instance in this
-                         accel will be an instance of the i'th
-                         element in this list. If null, you must
-                         set all the children individually before
-                         using this accel. */
-                       const VKRTAccel *initAccels      VKRT_IF_CPP(= nullptr),
+VKRT_API void 
+vkrtInstanceAccelSetTransforms(VKRTAccel instanceAccel,
+                               VKRTBuffer transforms//,
+                               // size_t offset, // maybe I can support these too?
+                               // size_t stride  // maybe I can support these too?
+                               );
 
-                       /*! instance IDs to use for the instance in
-                         this accel; must be either null, or an
-                         array of size numInstances. If null, the
-                         i'th child of this instance accel will use
-                         instanceID=i, otherwise, it will use the
-                         user-provided instance ID from this
-                         list. Specifying an instanceID will affect
-                         what value 'InstanceID()' will return
-                         in a CH program that refers to the given
-                         instance */
-                       const uint32_t *initInstanceIDs VKRT_IF_CPP(= nullptr),
+/*! sets the list of IDs to use for the child instnaces. By default
+    the instance ID of child #i is simply i, but optix allows to
+    specify a user-defined instnace ID for each instance, which with
+    owl can be done through this array. Array size must match number
+    of instances in the specified group */
+VKRT_API void
+vkrtInstanceAccelSetIDs(VKRTAccel instanceAccel,
+                        const uint32_t *instanceIDs);
 
-                       /*! initial list of transforms that this
-                         instance accel will use; must be either
-                         null, or an array of size numInstances, of
-                         the format specified */
-                       const float    *initTransforms  VKRT_IF_CPP(= nullptr),
-                       VKRTMatrixFormat matrixFormat    VKRT_IF_CPP(=VKRT_MATRIX_FORMAT_ROW_MAJOR),
-
-                       /*! Reserved for future use */
-                       unsigned int buildFlags VKRT_IF_CPP(=0)
-                       );
+VKRT_API void
+vkrtInstanceAccelSetVisibilityMasks(VKRTAccel instanceAccel,
+                                    const uint8_t *visibilityMasks);
 
 VKRT_API void
 vkrtAccelDestroy(VKRTAccel accel);

@@ -143,8 +143,6 @@ int main(int ac, char **av)
                            NUM_VERTICES,sizeof(float3),0);
   vkrtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
-  vkrtTrianglesSetTransform(trianglesGeom,
-                          geometryTransformBuffer,0);
 
   vkrtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
   vkrtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
@@ -154,11 +152,12 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
-  VKRTAccel trianglesAccel
-    = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
+  VKRTAccel trianglesAccel = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
+  vkrtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
   vkrtAccelBuild(trianglesAccel);
-  VKRTAccel world
-    = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
+  
+  VKRTAccel world = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
+  vkrtInstanceAccelSetTransforms(world, instanceTransformBuffer);
   vkrtAccelBuild(world);
 
   // ##################################################################
