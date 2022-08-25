@@ -38,3 +38,20 @@ namespace vkrt {
   [[vk::ext_instruction(4447)]]
   RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 };
+
+#ifndef VKRT_DEVICE_STAGES
+#define VKRT_DEVICE_STAGES
+
+// struct PushConsts {
+// 	float4 color;
+// 	float4 position;
+// };
+// [[vk::push_constant]] PushConsts pushConsts;
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
+{
+  printf("Hello from compute shader! %d\n", DTid.x);
+}
+#endif

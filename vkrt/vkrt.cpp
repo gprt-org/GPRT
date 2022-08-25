@@ -245,6 +245,8 @@ namespace vkrt {
     spv_context spvContext;
     std::string program;
 
+    
+
     Module(const char* spvCode) {
       program = std::string(spvCode);
       spvContext = spvContextCreate(SPV_ENV_UNIVERSAL_1_4);
@@ -254,25 +256,79 @@ namespace vkrt {
       spvContextDestroy(spvContext);
     }
 
-    spv_binary getBinary(std::string entryPoint) {
+    struct InternalStages {
+      // for copying transforms into the instance buffer
+      std::string fillInstanceDataEntryPoint = "vkrtFillInstanceData";
+      VkPipelineLayout fillInstanceDataPipelineLayout;
+      VkShaderModule fillInstanceDataShaderModule;
+      VkPipeline fillInstanceDataPipeline;
+    } internalStages;
+
+    void setupInternalStages(VkDevice logicalDevice) {
+      // todo, consider refactoring this into a more official "Compute" shader object
+
+      VkResult err;
+      // currently not using cache.
+      VkPipelineCache cache = VK_NULL_HANDLE;
+
+      VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+      pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
+			pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
+
+      err = vkCreatePipelineLayout(logicalDevice, 
+        &pipelineLayoutCreateInfo, nullptr, &internalStages.fillInstanceDataPipelineLayout);
+
+      spv_binary binary = getBinary(internalStages.fillInstanceDataEntryPoint, false);
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary->code;
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
+        NULL, &internalStages.fillInstanceDataShaderModule);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = internalStages.fillInstanceDataShaderModule; 
+      shaderStage.pName = internalStages.fillInstanceDataEntryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = internalStages.fillInstanceDataPipelineLayout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, 
+        cache, 1, &computePipelineCreateInfo, nullptr, &internalStages.fillInstanceDataPipeline);
+
+      releaseBinary(binary);
+
+      //todo, destroy the above stuff
+    }
+
+    spv_binary getBinary(std::string entryPoint, bool stripDTid = true) {
       std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
       std::smatch match;
       std::string text = program;
 
-      std::string newProgram;
+      std::string singleEntryPointProgram;
       while (std::regex_search(text, match, re))
       {
         std::string line = match.str(0);
         std::string otherEntryPoint = match.str(4);
 
         if (match.str(4) == (std::string("%") + std::string(entryPoint)) ) {
-          newProgram += match.prefix().str() + match.str(0);
+          singleEntryPointProgram += match.prefix().str() + match.str(0);
           text = match.suffix().str();
         }
         else {
           // Remove the other entry points. Currently, SPIRV doesn't support
           // multiple entry points in combination with debug printf
-          newProgram += match.prefix();
+          singleEntryPointProgram += match.prefix();
           text = match.suffix().str();
 
           // Remove the OpName %entrypoint "entrypoint" line
@@ -297,15 +353,82 @@ namespace vkrt {
           }
         }
       }
-      newProgram += text;
+      singleEntryPointProgram += text;
+      {
+        spv_binary binary = nullptr;
+        spv_diagnostic diagnostic = nullptr;
+        spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
+        spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
+        if (diagnostic) {
+          spvDiagnosticPrint(diagnostic);
+          spvDiagnosticDestroy(diagnostic);
+        }
+      }
 
       // std::cout<<"final program " << std::endl;
-      // std::cout<<newProgram<<std::endl;
+      // std::cout<<singleEntryPointProgram<<std::endl;
+
+      // hold over until we can get those SPIR-V tools changes in...
+      if (stripDTid) 
+      {
+        text = singleEntryPointProgram;
+        singleEntryPointProgram = "";
+
+        std::string newProgram;
+        std::regex re("( *)(OpName \%param_var_DTid \"param.var.DTid\")");
+        std::smatch match;
+
+        while (std::regex_search(text, match, re))
+        {
+          std::string line = match.str(0);
+          std::string opname = match.str(2);
+
+          // Remove 
+          singleEntryPointProgram += match.prefix();
+          text = match.suffix().str();
+        }
+        singleEntryPointProgram += text;
+      }
+
+      if (stripDTid) 
+      {
+        text = singleEntryPointProgram;
+        singleEntryPointProgram = "";
+
+        std::string newProgram;
+        std::regex re("( *)(OpExecutionMode)(.*)");
+        std::smatch match;
+
+        while (std::regex_search(text, match, re))
+        {
+          std::string line = match.str(0);
+          std::string opname = match.str(2);
+
+          // Remove 
+          singleEntryPointProgram += match.prefix();
+          text = match.suffix().str();
+        }
+        singleEntryPointProgram += text;
+      }
+
+      // std::cout<<"final program " << std::endl;
+      // std::cout<<singleEntryPointProgram<<std::endl;
+
+      {
+        spv_binary binary = nullptr;
+        spv_diagnostic diagnostic = nullptr;
+        spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
+        spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
+        if (diagnostic) {
+          spvDiagnosticPrint(diagnostic);
+          spvDiagnosticDestroy(diagnostic);
+        }
+      }
 
       // Now, assemble the IR
       spv_binary binary = nullptr;
       spv_diagnostic diagnostic = nullptr;
-      spvTextToBinary(spvContext, newProgram.c_str(), newProgram.size(), &binary, &diagnostic);
+      spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
       spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
       if (diagnostic) {
         spvDiagnosticPrint(diagnostic);
@@ -812,7 +935,7 @@ namespace vkrt {
     
     ~Accel() {};
 
-    virtual void build() { };
+    virtual void build(vkrt::Module *module) { };
   };
 
   struct TrianglesAccel : public Accel {
@@ -847,7 +970,7 @@ namespace vkrt {
       this->transforms.buffer = transforms;
     }
 
-    void build() {
+    void build(vkrt::Module *module) {
       VkResult err;
 
       std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1051,7 +1174,7 @@ namespace vkrt {
       this->transforms.buffer = transforms;
     }
 
-    void build() {
+    void build(vkrt::Module *module) {
       VkResult err;
 
 
@@ -1069,6 +1192,35 @@ namespace vkrt {
         sizeof(VkAccelerationStructureInstanceKHR) * instances.size()
       );
 
+
+      // Use a compute shader to copy transforms into instances buffer
+      
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, module->internalStages.fillInstanceDataPipeline);
+      // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+      vkCmdDispatch(commandBuffer, instances.size(), 1, 1);
+      err = vkEndCommandBuffer(commandBuffer);
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) VKRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) VKRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+
+      VKRT_NOTIMPLEMENTED;
       // VkCmdCopyBuffer(
       //   commandBuffer,
 
@@ -2137,6 +2289,7 @@ VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, const char* spvCode)
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Module *module = new vkrt::Module(spvCode);
+  module->setupInternalStages(context->logicalDevice);
   LOG("module created...");
   return (VKRTModule)module;
 }
@@ -2582,13 +2735,14 @@ vkrtAccelDestroy(VKRTAccel accel)
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void vkrtAccelBuild(VKRTAccel _accel)
+VKRT_API void vkrtAccelBuild(VKRTAccel _accel, VKRTModule _module)
 {
   vkrt::Accel *accel = (vkrt::Accel*)_accel;
-  accel->build();
+  vkrt::Module *module = (vkrt::Module*)_module;
+  accel->build(module);
 }
 
-VKRT_API void vkrtAccelRefit(VKRTAccel accel)
+VKRT_API void vkrtAccelRefit(VKRTAccel accel, VKRTModule _module)
 {
   VKRT_NOTIMPLEMENTED;
 }

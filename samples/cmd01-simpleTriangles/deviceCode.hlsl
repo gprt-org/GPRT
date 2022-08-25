@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
 #include "deviceCode.h"
+#include "vkrt.h"
 
 [[vk::shader_record_ext]]
 ConstantBuffer<RayGenData> raygenSBTData;
@@ -36,6 +36,7 @@ void simpleRayGen() {
 //     printf("Color 0 %f %f %f\n", raygenSBTData.color0.x, raygenSBTData.color0.y, raygenSBTData.color0.z);
 //     printf("Color 1 %f %f %f\n", raygenSBTData.color1.x, raygenSBTData.color1.y, raygenSBTData.color1.z);
 //   }
+//
 
 //   // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
 //   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);

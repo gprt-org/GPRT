@@ -113,8 +113,8 @@ int main(int ac, char **av)
                         VKRT_TRIANGLES,
                         sizeof(TrianglesGeomData),
                         trianglesGeomVars,3);
-  vkrtGeomTypeSetClosestHit(trianglesGeomType,0,
-                           module,"TriangleMesh");
+  // vkrtGeomTypeSetClosestHit(trianglesGeomType,0,
+  //                          module,"TriangleMesh");
 
   // ##################################################################
   // set up all the *GEOMS* we want to run that code on
@@ -154,11 +154,11 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   VKRTAccel trianglesAccel = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
   vkrtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
-  vkrtAccelBuild(trianglesAccel);
+  vkrtAccelBuild(trianglesAccel, module);
   
   VKRTAccel world = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
   vkrtInstanceAccelSetTransforms(world, instanceTransformBuffer);
-  vkrtAccelBuild(world);
+  vkrtAccelBuild(world, module);
 
   // ##################################################################
   // set miss and raygen program required for SBT

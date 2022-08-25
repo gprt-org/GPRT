@@ -618,9 +618,9 @@ vkrtInstanceAccelSetVisibilityMasks(VKRTAccel instanceAccel,
 VKRT_API void
 vkrtAccelDestroy(VKRTAccel accel);
 
-VKRT_API void vkrtAccelBuild(VKRTAccel accel);
+VKRT_API void vkrtAccelBuild(VKRTAccel accel, VKRTModule module);
 
-VKRT_API void vkrtAccelRefit(VKRTAccel accel);
+VKRT_API void vkrtAccelRefit(VKRTAccel accel, VKRTModule module);
 
 VKRT_API VKRTGeomType
 vkrtGeomTypeCreate(VKRTContext  context,
