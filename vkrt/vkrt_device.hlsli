@@ -42,16 +42,18 @@ namespace vkrt {
 #ifndef VKRT_DEVICE_STAGES
 #define VKRT_DEVICE_STAGES
 
-// struct PushConsts {
-// 	float4 color;
-// 	float4 position;
-// };
-// [[vk::push_constant]] PushConsts pushConsts;
+struct PushConsts {
+	uint64_t instanceBufferAddr;
+	uint64_t transformBufferAddr;
+};
+[[vk::push_constant]] PushConsts pushConsts;
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
 {
   printf("Hello from compute shader! %d\n", DTid.x);
+  printf("Address 1 is %d\n", pushConsts.instanceBufferAddr);
+  printf("Address 2 is %d\n", pushConsts.transformBufferAddr);
 }
 #endif

@@ -154,11 +154,11 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   VKRTAccel trianglesAccel = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
   vkrtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
-  vkrtAccelBuild(trianglesAccel, module);
+  vkrtAccelBuild(context, trianglesAccel);
   
   VKRTAccel world = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
   vkrtInstanceAccelSetTransforms(world, instanceTransformBuffer);
-  vkrtAccelBuild(world, module);
+  vkrtAccelBuild(context, world);
 
   // ##################################################################
   // set miss and raygen program required for SBT

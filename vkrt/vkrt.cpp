@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <fstream>
 #include <sstream>
+#include <map>
 
 #include <regex>
 
@@ -221,6 +222,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
 }
 
 namespace vkrt {
+  // forward declarations...
+  struct Geom; 
+  struct GeomType; 
+  struct TrianglesGeom;
+  struct TrianglesGeomType;
+  struct UserGeom;
+  struct UserGeomType;
 
   PFN_vkGetBufferDeviceAddressKHR vkGetBufferDeviceAddressKHR;
   PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR;
@@ -241,6 +249,18 @@ namespace vkrt {
   PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
   VkDebugReportCallbackEXT debugReportCallback;
 
+  struct Stage {
+    // for copying transforms into the instance buffer
+    // std::string fillInstanceDataEntryPoint = "vkrtFillInstanceData";
+    // VkPipelineLayout fillInstanceDataPipelineLayout;
+    // VkShaderModule fillInstanceDataShaderModule;
+    // VkPipeline fillInstanceDataPipeline;
+    std::string entryPoint;
+    VkPipelineLayout layout;
+    VkShaderModule module;
+    VkPipeline pipeline;
+  };
+
   struct Module {
     spv_context spvContext;
     std::string program;
@@ -256,61 +276,7 @@ namespace vkrt {
       spvContextDestroy(spvContext);
     }
 
-    struct InternalStages {
-      // for copying transforms into the instance buffer
-      std::string fillInstanceDataEntryPoint = "vkrtFillInstanceData";
-      VkPipelineLayout fillInstanceDataPipelineLayout;
-      VkShaderModule fillInstanceDataShaderModule;
-      VkPipeline fillInstanceDataPipeline;
-    } internalStages;
-
-    void setupInternalStages(VkDevice logicalDevice) {
-      // todo, consider refactoring this into a more official "Compute" shader object
-
-      VkResult err;
-      // currently not using cache.
-      VkPipelineCache cache = VK_NULL_HANDLE;
-
-      VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
-      pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-      pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
-			pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
-
-      err = vkCreatePipelineLayout(logicalDevice, 
-        &pipelineLayoutCreateInfo, nullptr, &internalStages.fillInstanceDataPipelineLayout);
-
-      spv_binary binary = getBinary(internalStages.fillInstanceDataEntryPoint, false);
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary->code;
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
-        NULL, &internalStages.fillInstanceDataShaderModule);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-			shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = internalStages.fillInstanceDataShaderModule; 
-      shaderStage.pName = internalStages.fillInstanceDataEntryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = internalStages.fillInstanceDataPipelineLayout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, 
-        cache, 1, &computePipelineCreateInfo, nullptr, &internalStages.fillInstanceDataPipeline);
-
-      releaseBinary(binary);
-
-      //todo, destroy the above stuff
-    }
-
-    spv_binary getBinary(std::string entryPoint, bool stripDTid = true) {
+    spv_binary getBinary(std::string entryPoint, bool isComputeBinary = false) {
       std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
       std::smatch match;
       std::string text = program;
@@ -369,7 +335,7 @@ namespace vkrt {
       // std::cout<<singleEntryPointProgram<<std::endl;
 
       // hold over until we can get those SPIR-V tools changes in...
-      if (stripDTid) 
+      if (!isComputeBinary) 
       {
         text = singleEntryPointProgram;
         singleEntryPointProgram = "";
@@ -390,7 +356,7 @@ namespace vkrt {
         singleEntryPointProgram += text;
       }
 
-      if (stripDTid) 
+      if (!isComputeBinary) 
       {
         text = singleEntryPointProgram;
         singleEntryPointProgram = "";
@@ -633,6 +599,49 @@ namespace vkrt {
     // Map of the name of the variable to that variable declaration
     std::unordered_map<std::string, VKRTVarDef> vars;
   };
+ 
+  struct ComputeProg : public SBTEntry {
+    VkShaderModule shaderModule;
+    VkPipelineShaderStageCreateInfo shaderStage{};
+    VkShaderModuleCreateInfo moduleCreateInfo{};
+    VkDevice logicalDevice;
+
+    ComputeProg(VkDevice  _logicalDevice,
+             Module *module,
+             const char* entryPoint,
+             size_t      sizeOfVarStruct,
+             std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
+    {
+      std::cout<<"Compute program is being made!"<<std::endl;
+
+      spv_binary binary = module->getBinary(entryPoint, true);
+
+      // store a reference to the logical device this module is made on
+      logicalDevice = _logicalDevice;
+
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
+
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
+        NULL, &shaderModule));
+
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = shaderModule;
+      shaderStage.pName = entryPoint;
+      assert(shaderStage.module != VK_NULL_HANDLE);
+
+      module->releaseBinary(binary);
+
+      vars = _vars;
+    }
+    ~ComputeProg() {}
+    void destroy() {
+      std::cout<<"Compute program is being destroyed!"<<std::endl;
+      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    }
+  };
 
   struct RayGen : public SBTEntry {
     VkShaderModule shaderModule;
@@ -721,14 +730,6 @@ namespace vkrt {
     }
   };
 
-  // forward declarations...
-  struct Geom; 
-  struct GeomType; 
-  struct TrianglesGeom;
-  struct TrianglesGeomType;
-  struct UserGeom;
-  struct UserGeomType;
-  
   /* An abstraction for any sort of geometry type - describes the
      programs to use, and structure of the SBT records, when building
      shader binding tables (SBTs) with geometries of this type. This
@@ -935,7 +936,7 @@ namespace vkrt {
     
     ~Accel() {};
 
-    virtual void build(vkrt::Module *module) { };
+    virtual void build(std::map<std::string, Stage> internalStages) { };
   };
 
   struct TrianglesAccel : public Accel {
@@ -970,7 +971,7 @@ namespace vkrt {
       this->transforms.buffer = transforms;
     }
 
-    void build(vkrt::Module *module) {
+    void build(std::map<std::string, Stage> internalStages) {
       VkResult err;
 
       std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1174,9 +1175,8 @@ namespace vkrt {
       this->transforms.buffer = transforms;
     }
 
-    void build(vkrt::Module *module) {
+    void build(std::map<std::string, Stage> internalStages) {
       VkResult err;
-
 
       // todo, transfer instance transforms into instances buffer
 
@@ -1196,9 +1196,18 @@ namespace vkrt {
       // Use a compute shader to copy transforms into instances buffer
       
       VkCommandBufferBeginInfo cmdBufInfo{};
+      struct PushContants {
+        uint64_t instanceBufferAddr;
+        uint64_t transformBufferAddr;
+      } pushConstants;
+      pushConstants.instanceBufferAddr = instancesBuffer->address;
+      pushConstants.transformBufferAddr = transforms.buffer->address;
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, module->internalStages.fillInstanceDataPipeline);
+      vkCmdPushConstants(commandBuffer, internalStages["vkrtFillInstanceData"].layout, 
+        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushContants), &pushConstants
+      );
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["vkrtFillInstanceData"].pipeline);
       // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
       vkCmdDispatch(commandBuffer, instances.size(), 1, 1);
       err = vkEndCommandBuffer(commandBuffer);
@@ -1399,6 +1408,7 @@ namespace vkrt {
     }
   };
 
+  
   struct Context {
     VkApplicationInfo appInfo;
 
@@ -1498,6 +1508,15 @@ namespace vkrt {
     vkrt::Buffer hitShaderBindingTable;
 
     uint32_t numRayTypes = 1;
+
+    // struct InternalStages {
+    //   // for copying transforms into the instance buffer
+    //   std::string fillInstanceDataEntryPoint = "vkrtFillInstanceData";
+    //   VkPipelineLayout fillInstanceDataPipelineLayout;
+    //   VkShaderModule fillInstanceDataShaderModule;
+    //   VkPipeline fillInstanceDataPipeline;
+    // }
+    Stage fillInstanceDataStage;
 
     /*! returns whether logging is enabled */
     inline static bool logging()
@@ -2261,8 +2280,62 @@ namespace vkrt {
         throw std::runtime_error("failed to create ray tracing pipeline! : \n" + errorString(err));
       }
     }
-  };
+  
+    void setupInternalStages(vkrt::Module *module) {
+      fillInstanceDataStage.entryPoint = "vkrtFillInstanceData";
 
+      // todo, consider refactoring this into a more official "Compute" shader object
+
+      VkResult err;
+      // currently not using cache.
+      VkPipelineCache cache = VK_NULL_HANDLE;
+
+      VkPushConstantRange pushConstantRange = {};
+      pushConstantRange.size = 2 * sizeof(uint64_t);
+      pushConstantRange.offset = 0;
+      pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+      VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+      pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
+			pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
+      pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+      pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
+      err = vkCreatePipelineLayout(logicalDevice, 
+        &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
+
+      spv_binary binary = module->getBinary(fillInstanceDataStage.entryPoint, true);
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary->code;
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
+        NULL, &fillInstanceDataStage.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = fillInstanceDataStage.module; 
+      shaderStage.pName = fillInstanceDataStage.entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, 
+        cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
+
+      module->releaseBinary(binary);
+
+      //todo, destroy the above stuff
+    }
+  };
 }
 
 
@@ -2289,7 +2362,7 @@ VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, const char* spvCode)
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Module *module = new vkrt::Module(spvCode);
-  module->setupInternalStages(context->logicalDevice);
+  context->setupInternalStages(module);
   LOG("module created...");
   return (VKRTModule)module;
 }
@@ -2735,14 +2808,16 @@ vkrtAccelDestroy(VKRTAccel accel)
   VKRT_NOTIMPLEMENTED;
 }
 
-VKRT_API void vkrtAccelBuild(VKRTAccel _accel, VKRTModule _module)
+VKRT_API void vkrtAccelBuild(VKRTContext _context, VKRTAccel _accel)
 {
   vkrt::Accel *accel = (vkrt::Accel*)_accel;
-  vkrt::Module *module = (vkrt::Module*)_module;
-  accel->build(module);
+  vkrt::Context *context = (vkrt::Context*)_context;
+  accel->build({
+    {"vkrtFillInstanceData", context->fillInstanceDataStage}
+  });
 }
 
-VKRT_API void vkrtAccelRefit(VKRTAccel accel, VKRTModule _module)
+VKRT_API void vkrtAccelRefit(VKRTContext _context, VKRTAccel accel)
 {
   VKRT_NOTIMPLEMENTED;
 }
