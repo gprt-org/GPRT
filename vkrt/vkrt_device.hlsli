@@ -48,6 +48,30 @@ struct PushConsts {
 };
 [[vk::push_constant]] PushConsts pushConsts;
 
+typedef enum VkGeometryInstanceFlagBitsKHR {
+    VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR = 0x00000001,
+    VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR = 0x00000002,
+    VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR = 0x00000004,
+    VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR = 0x00000008,
+    VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR = VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR,
+    VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
+    VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_NV = VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR,
+    VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_NV = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR,
+    VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_NV = VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR,
+    VK_GEOMETRY_INSTANCE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkGeometryInstanceFlagBitsKHR;
+
+typedef struct VkTransformMatrixKHR {
+    float    mat[3][4];
+} VkTransformMatrixKHR;
+
+typedef struct VkAccelerationStructureInstanceKHR {
+    VkTransformMatrixKHR          transform;
+    uint32_t                      instanceCustomIndex24Mask8;
+    uint32_t                      instanceShaderBindingTableRecordOffset24Flags8;
+    uint64_t                      accelerationStructureReference;
+} VkAccelerationStructureInstanceKHR;
+
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
@@ -55,5 +79,14 @@ void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   printf("Hello from compute shader! %d\n", DTid.x);
   printf("Address 1 is %d\n", pushConsts.instanceBufferAddr);
   printf("Address 2 is %d\n", pushConsts.transformBufferAddr);
+
+  VkAccelerationStructureInstanceKHR instance;
+  instance.transform = vk::RawBufferLoad<VkTransformMatrixKHR>(
+    pushConsts.transformBufferAddr + sizeof(VkTransformMatrixKHR) * DTid.x);
+  
+  vk::RawBufferStore<VkAccelerationStructureInstanceKHR>(
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
+    instance
+  );
 }
 #endif

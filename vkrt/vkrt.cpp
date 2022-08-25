@@ -1188,7 +1188,8 @@ namespace vkrt {
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
         // means that this memory is stored directly on the device 
         //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
         sizeof(VkAccelerationStructureInstanceKHR) * instances.size()
       );
 
@@ -1229,6 +1230,10 @@ namespace vkrt {
       err = vkQueueWaitIdle(queue);
       if (err) VKRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
 
+
+      err = instancesBuffer->map();
+      std::vector<VkAccelerationStructureInstanceKHR> tmp(instances.size());
+      memcpy(tmp.data(), instancesBuffer->mapped, instances.size() * sizeof(VkAccelerationStructureInstanceKHR));
       VKRT_NOTIMPLEMENTED;
       // VkCmdCopyBuffer(
       //   commandBuffer,

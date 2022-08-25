@@ -23,6 +23,7 @@
 #include "deviceCode.h"
 #include "vkrt.h"
 
+
 [[vk::shader_record_ext]]
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
