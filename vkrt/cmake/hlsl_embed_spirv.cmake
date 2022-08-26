@@ -66,7 +66,7 @@ function(embed_spirv)
     -fspv-extension=SPV_KHR_ray_tracing  -fspv-extension=SPV_KHR_ray_query  -fspv-extension=SPV_KHR_non_semantic_info -fspv-extension=SPV_KHR_physical_storage_buffer -fcgl -Od # Don't optimize yet, we'll explicitly optimize afterwards.
     ${EMBED_SPIRV_SOURCES} 
     -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_unoptimized_as.spv 
-    DEPENDS ${EMBED_SPIRV_SOURCES}
+    DEPENDS ${EMBED_SPIRV_SOURCES} ${PROJECT_SOURCE_DIR}/vkrt/vkrt_device.hlsli ${PROJECT_SOURCE_DIR}/vkrt/vkrt.h
     COMMENT "compile SPIRV ${EMBED_SPIRV_OUTPUT_TARGET}_unoptimized.spv from ${EMBED_SPIRV_SOURCES}"
   )
 

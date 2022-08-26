@@ -45,6 +45,7 @@ namespace vkrt {
 struct PushConsts {
 	uint64_t instanceBufferAddr;
 	uint64_t transformBufferAddr;
+	uint64_t accelReferencesAddr;
 };
 [[vk::push_constant]] PushConsts pushConsts;
 
@@ -66,7 +67,7 @@ typedef struct VkTransformMatrixKHR {
 } VkTransformMatrixKHR;
 
 typedef struct VkAccelerationStructureInstanceKHR {
-    VkTransformMatrixKHR          transform;
+    float3x4                      transform;
     uint32_t                      instanceCustomIndex24Mask8;
     uint32_t                      instanceShaderBindingTableRecordOffset24Flags8;
     uint64_t                      accelerationStructureReference;
@@ -79,14 +80,48 @@ void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   printf("Hello from compute shader! %d\n", DTid.x);
   printf("Address 1 is %d\n", pushConsts.instanceBufferAddr);
   printf("Address 2 is %d\n", pushConsts.transformBufferAddr);
+  printf("Address 3 is %d\n", pushConsts.accelReferencesAddr);
 
   VkAccelerationStructureInstanceKHR instance;
-  instance.transform = vk::RawBufferLoad<VkTransformMatrixKHR>(
+  
+  instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
+  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 
+  | 0x00 << 24;
+
+  instance.transform = vk::RawBufferLoad<float3x4>(
     pushConsts.transformBufferAddr + sizeof(VkTransformMatrixKHR) * DTid.x);
   
-  vk::RawBufferStore<VkAccelerationStructureInstanceKHR>(
+  instance.accelerationStructureReference = vk::RawBufferLoad<uint64_t>(
+    pushConsts.accelReferencesAddr + sizeof(uint64_t) * DTid.x
+  );
+
+  // printf("accel addr is %d\n", instance.accelerationStructureReference);
+
+  // printf("sizeof instance is %d\n", sizeof(VkAccelerationStructureInstanceKHR));
+  // vk::RawBufferStore<VkAccelerationStructureInstanceKHR>(
+  //   pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
+  //   instance
+  // );
+
+  // for whatever reason, can't just store all values in this structure at once... 
+  vk::RawBufferStore<float3x4>(
     pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
-    instance
+    instance.transform
+  );
+
+  vk::RawBufferStore<uint32_t>(
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR),
+    instance.instanceCustomIndex24Mask8
+  );
+
+  vk::RawBufferStore<uint32_t>(
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR) + sizeof(uint32_t),
+    instance.instanceShaderBindingTableRecordOffset24Flags8
+  );
+
+  vk::RawBufferStore<uint64_t>(
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR) + sizeof(uint32_t) + sizeof(uint32_t),
+    instance.accelerationStructureReference
   );
 }
 #endif

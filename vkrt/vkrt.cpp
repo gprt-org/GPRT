@@ -997,13 +997,11 @@ namespace vkrt {
         geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
         geom.geometry.triangles.vertexData.deviceAddress = 
           geometries[gid]->vertex.buffers[0]->address + geometries[gid]->vertex.offset;
-        geom.geometry.triangles.vertexData.hostAddress = nullptr;
         geom.geometry.triangles.vertexStride = geometries[gid]->vertex.stride;
         geom.geometry.triangles.maxVertex = geometries[gid]->vertex.count;
 
         // index data
         geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-        geom.geometry.triangles.indexData.hostAddress = nullptr;
         // note, offset accounted for in range
         geom.geometry.triangles.indexData.deviceAddress = geometries[gid]->index.buffer->address; 
         maxPrimitiveCounts[gid] = geometries[gid]->index.count / 3;
@@ -1011,7 +1009,6 @@ namespace vkrt {
         // transform data
         // note, offset accounted for in range
         geom.geometry.triangles.transformData.deviceAddress = transforms.buffer->address;
-        geom.geometry.triangles.transformData.hostAddress = nullptr;
 
         auto &geomRange = accelerationBuildStructureRangeInfos[gid];
         accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
@@ -1115,7 +1112,6 @@ namespace vkrt {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-
       // VkFenceCreateInfo fenceInfo {};
       // fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
       // fenceInfo.flags = 0;
@@ -1123,13 +1119,13 @@ namespace vkrt {
       // err = vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence);
       // if (err) VKRT_RAISE("failed to create fence for triangle accel build! : \n" + errorString(err));
 
-      // err = vkQueueSubmit(queue, 1, &submitInfo, fence);
-      // if (err) VKRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) VKRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
       if (err) VKRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
 
-      // // Wait for the fence to signal that command buffer has finished executing
+      // Wait for the fence to signal that command buffer has finished executing
       // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000 /*timeout*/);
       // if (err) VKRT_RAISE("failed to wait for fence for triangle accel build! : \n" + errorString(err));
       // vkDestroyFence(logicalDevice, fence, nullptr);
@@ -1145,6 +1141,7 @@ namespace vkrt {
     std::vector<Accel*> instances; 
 
     vkrt::Buffer *instancesBuffer = nullptr;
+    vkrt::Buffer *accelAddressesBuffer = nullptr;
 
     struct {
       vkrt::Buffer* buffer = nullptr;
@@ -1160,6 +1157,25 @@ namespace vkrt {
     {
       this->instances.resize(numInstances);
       memcpy(this->instances.data(), instances, sizeof(VKRTAccel*) * numInstances);
+
+      accelAddressesBuffer = new vkrt::Buffer(
+        physicalDevice, logicalDevice,
+        // I guess I need this to use these buffers as input to tree builds?
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+        sizeof(uint64_t) * numInstances
+      );
+
+      std::vector<uint64_t> addresses(numInstances);
+      for (uint32_t i = 0; i < numInstances; ++i) 
+        addresses[i] = this->instances[i]->address;
+      accelAddressesBuffer->map();
+      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
     };
     
     ~InstanceAccel() {};
@@ -1188,8 +1204,9 @@ namespace vkrt {
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
         // means that this memory is stored directly on the device 
         //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         sizeof(VkAccelerationStructureInstanceKHR) * instances.size()
       );
 
@@ -1200,9 +1217,13 @@ namespace vkrt {
       struct PushContants {
         uint64_t instanceBufferAddr;
         uint64_t transformBufferAddr;
+        uint64_t accelReferencesAddr;
       } pushConstants;
+
       pushConstants.instanceBufferAddr = instancesBuffer->address;
       pushConstants.transformBufferAddr = transforms.buffer->address;
+      pushConstants.accelReferencesAddr = accelAddressesBuffer->address;
+
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       vkCmdPushConstants(commandBuffer, internalStages["vkrtFillInstanceData"].layout, 
@@ -1225,191 +1246,146 @@ namespace vkrt {
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
       err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
-      if (err) VKRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+      if (err) VKRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
-      if (err) VKRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+      if (err) VKRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
+      VkAccelerationStructureInstanceKHR instance{};
+      instancesBuffer->map();
+      memcpy(&instance, instancesBuffer->mapped, sizeof(VkAccelerationStructureInstanceKHR));
 
-      err = instancesBuffer->map();
-      std::vector<VkAccelerationStructureInstanceKHR> tmp(instances.size());
-      memcpy(tmp.data(), instancesBuffer->mapped, instances.size() * sizeof(VkAccelerationStructureInstanceKHR));
-      VKRT_NOTIMPLEMENTED;
-      // VkCmdCopyBuffer(
-      //   commandBuffer,
+      VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+      accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+      accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+      accelerationStructureGeometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+      accelerationStructureGeometry.geometry.instances.arrayOfPointers = VK_FALSE;
+      accelerationStructureGeometry.geometry.instances.data.deviceAddress = instancesBuffer->address;
 
-      // );
+      // Get size info
+      /*
+      The pSrcAccelerationStructure, dstAccelerationStructure, and mode members of pBuildInfo are ignored. 
+      Any VkDeviceOrHostAddressKHR members of pBuildInfo are ignored by this command, except that the hostAddress member 
+      of VkAccelerationStructureGeometryTrianglesDataKHR::transformData will be examined to check if it is NULL.*
+      */
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+      accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+      accelerationStructureBuildGeometryInfo.geometryCount = 1;
+      accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
+      uint32_t primitive_count = 1;
 
-
-
-      // std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
-      // std::vector<VkAccelerationStructureBuildRangeInfoKHR*> accelerationBuildStructureRangeInfoPtrs(geometries.size());
-
-      // std::vector<VkAccelerationStructureInstanceKHR> accelerationStructureInstances(accels.size());
-      // // std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
-      // for (uint32_t iid = 0; iid < accels.size(); ++iid) {
-      //   auto &instance = accelerationStructureInstances[iid];
-        
-
-      //   // geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-      //   // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR; 
-      //   //   means, anyhit shader is disabled
-
-      //   // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR; 
-      //   //   means, anyhit should only be called once.
-      //   //   If absent, then an anyhit shader might be called more than once...
-      //   geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
-      //   // apparently, geom.flags can't be 0, otherwise we get a device loss on build...
-
-      //   geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-      //   geom.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-
-      //   // vertex data
-      //   geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-      //   geom.geometry.triangles.vertexData.deviceAddress = 
-      //     geometries[gid]->vertex.buffers[0]->address + geometries[gid]->vertex.offset;
-      //   geom.geometry.triangles.vertexData.hostAddress = nullptr;
-      //   geom.geometry.triangles.vertexStride = geometries[gid]->vertex.stride;
-      //   geom.geometry.triangles.maxVertex = geometries[gid]->vertex.count;
-
-      //   // index data
-      //   geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-      //   geom.geometry.triangles.indexData.hostAddress = nullptr;
-      //   // note, offset accounted for in range
-      //   geom.geometry.triangles.indexData.deviceAddress = geometries[gid]->index.buffer->address; 
-      //   maxPrimitiveCounts[gid] = geometries[gid]->index.count / 3;
-        
-      //   // transform data
-      //   // note, offset accounted for in range
-      //   geom.geometry.triangles.transformData.deviceAddress = geometries[gid]->transform.buffer->address;
-      //   geom.geometry.triangles.transformData.hostAddress = nullptr;
-
-      //   auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      //   accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
-      //   geomRange.primitiveCount = geometries[gid]->index.count / 3;
-      //   geomRange.primitiveOffset = geometries[gid]->index.offset;
-      //   geomRange.firstVertex = geometries[gid]->index.firstVertex;
-      //   geomRange.transformOffset = geometries[gid]->transform.offset;
-      // }
-
-      // // Get size info
-      // VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
-      // accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-      // accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      // accelerationStructureBuildGeometryInfo.flags = flags;
-      // accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
-      // accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
-
-      // VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
-      // accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-      // vkGetAccelerationStructureBuildSizesKHR(
-      //   logicalDevice,
-      //   VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-      //   &accelerationStructureBuildGeometryInfo,
-      //   maxPrimitiveCounts.data(),
-      //   &accelerationStructureBuildSizesInfo
-      // );
+      VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+      accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+      vkGetAccelerationStructureBuildSizesKHR(
+        logicalDevice, 
+        VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &accelerationStructureBuildGeometryInfo,
+        &primitive_count,
+        &accelerationStructureBuildSizesInfo);
       
-      // accelBuffer = new vkrt::Buffer(
-      //   physicalDevice, logicalDevice,
-      //   // means we can use this buffer as a means of storing an acceleration structure
-      //   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
-      //   // means we can get this buffer's address with vkGetBufferDeviceAddress
-      //   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-      //   // means that this memory is stored directly on the device 
-      //   //  (rather than the host, or in a special host/device section)
-      //   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      //   accelerationStructureBuildSizesInfo.accelerationStructureSize
-      // );
+      accelBuffer = new vkrt::Buffer(
+        physicalDevice, logicalDevice,
+        // means we can use this buffer as a means of storing an acceleration structure
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        accelerationStructureBuildSizesInfo.accelerationStructureSize
+      );
 
-      // scratchBuffer = new vkrt::Buffer(
-      //   physicalDevice, logicalDevice,
-      //   // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
-      //   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
-      //   // means we can get this buffer's address with vkGetBufferDeviceAddress
-      //   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-      //   // means that this memory is stored directly on the device 
-      //   //  (rather than the host, or in a special host/device section)
-      //   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      //   accelerationStructureBuildSizesInfo.buildScratchSize
-      // );
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      err = vkCreateAccelerationStructureKHR(
+        logicalDevice,
+        &accelerationStructureCreateInfo, 
+        nullptr,
+        &accelerationStructure
+      );
+      if (err) VKRT_RAISE("failed to create acceleration structure for instance accel build! : \n" + errorString(err));
 
-      // VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
-      // accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      // accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
-      // accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-      // accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      // err = vkCreateAccelerationStructureKHR(
-      //   logicalDevice,
-      //   &accelerationStructureCreateInfo, 
-      //   nullptr,
-      //   &accelerationStructure
-      // );
-      // if (err) VKRT_RAISE("failed to create acceleration structure for triangle accel build! : \n" + errorString(err));
+      scratchBuffer = new vkrt::Buffer(
+        physicalDevice, logicalDevice,
+        // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        accelerationStructureBuildSizesInfo.buildScratchSize
+      );
 
-      // VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
-      // accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-      // accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      // accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-      // accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-      // accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
-      // accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
-      // accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
-      // accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+      accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+      accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+      accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
+      accelerationBuildGeometryInfo.geometryCount = 1;
+      accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+      accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
 
+      VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
+      accelerationStructureBuildRangeInfo.primitiveCount = 1;
+      accelerationStructureBuildRangeInfo.primitiveOffset = 0;
+      accelerationStructureBuildRangeInfo.firstVertex = 0;
+      accelerationStructureBuildRangeInfo.transformOffset = 0;
+      std::vector<VkAccelerationStructureBuildRangeInfoKHR*> accelerationBuildStructureRangeInfoPtrs = { &accelerationStructureBuildRangeInfo };
+      
       // // Build the acceleration structure on the device via a one-time command buffer submission
       // // Some implementations may support acceleration structure building on the host (VkPhysicalDeviceAccelerationStructureFeaturesKHR->accelerationStructureHostCommands), but we prefer device builds
-      // // VkCommandBuffer commandBuffer = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
       // VkCommandBufferBeginInfo cmdBufInfo{};
-      // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      // err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      // if (err) VKRT_RAISE("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) VKRT_RAISE("failed to begin command buffer for instance accel build! : \n" + errorString(err));
 
-      // vkCmdBuildAccelerationStructuresKHR(
-      //   commandBuffer,
-      //   1,
-      //   &accelerationBuildGeometryInfo,
-      //   accelerationBuildStructureRangeInfoPtrs.data());
+      vkCmdBuildAccelerationStructuresKHR(
+        commandBuffer,
+        1,
+        &accelerationBuildGeometryInfo,
+        accelerationBuildStructureRangeInfoPtrs.data());
 
-      // err = vkEndCommandBuffer(commandBuffer);
-      // if (err) VKRT_RAISE("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) VKRT_RAISE("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
       // VkSubmitInfo submitInfo;
-      // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      // submitInfo.pNext = NULL;
-      // submitInfo.waitSemaphoreCount = 0;
-      // submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
-      // submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
-      // submitInfo.commandBufferCount = 1;
-      // submitInfo.pCommandBuffers = &commandBuffer;
-      // submitInfo.signalSemaphoreCount = 0;
-      // submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
+      err = vkQueueWaitIdle(queue);
 
-      // // VkFenceCreateInfo fenceInfo {};
-      // // fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-      // // fenceInfo.flags = 0;
-      // // VkFence fence;
-      // // err = vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence);
-      // // if (err) VKRT_RAISE("failed to create fence for triangle accel build! : \n" + errorString(err));
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) VKRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
-      // // err = vkQueueSubmit(queue, 1, &submitInfo, fence);
-      // // if (err) VKRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
-
-      // err = vkQueueWaitIdle(queue);
-      // if (err) VKRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+      err = vkQueueWaitIdle(queue);
+      if (err) VKRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
       // // // Wait for the fence to signal that command buffer has finished executing
       // // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000 /*timeout*/);
-      // // if (err) VKRT_RAISE("failed to wait for fence for triangle accel build! : \n" + errorString(err));
+      // // if (err) VKRT_RAISE("failed to wait for fence for instance accel build! : \n" + errorString(err));
       // // vkDestroyFence(logicalDevice, fence, nullptr);
 
-      // VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
-      // accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-      // accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
-      // address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(logicalDevice, &accelerationDeviceAddressInfo);
+      VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+      accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+      accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+      address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(logicalDevice, &accelerationDeviceAddressInfo);
     }
   };
 
@@ -2296,7 +2272,7 @@ namespace vkrt {
       VkPipelineCache cache = VK_NULL_HANDLE;
 
       VkPushConstantRange pushConstantRange = {};
-      pushConstantRange.size = 2 * sizeof(uint64_t);
+      pushConstantRange.size = 3 * sizeof(uint64_t);
       pushConstantRange.offset = 0;
       pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
