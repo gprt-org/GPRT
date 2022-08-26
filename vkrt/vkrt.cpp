@@ -1251,9 +1251,15 @@ namespace vkrt {
       err = vkQueueWaitIdle(queue);
       if (err) VKRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
-      VkAccelerationStructureInstanceKHR instance{};
-      instancesBuffer->map();
-      memcpy(&instance, instancesBuffer->mapped, sizeof(VkAccelerationStructureInstanceKHR));
+      // VkAccelerationStructureInstanceKHR instance{};
+      // struct TMP {
+      //   uint32_t a;
+      //   uint32_t b;
+      //   uint32_t c;
+      // };
+      // TMP tmp;
+      // instancesBuffer->map();
+      // memcpy(&tmp, instancesBuffer->mapped, sizeof(TMP));
 
       VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
       accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;

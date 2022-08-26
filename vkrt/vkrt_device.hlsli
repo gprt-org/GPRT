@@ -62,34 +62,35 @@ typedef enum VkGeometryInstanceFlagBitsKHR {
     VK_GEOMETRY_INSTANCE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
 } VkGeometryInstanceFlagBitsKHR;
 
-typedef struct VkTransformMatrixKHR {
-    float    mat[3][4];
-} VkTransformMatrixKHR;
 
-typedef struct VkAccelerationStructureInstanceKHR {
+struct VkAccelerationStructureInstanceKHR {
     float3x4                      transform;
     uint32_t                      instanceCustomIndex24Mask8;
     uint32_t                      instanceShaderBindingTableRecordOffset24Flags8;
     uint64_t                      accelerationStructureReference;
-} VkAccelerationStructureInstanceKHR;
+};
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
 {
-  printf("Hello from compute shader! %d\n", DTid.x);
-  printf("Address 1 is %d\n", pushConsts.instanceBufferAddr);
-  printf("Address 2 is %d\n", pushConsts.transformBufferAddr);
-  printf("Address 3 is %d\n", pushConsts.accelReferencesAddr);
-
   VkAccelerationStructureInstanceKHR instance;
+
+  // instance.transform = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+  // instance.a.x = 0;
+  // instance.a.y = 1;
+  // instance.a.z = 2;
+  // vk::RawBufferStore<TMP>(
+  //   pushConsts.instanceBufferAddr + sizeof(TMP) * DTid.x,
+  //   instance
+  // );
   
   instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
-  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 
-  | 0x00 << 24;
+  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 | 0x00 << 24;
 
-  instance.transform = vk::RawBufferLoad<float3x4>(
-    pushConsts.transformBufferAddr + sizeof(VkTransformMatrixKHR) * DTid.x);
+  instance.transform = 
+    vk::RawBufferLoad<float3x4>(
+      pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x);
   
   instance.accelerationStructureReference = vk::RawBufferLoad<uint64_t>(
     pushConsts.accelReferencesAddr + sizeof(uint64_t) * DTid.x
@@ -110,17 +111,17 @@ void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   );
 
   vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR),
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4),
     instance.instanceCustomIndex24Mask8
   );
 
   vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR) + sizeof(uint32_t),
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t),
     instance.instanceShaderBindingTableRecordOffset24Flags8
   );
 
   vk::RawBufferStore<uint64_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(VkTransformMatrixKHR) + sizeof(uint32_t) + sizeof(uint32_t),
+    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t) + sizeof(uint32_t),
     instance.accelerationStructureReference
   );
 }

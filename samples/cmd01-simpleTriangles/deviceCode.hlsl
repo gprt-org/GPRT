@@ -23,29 +23,64 @@
 #include "deviceCode.h"
 #include "vkrt.h"
 
+struct Payload
+{
+[[vk::location(0)]] float3 color;
+};
+
 
 [[vk::shader_record_ext]]
 ConstantBuffer<RayGenData> raygenSBTData;
 [shader("raygeneration")]
 void simpleRayGen() {
-//   uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 pixelID = DispatchRaysIndex().xy;
 
-//   if (pixelID.x == 0 && pixelID.y == 0) {
-//     uint32_t test1 = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
-//     printf("Hello from your first raygen program!\n");
-//     printf("Size of RayGenData %d\n", sizeof(RayGenData));
-//     printf("Color 0 %f %f %f\n", raygenSBTData.color0.x, raygenSBTData.color0.y, raygenSBTData.color0.z);
-//     printf("Color 1 %f %f %f\n", raygenSBTData.color1.x, raygenSBTData.color1.y, raygenSBTData.color1.z);
-//   }
-//
+  if (pixelID.x == 0 && pixelID.y == 0) {
+    printf("Hello from your first raygen program!\n");
+  }
 
-//   // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
-//   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-//   // alternate pattern, showing that pixel (0,0) is in the upper left corner
-//   // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-//   const float3 color = (pattern & 1) ? raygenSBTData.color1 : raygenSBTData.color0;
+  float2 screen = (float2(pixelID) + float2(.5f, .5f))  / float2(raygenSBTData.fbSize);
+  RayDesc rayDesc;
+  rayDesc.Origin = raygenSBTData.camera.pos;
+  rayDesc.Direction = 
+    normalize(raygenSBTData.camera.dir_00
+    + screen.x * raygenSBTData.camera.dir_du
+    + screen.y * raygenSBTData.camera.dir_dv
+  );
+  rayDesc.TMin = 0.001;
+  rayDesc.TMax = 10000.0;
 
-//   // find the frame buffer location (x + width*y) and put the "computed" result there
-//   const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
-//   vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(color));
+  Payload payload;
+  RaytracingAccelerationStructure world = vkrt::getAccelHandle(raygenSBTData.world);
+  TraceRay(world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 0, 0, rayDesc, payload);
+  const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
+  vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(payload.color));
+}
+
+[[vk::shader_record_ext]]
+ConstantBuffer<TrianglesGeomData> geomSBTData;
+[shader("closesthit")]
+void TriangleMesh(inout Payload prd, in float2 attribs)
+{
+  // compute normal:
+  const int    primID = PrimitiveIndex();
+  const int3   index  = vk::RawBufferLoad<int3>(geomSBTData.index  + sizeof(int3) * primID);
+  const float3 A      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.x);
+  const float3 B      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.y);
+  const float3 C      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.z);
+  const float3 Ng     = normalize(cross(B-A,C-A));
+
+  const float3 rayDir = WorldRayDirection();
+  prd.color = (.2f + .8f * abs(dot(rayDir,Ng))) * geomSBTData.color;
+}
+
+[[vk::shader_record_ext]]
+ConstantBuffer<MissProgData> missSBTData;
+[shader("miss")]
+void miss(inout Payload prd)
+{
+  uint2 pixelID = DispatchRaysIndex().xy;
+  
+  int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
+  prd.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
 }
