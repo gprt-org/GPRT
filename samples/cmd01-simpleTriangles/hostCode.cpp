@@ -263,6 +263,8 @@ int main(int ac, char **av)
   vkrtBufferDestroy(vertexBuffer);
   vkrtBufferDestroy(indexBuffer);
   vkrtBufferDestroy(frameBuffer);
+  vkrtBufferDestroy(geometryTransformBuffer);
+  vkrtBufferDestroy(instanceTransformBuffer);
   vkrtRayGenDestroy(rayGen);
   vkrtMissProgDestroy(missProg);
   vkrtAccelDestroy(trianglesAccel);

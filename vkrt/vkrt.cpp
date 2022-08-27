@@ -922,6 +922,7 @@ namespace vkrt {
     ~Accel() {};
 
     virtual void build(std::map<std::string, Stage> internalStages) { };
+    virtual void destroy() { };
     virtual AccelType getType() {return VKRT_UNKNOWN_ACCEL;}
   };
 
@@ -1124,6 +1125,25 @@ namespace vkrt {
       accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
       address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(logicalDevice, &accelerationDeviceAddressInfo);
     }
+  
+    void destroy() { 
+      if (accelerationStructure) {
+        vkDestroyAccelerationStructureKHR(logicalDevice, accelerationStructure, nullptr);
+        accelerationStructure = VK_NULL_HANDLE;
+      }
+
+      if (accelBuffer) {
+        accelBuffer->destroy();
+        delete accelBuffer;
+        accelBuffer = nullptr;
+      }
+
+      if (scratchBuffer) {
+        scratchBuffer->destroy();
+        delete scratchBuffer;
+        scratchBuffer = nullptr;
+      }
+    };
   };
 
   struct InstanceAccel : public Accel {
@@ -1384,6 +1404,37 @@ namespace vkrt {
       accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
       address = vkrt::vkGetAccelerationStructureDeviceAddressKHR(logicalDevice, &accelerationDeviceAddressInfo);
     }
+
+    void destroy() { 
+      if (accelerationStructure) {
+        vkDestroyAccelerationStructureKHR(logicalDevice, accelerationStructure, nullptr);
+        accelerationStructure = VK_NULL_HANDLE;
+      }
+
+      if (accelBuffer) {
+        accelBuffer->destroy();
+        delete accelBuffer;
+        accelBuffer = nullptr;
+      }
+
+      if (scratchBuffer) {
+        scratchBuffer->destroy();
+        delete scratchBuffer;
+        scratchBuffer = nullptr;
+      }
+
+      if (instancesBuffer) {
+        instancesBuffer->destroy();
+        delete instancesBuffer;
+        instancesBuffer = nullptr;
+      }
+
+      if (accelAddressesBuffer) {
+        accelAddressesBuffer->destroy();
+        delete accelAddressesBuffer;
+        accelAddressesBuffer = nullptr;
+      }
+    };
   };
 
   
@@ -2072,6 +2123,13 @@ namespace vkrt {
         vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
       if (pipeline)
         vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      
+      if (fillInstanceDataStage.layout)
+        vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
+      if (fillInstanceDataStage.pipeline)
+        vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
+      if (fillInstanceDataStage.module)
+        vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
 
       raygenShaderBindingTable.destroy();
       missShaderBindingTable.destroy();
@@ -2898,9 +2956,13 @@ vkrtInstanceAccelSetTransforms(VKRTAccel instanceAccel,
 }
 
 VKRT_API void
-vkrtAccelDestroy(VKRTAccel accel)
+vkrtAccelDestroy(VKRTAccel _accel)
 {
-  VKRT_NOTIMPLEMENTED;
+  LOG_API_CALL();
+  vkrt::Accel *accel = (vkrt::Accel*)_accel;
+  accel->destroy();
+  delete accel;
+  LOG("accel destroyed");
 }
 
 VKRT_API void vkrtAccelBuild(VKRTContext _context, VKRTAccel _accel)
