@@ -24,6 +24,8 @@
 
 #ifdef VKRT_DEVICE
 #include "vkrt_device.hlsli"
+#define alignas(alignment)
 #else 
+#include <stdalign.h>
 #include "vkrt_host.h"
 #endif

@@ -26,32 +26,30 @@
 struct TrianglesGeomData
 {
   /*! base color we use for the entire mesh */
-  float3 color; float pad;
+  alignas(16) float3 color;
   /*! array/buffer of vertex indices */
-  uint64_t index; // vec3i*
+  alignas(8) uint64_t index; // vec3i*
   /*! array/buffer of vertex positions */
-  uint64_t vertex; // vec3f *
+  alignas(8) uint64_t vertex; // vec3f *
 };
 
 struct RayGenData
 {
-  uint64_t fbPtr;
-  int2 fbSize;
-  // OptixTraversableHandle world;
-  uint64_t world; // RaytracingAccelerationStructure*
-  uint64_t pad;
+  alignas(8) uint64_t fbPtr;
+  alignas(8) int2 fbSize;
+  alignas(8) uint64_t world; // RaytracingAccelerationStructure*
 
   struct { 
-    float3 pos;    float pad1;
-    float3 dir_00; float pad2;
-    float3 dir_du; float pad3;
-    float3 dir_dv; float pad4;
+    alignas(16) float3 pos;   
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
   } camera;
 };
 
 /* variables for the miss program */
 struct MissProgData
 {
-  float3  color0;  float pad1;
-  float3  color1;  float pad2;
+  alignas(16) float3  color0;
+  alignas(16) float3  color1;
 };

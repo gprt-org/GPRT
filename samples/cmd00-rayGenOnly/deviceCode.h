@@ -26,9 +26,9 @@
 struct RayGenData
 {
   // pointers are represented using uint64_t
-  uint64_t fbPtr;
-  int2 fbSize;
+  alignas(8) uint64_t fbPtr;
+  alignas(8) int2 fbSize;
 
-  float3 color0; float pad1; // note the padding here
-  float3 color1; float pad2; // note the padding here
+  alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here
+  alignas(16) float3 color1; // note the 16 byte alignment (not 12 byte) here
 };
