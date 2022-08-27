@@ -32,9 +32,11 @@ void simpleRayGen() {
   RaytracingAccelerationStructure test = vkrt::getAccelHandle(raygenSBTData.fbPtr);
 
   if (pixelID.x == 0 && pixelID.y == 0) {
-    uint32_t test1 = vk::RawBufferLoad<uint32_t>(raygenSBTData.fbPtr, 4);
     printf("Hello from your first raygen program!\n");
-    printf("Size of accel %d\n", sizeof(float));
+    printf("fbPtr %d\n", raygenSBTData.fbPtr);
+    printf("Screen size %d %d\n", raygenSBTData.fbSize.x, raygenSBTData.fbSize.y);
+    printf("color0 %f %f %f\n", raygenSBTData.color0.x, raygenSBTData.color0.y, raygenSBTData.color0.z);
+    printf("color1 %f %f %f\n", raygenSBTData.color1.x, raygenSBTData.color1.y, raygenSBTData.color1.z);
   }
 
   // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).

@@ -93,9 +93,6 @@ ELSE()
   message(STATUS ${Vulkan_LIBRARY})
 ENDIF()
 
-# Find HLSLPP
-add_subdirectory(hlslpp)
-
 # Find STB Image
 add_subdirectory(stb_image)
 

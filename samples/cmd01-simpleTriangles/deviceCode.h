@@ -39,6 +39,7 @@ struct RayGenData
   int2 fbSize;
   // OptixTraversableHandle world;
   uint64_t world; // RaytracingAccelerationStructure*
+  uint64_t pad;
 
   struct { 
     float3 pos;    float pad1;

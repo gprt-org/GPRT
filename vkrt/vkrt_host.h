@@ -22,8 +22,11 @@
 
 #include <vulkan/vulkan.h>
 
-#include "hlsl++.h"
-using namespace hlslpp;
+#include "linalg.h"
+using namespace linalg;
+using namespace linalg::detail;
+using namespace linalg::aliases;
+using namespace linalg::ostream_overloads;
 
 #include <sys/types.h>
 #include <stdint.h>

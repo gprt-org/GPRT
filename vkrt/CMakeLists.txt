@@ -47,7 +47,7 @@ set_target_properties(vkrt
 #     )
 # ENDIF(WIN32)
 
-target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY} SPIRV-Tools-static hlslpp)
+target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY} SPIRV-Tools-static)
 set_target_properties(vkrt PROPERTIES LINKER_LANGUAGE CXX)
 
 target_include_directories(vkrt

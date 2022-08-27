@@ -320,20 +320,7 @@ namespace vkrt {
         }
       }
       singleEntryPointProgram += text;
-      {
-        spv_binary binary = nullptr;
-        spv_diagnostic diagnostic = nullptr;
-        spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
-        spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
-        if (diagnostic) {
-          spvDiagnosticPrint(diagnostic);
-          spvDiagnosticDestroy(diagnostic);
-        }
-      }
-
-      // std::cout<<"final program " << std::endl;
-      // std::cout<<singleEntryPointProgram<<std::endl;
-
+      
       // hold over until we can get those SPIR-V tools changes in...
       if (!isComputeBinary) 
       {
@@ -379,17 +366,6 @@ namespace vkrt {
 
       // std::cout<<"final program " << std::endl;
       // std::cout<<singleEntryPointProgram<<std::endl;
-
-      {
-        spv_binary binary = nullptr;
-        spv_diagnostic diagnostic = nullptr;
-        spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
-        spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
-        if (diagnostic) {
-          spvDiagnosticPrint(diagnostic);
-          spvDiagnosticDestroy(diagnostic);
-        }
-      }
 
       // Now, assemble the IR
       spv_binary binary = nullptr;
@@ -738,6 +714,8 @@ namespace vkrt {
   struct GeomType : public SBTEntry {
     VkDevice logicalDevice;
     std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
+    std::vector<VkPipelineShaderStageCreateInfo> anyHitShaderStages;
+    std::vector<VkPipelineShaderStageCreateInfo> intersectionShaderStages;
     
     GeomType(VkDevice  _logicalDevice,
              uint32_t numRayTypes,
@@ -916,6 +894,13 @@ namespace vkrt {
     }
   };
 
+  typedef enum
+  {
+    VKRT_UNKNOWN_ACCEL = 0x0,
+    VKRT_TRIANGLES_ACCEL = 0x1,
+    VKRT_INSTANCE_ACCEL  = 0x2,
+  } AccelType;
+
   struct Accel {
     VkPhysicalDevice physicalDevice;
     VkDevice logicalDevice;
@@ -937,6 +922,7 @@ namespace vkrt {
     ~Accel() {};
 
     virtual void build(std::map<std::string, Stage> internalStages) { };
+    virtual AccelType getType() {return VKRT_UNKNOWN_ACCEL;}
   };
 
   struct TrianglesAccel : public Accel {
@@ -971,6 +957,8 @@ namespace vkrt {
       this->transforms.buffer = transforms;
     }
 
+    AccelType getType() {return VKRT_TRIANGLES_ACCEL;}
+
     void build(std::map<std::string, Stage> internalStages) {
       VkResult err;
 
@@ -1004,15 +992,16 @@ namespace vkrt {
         geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
         // note, offset accounted for in range
         geom.geometry.triangles.indexData.deviceAddress = geometries[gid]->index.buffer->address; 
-        maxPrimitiveCounts[gid] = geometries[gid]->index.count / 3;
+        maxPrimitiveCounts[gid] = geometries[gid]->index.count;
         
         // transform data
         // note, offset accounted for in range
         geom.geometry.triangles.transformData.deviceAddress = transforms.buffer->address;
+        // if the above is null, then that indicates identity
 
         auto &geomRange = accelerationBuildStructureRangeInfos[gid];
         accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
-        geomRange.primitiveCount = geometries[gid]->index.count / 3;
+        geomRange.primitiveCount = geometries[gid]->index.count;
         geomRange.primitiveOffset = geometries[gid]->index.offset;
         geomRange.firstVertex = geometries[gid]->index.firstVertex;
         geomRange.transformOffset = gid * 12 * sizeof(float); // might change this later...
@@ -1190,6 +1179,8 @@ namespace vkrt {
       // assuming no motion blurred triangles for now, so we assume 1 transform per instance
       this->transforms.buffer = transforms;
     }
+
+    AccelType getType() {return VKRT_INSTANCE_ACCEL;}
 
     void build(std::map<std::string, Stage> internalStages) {
       VkResult err;
@@ -1488,6 +1479,9 @@ namespace vkrt {
 
     std::vector<RayGen*> raygenPrograms;
     std::vector<MissProg*> missPrograms;
+    std::vector<GeomType*> geomTypes;
+
+    std::vector<Accel*> accels;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
     vkrt::Buffer raygenShaderBindingTable;
@@ -1532,6 +1526,22 @@ namespace vkrt {
 				vkDestroyDebugUtilsMessengerEXT(instance, debugUtilsMessenger, nullptr);
 			}
 		}
+
+    size_t getNumHitRecords() {
+      int totalGeometries = 0;
+      for (int accelID = 0; accelID < accels.size(); ++accelID) {
+        Accel *accel = accels[accelID];
+        if (!accel) continue;
+        if (accel->getType() == VKRT_INSTANCE_ACCEL) continue;
+        if (accel->getType() == VKRT_TRIANGLES_ACCEL) {
+          TrianglesAccel *triAccel = (TrianglesAccel*) accel;
+          totalGeometries += triAccel->geometries.size();
+        }
+      }
+
+      int numHitRecords = totalGeometries * numRayTypes;
+      return numHitRecords;
+    }
 
     Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -2118,7 +2128,7 @@ namespace vkrt {
 
       size_t numRayGens = raygenPrograms.size();
       size_t numMissProgs = missPrograms.size();
-      int numRayTypes = 1;
+      size_t numHitRecords = getNumHitRecords();
 
       // Raygen records
       if (raygenPrograms.size() > 0) {
@@ -2130,7 +2140,7 @@ namespace vkrt {
             bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
         }
         raygenShaderBindingTable.map();
-        memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize);
+        memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize * numRayGens);
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
           RayGen *raygen = raygenPrograms[idx];
           size_t stride = recordSize;
@@ -2158,7 +2168,7 @@ namespace vkrt {
         missShaderBindingTable.map();
         memcpy(missShaderBindingTable.mapped,
           shaderHandleStorage.data() + handleSize * numRayGens,
-          handleSize);
+          handleSize * numMissProgs);
         for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
           MissProg *missprog = missPrograms[idx];
           size_t stride = recordSize;
@@ -2175,22 +2185,63 @@ namespace vkrt {
       }
 
       // Hit records
-      // if (hitgroupPrograms.size() > 0) {
-        if (hitShaderBindingTable.size != recordSize * 1 /*TODO!*/) {
+      if (numHitRecords > 0)
+      {
+        // Now, allocate our hit shader binding table
+        if (hitShaderBindingTable.size != recordSize * numHitRecords) {
           hitShaderBindingTable.destroy();
         }
         if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, bufferUsageFlags, memoryUsageFlags, recordSize);
+          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+            bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords);
         }
+
         hitShaderBindingTable.map();
+
         memcpy(hitShaderBindingTable.mapped,
             shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
-            handleSize);
+            handleSize * numHitRecords);
 
-        // TODO: hit programs...
+        // todo: fill in the parameters for each hit record.
+
         hitShaderBindingTable.unmap();
       }
-    // }
+
+
+      // {
+      //     TrianglesAccel *triAccel = (TrianglesAccel*) accel;
+
+      //     const size_t sbtOffset = 0 ; // triAccel->sbtOffset; //?????
+      //     std::cout<<"TODO, compute correct sbt offset for a triangle accel!"<<std::endl;
+      //     for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+      //       for (int rayTypeID = 0; rayTypeID < numRayTypes; ++rayTypeID) {
+
+      //         size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
+      //         uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
+
+      //         int HG_stride = ;
+      //         int R_stride = numRayTypes;
+      //         int R_offset = rayTypeID;
+      //         int G_ID = geomID;
+      //         int I_offset = ;
+      //         void* HG = hitShaderBindingTable.mapped + (HG_stride * (R_offset + R_stride * G_ID + I_offset));
+
+      //       }
+      //     }
+      //   }
+
+
+      // if (hitgroupPrograms.size() > 0) 
+      {
+        
+        
+        
+        
+
+        // TODO: hit programs...
+        
+      }
+    }
 
     void buildPrograms()
     {
@@ -2245,6 +2296,35 @@ namespace vkrt {
 
       // Closest hit group
       {
+        for (auto geomType : geomTypes) {
+          for (uint32_t rayType = 0; rayType < numRayTypes; ++rayType) {
+            VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+            shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+            shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR; // or VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR
+            
+            // init all to unused
+            shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+            shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+            shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+            shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+            if (geomType->closestHitShaderStages.size() > 0) {
+              shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
+              shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+            }
+
+            if (geomType->anyHitShaderStages.size() > 0) {
+              shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
+              shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+            }
+
+            if (geomType->intersectionShaderStages.size() > 0) {
+              shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
+              shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+            }
+            shaderGroups.push_back(shaderGroup);
+          }
+        }
       }
 
       /*
@@ -2534,6 +2614,8 @@ vkrtGeomTypeCreate(VKRTContext  _context,
       break;
   }
 
+  context->geomTypes.push_back(geomType);
+
   LOG("geom type created...");
   return (VKRTGeomType)geomType;
 }
@@ -2736,6 +2818,7 @@ vkrtTrianglesAccelCreate(VKRTContext _context,
       context->physicalDevice, context->logicalDevice, 
       context->graphicsCommandBuffer, context->graphicsQueue, 
       numGeometries, (vkrt::TrianglesGeom*)arrayOfChildGeoms);
+  context->accels.push_back(accel);
   return (VKRTAccel)accel;
 }
 
@@ -2772,6 +2855,7 @@ vkrtInstanceAccelCreate(VKRTContext _context,
       context->physicalDevice, context->logicalDevice, 
       context->graphicsCommandBuffer, context->graphicsQueue, 
       numAccels, arrayOfAccels);
+  context->accels.push_back(accel);
   return (VKRTAccel)accel;
 }
 
@@ -2888,15 +2972,16 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
       context->logicalDevice, context->missShaderBindingTable.buffer);
     missShaderSbtEntry.stride = recordSize;
-    missShaderSbtEntry.size = missShaderSbtEntry.stride * 1; // only one
+    missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
-  // if (context->hitGroupPrograms.size() > 0) {
-  hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->hitShaderBindingTable.buffer);
-  hitShaderSbtEntry.stride = recordSize;
-  hitShaderSbtEntry.size = hitShaderSbtEntry.stride * 1; // only one
-  // }
+  size_t numHitRecords = context->getNumHitRecords();
+  if (numHitRecords > 0) {
+    hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
+      context->logicalDevice, context->hitShaderBindingTable.buffer);
+    hitShaderSbtEntry.stride = recordSize;
+    hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords; // only one
+  }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{}; // empty
   // callableShaderSbtEntry.stride = handleSizeAligned;
@@ -5421,7 +5506,8 @@ VKRT_API void vkrtRayGenSetBuffer(VKRTRayGen _rayGen, const char *name, VKRTBuff
   assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
 
   // The found variable must be a buffer
-  assert(raygen->vars[name].decl.type == VKRT_BUFFER);
+  assert(raygen->vars[name].decl.type == VKRT_BUFFER || 
+         raygen->vars[name].decl.type == VKRT_BUFPTR);
 
   // Buffer pointers are 64 bits
   size_t size = sizeof(uint64_t);
@@ -5560,7 +5646,8 @@ VKRT_API void vkrtMissProgSetBuffer(VKRTMissProg _missProg, const char *name, VK
   assert(missprog->vars.find(std::string(name)) != missprog->vars.end());
 
   // The found variable must be a buffer
-  assert(missprog->vars[name].decl.type == VKRT_BUFFER);
+  assert(missprog->vars[name].decl.type == VKRT_BUFFER || 
+         missprog->vars[name].decl.type == VKRT_BUFPTR);
 
   // Buffer pointers are 64 bits
   size_t size = sizeof(uint64_t);
