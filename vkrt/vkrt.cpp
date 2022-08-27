@@ -2202,8 +2202,32 @@ namespace vkrt {
             shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
             handleSize * numHitRecords);
 
-        // todo: fill in the parameters for each hit record.
+        for (int accelID = 0; accelID < accels.size(); ++accelID) {
+          Accel *accel = accels[accelID];
+          if (!accel) continue;
+          if (accel->getType() == VKRT_INSTANCE_ACCEL) continue;
+          if (accel->getType() == VKRT_TRIANGLES_ACCEL) {
+            TrianglesAccel *triAccel = (TrianglesAccel*) accel;
 
+            for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+              auto &geom = triAccel->geometries[geomID];
+
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+
+                size_t instanceOffset = 0; // TODO
+                size_t stride = recordSize;
+                size_t offset = stride * (rayType + numRayTypes * geomID + instanceOffset) + handleSize /* params start after shader identifier */ ; // note, not considering instance offset...
+                uint8_t* params = ((uint8_t*) (hitShaderBindingTable.mapped)) + offset;
+                for (auto &var : geom->vars) {
+                  size_t varOffset = var.second.decl.offset;
+                  size_t varSize = getSize(var.second.decl.type);
+                  std::cout<<"Embedding " << var.first << " into hitgroup SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
+                  memcpy(params + varOffset, var.second.data, varSize);
+                }
+              }
+            }
+          }
+        }
         hitShaderBindingTable.unmap();
       }
 

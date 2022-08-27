@@ -72,17 +72,16 @@ ConstantBuffer<TrianglesGeomData> geomSBTData;
 [shader("closesthit")]
 void TriangleMesh(inout Payload prd) // , in float2 attribs
 {
-  // // compute normal:
-  // const int    primID = PrimitiveIndex();
-  // const int3   index  = vk::RawBufferLoad<int3>(geomSBTData.index  + sizeof(int3) * primID);
-  // const float3 A      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.x);
-  // const float3 B      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.y);
-  // const float3 C      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.z);
-  // const float3 Ng     = normalize(cross(B-A,C-A));
+  // compute normal:
+  const int    primID = PrimitiveIndex();
+  const int3   index  = vk::RawBufferLoad<int3>(geomSBTData.index  + sizeof(int3) * primID);
+  const float3 A      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.x);
+  const float3 B      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.y);
+  const float3 C      = vk::RawBufferLoad<float3>(geomSBTData.vertex + sizeof(float3) * index.z);
+  const float3 Ng     = normalize(cross(B-A,C-A));
 
-  // const float3 rayDir = WorldRayDirection();
-  // prd.color = (.2f + .8f * abs(dot(rayDir,Ng))) * geomSBTData.color;
-  prd.color = float3(1.f, 0.f, 0.f);
+  const float3 rayDir = WorldRayDirection();
+  prd.color = (.2f + .8f * abs(dot(rayDir,Ng))) * geomSBTData.color;
 }
 
 [[vk::shader_record_ext]]
@@ -90,9 +89,8 @@ ConstantBuffer<MissProgData> missSBTData;
 [shader("miss")]
 void miss(inout Payload prd)
 {
-  // uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 pixelID = DispatchRaysIndex().xy;
   
-  // int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
-  // prd.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
-  prd.color = float3(0.f, 1.f, 0.f);
+  int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
+  prd.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
 }
