@@ -56,11 +56,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 
-# need PIC if building static libraries on Linux
-if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-endif()
-
 # ------------------------------------------------------------------
 # gprt library itself
 # ------------------------------------------------------------------
