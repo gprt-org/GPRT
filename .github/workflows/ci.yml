@@ -16,7 +16,7 @@ jobs:
   main:
     runs-on: ubuntu-20.04
 
-  steps:
+    steps:
     - uses: actions/checkout@v2
 
     - name: Setup environment
@@ -29,10 +29,6 @@ jobs:
       run: |
         wget https://drive.google.com/uc\?export\=download\&id\=1dF6cX5q-3tB3e5zVcZIL_Fa1W8-WRpOq -O dxc-artifacts.tar.gz
         tar xf dxc-artifactcs.tar.gz
-
-    - name: Build
-      shell: bash
-      run:
 
     - name: Build
       shell: bash
