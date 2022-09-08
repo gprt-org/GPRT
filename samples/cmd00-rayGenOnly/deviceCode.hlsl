@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
+#include "gprt.h"
 #include "deviceCode.h"
 
 
@@ -43,5 +43,5 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
   const int fbOfs = pixelID.x + SBTData.fbSize.x * pixelID.y;
   vk::RawBufferStore<uint32_t>(
     SBTData.fbPtr + fbOfs * sizeof(uint32_t), 
-    vkrt::make_rgba(color));
+    gprt::make_rgba(color));
 }

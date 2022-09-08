@@ -20,34 +20,59 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_library(vkrt)
+add_library(gprt)
 
-target_sources(owl PRIVATE
-  # -------------------------------------------------------
-  # infrastructure
-  # -------------------------------------------------------
+include(cmake/hlsl_embed_spirv.cmake)
 
-  # -------------------------------------------------------
-  # API layer
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # data handling
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # base classes
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # program types
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # geometries
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # accel structures
-  # -------------------------------------------------------
+embed_spirv(
+  OUTPUT_TARGET
+    gprtDeviceCode
+  ENTRY_POINTS
+    gprtFillInstanceData
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device_code.hlsl
 )
+
+target_sources(gprt PRIVATE
+    gprt.cpp
+    gprt.h
+)
+
+set_target_properties(gprt
+    PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
+# IF(WIN32)
+# 	# Nothing here (yet)
+# ELSEIF(APPLE)
+# 	target_link_libraries(gprt ${Vulkan_LIBRARY} "-framework AppKit" "-framework QuartzCore")
+# ELSE(WIN32)
+# 	target_link_libraries(gprt
+#         ${XCB_LIBRARIES}
+#         ${Vulkan_LIBRARY}
+#         ${Vulkan_LIBRARY}
+#         ${DIRECTFB_LIBRARIES}
+#         ${WAYLAND_CLIENT_LIBRARIES}
+#         ${CMAKE_THREAD_LIBS_INIT}
+#     )
+# ENDIF(WIN32)
+
+target_link_libraries(gprt 
+    PUBLIC 
+    ${Vulkan_LIBRARY} 
+    SPIRV-Tools-static
+    SPIRV-Tools-opt
+    gprtDeviceCode
+)
+
+set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
+
+target_include_directories(gprt
+  PUBLIC
+    ${Vulkan_INCLUDE_DIR}
+    ${PROJECT_SOURCE_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+
+add_library(gprt::gprt ALIAS gprt)

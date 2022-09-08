@@ -33,6 +33,6 @@ add_executable(sample01_simpleTriangles hostCode.cpp)
 target_link_libraries(sample01_simpleTriangles
   PRIVATE
     sample01_deviceCode
-    vkrt::vkrt
+    gprt::gprt
     stb_image
 )

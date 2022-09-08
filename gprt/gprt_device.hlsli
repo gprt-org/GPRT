@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-namespace vkrt {
+namespace gprt {
   inline uint32_t make_8bit(const float f)
   {
     return min(255,max(0,int(f*256.f)));

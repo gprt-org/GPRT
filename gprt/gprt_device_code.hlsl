@@ -1,4 +1,4 @@
-#include "vkrt.h"
+#include "gprt.h"
 
 struct PushConsts {
 	uint64_t instanceBufferAddr;
@@ -33,9 +33,9 @@ struct VkAccelerationStructureInstanceKHR {
 
 // [shader("compute")]
 // [numthreads(1, 1, 1)]
-// void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
+// void gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
 
-GPRT_COMPUTE_PROGRAM(vkrtFillInstanceData)(uint3 DTid)
+GPRT_COMPUTE_PROGRAM(gprtFillInstanceData)(uint3 DTid)
 {
   VkAccelerationStructureInstanceKHR instance;
   // float3x4 transform = vk::RawBufferLoad<float3x4>(

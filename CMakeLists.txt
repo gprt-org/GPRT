@@ -27,17 +27,17 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.18)
 endif()
 
 if (NOT (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR}))
-  set(VKRT_IS_SUBPROJECT ON)
+  set(GPRT_IS_SUBPROJECT ON)
 else()
-  set(VKRT_IS_SUBPROJECT OFF)
+  set(GPRT_IS_SUBPROJECT OFF)
 endif()
 
 set(CMAKE_BUILD_TYPE_INIT "Release")
 
 # project command is required to come after cmake_minimum_required command.
-project(VKRT VERSION 1.0.0 LANGUAGES C CXX)
+project(GPRT VERSION 1.0.0 LANGUAGES C CXX)
 
-if (NOT VKRT_IS_SUBPROJECT)
+if (NOT GPRT_IS_SUBPROJECT)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
@@ -46,8 +46,8 @@ endif()
 # ------------------------------------------------------------------
 # first, include some dependencies
 # ------------------------------------------------------------------
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/vkrt/cmake/")
-if (VKRT_IS_SUBPROJECT)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/gprt/cmake/")
+if (GPRT_IS_SUBPROJECT)
   set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} PARENT_SCOPE)
 endif()
 
@@ -57,26 +57,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 
 # ------------------------------------------------------------------
-# vkrt library itself
+# gprt library itself
 # ------------------------------------------------------------------
-option(VKRT_BUILD_SHARED "Build VKRT as a shared library? (otherwise static)" OFF)
-set(BUILD_SHARED_LIBS ${VKRT_BUILD_SHARED}) # use 'VKRT_' naming convention
-add_subdirectory(vkrt)
+option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
+set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
+add_subdirectory(gprt)
 
-option(VKRT_BUILD_SAMPLES "Build the Samples?" ON)
-# add_compile_definitions(VKRT_BUILDING_ALL_SAMPLES)
-# option(VKRT_BUILD_ADVANCED_TESTS "Build the *advanced* test-cases?" OFF)
+option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
+# add_compile_definitions(GPRT_BUILDING_ALL_SAMPLES)
+# option(GPRT_BUILD_ADVANCED_TESTS "Build the *advanced* test-cases?" OFF)
 
 add_subdirectory(3rdParty)
 
 # ------------------------------------------------------------------
 # tutorial/samples
 # ------------------------------------------------------------------
-if (VKRT_BUILD_SAMPLES)
+if (GPRT_BUILD_SAMPLES)
   add_subdirectory(samples)
 endif()
 
-if (VKRT_IS_SUBPROJECT)
+if (GPRT_IS_SUBPROJECT)
   return()
 endif()
 
@@ -88,6 +88,6 @@ endif()
 # # ------------------------------------------------------------------
 # # some basic testing
 # # ------------------------------------------------------------------
-# if (VKRT_BUILD_ADVANCED_TESTS)
+# if (GPRT_BUILD_ADVANCED_TESTS)
 #   add_subdirectory(tests)
 # endif()

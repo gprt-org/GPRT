@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
+#include "gprt.h"
 
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData

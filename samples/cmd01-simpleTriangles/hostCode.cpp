@@ -23,8 +23,8 @@
 // This program sets up a single geometric object, a mesh for a cube, and
 // its acceleration structure, then ray traces it.
 
-// public VKRT API
-#include <vkrt.h>
+// public GPRT API
+#include <gprt.h>
 // our device-side data structures
 #include "deviceCode.h"
 // external helper stuff for image output
@@ -32,13 +32,13 @@
 #include "stb/stb_image_write.h"
 
 #define LOG(message)                                            \
-  std::cout << VKRT_TERMINAL_BLUE;                               \
-  std::cout << "#vkrt.sample(main): " << message << std::endl;   \
-  std::cout << VKRT_TERMINAL_DEFAULT;
+  std::cout << GPRT_TERMINAL_BLUE;                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+  std::cout << GPRT_TERMINAL_DEFAULT;
 #define LOG_OK(message)                                         \
-  std::cout << VKRT_TERMINAL_LIGHT_BLUE;                         \
-  std::cout << "#vkrt.sample(main): " << message << std::endl;   \
-  std::cout << VKRT_TERMINAL_DEFAULT;
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                         \
+  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+  std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern std::map<std::string, std::vector<uint8_t>> sample01_deviceCode;
 
@@ -90,11 +90,11 @@ const float cosFovy = 0.66f;
 #include <iostream>
 int main(int ac, char **av)
 {
-  LOG("vkrt example '" << av[0] << "' starting up");
+  LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  VKRTContext context = vkrtContextCreate(nullptr,1);
-  VKRTModule module = vkrtModuleCreate(context,sample01_deviceCode);
+  GPRTContext context = gprtContextCreate(nullptr,1);
+  GPRTModule module = gprtModuleCreate(context,sample01_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render
@@ -103,20 +103,20 @@ int main(int ac, char **av)
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  VKRTVarDecl trianglesGeomVars[] = {
-    { "one", VKRT_INT, VKRT_OFFSETOF(TrianglesGeomData,one)},
-    { "two", VKRT_INT, VKRT_OFFSETOF(TrianglesGeomData,two)},
-    // { "index",  VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,index)},
-    // { "vertex", VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,vertex)},
-    // { "color",  VKRT_FLOAT3, VKRT_OFFSETOF(TrianglesGeomData,color)}
+  GPRTVarDecl trianglesGeomVars[] = {
+    { "one", GPRT_INT, GPRT_OFFSETOF(TrianglesGeomData,one)},
+    { "two", GPRT_INT, GPRT_OFFSETOF(TrianglesGeomData,two)},
+    // { "index",  GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,index)},
+    // { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
+    // { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)}
     { /* sentinel to mark end of list */ }
   };
-  VKRTGeomType trianglesGeomType
-    = vkrtGeomTypeCreate(context,
-                        VKRT_TRIANGLES,
+  GPRTGeomType trianglesGeomType
+    = gprtGeomTypeCreate(context,
+                        GPRT_TRIANGLES,
                         sizeof(TrianglesGeomData),
                         trianglesGeomVars,-1);
-  vkrtGeomTypeSetClosestHit(trianglesGeomType,0,
+  gprtGeomTypeSetClosestHit(trianglesGeomType,0,
                            module,"TriangleMesh");
 
   // ##################################################################
@@ -128,50 +128,50 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // triangle mesh
   // ------------------------------------------------------------------
-  VKRTBuffer vertexBuffer
-    = vkrtHostPinnedBufferCreate(context,VKRT_FLOAT3,NUM_VERTICES,vertices);
-  VKRTBuffer indexBuffer
-    = vkrtDeviceBufferCreate(context,VKRT_INT3,NUM_INDICES,indices);
-  VKRTBuffer geometryTransformBuffer
-    = vkrtDeviceBufferCreate(context,VKRT_TRANSFORM,1,geometryTransform);
-  VKRTBuffer instanceTransformBuffer
-    = vkrtDeviceBufferCreate(context,VKRT_TRANSFORM,1,instanceTransform);
-  VKRTBuffer frameBuffer
-    = vkrtHostPinnedBufferCreate(context,VKRT_INT,fbSize.x*fbSize.y);
+  GPRTBuffer vertexBuffer
+    = gprtHostPinnedBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+  GPRTBuffer indexBuffer
+    = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
+  GPRTBuffer geometryTransformBuffer
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,geometryTransform);
+  GPRTBuffer instanceTransformBuffer
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,instanceTransform);
+  GPRTBuffer frameBuffer
+    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
 
-  vkrtBufferMap(indexBuffer);
-  int3* indices_  = (int3*)vkrtBufferGetPointer(indexBuffer);
+  gprtBufferMap(indexBuffer);
+  int3* indices_  = (int3*)gprtBufferGetPointer(indexBuffer);
   for (uint32_t i = 0; i < NUM_INDICES; ++i) {
     std::cout<<indices_[i].x << " " <<indices_[i].y << " " <<indices_[i].z << std::endl;
   }
-  vkrtBufferUnmap(indexBuffer);
+  gprtBufferUnmap(indexBuffer);
 
 
-  VKRTGeom trianglesGeom
-    = vkrtGeomCreate(context,trianglesGeomType);
+  GPRTGeom trianglesGeom
+    = gprtGeomCreate(context,trianglesGeomType);
 
-  vkrtTrianglesSetVertices(trianglesGeom,vertexBuffer,
+  gprtTrianglesSetVertices(trianglesGeom,vertexBuffer,
                            NUM_VERTICES,sizeof(float3),0);
-  vkrtTrianglesSetIndices(trianglesGeom,indexBuffer,
+  gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
 
-  // vkrtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  // vkrtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+  // gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  // gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
 
-  // vkrtGeomSet3f(trianglesGeom,"color",float3(0,1,0));
-  // vkrtGeomSet3f(trianglesGeom,"color",0,1,0);
+  // gprtGeomSet3f(trianglesGeom,"color",float3(0,1,0));
+  // gprtGeomSet3f(trianglesGeom,"color",0,1,0);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
-  VKRTAccel trianglesAccel = vkrtTrianglesAccelCreate(context,1,&trianglesGeom);
-  vkrtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
-  vkrtAccelBuild(context, trianglesAccel);
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
+  gprtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
+  gprtAccelBuild(context, trianglesAccel);
   
-  VKRTAccel world = vkrtInstanceAccelCreate(context,1,&trianglesAccel);
-  vkrtInstanceAccelSetTransforms(world, instanceTransformBuffer);
-  vkrtAccelBuild(context, world);
+  GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
+  gprtInstanceAccelSetTransforms(world, instanceTransformBuffer);
+  gprtAccelBuild(context, world);
 
   // ##################################################################
   // set miss and raygen program required for SBT
@@ -180,42 +180,42 @@ int main(int ac, char **av)
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  VKRTVarDecl missProgVars[]
+  GPRTVarDecl missProgVars[]
     = {
-    { "color0", VKRT_FLOAT3, VKRT_OFFSETOF(MissProgData,color0)},
-    { "color1", VKRT_FLOAT3, VKRT_OFFSETOF(MissProgData,color1)},
+    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
+    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
     { /* sentinel to mark end of list */ }
   };
   // ----------- create object  ----------------------------
-  VKRTMissProg missProg
-    = vkrtMissProgCreate(context,module,"miss",sizeof(MissProgData),
+  GPRTMissProg missProg
+    = gprtMissProgCreate(context,module,"miss",sizeof(MissProgData),
                         missProgVars,-1);
 
   // ----------- set variables  ----------------------------
-  // vkrtMissProgSet3f(missProg,"color0",float3{.8f,0.f,0.f});
-  // vkrtMissProgSet3f(missProg,"color1",float3{.8f,.8f,.8f});
-  vkrtMissProgSet3f(missProg,"color0",.8f,0.f,0.f);
-  vkrtMissProgSet3f(missProg,"color1",.8f,.8f,.8f);
+  // gprtMissProgSet3f(missProg,"color0",float3{.8f,0.f,0.f});
+  // gprtMissProgSet3f(missProg,"color1",float3{.8f,.8f,.8f});
+  gprtMissProgSet3f(missProg,"color0",.8f,0.f,0.f);
+  gprtMissProgSet3f(missProg,"color1",.8f,.8f,.8f);
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  VKRTVarDecl rayGenVars[] = {
-    { "three",         VKRT_INT, VKRT_OFFSETOF(RayGenData,three)},
-    { "four",          VKRT_INT, VKRT_OFFSETOF(RayGenData,four)},
-    { "fbSize",        VKRT_INT2,   VKRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         VKRT_BUFPTR, VKRT_OFFSETOF(RayGenData,fbPtr)},
-    { "world",         VKRT_ACCEL,  VKRT_OFFSETOF(RayGenData,world)},
-    { "camera.pos",    VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.pos)},
-    { "camera.dir_00", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_00)},
-    { "camera.dir_du", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_du)},
-    { "camera.dir_dv", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_dv)},
+  GPRTVarDecl rayGenVars[] = {
+    { "three",         GPRT_INT, GPRT_OFFSETOF(RayGenData,three)},
+    { "four",          GPRT_INT, GPRT_OFFSETOF(RayGenData,four)},
+    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
+    { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
+    { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
+    { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
+    { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
+    { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
     { /* sentinel to mark end of list */ }
   };
 
   // ----------- create object  ----------------------------
-  VKRTRayGen rayGen
-    = vkrtRayGenCreate(context,module,"simpleRayGen",
+  GPRTRayGen rayGen
+    = gprtRayGenCreate(context,module,"simpleRayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
 
@@ -232,43 +232,43 @@ int main(int ac, char **av)
   camera_d00 -= 0.5f * camera_ddv;
 
   // ----------- set variables  ----------------------------
-  vkrtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
+  gprtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
   
-  vkrtGeomSet1i(trianglesGeom,"one",1);
-  vkrtGeomSet1i(trianglesGeom,"two",2);
-  vkrtRayGenSet1i(rayGen,"three",3); // on AMD, for some reason this ends up setting SBT record for triangle...
-  vkrtRayGenSet1i(rayGen,"four",4);
+  gprtGeomSet1i(trianglesGeom,"one",1);
+  gprtGeomSet1i(trianglesGeom,"two",2);
+  gprtRayGenSet1i(rayGen,"three",3); // on AMD, for some reason this ends up setting SBT record for triangle...
+  gprtRayGenSet1i(rayGen,"four",4);
 
-  // vkrtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
-  vkrtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
-  vkrtRayGenSetAccel (rayGen,"world",        world);
-  // vkrtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
-  // vkrtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
-  // vkrtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
-  // vkrtRayGenSet3f    (rayGen,"camera.dir_dv",(const float3&)camera_ddv);
-  vkrtRayGenSet3f    (rayGen,"camera.pos",   camera_pos.x, camera_pos.y, camera_pos.z);
-  vkrtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
-  vkrtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
-  vkrtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
+  // gprtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
+  gprtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
+  gprtRayGenSetAccel (rayGen,"world",        world);
+  // gprtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
+  // gprtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
+  // gprtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
+  // gprtRayGenSet3f    (rayGen,"camera.dir_dv",(const float3&)camera_ddv);
+  gprtRayGenSet3f    (rayGen,"camera.pos",   camera_pos.x, camera_pos.y, camera_pos.z);
+  gprtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
+  gprtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
+  gprtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
 
   // ##################################################################
   // build *SBT* required to trace the groups
   // ##################################################################
-  vkrtBuildPrograms(context);
-  vkrtBuildPipeline(context);
-  vkrtBuildSBT(context);
+  gprtBuildPrograms(context);
+  gprtBuildPipeline(context);
+  gprtBuildSBT(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
   LOG("launching ...");
-  vkrtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+  gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
 
   LOG("done with launch, writing picture ...");
   // for host pinned mem it doesn't matter which device we query...
   const uint32_t *fb
-    = (const uint32_t*)vkrtBufferGetPointer(frameBuffer,0);
+    = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
   assert(fb);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,int(fbSize.x) * sizeof(uint32_t));
@@ -281,19 +281,19 @@ int main(int ac, char **av)
 
   LOG("cleaning up ...");
 
-  vkrtBufferDestroy(vertexBuffer);
-  vkrtBufferDestroy(indexBuffer);
-  vkrtBufferDestroy(frameBuffer);
-  vkrtBufferDestroy(geometryTransformBuffer);
-  vkrtBufferDestroy(instanceTransformBuffer);
-  vkrtRayGenDestroy(rayGen);
-  vkrtMissProgDestroy(missProg);
-  vkrtAccelDestroy(trianglesAccel);
-  vkrtAccelDestroy(world);
-  vkrtGeomDestroy(trianglesGeom);
-  vkrtGeomTypeDestroy(trianglesGeomType);
-  vkrtModuleDestroy(module);
-  vkrtContextDestroy(context);
+  gprtBufferDestroy(vertexBuffer);
+  gprtBufferDestroy(indexBuffer);
+  gprtBufferDestroy(frameBuffer);
+  gprtBufferDestroy(geometryTransformBuffer);
+  gprtBufferDestroy(instanceTransformBuffer);
+  gprtRayGenDestroy(rayGen);
+  gprtMissProgDestroy(missProg);
+  gprtAccelDestroy(trianglesAccel);
+  gprtAccelDestroy(world);
+  gprtGeomDestroy(trianglesGeom);
+  gprtGeomTypeDestroy(trianglesGeomType);
+  gprtModuleDestroy(module);
+  gprtContextDestroy(context);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

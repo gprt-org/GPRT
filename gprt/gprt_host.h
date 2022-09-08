@@ -1,0 +1,1182 @@
+// MIT License
+
+// Copyright (c) 2022 Nathan V. Morrical
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <vulkan/vulkan.h>
+
+#include "linalg.h"
+using namespace linalg;
+using namespace linalg::detail;
+using namespace linalg::aliases;
+using namespace linalg::ostream_overloads;
+
+#include <sys/types.h>
+#include <stdint.h>
+
+#include <assert.h>
+#include <unordered_map>
+#include <string>
+#include <vector>
+#include <map>
+
+#ifdef __cplusplus
+# include <cstddef>
+#endif
+
+#if defined(_MSC_VER)
+#  define GPRT_DLL_EXPORT __declspec(dllexport)
+#  define GPRT_DLL_IMPORT __declspec(dllimport)
+#elif defined(__clang__) || defined(__GNUC__)
+#  define GPRT_DLL_EXPORT __attribute__((visibility("default")))
+#  define GPRT_DLL_IMPORT __attribute__((visibility("default")))
+#else
+#  define GPRT_DLL_EXPORT
+#  define GPRT_DLL_IMPORT
+#endif
+
+#ifdef __cplusplus
+# define GPRT_IF_CPP(a) a
+#else
+# define GPRT_IF_CPP(a) /* drop it */
+#endif
+
+#  ifdef __cplusplus
+#    define GPRT_API extern "C" GPRT_DLL_EXPORT
+#  else
+#    define GPRT_API /* bla */
+#  endif
+
+#define GPRT_OFFSETOF(type,member)                       \
+   (uint32_t)((char *)(&((struct type *)0)-> member )   \
+   -                                                    \
+   (char *)(((struct type *)0)))
+
+// Terminal colors
+#define GPRT_TERMINAL_RED "\033[0;31m"
+#define GPRT_TERMINAL_GREEN "\033[0;32m"
+#define GPRT_TERMINAL_LIGHT_GREEN "\033[1;32m"
+#define GPRT_TERMINAL_YELLOW "\033[1;33m"
+#define GPRT_TERMINAL_BLUE "\033[0;34m"
+#define GPRT_TERMINAL_LIGHT_BLUE "\033[1;34m"
+#define GPRT_TERMINAL_RESET "\033[0m"
+#define GPRT_TERMINAL_DEFAULT GPRT_TERMINAL_RESET
+#define GPRT_TERMINAL_BOLD "\033[1;1m"
+#define GPRT_TERMINAL_MAGENTA "\e[35m"
+#define GPRT_TERMINAL_LIGHT_MAGENTA "\e[95m"
+#define GPRT_TERMINAL_CYAN "\e[36m"
+#define GPRT_TERMINAL_LIGHT_RED "\033[1;31m"
+
+typedef struct _GPRTContext       *GPRTContext;
+typedef struct _GPRTBuffer        *GPRTBuffer;
+typedef struct _GPRTTexture       *GPRTTexture;
+typedef struct _GPRTGeom          *GPRTGeom;
+typedef struct _GPRTGeomType      *GPRTGeomType;
+typedef struct _GPRTVariable      *GPRTVariable;
+typedef struct _GPRTModule        *GPRTModule;
+typedef struct _GPRTAccel         *GPRTAccel;
+typedef struct _GPRTRayGen        *GPRTRayGen;
+typedef struct _GPRTMissProg      *GPRTMissProg;
+
+/*! launch params (or "globals") are variables that can be put into
+  device constant memory, accessible through Vulkan's push constants */
+typedef struct _GPRTLaunchParams  *GPRTLaunchParams, *GPRTParams, *GPRTGlobals;
+
+typedef enum
+{
+  GPRT_SBT_HITGROUPS = 0x1,
+  GPRT_SBT_GEOMS     = GPRT_SBT_HITGROUPS,
+  GPRT_SBT_RAYGENS   = 0x2,
+  GPRT_SBT_MISSPROGS = 0x4,
+  GPRT_SBT_ALL   = 0x7
+} GPRTBuildSBTFlags;
+
+/*! enum that specifies the different possible memory layouts for
+  passing transformation matrices */
+typedef enum
+  {
+   /*! A 4x3-float column-major matrix format, where a matrix is
+     specified through four float3's, the first three being the basis
+     vectors of the linear transform, and the fourth one the
+     translation part. */
+   GPRT_MATRIX_FORMAT_COLUMN_MAJOR=0,
+
+   /*! 3x4-float *row-major* layout as preferred by vulkan matching VkTransformMatrixKHR;
+     not that, in this case, it doesn't matter if it's a 4x3 or 4x4 matrix,
+     as the last row in a 4x4 row major matrix can simply be ignored */
+   GPRT_MATRIX_FORMAT_ROW_MAJOR
+  } GPRTMatrixFormat;
+
+typedef enum
+  {
+   GPRT_INVALID_TYPE = 0,
+
+   GPRT_BUFFER=10,
+   /*! a 64-bit int representing the number of elements in a buffer */
+   GPRT_BUFFER_SIZE,
+   GPRT_BUFFER_ID,
+   GPRT_BUFFER_POINTER,
+   GPRT_BUFPTR=GPRT_BUFFER_POINTER,
+
+   GPRT_ACCEL=20,
+
+   /*! implicit variable of type integer that specifies the *index*
+     of the given device. this variable type is implicit in the
+     sense that it only gets _declared_ on the host, and gets set
+     automatically during SBT creation */
+   GPRT_DEVICE=30,
+
+   /*! texture(s) */
+   GPRT_TEXTURE=40,
+   GPRT_TEXTURE_2D=GPRT_TEXTURE,
+
+
+   /* all types that are naively copyable should be below this value,
+      all that aren't should be above */
+   _GPRT_BEGIN_COPYABLE_TYPES = 1000,
+
+
+   GPRT_FLOAT=1000,
+   GPRT_FLOAT2,
+   GPRT_FLOAT3,
+   GPRT_FLOAT4,
+
+   GPRT_INT=1010,
+   GPRT_INT2,
+   GPRT_INT3,
+   GPRT_INT4,
+
+   GPRT_INT32_T   = GPRT_INT,
+   GPRT_INT32_T2 = GPRT_INT2,
+   GPRT_INT32_T3 = GPRT_INT3,
+   GPRT_INT32_T4 = GPRT_INT4,
+
+   GPRT_UINT=1020,
+   GPRT_UINT2,
+   GPRT_UINT3,
+   GPRT_UINT4,
+
+   GPRT_UINT32_T  = GPRT_UINT,
+   GPRT_UINT32_T2 = GPRT_UINT2,
+   GPRT_UINT32_T3 = GPRT_UINT3,
+   GPRT_UINT32_T4 = GPRT_UINT4,
+
+   /* 64 bit integers */
+   GPRT_LONG=1030,
+   GPRT_LONG2,
+   GPRT_LONG3,
+   GPRT_LONG4,
+
+   GPRT_INT64_T  = GPRT_LONG,
+   GPRT_INT64_T2 = GPRT_LONG2,
+   GPRT_INT64_T3 = GPRT_LONG3,
+   GPRT_INT64_T4 = GPRT_LONG4,
+
+   GPRT_ULONG=1040,
+   GPRT_ULONG2,
+   GPRT_ULONG3,
+   GPRT_ULONG4,
+
+   GPRT_UINT64_T = GPRT_ULONG,
+   GPRT_UINT64_T2 = GPRT_ULONG2,
+   GPRT_UINT64_T3 = GPRT_ULONG3,
+   GPRT_UINT64_T4 = GPRT_ULONG4,
+
+   GPRT_DOUBLE=1050,
+   GPRT_DOUBLE2,
+   GPRT_DOUBLE3,
+   GPRT_DOUBLE4,
+
+   GPRT_CHAR=1060,
+   GPRT_CHAR2,
+   GPRT_CHAR3,
+   GPRT_CHAR4,
+
+   GPRT_INT8_T   = GPRT_CHAR,
+   GPRT_INT8_T2 = GPRT_CHAR2,
+   GPRT_INT8_T3 = GPRT_CHAR3,
+   GPRT_INT8_T4 = GPRT_CHAR4,
+
+   /*! unsigend 8-bit integer */
+   GPRT_UCHAR=1070,
+   GPRT_UCHAR2,
+   GPRT_UCHAR3,
+   GPRT_UCHAR4,
+
+   GPRT_UINT8_T  = GPRT_UCHAR,
+   GPRT_UINT8_T2 = GPRT_UCHAR2,
+   GPRT_UINT8_T3 = GPRT_UCHAR3,
+   GPRT_UINT8_T4 = GPRT_UCHAR4,
+
+   GPRT_SHORT=1080,
+   GPRT_SHORT2,
+   GPRT_SHORT3,
+   GPRT_SHORT4,
+
+   GPRT_INT16_T  = GPRT_SHORT,
+   GPRT_INT16_T2 = GPRT_SHORT2,
+   GPRT_INT16_T3 = GPRT_SHORT3,
+   GPRT_INT16_T4 = GPRT_SHORT4,
+
+   /*! unsigend 8-bit integer */
+   GPRT_USHORT=1090,
+   GPRT_USHORT2,
+   GPRT_USHORT3,
+   GPRT_USHORT4,
+
+   GPRT_UINT16_T  = GPRT_USHORT,
+   GPRT_UINT16_T2 = GPRT_USHORT2,
+   GPRT_UINT16_T3 = GPRT_USHORT3,
+   GPRT_UINT16_T4 = GPRT_USHORT4,
+
+   GPRT_BOOL,
+   GPRT_BOOL2,
+   GPRT_BOOL3,
+   GPRT_BOOL4,
+
+   /*! just another name for a 64-bit data type - unlike
+     GPRT_BUFFER_POINTER's (which gets translated from GPRTBuffer's
+     to actual device-side poiners) these GPRT_RAW_POINTER types get
+     copied binary without any translation. This is useful for
+     owl-cuda interaction (where the user already has device
+     pointers), but should not be used for logical buffers */
+   GPRT_RAW_POINTER=GPRT_ULONG,
+   GPRT_BYTE = GPRT_UCHAR,
+   // GPRT_BOOL = GPRT_UCHAR,
+   // GPRT_BOOL2 = GPRT_UCHAR2,
+   // GPRT_BOOL3 = GPRT_UCHAR3,
+   // GPRT_BOOL4 = GPRT_UCHAR4,
+
+
+   /* matrix formats */
+   GPRT_AFFINE3F=1300,
+   
+   /* A type matching VkTransformMatrixKHR, row major 3x4 */
+   GPRT_TRANSFORM=1400,
+
+   /*! at least for now, use that for buffers with user-defined types:
+     type then is "GPRT_USER_TYPE_BEGIN+sizeof(elementtype). Note
+     that since we always _add_ the user type's size to this value
+     this MUST be the last entry in the enum */
+   GPRT_USER_TYPE_BEGIN=10000
+  }
+  GPRTDataType;
+
+typedef enum
+  {
+   GPRT_USER,
+   GPRT_TRIANGLES,
+  //  GPRT_CURVES
+  }
+  GPRTGeomKind;
+
+  inline size_t getSize(GPRTDataType type)
+  {
+         if (type == GPRT_INT8_T)  return sizeof(int8_t);
+    else if (type == GPRT_INT8_T2) return sizeof(int8_t) * 2;
+    else if (type == GPRT_INT8_T3) return sizeof(int8_t) * 3;
+    else if (type == GPRT_INT8_T4) return sizeof(int8_t) * 4;
+
+    else if (type == GPRT_UINT8_T)  return sizeof(uint8_t);
+    else if (type == GPRT_UINT8_T2) return sizeof(uint8_t) * 2;
+    else if (type == GPRT_UINT8_T3) return sizeof(uint8_t) * 3;
+    else if (type == GPRT_UINT8_T4) return sizeof(uint8_t) * 4;
+
+    else if (type == GPRT_INT16_T)  return sizeof(int16_t);
+    else if (type == GPRT_INT16_T2) return sizeof(int16_t) * 2;
+    else if (type == GPRT_INT16_T3) return sizeof(int16_t) * 3;
+    else if (type == GPRT_INT16_T4) return sizeof(int16_t) * 4;
+
+    else if (type == GPRT_UINT16_T)  return sizeof(uint16_t);
+    else if (type == GPRT_UINT16_T2) return sizeof(uint16_t) * 2;
+    else if (type == GPRT_UINT16_T3) return sizeof(uint16_t) * 3;
+    else if (type == GPRT_UINT16_T4) return sizeof(uint16_t) * 4;
+
+    else if (type == GPRT_INT32_T)  return sizeof(int32_t);
+    else if (type == GPRT_INT32_T2) return sizeof(int32_t) * 2;
+    else if (type == GPRT_INT32_T3) return sizeof(int32_t) * 3;
+    else if (type == GPRT_INT32_T4) return sizeof(int32_t) * 4;
+
+    else if (type == GPRT_UINT32_T)  return sizeof(uint32_t);
+    else if (type == GPRT_UINT32_T2) return sizeof(uint32_t) * 2;
+    else if (type == GPRT_UINT32_T3) return sizeof(uint32_t) * 3;
+    else if (type == GPRT_UINT32_T4) return sizeof(uint32_t) * 4;
+
+    else if (type == GPRT_INT64_T)  return sizeof(int64_t);
+    else if (type == GPRT_INT64_T2) return sizeof(int64_t) * 2;
+    else if (type == GPRT_INT64_T3) return sizeof(int64_t) * 3;
+    else if (type == GPRT_INT64_T4) return sizeof(int64_t) * 4;
+
+    else if (type == GPRT_UINT64_T)  return sizeof(uint64_t);
+    else if (type == GPRT_UINT64_T2) return sizeof(uint64_t) * 2;
+    else if (type == GPRT_UINT64_T3) return sizeof(uint64_t) * 3;
+    else if (type == GPRT_UINT64_T4) return sizeof(uint64_t) * 4;
+
+    else if (type == GPRT_INT64_T)  return sizeof(uint64_t);
+    else if (type == GPRT_INT64_T2) return sizeof(uint64_t) * 2;
+    else if (type == GPRT_INT64_T3) return sizeof(uint64_t) * 3;
+    else if (type == GPRT_INT64_T4) return sizeof(uint64_t) * 4;
+
+    else if (type == GPRT_BUFFER) return sizeof(uint64_t);
+    else if (type == GPRT_BUFPTR) return sizeof(uint64_t);
+
+    else if (type == GPRT_FLOAT) return sizeof(float);
+    else if (type == GPRT_FLOAT2) return sizeof(float) * 2;
+    else if (type == GPRT_FLOAT3) return sizeof(float) * 3;
+    else if (type == GPRT_FLOAT4) return sizeof(float) * 4;
+
+    else if (type == GPRT_DOUBLE) return sizeof(double);
+    else if (type == GPRT_DOUBLE2) return sizeof(double) * 2;
+    else if (type == GPRT_DOUBLE3) return sizeof(double) * 3;
+    else if (type == GPRT_DOUBLE4) return sizeof(double) * 4;
+
+    else if (type == GPRT_BOOL) return sizeof(bool);
+    else if (type == GPRT_BOOL2) return sizeof(bool) * 2;
+    else if (type == GPRT_BOOL3) return sizeof(bool) * 3;
+    else if (type == GPRT_BOOL4) return sizeof(bool) * 4;
+
+    else if (type == GPRT_BUFFER) return sizeof(uint64_t);
+    else if (type == GPRT_ACCEL) return sizeof(uint64_t);
+    else if (type == GPRT_TRANSFORM) return sizeof(float) * 3 * 4;
+
+    // User Types have size encoded in their type enum
+    else if (type > GPRT_USER_TYPE_BEGIN) return type - GPRT_USER_TYPE_BEGIN;
+    else assert(false); return -1;// std::runtime_error("Unimplemented!");
+  }
+
+  #define GPRT_USER_TYPE(userType) ((GPRTDataType)(GPRT_USER_TYPE_BEGIN+sizeof(userType)))
+
+typedef struct _GPRTVarDecl {
+  const char *name;
+  GPRTDataType type; // note, also includes size if GPRT_USER_TYPE
+  uint32_t    offset;
+} GPRTVarDecl;
+
+typedef struct _GPRTVarDef {
+  GPRTVarDecl decl;
+  void* data = nullptr;
+} GPRTVarDef;
+
+inline std::unordered_map<std::string, GPRTVarDef> checkAndPackVariables(
+  const GPRTVarDecl *vars, int numVars)
+{
+  if (vars == nullptr && (numVars == 0 || numVars == -1))
+    return {};
+
+  // *copy* the vardecls here, so we can catch any potential memory
+  // *access errors early
+
+  assert(vars);
+  if (numVars == -1) {
+    // using -1 as count value for a variable list means the list is
+    // null-terminated... so just count it
+    for (numVars = 0; vars[numVars].name != nullptr; numVars++);
+  }
+  std::unordered_map<std::string, GPRTVarDef> varDefs;
+  for (int i=0;i<numVars;i++) {
+    assert(vars[i].name != nullptr);
+    varDefs[vars[i].name].decl = vars[i];
+
+    // allocate depending on the size of the variable...
+    varDefs[vars[i].name].data = malloc(getSize(vars[i].type));
+  }
+  return varDefs;
+}
+
+inline std::vector<GPRTVarDecl> getDecls(
+  std::unordered_map<std::string, GPRTVarDef> vars)
+{
+  std::vector<GPRTVarDecl> decls;
+  for (auto &it : vars) {
+    decls.push_back(it.second.decl);
+  }
+  return decls;
+}
+
+GPRT_API GPRTModule gprtModuleCreate(GPRTContext context, std::map<std::string, std::vector<uint8_t>> spvCode);
+GPRT_API void gprtModuleDestroy(GPRTModule module);
+
+GPRT_API GPRTGeom
+gprtGeomCreate(GPRTContext  context,
+              GPRTGeomType type);
+
+GPRT_API void
+gprtGeomDestroy(GPRTGeom geometry);
+
+// ==================================================================
+// "Triangles" functions
+// ==================================================================
+GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles,
+                                      GPRTBuffer vertices,
+                                      size_t count,
+                                      size_t stride,
+                                      size_t offset);
+// GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
+//                                            /*! number of vertex arrays
+//                                                passed here, the first
+//                                                of those is for t=0,
+//                                                thelast for t=1,
+//                                                everything is linearly
+//                                                interpolated
+//                                                in-between */
+//                                            size_t    numKeys,
+//                                            GPRTBuffer *vertexArrays,
+//                                            size_t count,
+//                                            size_t stride,
+//                                            size_t offset);
+GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles,
+                                     GPRTBuffer indices,
+                                     size_t count,
+                                     size_t stride,
+                                     size_t offset);
+
+/*! technically this is currently a no-op, but we have this function around to
+  match OWL */
+GPRT_API void gprtBuildPrograms(GPRTContext context);
+
+GPRT_API void gprtBuildPipeline(GPRTContext context);
+GPRT_API void gprtBuildSBT(GPRTContext context,
+                         GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
+
+/*! creates a new device context with the gives list of devices.
+
+  If requested device IDs list if null it implicitly refers to the
+  list "0,1,2,...."; if numDevices <= 0 it automatically refers to
+  "all devices you can find". Examples:
+
+  - gprtContextCreate(nullptr,1) creates one device on the first GPU
+
+  - gprtContextCreate(nullptr,0) creates a context across all GPUs in
+  the system
+
+  - int gpu=2;gprtContextCreate(&gpu,1) will create a context on GPU #2
+  (where 2 refers to the CUDA device ordinal; from that point on, from
+  gprt's standpoint (eg, during gprtBufferGetPointer() this GPU will
+  from that point on be known as device #0 */
+GPRT_API GPRTContext
+gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=nullptr),
+                 int numDevices GPRT_IF_CPP(=0));
+
+GPRT_API void
+gprtContextDestroy(GPRTContext context);
+
+/*! set number of ray types to be used in this context; this should be
+  done before any programs, pipelines, geometries, etc get
+  created */
+GPRT_API void
+gprtContextSetRayTypeCount(GPRTContext context,
+                           size_t numRayTypes);
+
+GPRT_API GPRTRayGen
+gprtRayGenCreate(GPRTContext  context,
+                 GPRTModule module,
+                 const char *programName,
+                 size_t      sizeOfVarStruct,
+                 GPRTVarDecl *vars,
+                 int         numVars);
+
+GPRT_API void
+gprtRayGenDestroy(GPRTRayGen rayGen);
+
+GPRT_API GPRTMissProg
+gprtMissProgCreate(GPRTContext  context,
+                   GPRTModule module,
+                   const char *programName,
+                   size_t      sizeOfVarStruct,
+                   GPRTVarDecl *vars,
+                   int         numVars);
+
+/*! sets the given miss program for the given ray type */
+GPRT_API void
+gprtMissProgSet(GPRTContext  context,
+               int rayType,
+               GPRTMissProg missProgToUse);
+
+GPRT_API void
+gprtMissProgDestroy(GPRTMissProg missProg);
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for AABB geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_GEOM_USER
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel
+gprtAABBAccelCreate(GPRTContext context,
+                    size_t       numGeometries,
+                    GPRTGeom    *arrayOfChildGeoms,
+                    unsigned int flags GPRT_IF_CPP(=0));
+
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for triangle geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_GEOM_TRIANGLES
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel
+gprtTrianglesAccelCreate(GPRTContext context,
+                            size_t     numGeometries,
+                            GPRTGeom   *arrayOfChildGeoms,
+                            unsigned int flags GPRT_IF_CPP(=0));
+
+GPRT_API void 
+gprtTrianglesAccelSetTransforms(GPRTAccel trianglesAccel,
+                                GPRTBuffer transforms//,
+                                // size_t offset, // maybe I can support these too?
+                                // size_t stride  // maybe I can support these too?
+                                );
+
+// // ------------------------------------------------------------------
+// /*! create a new acceleration structure for "curves" geometries.
+
+//   \param numGeometries Number of geometries in this acceleration structure,
+//   must be non-zero.
+
+//   \param arrayOfChildGeoms A array of 'numGeometries' child
+//   geometries. Every geom in this array must be a valid gprt geometry
+//   created with gprtGeomCreate, and must be of a GPRT_GEOM_CURVES
+//   type.
+
+//   \param flags reserved for future use
+
+//   Note that in order to use curves geometries you _have_ to call
+//   gprtEnableCurves() before curves are used; in particular, curves
+//   _have_ to already be enabled when the pipeline gets compiled.
+// */
+// GPRT_API GPRTAccel
+// gprtCurvesAccelCreate(GPRTContext context,
+//                          size_t     numCurveGeometries,
+//                          GPRTGeom   *curveGeometries,
+//                          unsigned int flags GPRT_IF_CPP(=0));
+
+// ------------------------------------------------------------------
+/*! create a new instance acceleration structure with given number of
+  instances. 
+  
+  \param numAccels Number of acceleration structures instantiated in the leaves
+  of this acceleration structure, must be non-zero.
+
+  \param arrayOfAccels A array of 'numInstances' child
+  acceleration structures. No accel in this array can be an instance accel.  
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel
+gprtInstanceAccelCreate(GPRTContext context,
+                        size_t numAccels,
+                        GPRTAccel *arrayOfAccels,
+                        unsigned int flags GPRT_IF_CPP(=0));
+
+GPRT_API void 
+gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
+                               GPRTBuffer transforms//,
+                               // size_t offset, // maybe I can support these too?
+                               // size_t stride  // maybe I can support these too?
+                               );
+
+/*! sets the list of IDs to use for the child instnaces. By default
+    the instance ID of child #i is simply i, but optix allows to
+    specify a user-defined instnace ID for each instance, which with
+    owl can be done through this array. Array size must match number
+    of instances in the specified group */
+GPRT_API void
+gprtInstanceAccelSetIDs(GPRTAccel instanceAccel,
+                        const uint32_t *instanceIDs);
+
+GPRT_API void
+gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel,
+                                    const uint8_t *visibilityMasks);
+
+GPRT_API void
+gprtAccelDestroy(GPRTAccel accel);
+
+GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel);
+
+GPRT_API void gprtAccelRefit(GPRTContext context, GPRTAccel accel);
+
+GPRT_API GPRTGeomType
+gprtGeomTypeCreate(GPRTContext  context,
+                   GPRTGeomKind kind,
+                   size_t       sizeOfVarStruct,
+                   GPRTVarDecl  *vars,
+                   int          numVars);
+
+GPRT_API void
+gprtGeomTypeDestroy(GPRTGeomType geomType);
+
+GPRT_API void
+gprtGeomTypeSetClosestHit(GPRTGeomType type,
+                          int rayType,
+                          GPRTModule module,
+                          const char *progName);
+
+GPRT_API void
+gprtGeomTypeSetAnyHit(GPRTGeomType type,
+                      int rayType,
+                      GPRTModule module,
+                      const char *progName);
+
+GPRT_API void
+gprtGeomTypeSetIntersectProg(GPRTGeomType type,
+                             int rayType,
+                             GPRTModule module,
+                             const char *progName);
+
+GPRT_API void
+gprtGeomTypeSetBoundsProg(GPRTGeomType type,
+                          GPRTModule module,
+                          const char *progName);
+
+/*! creates a buffer that uses host pinned memory; that memory is
+pinned on the host and accessible to all devices */
+GPRT_API GPRTBuffer
+gprtHostPinnedBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+/*! creates a device buffer where every device has its own local copy
+  of the given buffer */
+GPRT_API GPRTBuffer
+gprtDeviceBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+/*! Destroys all underlying Vulkan resources for the given buffer and frees any
+  underlying memory*/
+GPRT_API void
+gprtBufferDestroy(GPRTBuffer buffer);
+
+/*! returns the device pointer of the given pointer for the given
+  device ID. For host-pinned or managed memory buffers (where the
+  buffer is shared across all devices) this pointer should be the
+  same across all devices (and even be accessible on the host); for
+  device buffers each device *may* see this buffer under a different
+  address, and that address is not valid on the host. Note this
+  function is paricuarly useful for CUDA-interop; allowing to
+  cudaMemcpy to/from an owl buffer directly from CUDA code
+
+  // TODO! update for Vulkan...
+  */
+GPRT_API void *
+gprtBufferGetPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
+
+GPRT_API void
+gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
+GPRT_API void
+gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
+/*! Executes a ray tracing pipeline with the given raygen program.
+  This call will block until the raygen program returns. */
+GPRT_API void
+gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y);
+
+/*! 3D-launch variant of \see gprtRayGenLaunch2D */
+GPRT_API void
+gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y, int dims_z);
+
+
+#ifdef __cplusplus
+// ------------------------------------------------------------------
+// setters for variables of type "bool" (bools only on c++)
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1b(GPRTRayGen raygen, const char *name, bool val);
+GPRT_API void gprtRayGenSet2b(GPRTRayGen raygen, const char *name, bool x, bool y);
+GPRT_API void gprtRayGenSet3b(GPRTRayGen raygen, const char *name, bool x, bool y, bool z);
+GPRT_API void gprtRayGenSet4b(GPRTRayGen raygen, const char *name, bool x, bool y, bool z, bool w);
+GPRT_API void gprtRayGenSet2bv(GPRTRayGen raygen, const char *name, const bool *val);
+GPRT_API void gprtRayGenSet3bv(GPRTRayGen raygen, const char *name, const bool *val);
+GPRT_API void gprtRayGenSet4bv(GPRTRayGen raygen, const char *name, const bool *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1b(GPRTMissProg missprog, const char *name, bool val);
+GPRT_API void gprtMissProgSet2b(GPRTMissProg missprog, const char *name, bool x, bool y);
+GPRT_API void gprtMissProgSet3b(GPRTMissProg missprog, const char *name, bool x, bool y, bool z);
+GPRT_API void gprtMissProgSet4b(GPRTMissProg missprog, const char *name, bool x, bool y, bool z, bool w);
+GPRT_API void gprtMissProgSet2bv(GPRTMissProg missprog, const char *name, const bool *val);
+GPRT_API void gprtMissProgSet3bv(GPRTMissProg missprog, const char *name, const bool *val);
+GPRT_API void gprtMissProgSet4bv(GPRTMissProg missprog, const char *name, const bool *val);
+
+// setters for variables on "Geom"s
+// GPRT_API void gprtGeomSet1b(GPRTGeom geom, const char *name, bool val);
+// GPRT_API void gprtGeomSet2b(GPRTGeom geom, const char *name, bool x, bool y);
+// GPRT_API void gprtGeomSet3b(GPRTGeom geom, const char *name, bool x, bool y, bool z);
+// GPRT_API void gprtGeomSet4b(GPRTGeom geom, const char *name, bool x, bool y, bool z, bool w);
+// GPRT_API void gprtGeomSet2bv(GPRTGeom geom, const char *name, const bool *val);
+// GPRT_API void gprtGeomSet3bv(GPRTGeom geom, const char *name, const bool *val);
+// GPRT_API void gprtGeomSet4bv(GPRTGeom geom, const char *name, const bool *val);
+
+// // setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1b(OWLParams var, const char *name, bool val);
+// GPRT_API void gprtParamsSet2b(OWLParams var, const char *name, bool x, bool y);
+// GPRT_API void gprtParamsSet3b(OWLParams var, const char *name, bool x, bool y, bool z);
+// GPRT_API void gprtParamsSet4b(OWLParams var, const char *name, bool x, bool y, bool z, bool w);
+// GPRT_API void gprtParamsSet2bv(OWLParams var, const char *name, const bool *val);
+// GPRT_API void gprtParamsSet3bv(OWLParams var, const char *name, const bool *val);
+// GPRT_API void gprtParamsSet4bv(OWLParams var, const char *name, const bool *val);
+#endif
+
+// ------------------------------------------------------------------
+// setters for variables of type "char"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1c(GPRTRayGen raygen, const char *name, int8_t val);
+GPRT_API void gprtRayGenSet2c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y);
+GPRT_API void gprtRayGenSet3c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z);
+GPRT_API void gprtRayGenSet4c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+GPRT_API void gprtRayGenSet2cv(GPRTRayGen raygen, const char *name, const int8_t *val);
+GPRT_API void gprtRayGenSet3cv(GPRTRayGen raygen, const char *name, const int8_t *val);
+GPRT_API void gprtRayGenSet4cv(GPRTRayGen raygen, const char *name, const int8_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1c(GPRTMissProg missprog, const char *name, int8_t val);
+GPRT_API void gprtMissProgSet2c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y);
+GPRT_API void gprtMissProgSet3c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z);
+GPRT_API void gprtMissProgSet4c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+GPRT_API void gprtMissProgSet2cv(GPRTMissProg missprog, const char *name, const int8_t *val);
+GPRT_API void gprtMissProgSet3cv(GPRTMissProg missprog, const char *name, const int8_t *val);
+GPRT_API void gprtMissProgSet4cv(GPRTMissProg missprog, const char *name, const int8_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1c(GPRTGeom geom, const char *name, int8_t val);
+GPRT_API void gprtGeomSet2c(GPRTGeom geom, const char *name, int8_t x, int8_t y);
+GPRT_API void gprtGeomSet3c(GPRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z);
+GPRT_API void gprtGeomSet4c(GPRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+GPRT_API void gprtGeomSet2cv(GPRTGeom geom, const char *name, const int8_t *val);
+GPRT_API void gprtGeomSet3cv(GPRTGeom geom, const char *name, const int8_t *val);
+GPRT_API void gprtGeomSet4cv(GPRTGeom geom, const char *name, const int8_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1c(OWLParams obj, const char *name, int8_t val);
+// GPRT_API void gprtParamsSet2c(OWLParams obj, const char *name, int8_t x, int8_t y);
+// GPRT_API void gprtParamsSet3c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z);
+// GPRT_API void gprtParamsSet4c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+// GPRT_API void gprtParamsSet2cv(OWLParams obj, const char *name, const int8_t *val);
+// GPRT_API void gprtParamsSet3cv(OWLParams obj, const char *name, const int8_t *val);
+// GPRT_API void gprtParamsSet4cv(OWLParams obj, const char *name, const int8_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint8_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1uc(GPRTRayGen raygen, const char *name, uint8_t val);
+GPRT_API void gprtRayGenSet2uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y);
+GPRT_API void gprtRayGenSet3uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z);
+GPRT_API void gprtRayGenSet4uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+GPRT_API void gprtRayGenSet2ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
+GPRT_API void gprtRayGenSet3ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
+GPRT_API void gprtRayGenSet4ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1uc(GPRTMissProg missprog, const char *name, uint8_t val);
+GPRT_API void gprtMissProgSet2uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y);
+GPRT_API void gprtMissProgSet3uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z);
+GPRT_API void gprtMissProgSet4uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+GPRT_API void gprtMissProgSet2ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
+GPRT_API void gprtMissProgSet3ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
+GPRT_API void gprtMissProgSet4ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1uc(GPRTGeom geom, const char *name, uint8_t val);
+GPRT_API void gprtGeomSet2uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y);
+GPRT_API void gprtGeomSet3uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z);
+GPRT_API void gprtGeomSet4uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+GPRT_API void gprtGeomSet2ucv(GPRTGeom geom, const char *name, const uint8_t *val);
+GPRT_API void gprtGeomSet3ucv(GPRTGeom geom, const char *name, const uint8_t *val);
+GPRT_API void gprtGeomSet4ucv(GPRTGeom geom, const char *name, const uint8_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
+// GPRT_API void gprtParamsSet2uc(OWLParams obj, const char *name, uint8_t x, uint8_t y);
+// GPRT_API void gprtParamsSet3uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
+// GPRT_API void gprtParamsSet4uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+// GPRT_API void gprtParamsSet2ucv(OWLParams obj, const char *name, const uint8_t *val);
+// GPRT_API void gprtParamsSet3ucv(OWLParams obj, const char *name, const uint8_t *val);
+// GPRT_API void gprtParamsSet4ucv(OWLParams obj, const char *name, const uint8_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1s(GPRTRayGen raygen, const char *name, int16_t val);
+GPRT_API void gprtRayGenSet2s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y);
+GPRT_API void gprtRayGenSet3s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z);
+GPRT_API void gprtRayGenSet4s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+GPRT_API void gprtRayGenSet2sv(GPRTRayGen raygen, const char *name, const int16_t *val);
+GPRT_API void gprtRayGenSet3sv(GPRTRayGen raygen, const char *name, const int16_t *val);
+GPRT_API void gprtRayGenSet4sv(GPRTRayGen raygen, const char *name, const int16_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1s(GPRTMissProg missprog, const char *name, int16_t val);
+GPRT_API void gprtMissProgSet2s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y);
+GPRT_API void gprtMissProgSet3s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z);
+GPRT_API void gprtMissProgSet4s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+GPRT_API void gprtMissProgSet2sv(GPRTMissProg missprog, const char *name, const int16_t *val);
+GPRT_API void gprtMissProgSet3sv(GPRTMissProg missprog, const char *name, const int16_t *val);
+GPRT_API void gprtMissProgSet4sv(GPRTMissProg missprog, const char *name, const int16_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1s(GPRTGeom geom, const char *name, int16_t val);
+GPRT_API void gprtGeomSet2s(GPRTGeom geom, const char *name, int16_t x, int16_t y);
+GPRT_API void gprtGeomSet3s(GPRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z);
+GPRT_API void gprtGeomSet4s(GPRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+GPRT_API void gprtGeomSet2sv(GPRTGeom geom, const char *name, const int16_t *val);
+GPRT_API void gprtGeomSet3sv(GPRTGeom geom, const char *name, const int16_t *val);
+GPRT_API void gprtGeomSet4sv(GPRTGeom geom, const char *name, const int16_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1s(OWLParams obj, const char *name, int16_t val);
+// GPRT_API void gprtParamsSet2s(OWLParams obj, const char *name, int16_t x, int16_t y);
+// GPRT_API void gprtParamsSet3s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z);
+// GPRT_API void gprtParamsSet4s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+// GPRT_API void gprtParamsSet2sv(OWLParams obj, const char *name, const int16_t *val);
+// GPRT_API void gprtParamsSet3sv(OWLParams obj, const char *name, const int16_t *val);
+// GPRT_API void gprtParamsSet4sv(OWLParams obj, const char *name, const int16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint16_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1us(GPRTRayGen raygen, const char *name, uint16_t val);
+GPRT_API void gprtRayGenSet2us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y);
+GPRT_API void gprtRayGenSet3us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z);
+GPRT_API void gprtRayGenSet4us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+GPRT_API void gprtRayGenSet2usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
+GPRT_API void gprtRayGenSet3usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
+GPRT_API void gprtRayGenSet4usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1us(GPRTMissProg missprog, const char *name, uint16_t val);
+GPRT_API void gprtMissProgSet2us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y);
+GPRT_API void gprtMissProgSet3us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z);
+GPRT_API void gprtMissProgSet4us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+GPRT_API void gprtMissProgSet2usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
+GPRT_API void gprtMissProgSet3usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
+GPRT_API void gprtMissProgSet4usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1us(GPRTGeom geom, const char *name, uint16_t val);
+GPRT_API void gprtGeomSet2us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y);
+GPRT_API void gprtGeomSet3us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z);
+GPRT_API void gprtGeomSet4us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+GPRT_API void gprtGeomSet2usv(GPRTGeom geom, const char *name, const uint16_t *val);
+GPRT_API void gprtGeomSet3usv(GPRTGeom geom, const char *name, const uint16_t *val);
+GPRT_API void gprtGeomSet4usv(GPRTGeom geom, const char *name, const uint16_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
+// GPRT_API void gprtParamsSet2us(OWLParams obj, const char *name, uint16_t x, uint16_t y);
+// GPRT_API void gprtParamsSet3us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
+// GPRT_API void gprtParamsSet4us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+// GPRT_API void gprtParamsSet2usv(OWLParams obj, const char *name, const uint16_t *val);
+// GPRT_API void gprtParamsSet3usv(OWLParams obj, const char *name, const uint16_t *val);
+// GPRT_API void gprtParamsSet4usv(OWLParams obj, const char *name, const uint16_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1i(GPRTRayGen raygen, const char *name, int32_t val);
+GPRT_API void gprtRayGenSet2i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y);
+GPRT_API void gprtRayGenSet3i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z);
+GPRT_API void gprtRayGenSet4i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+GPRT_API void gprtRayGenSet2iv(GPRTRayGen raygen, const char *name, const int32_t *val);
+GPRT_API void gprtRayGenSet3iv(GPRTRayGen raygen, const char *name, const int32_t *val);
+GPRT_API void gprtRayGenSet4iv(GPRTRayGen raygen, const char *name, const int32_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1i(GPRTMissProg missprog, const char *name, int32_t val);
+GPRT_API void gprtMissProgSet2i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y);
+GPRT_API void gprtMissProgSet3i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z);
+GPRT_API void gprtMissProgSet4i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+GPRT_API void gprtMissProgSet2iv(GPRTMissProg missprog, const char *name, const int32_t *val);
+GPRT_API void gprtMissProgSet3iv(GPRTMissProg missprog, const char *name, const int32_t *val);
+GPRT_API void gprtMissProgSet4iv(GPRTMissProg missprog, const char *name, const int32_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1i(GPRTGeom geom, const char *name, int32_t val);
+GPRT_API void gprtGeomSet2i(GPRTGeom geom, const char *name, int32_t x, int32_t y);
+GPRT_API void gprtGeomSet3i(GPRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z);
+GPRT_API void gprtGeomSet4i(GPRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+GPRT_API void gprtGeomSet2iv(GPRTGeom geom, const char *name, const int32_t *val);
+GPRT_API void gprtGeomSet3iv(GPRTGeom geom, const char *name, const int32_t *val);
+GPRT_API void gprtGeomSet4iv(GPRTGeom geom, const char *name, const int32_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1i(OWLParams obj, const char *name, int32_t val);
+// GPRT_API void gprtParamsSet2i(OWLParams obj, const char *name, int32_t x, int32_t y);
+// GPRT_API void gprtParamsSet3i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z);
+// GPRT_API void gprtParamsSet4i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+// GPRT_API void gprtParamsSet2iv(OWLParams obj, const char *name, const int32_t *val);
+// GPRT_API void gprtParamsSet3iv(OWLParams obj, const char *name, const int32_t *val);
+// GPRT_API void gprtParamsSet4iv(OWLParams obj, const char *name, const int32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint32_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1ui(GPRTRayGen raygen, const char *name, uint32_t val);
+GPRT_API void gprtRayGenSet2ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y);
+GPRT_API void gprtRayGenSet3ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z);
+GPRT_API void gprtRayGenSet4ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+GPRT_API void gprtRayGenSet2uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
+GPRT_API void gprtRayGenSet3uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
+GPRT_API void gprtRayGenSet4uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1ui(GPRTMissProg missprog, const char *name, uint32_t val);
+GPRT_API void gprtMissProgSet2ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y);
+GPRT_API void gprtMissProgSet3ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z);
+GPRT_API void gprtMissProgSet4ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+GPRT_API void gprtMissProgSet2uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
+GPRT_API void gprtMissProgSet3uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
+GPRT_API void gprtMissProgSet4uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1ui(GPRTGeom geom, const char *name, uint32_t val);
+GPRT_API void gprtGeomSet2ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y);
+GPRT_API void gprtGeomSet3ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z);
+GPRT_API void gprtGeomSet4ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+GPRT_API void gprtGeomSet2uiv(GPRTGeom geom, const char *name, const uint32_t *val);
+GPRT_API void gprtGeomSet3uiv(GPRTGeom geom, const char *name, const uint32_t *val);
+GPRT_API void gprtGeomSet4uiv(GPRTGeom geom, const char *name, const uint32_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
+// GPRT_API void gprtParamsSet2ui(OWLParams obj, const char *name, uint32_t x, uint32_t y);
+// GPRT_API void gprtParamsSet3ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
+// GPRT_API void gprtParamsSet4ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+// GPRT_API void gprtParamsSet2uiv(OWLParams obj, const char *name, const uint32_t *val);
+// GPRT_API void gprtParamsSet3uiv(OWLParams obj, const char *name, const uint32_t *val);
+// GPRT_API void gprtParamsSet4uiv(OWLParams obj, const char *name, const uint32_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "float"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1f(GPRTRayGen raygen, const char *name, float val);
+GPRT_API void gprtRayGenSet2f(GPRTRayGen raygen, const char *name, float x, float y);
+GPRT_API void gprtRayGenSet3f(GPRTRayGen raygen, const char *name, float x, float y, float z);
+GPRT_API void gprtRayGenSet4f(GPRTRayGen raygen, const char *name, float x, float y, float z, float w);
+GPRT_API void gprtRayGenSet2fv(GPRTRayGen raygen, const char *name, const float *val);
+GPRT_API void gprtRayGenSet3fv(GPRTRayGen raygen, const char *name, const float *val);
+GPRT_API void gprtRayGenSet4fv(GPRTRayGen raygen, const char *name, const float *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1f(GPRTMissProg missprog, const char *name, float val);
+GPRT_API void gprtMissProgSet2f(GPRTMissProg missprog, const char *name, float x, float y);
+GPRT_API void gprtMissProgSet3f(GPRTMissProg missprog, const char *name, float x, float y, float z);
+GPRT_API void gprtMissProgSet4f(GPRTMissProg missprog, const char *name, float x, float y, float z, float w);
+GPRT_API void gprtMissProgSet2fv(GPRTMissProg missprog, const char *name, const float *val);
+GPRT_API void gprtMissProgSet3fv(GPRTMissProg missprog, const char *name, const float *val);
+GPRT_API void gprtMissProgSet4fv(GPRTMissProg missprog, const char *name, const float *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1f(GPRTGeom geom, const char *name, float val);
+GPRT_API void gprtGeomSet2f(GPRTGeom geom, const char *name, float x, float y);
+GPRT_API void gprtGeomSet3f(GPRTGeom geom, const char *name, float x, float y, float z);
+GPRT_API void gprtGeomSet4f(GPRTGeom geom, const char *name, float x, float y, float z, float w);
+GPRT_API void gprtGeomSet2fv(GPRTGeom geom, const char *name, const float *val);
+GPRT_API void gprtGeomSet3fv(GPRTGeom geom, const char *name, const float *val);
+GPRT_API void gprtGeomSet4fv(GPRTGeom geom, const char *name, const float *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1f(OWLParams obj, const char *name, float val);
+// GPRT_API void gprtParamsSet2f(OWLParams obj, const char *name, float x, float y);
+// GPRT_API void gprtParamsSet3f(OWLParams obj, const char *name, float x, float y, float z);
+// GPRT_API void gprtParamsSet4f(OWLParams obj, const char *name, float x, float y, float z, float w);
+// GPRT_API void gprtParamsSet2fv(OWLParams obj, const char *name, const float *val);
+// GPRT_API void gprtParamsSet3fv(OWLParams obj, const char *name, const float *val);
+// GPRT_API void gprtParamsSet4fv(OWLParams obj, const char *name, const float *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "double"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1d(GPRTRayGen raygen, const char *name, double val);
+GPRT_API void gprtRayGenSet2d(GPRTRayGen raygen, const char *name, double x, double y);
+GPRT_API void gprtRayGenSet3d(GPRTRayGen raygen, const char *name, double x, double y, double z);
+GPRT_API void gprtRayGenSet4d(GPRTRayGen raygen, const char *name, double x, double y, double z, double w);
+GPRT_API void gprtRayGenSet2dv(GPRTRayGen raygen, const char *name, const double *val);
+GPRT_API void gprtRayGenSet3dv(GPRTRayGen raygen, const char *name, const double *val);
+GPRT_API void gprtRayGenSet4dv(GPRTRayGen raygen, const char *name, const double *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1d(GPRTMissProg missprog, const char *name, double val);
+GPRT_API void gprtMissProgSet2d(GPRTMissProg missprog, const char *name, double x, double y);
+GPRT_API void gprtMissProgSet3d(GPRTMissProg missprog, const char *name, double x, double y, double z);
+GPRT_API void gprtMissProgSet4d(GPRTMissProg missprog, const char *name, double x, double y, double z, double w);
+GPRT_API void gprtMissProgSet2dv(GPRTMissProg missprog, const char *name, const double *val);
+GPRT_API void gprtMissProgSet3dv(GPRTMissProg missprog, const char *name, const double *val);
+GPRT_API void gprtMissProgSet4dv(GPRTMissProg missprog, const char *name, const double *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1d(GPRTGeom geom, const char *name, double val);
+GPRT_API void gprtGeomSet2d(GPRTGeom geom, const char *name, double x, double y);
+GPRT_API void gprtGeomSet3d(GPRTGeom geom, const char *name, double x, double y, double z);
+GPRT_API void gprtGeomSet4d(GPRTGeom geom, const char *name, double x, double y, double z, double w);
+GPRT_API void gprtGeomSet2dv(GPRTGeom geom, const char *name, const double *val);
+GPRT_API void gprtGeomSet3dv(GPRTGeom geom, const char *name, const double *val);
+GPRT_API void gprtGeomSet4dv(GPRTGeom geom, const char *name, const double *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1d(OWLParams obj, const char *name, double val);
+// GPRT_API void gprtParamsSet2d(OWLParams obj, const char *name, double x, double y);
+// GPRT_API void gprtParamsSet3d(OWLParams obj, const char *name, double x, double y, double z);
+// GPRT_API void gprtParamsSet4d(OWLParams obj, const char *name, double x, double y, double z, double w);
+// GPRT_API void gprtParamsSet2dv(OWLParams obj, const char *name, const double *val);
+// GPRT_API void gprtParamsSet3dv(OWLParams obj, const char *name, const double *val);
+// GPRT_API void gprtParamsSet4dv(OWLParams obj, const char *name, const double *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "int64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1l(GPRTRayGen raygen, const char *name, int64_t val);
+GPRT_API void gprtRayGenSet2l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y);
+GPRT_API void gprtRayGenSet3l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z);
+GPRT_API void gprtRayGenSet4l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+GPRT_API void gprtRayGenSet2lv(GPRTRayGen raygen, const char *name, const int64_t *val);
+GPRT_API void gprtRayGenSet3lv(GPRTRayGen raygen, const char *name, const int64_t *val);
+GPRT_API void gprtRayGenSet4lv(GPRTRayGen raygen, const char *name, const int64_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1l(GPRTMissProg missprog, const char *name, int64_t val);
+GPRT_API void gprtMissProgSet2l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y);
+GPRT_API void gprtMissProgSet3l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z);
+GPRT_API void gprtMissProgSet4l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+GPRT_API void gprtMissProgSet2lv(GPRTMissProg missprog, const char *name, const int64_t *val);
+GPRT_API void gprtMissProgSet3lv(GPRTMissProg missprog, const char *name, const int64_t *val);
+GPRT_API void gprtMissProgSet4lv(GPRTMissProg missprog, const char *name, const int64_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1l(GPRTGeom geom, const char *name, int64_t val);
+GPRT_API void gprtGeomSet2l(GPRTGeom geom, const char *name, int64_t x, int64_t y);
+GPRT_API void gprtGeomSet3l(GPRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z);
+GPRT_API void gprtGeomSet4l(GPRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+GPRT_API void gprtGeomSet2lv(GPRTGeom geom, const char *name, const int64_t *val);
+GPRT_API void gprtGeomSet3lv(GPRTGeom geom, const char *name, const int64_t *val);
+GPRT_API void gprtGeomSet4lv(GPRTGeom geom, const char *name, const int64_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1l(OWLParams obj, const char *name, int64_t val);
+// GPRT_API void gprtParamsSet2l(OWLParams obj, const char *name, int64_t x, int64_t y);
+// GPRT_API void gprtParamsSet3l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z);
+// GPRT_API void gprtParamsSet4l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+// GPRT_API void gprtParamsSet2lv(OWLParams obj, const char *name, const int64_t *val);
+// GPRT_API void gprtParamsSet3lv(OWLParams obj, const char *name, const int64_t *val);
+// GPRT_API void gprtParamsSet4lv(OWLParams obj, const char *name, const int64_t *val);
+
+// ------------------------------------------------------------------
+// setters for variables of type "uint64_t"
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+GPRT_API void gprtRayGenSet1ul(GPRTRayGen raygen, const char *name, uint64_t val);
+GPRT_API void gprtRayGenSet2ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y);
+GPRT_API void gprtRayGenSet3ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z);
+GPRT_API void gprtRayGenSet4ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+GPRT_API void gprtRayGenSet2ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
+GPRT_API void gprtRayGenSet3ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
+GPRT_API void gprtRayGenSet4ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
+
+// setters for variables on "MissProg"s
+GPRT_API void gprtMissProgSet1ul(GPRTMissProg missprog, const char *name, uint64_t val);
+GPRT_API void gprtMissProgSet2ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y);
+GPRT_API void gprtMissProgSet3ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z);
+GPRT_API void gprtMissProgSet4ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+GPRT_API void gprtMissProgSet2ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
+GPRT_API void gprtMissProgSet3ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
+GPRT_API void gprtMissProgSet4ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
+
+// setters for variables on "Geom"s
+GPRT_API void gprtGeomSet1ul(GPRTGeom geom, const char *name, uint64_t val);
+GPRT_API void gprtGeomSet2ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y);
+GPRT_API void gprtGeomSet3ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z);
+GPRT_API void gprtGeomSet4ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+GPRT_API void gprtGeomSet2ulv(GPRTGeom geom, const char *name, const uint64_t *val);
+GPRT_API void gprtGeomSet3ulv(GPRTGeom geom, const char *name, const uint64_t *val);
+GPRT_API void gprtGeomSet4ulv(GPRTGeom geom, const char *name, const uint64_t *val);
+
+// setters for variables on "Params"s
+// GPRT_API void gprtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
+// GPRT_API void gprtParamsSet2ul(OWLParams obj, const char *name, uint64_t x, uint64_t y);
+// GPRT_API void gprtParamsSet3ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
+// GPRT_API void gprtParamsSet4ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+// GPRT_API void gprtParamsSet2ulv(OWLParams obj, const char *name, const uint64_t *val);
+// GPRT_API void gprtParamsSet3ulv(OWLParams obj, const char *name, const uint64_t *val);
+// GPRT_API void gprtParamsSet4ulv(OWLParams obj, const char *name, const uint64_t *val);
+
+// ------------------------------------------------------------------
+// setters for "meta" types
+// ------------------------------------------------------------------
+
+// setters for variables on "RayGen"s
+// GPRT_API void gprtRayGenSetTexture(GPRTRayGen raygen, const char *name, GPRTTexture val);
+// GPRT_API void gprtRayGenSetPointer(GPRTRayGen raygen, const char *name, const void *val);
+GPRT_API void gprtRayGenSetBuffer(GPRTRayGen raygen, const char *name, GPRTBuffer val);
+GPRT_API void gprtRayGenSetAccel(GPRTRayGen raygen, const char *name, GPRTAccel val);
+GPRT_API void gprtRayGenSetRaw(GPRTRayGen raygen, const char *name, const void *val);
+
+// // setters for variables on "Geom"s
+// GPRT_API void gprtGeomSetTexture(GPRTGeom obj, const char *name, GPRTTexture val);
+// GPRT_API void gprtGeomSetPointer(GPRTGeom obj, const char *name, const void *val);
+GPRT_API void gprtGeomSetBuffer(GPRTGeom obj, const char *name, GPRTBuffer val);
+GPRT_API void gprtGeomSetAccel(GPRTGeom obj, const char *name, GPRTAccel val);
+GPRT_API void gprtGeomSetRaw(GPRTGeom obj, const char *name, const void *val);
+
+// // setters for variables on "Params"s
+// GPRT_API void gprtParamsSetTexture(GPRTParams obj, const char *name, GPRTTexture val);
+// GPRT_API void gprtParamsSetPointer(GPRTParams obj, const char *name, const void *val);
+// GPRT_API void gprtParamsSetBuffer(GPRTParams obj, const char *name, GPRTBuffer val);
+// GPRT_API void gprtParamsSetAccel(GPRTParams obj, const char *name, GPRTAccel val);
+// GPRT_API void gprtParamsSetRaw(GPRTParams obj, const char *name, const void *val);
+
+// setters for variables on "MissProg"s
+// GPRT_API void gprtMissProgSetTexture(GPRTMissProg missprog, const char *name, GPRTTexture val);
+// GPRT_API void gprtMissProgSetPointer(GPRTMissProg missprog, const char *name, const void *val);
+GPRT_API void gprtMissProgSetBuffer(GPRTMissProg missprog, const char *name, GPRTBuffer val);
+GPRT_API void gprtMissProgSetAccel(GPRTMissProg missprog, const char *name, GPRTAccel val);
+GPRT_API void gprtMissProgSetRaw(GPRTMissProg missprog, const char *name, const void *val);

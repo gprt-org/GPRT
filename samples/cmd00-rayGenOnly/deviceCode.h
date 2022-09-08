@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "vkrt.h"
+#include "gprt.h"
 
 // note! HLSL aligns to float4 boundaries!
 struct RayGenData

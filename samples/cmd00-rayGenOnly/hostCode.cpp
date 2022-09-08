@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// public VKRT API
-#include <vkrt.h>
+// public GPRT API
+#include <gprt.h>
 
 // our device-side data structures
 #include "deviceCode.h"
@@ -30,13 +30,13 @@
 #include "stb/stb_image_write.h"
 
 #define LOG(message)                                            \
-  std::cout << VKRT_TERMINAL_BLUE;                               \
-  std::cout << "#vkrt.sample(main): " << message << std::endl;   \
-  std::cout << VKRT_TERMINAL_DEFAULT;
+  std::cout << GPRT_TERMINAL_BLUE;                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+  std::cout << GPRT_TERMINAL_DEFAULT;
 #define LOG_OK(message)                                         \
-  std::cout << VKRT_TERMINAL_LIGHT_BLUE;                         \
-  std::cout << "#vkrt.sample(main): " << message << std::endl;   \
-  std::cout << VKRT_TERMINAL_DEFAULT;
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                         \
+  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+  std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern std::map<std::string, std::vector<uint8_t>> sample00_deviceCode;
 
@@ -52,7 +52,7 @@ int main(int ac, char **av)
 {
   // The output window will show comments for many of the methods called.
   // Walking through the code line by line with a debugger is educational.
-  LOG("vkrt example '" << av[0] << "' starting up");
+  LOG("gprt example '" << av[0] << "' starting up");
 
   // ##################################################################
   // set up all the *CODE* we want to run
@@ -60,35 +60,35 @@ int main(int ac, char **av)
 
   LOG("building module, programs, and pipeline");
 
-  // Initialize Vulkan, and create a "vkrt device," a context to hold the
+  // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices requested.
-  VKRTContext vkrt = vkrtContextCreate(nullptr, 1);
+  GPRTContext gprt = gprtContextCreate(nullptr, 1);
 
   // SPIR-V is the intermediate code that the GPU deviceCode.hlsl shader program is converted into.
   // You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
-  // We store this SPIR-V intermediate code representation in a VKRT module.
-  VKRTModule module = vkrtModuleCreate(vkrt,sample00_deviceCode);
+  // We store this SPIR-V intermediate code representation in a GPRT module.
+  GPRTModule module = gprtModuleCreate(gprt,sample00_deviceCode);
 
-  VKRTVarDecl rayGenVars[]
+  GPRTVarDecl rayGenVars[]
     = {
-      { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
-      { "fbSize", VKRT_INT2,  VKRT_OFFSETOF(RayGenData, fbSize) },
-      { "color0", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color0) },
-      { "color1", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color1) },
+      { "fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr) },
+      { "fbSize", GPRT_INT2,  GPRT_OFFSETOF(RayGenData, fbSize) },
+      { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color0) },
+      { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color1) },
       { /* sentinel: */ nullptr }
   };
   // Allocate room for one RayGen shader, create it, and
-  // hold on to it with the "vkrt" context
-  VKRTRayGen rayGen
-      = vkrtRayGenCreate(vkrt, module, "simpleRayGen",
+  // hold on to it with the "gprt" context
+  GPRTRayGen rayGen
+      = gprtRayGenCreate(gprt, module, "simpleRayGen",
                       sizeof(RayGenData),rayGenVars,-1);
 
   // (re-)builds all vulkan programs, with current pipeline settings
-  vkrtBuildPrograms(vkrt);
+  gprtBuildPrograms(gprt);
 
   // Create the pipeline.
-  vkrtBuildPipeline(vkrt);
+  gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
   // alloc buffers
@@ -96,28 +96,28 @@ int main(int ac, char **av)
   LOG("allocating frame buffer");
   // Create a frame buffer as page-locked, aka "pinned" memory.
   // GPU writes to CPU memory directly (slow) but no transfers needed
-  VKRTBuffer frameBuffer = vkrtHostPinnedBufferCreate(vkrt,
-                                          /*type:*/VKRT_INT,
+  GPRTBuffer frameBuffer = gprtHostPinnedBufferCreate(gprt,
+                                          /*type:*/GPRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
 
   // ------------------------------------------------------------------
   // build Shader Binding Table (SBT) required to trace the groups
   // ------------------------------------------------------------------
-  vkrtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
-  vkrtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
-  vkrtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
-  vkrtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
+  gprtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
+  gprtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
+  gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
+  gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the ray generation record.
-  vkrtBuildSBT(vkrt);
+  gprtBuildSBT(gprt);
 
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
   LOG("executing the launch ...");
-  vkrtRayGenLaunch2D(vkrt,rayGen,fbSize.x,fbSize.y);
+  gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
 
   LOG("done with launch, writing frame buffer to " << outFileName);
-  const uint32_t *fb = (const uint32_t*)vkrtBufferGetPointer(frameBuffer,0);
+  const uint32_t *fb = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);
@@ -127,10 +127,10 @@ int main(int ac, char **av)
   // ##################################################################
 
   LOG("cleaning up ...");
-  vkrtBufferDestroy(frameBuffer);
-  vkrtRayGenDestroy(rayGen);
-  vkrtModuleDestroy(module);
-  vkrtContextDestroy(vkrt);
+  gprtBufferDestroy(frameBuffer);
+  gprtRayGenDestroy(rayGen);
+  gprtModuleDestroy(module);
+  gprtContextDestroy(gprt);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

@@ -33,6 +33,6 @@ add_executable(sample00_rayGenOnly hostCode.cpp)
 target_link_libraries(sample00_rayGenOnly
   PRIVATE
     sample00_deviceCode
-    vkrt::vkrt
+    gprt::gprt
     stb_image
 )

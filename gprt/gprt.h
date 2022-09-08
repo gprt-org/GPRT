@@ -22,10 +22,10 @@
 
 #pragma once
 
-#ifdef VKRT_DEVICE
-#include "vkrt_device.hlsli"
+#ifdef GPRT_DEVICE
+#include "gprt_device.hlsli"
 #define alignas(alignment)
 #else 
 #include <stdalign.h>
-#include "vkrt_host.h"
+#include "gprt_host.h"
 #endif

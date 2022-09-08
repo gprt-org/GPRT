@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "deviceCode.h"
-#include "vkrt.h"
+#include "gprt.h"
 
 struct Data{
   float3 color;
@@ -68,7 +68,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
   );
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = vkrt::getAccelHandle(RGSBTData.world);
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(RGSBTData.world);
   TraceRay(
     world, // the tree
     RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -81,7 +81,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
   );
   const int fbOfs = pixelID.x + RGSBTData.fbSize.x * pixelID.y;
   vk::RawBufferStore<uint32_t>(RGSBTData.fbPtr + fbOfs * sizeof(uint32_t), 
-    vkrt::make_rgba(payload.data.color));
+    gprt::make_rgba(payload.data.color));
 }
 
 
