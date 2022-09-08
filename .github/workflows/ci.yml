@@ -56,9 +56,10 @@ jobs:
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
         make -j4
 
-    - name: Run Samples
-      shell: bash
-      run: |
-        cd bld
-        ./sample00_rayGenOnly
-        ./sample01_simpleTriangles
+    # Just checking build until a CPU backend is ready
+    # - name: Run Samples
+    #   shell: bash
+    #   run: |
+    #     cd bld
+    #     ./sample00_rayGenOnly
+    #     ./sample01_simpleTriangles
