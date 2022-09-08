@@ -1,6 +1,8 @@
 
 
-# GPRT (Vuklan Ray Tracer)
+[![CI](https://github.com/natevm/vkrt/actions/workflows/ci.yml/badge.svg)](https://github.com/natevm/vkrt/actions/workflows/ci.yml)
+
+# GPRT (General Purpose Ray Tracer)
 
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 
@@ -24,13 +26,14 @@ And built with
 make all
 ```
 
-## Linux-Specific Build Instructions
+## Linux Build Instructions
 
-The Linux version currently requires shared library compilation, which can be
-enabled with
+### Dependencies
+
+The following apt-packages should be installed:
 
 ```shell
--DGPRT_BUILD_SHARED=ON
+sudo apt install xorg-dev libxinerama-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev
 ```
 
-in the CMake command above.
+along with the [Vulkan SDK](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started_ubuntu.html).
