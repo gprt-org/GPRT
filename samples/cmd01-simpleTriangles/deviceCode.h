@@ -25,17 +25,24 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData
 {
-  /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
+  alignas(4) int one;
+  alignas(4) int two;
   /*! array/buffer of vertex indices */
-  alignas(8) uint64_t index; // vec3i*
   /*! array/buffer of vertex positions */
-  alignas(8) uint64_t vertex; // vec3f *
+  // alignas(8) uint64_t index; // vec3i*
+  // alignas(8) uint64_t vertex; // vec3f *
+  
+  /*! base color we use for the entire mesh */
+  // alignas(16) float3 color;
+
 };
 
 struct RayGenData
 {
+  alignas(4) int three;
+  alignas(4) int four;
   alignas(8) uint64_t fbPtr;
+
   alignas(8) int2 fbSize;
   alignas(8) uint64_t world; // RaytracingAccelerationStructure*
 

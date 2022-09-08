@@ -22,6 +22,7 @@
 
 // public VKRT API
 #include <vkrt.h>
+
 // our device-side data structures
 #include "deviceCode.h"
 // external helper stuff for image output
@@ -37,7 +38,7 @@
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
   std::cout << VKRT_TERMINAL_DEFAULT;
 
-extern "C" char sample00_deviceCode_spv[];
+extern std::map<std::string, std::vector<uint8_t>> sample00_deviceCode;
 
 // When run, this program produces this PNG as output.
 // In this case the correct result is a red and light gray checkerboard,
@@ -67,26 +68,23 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a VKRT module.
-  VKRTModule module = vkrtModuleCreate(vkrt,sample00_deviceCode_spv);
+  VKRTModule module = vkrtModuleCreate(vkrt,sample00_deviceCode);
 
   VKRTVarDecl rayGenVars[]
     = {
       { "fbPtr", VKRT_BUFFER, VKRT_OFFSETOF(RayGenData, fbPtr) },
-      { "fbSize", VKRT_INT2, VKRT_OFFSETOF(RayGenData, fbSize) },
+      { "fbSize", VKRT_INT2,  VKRT_OFFSETOF(RayGenData, fbSize) },
       { "color0", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color0) },
       { "color1", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData, color1) },
       { /* sentinel: */ nullptr }
   };
-
-  std::cout<<"Sizeof raygendata " << sizeof(RayGenData) << std::endl;
-  std::cout<<"Sizeof int2 " << sizeof(int2) << std::endl;
   // Allocate room for one RayGen shader, create it, and
-  // hold on to it with the "owl" context
+  // hold on to it with the "vkrt" context
   VKRTRayGen rayGen
       = vkrtRayGenCreate(vkrt, module, "simpleRayGen",
                       sizeof(RayGenData),rayGenVars,-1);
 
-  // (re-)builds all optix programs, with current pipeline settings
+  // (re-)builds all vulkan programs, with current pipeline settings
   vkrtBuildPrograms(vkrt);
 
   // Create the pipeline.

@@ -126,6 +126,7 @@ inline void vkrtRaise_impl(std::string str)
 
 
 #include "3rdParty/SPIRV-Tools/include/spirv-tools/libspirv.h"
+#include "3rdParty/SPIRV-Tools/include/spirv-tools/optimizer.hpp"
 
 std::string errorString(VkResult errorCode)
 {
@@ -221,6 +222,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
   return VK_FALSE;
 }
 
+// Contains definitions for internal entry points 
+// (bounds programs, transform programs...)
+extern std::map<std::string, std::vector<uint8_t>> vkrtDeviceCode;
+
 namespace vkrt {
   // forward declarations...
   struct Geom; 
@@ -263,12 +268,11 @@ namespace vkrt {
 
   struct Module {
     spv_context spvContext;
-    std::string program;
+    // std::string program;
+    std::map<std::string, std::vector<uint8_t>> program;
 
-    
-
-    Module(const char* spvCode) {
-      program = std::string(spvCode);
+    Module(std::map<std::string, std::vector<uint8_t>> program) {
+      this->program = program;
       spvContext = spvContextCreate(SPV_ENV_UNIVERSAL_1_4);
     }
 
@@ -276,10 +280,19 @@ namespace vkrt {
       spvContextDestroy(spvContext);
     }
 
-    spv_binary getBinary(std::string entryPoint, bool isComputeBinary = false) {
+    std::vector<uint32_t> getBinary(std::string entryType, std::string entryPoint) {
       std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
       std::smatch match;
-      std::string text = program;
+
+      std::string text;
+
+      spv_text spvText = nullptr;
+      spv_diagnostic spvTextDiagnostic = nullptr;
+      std::vector<uint8_t> prog = program[entryType];
+      spvBinaryToText(spvContext, (uint32_t*)prog.data(), prog.size() / 4, SPV_BINARY_TO_TEXT_OPTION_NONE, &spvText, &spvTextDiagnostic);
+      text = std::string(spvText->str);
+      spvTextDestroy(spvText);
+
 
       std::string singleEntryPointProgram;
       while (std::regex_search(text, match, re))
@@ -321,48 +334,48 @@ namespace vkrt {
       }
       singleEntryPointProgram += text;
       
-      // hold over until we can get those SPIR-V tools changes in...
-      if (!isComputeBinary) 
-      {
-        text = singleEntryPointProgram;
-        singleEntryPointProgram = "";
+      // // hold over until we can get those SPIR-V tools changes in...
+      // if (!isComputeBinary) 
+      // {
+      //   text = singleEntryPointProgram;
+      //   singleEntryPointProgram = "";
 
-        std::string newProgram;
-        std::regex re("( *)(OpName \%param_var_DTid \"param.var.DTid\")");
-        std::smatch match;
+      //   std::string newProgram;
+      //   std::regex re("( *)(OpName \%param_var_DTid \"param.var.DTid\")");
+      //   std::smatch match;
 
-        while (std::regex_search(text, match, re))
-        {
-          std::string line = match.str(0);
-          std::string opname = match.str(2);
+      //   while (std::regex_search(text, match, re))
+      //   {
+      //     std::string line = match.str(0);
+      //     std::string opname = match.str(2);
 
-          // Remove 
-          singleEntryPointProgram += match.prefix();
-          text = match.suffix().str();
-        }
-        singleEntryPointProgram += text;
-      }
+      //     // Remove 
+      //     singleEntryPointProgram += match.prefix();
+      //     text = match.suffix().str();
+      //   }
+      //   singleEntryPointProgram += text;
+      // }
 
-      if (!isComputeBinary) 
-      {
-        text = singleEntryPointProgram;
-        singleEntryPointProgram = "";
+      // if (!isComputeBinary) 
+      // {
+      //   text = singleEntryPointProgram;
+      //   singleEntryPointProgram = "";
 
-        std::string newProgram;
-        std::regex re("( *)(OpExecutionMode)(.*)");
-        std::smatch match;
+      //   std::string newProgram;
+      //   std::regex re("( *)(OpExecutionMode)(.*)");
+      //   std::smatch match;
 
-        while (std::regex_search(text, match, re))
-        {
-          std::string line = match.str(0);
-          std::string opname = match.str(2);
+      //   while (std::regex_search(text, match, re))
+      //   {
+      //     std::string line = match.str(0);
+      //     std::string opname = match.str(2);
 
-          // Remove 
-          singleEntryPointProgram += match.prefix();
-          text = match.suffix().str();
-        }
-        singleEntryPointProgram += text;
-      }
+      //     // Remove 
+      //     singleEntryPointProgram += match.prefix();
+      //     text = match.suffix().str();
+      //   }
+      //   singleEntryPointProgram += text;
+      // }
 
       // std::cout<<"final program " << std::endl;
       // std::cout<<singleEntryPointProgram<<std::endl;
@@ -377,63 +390,186 @@ namespace vkrt {
         spvDiagnosticDestroy(diagnostic);
       }
 
-      return binary;
+
+
+      // //Now, assemble the IR
+      // spv_binary binary = nullptr;
+      // spv_diagnostic diagnostic = nullptr;
+      // spvTextToBinary(spvContext, program.c_str(), program.size(), &binary, &diagnostic);
+      // spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
+      // if (diagnostic) {
+      //   spvDiagnosticPrint(diagnostic);
+      //   spvDiagnosticDestroy(diagnostic);
+      // }
+
+      std::vector<uint32_t> optimizedBinary;
+      auto &optimizer = spvtools::Optimizer(SPV_ENV_VULKAN_1_3);
+      optimizer.RegisterSizePasses();
+      optimizer.RegisterLegalizationPasses();
+      optimizer.RegisterPerformancePasses();
+      // optimizer.RegisterPass(spvtools::CreateInstDebugPrintfPass(7, 23));
+      optimizer.Run(binary->code, binary->wordCount, &optimizedBinary);
+      spvBinaryDestroy(binary);
+
+      diagnostic = nullptr;
+      spv_text txt;
+      spvBinaryToText(spvContext, optimizedBinary.data(), optimizedBinary.size(), 
+        // SPV_BINARY_TO_TEXT_OPTION_PRINT | 
+        // SPV_BINARY_TO_TEXT_OPTION_COLOR | 
+        // SPV_BINARY_TO_TEXT_OPTION_INDENT
+        SPV_BINARY_TO_TEXT_OPTION_NONE
+      , &txt, &diagnostic);
+
+      return optimizedBinary;
     }
 
-    void releaseBinary(spv_binary binary) {
-      spvBinaryDestroy(binary);
-    }
+    // void releaseBinary(spv_binary binary) {
+    //   spvBinaryDestroy(binary);
+    // }
   };
 
   struct Buffer {
     VkDevice device;
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+    VkCommandBuffer commandBuffer;
+    VkQueue queue;
+
+    /** @brief Usage flags to be filled by external source at buffer creation */
+    VkBufferUsageFlags usageFlags;
+    
+    /** @brief Memory property flags to be filled by external source at buffer creation */
+    VkMemoryPropertyFlags memoryPropertyFlags;
+
+    bool hostVisible;
+  
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDescriptorBufferInfo descriptor;
+    VkDeviceAddress address = 0;
+    
+  
+    struct StagingBuffer {
+      VkBuffer buffer = VK_NULL_HANDLE;
+      VkDeviceMemory memory = VK_NULL_HANDLE;
+      VkDeviceAddress address = 0;
+    } stagingBuffer;
+
     VkDeviceSize size = 0;
     VkDeviceSize alignment = 0;
     void* mapped = nullptr;
-    /** @brief Usage flags to be filled by external source at buffer creation (to query at some later point) */
-    VkBufferUsageFlags usageFlags;
-    /** @brief Memory property flags to be filled by external source at buffer creation (to query at some later point) */
-    VkMemoryPropertyFlags memoryPropertyFlags;
 
-    VkPhysicalDeviceMemoryProperties memoryProperties;
-
-    VkDeviceAddress address = 0;
-
-    VkResult map(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
     {
-      if (mapped) {
-        return VK_SUCCESS;
+      if (hostVisible) {
+        if (mapped) return VK_SUCCESS;
+        else return vkMapMemory(device, memory, offset, size, 0, &mapped);
       }
       else {
-        return vkMapMemory(device, memory, offset, size, 0, &mapped);
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err) VKRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+        // To do, consider allowing users to specify offsets here...
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = size;
+        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err) VKRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+        submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+        if (err) VKRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err) VKRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+
+        // todo, transfer device data to host
+        if (mapped) return VK_SUCCESS;
+        else return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
       }
     }
+
     void unmap()
     {
-      if (mapped)
-      {
-        vkUnmapMemory(device, memory);
-        mapped = nullptr;
+      if (hostVisible) {
+        if (mapped) {
+          vkUnmapMemory(device, memory);
+          mapped = nullptr;
+        }
+      }
+      else {
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err) VKRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+        // To do, consider allowing users to specify offsets here...
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = size;
+        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err) VKRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+        
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+        submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+        if (err) VKRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err) VKRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+        
+        // todo, transfer device data to device
+        if (mapped) {
+          vkUnmapMemory(device, stagingBuffer.memory);
+          mapped = nullptr;
+        }
       }
     }
-    VkResult bind(VkDeviceSize offset = 0)
-    {
-      return vkBindBufferMemory(device, buffer, memory, offset);
-    }
-    void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
-    {
-      descriptor.offset = offset;
-      descriptor.buffer = buffer;
-      descriptor.range = size;
-    }
-    void copyTo(void* data, VkDeviceSize size)
-    {
-      assert(mapped);
-      memcpy(mapped, data, size);
-    }
+
+    // VkResult bind(VkDeviceSize offset = 0)
+    // {
+    //   return vkBindBufferMemory(device, buffer, memory, offset);
+    // }
+
+    // void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+    // {
+    //   descriptor.offset = offset;
+    //   descriptor.buffer = buffer;
+    //   descriptor.range = size;
+    // }
+
+    // void copyTo(void* data, VkDeviceSize size)
+    // {
+    //   assert(mapped);
+    //   memcpy(mapped, data, size);
+    // }
 
     /*! Guarantees that the host's writes are available to the device */
     VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
@@ -470,13 +606,9 @@ namespace vkrt {
     void destroy()
     {
       if (buffer)
-      {
         vkDestroyBuffer(device, buffer, nullptr);
-      }
       if (memory)
-      {
         vkFreeMemory(device, memory, nullptr);
-      }
     }
 
     /* Default Constructor */
@@ -485,21 +617,34 @@ namespace vkrt {
     ~Buffer() {};
 
     Buffer(
-      VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
+      VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
+      VkCommandBuffer _commandBuffer, VkQueue _queue,
       VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags,
       VkDeviceSize _size, void *data = nullptr)
     {
       device = logicalDevice;
       memoryPropertyFlags = _memoryPropertyFlags;
-      size = _size;
       usageFlags = _usageFlags;
-      memoryPropertyFlags = _memoryPropertyFlags;
+      size = _size;
+      commandBuffer = _commandBuffer;
+      queue = _queue;
+
+      // Check if the buffer can be mapped to a host pointer. 
+      // If the buffer isn't host visible, this is buffer and requires 
+      // an additional staging buffer...
+      if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0) 
+        hostVisible = true;
+      else 
+        hostVisible = false;
 
       vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
 
       auto getMemoryType = [this](
         uint32_t typeBits, VkMemoryPropertyFlags properties,
         VkBool32 *memTypeFound = nullptr) -> uint32_t {
+
+        // memory type bits is a bitmask and contains one bit set for every supported memory type.
+        // Bit i is set if and only if the memory type i in the memory properties is supported.
         for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
           if ((typeBits & 1) == 1) {
             if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
@@ -528,6 +673,21 @@ namespace vkrt {
       bufferCreateInfo.size = size;
       VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
 
+      if (!hostVisible) {
+        const VkBufferUsageFlags bufferUsageFlags =
+          // means we can use this buffer to transfer into another
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+          // means we can use this buffer to receive data transferred from another
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT
+        ;
+
+        VkBufferCreateInfo bufferCreateInfo {};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = bufferUsageFlags;
+        bufferCreateInfo.size = size;
+        VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
+      }
+
       // Create the memory backing up the buffer handle
       VkMemoryRequirements memReqs;
       VkMemoryAllocateInfo memAllocInfo {};
@@ -545,8 +705,40 @@ namespace vkrt {
         memAllocInfo.pNext = &allocFlagsInfo;
       }
       VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
-
       alignment = memReqs.alignment;
+
+      // Attach the memory to the buffer object
+      VkResult err = vkBindBufferMemory(device, buffer, memory, /* offset */ 0);
+      if (err) throw std::runtime_error("failed to bind buffer memory! : \n" + errorString(err));
+
+      if (!hostVisible) {
+        const VkMemoryPropertyFlags memoryPropertyFlags =
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+        // Create the memory backing up the staging buffer handle
+        VkMemoryRequirements memReqs;
+        VkMemoryAllocateInfo memAllocInfo {};
+        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
+        memAllocInfo.allocationSize = memReqs.size;
+        // Find a memory type index that fits the properties of the buffer
+        memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+        // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
+        // need to enable the appropriate flag during allocation
+        VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
+        if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+          allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
+          allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
+          memAllocInfo.pNext = &allocFlagsInfo;
+        }
+        VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
+        alignment = memReqs.alignment;
+
+        // Attach the memory to the buffer object
+        VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
+        if (err) throw std::runtime_error("failed to bind staging buffer memory! : \n" + errorString(err));
+      }
 
       // If a pointer to the buffer data has been passed, map the buffer and
       // copy over the data
@@ -558,13 +750,9 @@ namespace vkrt {
         unmap();
       }
 
-      // Initialize a default descriptor that covers the whole buffer size
-      setupDescriptor();
-
-      // Attach the memory to the buffer object
-      VkResult err = bind();
-      if (err) throw std::runtime_error("failed to create buffer! : \n" + errorString(err));
-
+      //// Initialize a default descriptor that covers the whole buffer size
+      // setupDescriptor();
+      
       // means we can get this buffer's address with vkGetBufferDeviceAddress
       if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
         address = getDeviceAddress();
@@ -584,20 +772,21 @@ namespace vkrt {
 
     ComputeProg(VkDevice  _logicalDevice,
              Module *module,
-             const char* entryPoint,
+             const char* _entryPoint,
              size_t      sizeOfVarStruct,
              std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
     {
       std::cout<<"Compute program is being made!"<<std::endl;
 
-      spv_binary binary = module->getBinary(entryPoint, true);
+      std::string entryPoint = std::string("__compute__") + std::string(_entryPoint);
+      auto binary = module->getBinary("COMPUTE", entryPoint.c_str());
 
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
 
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
-      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary.data(); //(uint32_t*)binary->wordCount;//programBytes;
 
       VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &shaderModule));
@@ -605,10 +794,10 @@ namespace vkrt {
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
       shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint;
+      shaderStage.pName = entryPoint.c_str();
       assert(shaderStage.module != VK_NULL_HANDLE);
 
-      module->releaseBinary(binary);
+      // module->releaseBinary(binary);
 
       vars = _vars;
     }
@@ -624,23 +813,25 @@ namespace vkrt {
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
+    std::string entryPoint;
 
     RayGen(VkDevice  _logicalDevice,
            Module *module,
-           const char* entryPoint,
+           const char* _entryPoint,
            size_t      sizeOfVarStruct,
            std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
     {
       std::cout<<"Ray gen is being made!"<<std::endl;
 
-      spv_binary binary = module->getBinary(entryPoint);
+      entryPoint = std::string("__raygen__") + std::string(_entryPoint);
+      auto binary = module->getBinary("RAYGEN", entryPoint);
 
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
 
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
-      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary.data(); //(uint32_t*)binary->wordCount;//programBytes;
 
       VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &shaderModule);
@@ -649,10 +840,10 @@ namespace vkrt {
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
       shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint;
+      shaderStage.pName = entryPoint.c_str();
       assert(shaderStage.module != VK_NULL_HANDLE);
 
-      module->releaseBinary(binary);
+      // module->releaseBinary(binary);
 
       vars = _vars;
     }
@@ -668,23 +859,25 @@ namespace vkrt {
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
+    std::string entryPoint;
 
     MissProg(VkDevice  _logicalDevice,
              Module *module,
-             const char* entryPoint,
+             const char* _entryPoint,
              size_t      sizeOfVarStruct,
              std::unordered_map<std::string, VKRTVarDef> _vars) : SBTEntry()
     {
       std::cout<<"Miss program is being made!"<<std::endl;
 
-      spv_binary binary = module->getBinary(entryPoint);
+      entryPoint = std::string("__miss__") + std::string(_entryPoint);
+      auto binary = module->getBinary("MISS", entryPoint.c_str());
 
       // store a reference to the logical device this module is made on
       logicalDevice = _logicalDevice;
 
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);//sizeOfProgramBytes;
-      moduleCreateInfo.pCode = binary->code; //(uint32_t*)binary->wordCount;//programBytes;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);//sizeOfProgramBytes;
+      moduleCreateInfo.pCode = binary.data(); //(uint32_t*)binary->wordCount;//programBytes;
 
       VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &shaderModule));
@@ -692,10 +885,10 @@ namespace vkrt {
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       shaderStage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
       shaderStage.module = shaderModule;
-      shaderStage.pName = entryPoint;
+      shaderStage.pName = entryPoint.c_str();
       assert(shaderStage.module != VK_NULL_HANDLE);
 
-      module->releaseBinary(binary);
+      // module->releaseBinary(binary);
 
       vars = _vars;
     }
@@ -716,6 +909,7 @@ namespace vkrt {
     std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
     std::vector<VkPipelineShaderStageCreateInfo> anyHitShaderStages;
     std::vector<VkPipelineShaderStageCreateInfo> intersectionShaderStages;
+    std::string closestHitEntryPoint;
     
     GeomType(VkDevice  _logicalDevice,
              uint32_t numRayTypes,
@@ -737,13 +931,14 @@ namespace vkrt {
     
     void setClosestHit(int rayType,
                        Module *module,
-                       const char* entryPoint) 
+                       const char* _entryPoint) 
     {
-      spv_binary binary = module->getBinary(entryPoint);
+      closestHitEntryPoint = std::string("__closesthit__") + std::string(_entryPoint);
+      auto binary = module->getBinary("CLOSESTHIT", closestHitEntryPoint);
       VkShaderModuleCreateInfo moduleCreateInfo{};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary->code;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
 
       VkShaderModule shaderModule;
       VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
@@ -752,10 +947,10 @@ namespace vkrt {
       closestHitShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       closestHitShaderStages[rayType].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
       closestHitShaderStages[rayType].module = shaderModule;
-      closestHitShaderStages[rayType].pName = entryPoint;
+      closestHitShaderStages[rayType].pName = closestHitEntryPoint.c_str();
       assert(closestHitShaderStages[rayType].module != VK_NULL_HANDLE);
 
-      module->releaseBinary(binary);
+      // module->releaseBinary(binary);
     }
 
     void setAnyHit(int rayType,
@@ -1027,7 +1222,7 @@ namespace vkrt {
       );
       
       accelBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
         // means we can use this buffer as a means of storing an acceleration structure
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -1039,7 +1234,7 @@ namespace vkrt {
       );
 
       scratchBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
         // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -1168,14 +1363,14 @@ namespace vkrt {
       memcpy(this->instances.data(), instances, sizeof(VKRTAccel*) * numInstances);
 
       accelAddressesBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, commandBuffer, queue,
         // I guess I need this to use these buffers as input to tree builds?
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
         // means that this memory is stored directly on the device 
         //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
         sizeof(uint64_t) * numInstances
       );
@@ -1208,7 +1403,7 @@ namespace vkrt {
       // todo, transfer instance transforms into instances buffer
 
       instancesBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, commandBuffer, queue,
         // I guess I need this to use these buffers as input to tree builds?
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -1262,15 +1457,15 @@ namespace vkrt {
       err = vkQueueWaitIdle(queue);
       if (err) VKRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
-      // VkAccelerationStructureInstanceKHR instance{};
+      VkAccelerationStructureInstanceKHR instance{};
       // struct TMP {
       //   uint32_t a;
       //   uint32_t b;
       //   uint32_t c;
       // };
       // TMP tmp;
-      // instancesBuffer->map();
-      // memcpy(&tmp, instancesBuffer->mapped, sizeof(TMP));
+      instancesBuffer->map();
+      memcpy(&instance, instancesBuffer->mapped, sizeof(VkAccelerationStructureInstanceKHR));
 
       VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
       accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -1305,7 +1500,7 @@ namespace vkrt {
         &accelerationStructureBuildSizesInfo);
       
       accelBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
         // means we can use this buffer as a means of storing an acceleration structure
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -1330,7 +1525,7 @@ namespace vkrt {
       if (err) VKRT_RAISE("failed to create acceleration structure for instance accel build! : \n" + errorString(err));
 
       scratchBuffer = new vkrt::Buffer(
-        physicalDevice, logicalDevice,
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
         // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
         // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -1437,7 +1632,6 @@ namespace vkrt {
     };
   };
 
-  
   struct Context {
     VkApplicationInfo appInfo;
 
@@ -1549,6 +1743,7 @@ namespace vkrt {
     //   VkPipeline fillInstanceDataPipeline;
     // }
     Stage fillInstanceDataStage;
+    Module *internalModule = nullptr;
 
     /*! returns whether logging is enabled */
     inline static bool logging()
@@ -1795,7 +1990,7 @@ namespace vkrt {
       // Select physical device to be used
       // Defaults to the first device unless specified by command line
       uint32_t selectedDevice = 0; // TODO
-
+      
       std::cout << "Available Vulkan devices" << "\n";
       for (uint32_t i = 0; i < gpuCount; i++) {
         VkPhysicalDeviceProperties deviceProperties;
@@ -1805,6 +2000,9 @@ namespace vkrt {
         std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
           << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
           << (deviceProperties.apiVersion & 0xfff) << "\n";
+        
+        if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+          selectedDevice = i;
 
         // Get ray tracing pipeline properties
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
@@ -2116,6 +2314,10 @@ namespace vkrt {
       vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
       vkGetDeviceQueue(logicalDevice, queueFamilyIndices.compute, 0, &computeQueue);
       vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
+
+      // 7. Create a module for internal device entry points
+      internalModule = new Module(vkrtDeviceCode);
+      setupInternalStages(internalModule);
     };
 
     void destroy() {
@@ -2194,20 +2396,27 @@ namespace vkrt {
           raygenShaderBindingTable.destroy();
         }
         if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice,
+          raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
         }
         raygenShaderBindingTable.map();
-        memcpy(raygenShaderBindingTable.mapped, shaderHandleStorage.data(), handleSize * numRayGens);
+        uint8_t* mapped = ((uint8_t*) (raygenShaderBindingTable.mapped));
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
+          
+          // First, copy handle
+          size_t recordOffset = recordStride * idx;
+          size_t handleOffset = handleStride * idx;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t* params = mapped + recordOffset;
           RayGen *raygen = raygenPrograms[idx];
-          size_t stride = recordSize;
-          size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-          uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
           for (auto &var : raygen->vars) {
             size_t varOffset = var.second.decl.offset;
             size_t varSize = getSize(var.second.decl.type);
-            std::cout<<"Embedding " << var.first << " into raygen SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
             memcpy(params + varOffset, var.second.data, varSize);
           }
         }
@@ -2220,22 +2429,27 @@ namespace vkrt {
           missShaderBindingTable.destroy();
         }
         if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          missShaderBindingTable = Buffer(physicalDevice, logicalDevice,
+          missShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
         }
-        missShaderBindingTable.map();
-        memcpy(missShaderBindingTable.mapped,
-          shaderHandleStorage.data() + handleSize * numRayGens,
-          handleSize * numMissProgs);
+        missShaderBindingTable.map();        
+        uint8_t* mapped = ((uint8_t*) (missShaderBindingTable.mapped));
         for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
+
+          // First, copy handle
+          size_t recordOffset = recordStride * idx;
+          size_t handleOffset = handleStride * idx + handleStride * numRayGens;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t* params = mapped + recordOffset;
           MissProg *missprog = missPrograms[idx];
-          size_t stride = recordSize;
-          size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-          uint8_t* params = ((uint8_t*) (missShaderBindingTable.mapped)) + offset;
           for (auto &var : missprog->vars) {
             size_t varOffset = var.second.decl.offset;
             size_t varSize = getSize(var.second.decl.type);
-            std::cout<<"Embedding " << var.first << " into missprog SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
             memcpy(params + varOffset, var.second.data, varSize);
           }
         }
@@ -2250,16 +2464,12 @@ namespace vkrt {
           hitShaderBindingTable.destroy();
         }
         if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, 
+          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords);
         }
 
         hitShaderBindingTable.map();
-
-        memcpy(hitShaderBindingTable.mapped,
-            shaderHandleStorage.data() + handleSize * (numRayGens + numMissProgs),
-            handleSize * numHitRecords);
-
+        uint8_t* mapped = ((uint8_t*) (hitShaderBindingTable.mapped));
         for (int accelID = 0; accelID < accels.size(); ++accelID) {
           Accel *accel = accels[accelID];
           if (!accel) continue;
@@ -2267,19 +2477,26 @@ namespace vkrt {
           if (accel->getType() == VKRT_TRIANGLES_ACCEL) {
             TrianglesAccel *triAccel = (TrianglesAccel*) accel;
 
+            
             for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
               auto &geom = triAccel->geometries[geomID];
 
               for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                size_t recordStride = recordSize;
+                size_t handleStride = handleSize;
 
+                // First, copy handle
                 size_t instanceOffset = 0; // TODO
-                size_t stride = recordSize;
-                size_t offset = stride * (rayType + numRayTypes * geomID + instanceOffset) + handleSize /* params start after shader identifier */ ; // note, not considering instance offset...
-                uint8_t* params = ((uint8_t*) (hitShaderBindingTable.mapped)) + offset;
+                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numRayGens + numMissProgs);
+                memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                
+                // Then, copy params following handle
+                recordOffset = recordOffset + handleSize;
+                uint8_t* params = mapped + recordOffset;
                 for (auto &var : geom->vars) {
                   size_t varOffset = var.second.decl.offset;
                   size_t varSize = getSize(var.second.decl.type);
-                  std::cout<<"Embedding " << var.first << " into hitgroup SBT record. Size: " << varSize << " Offset: " << varOffset << std::endl;
                   memcpy(params + varOffset, var.second.data, varSize);
                 }
               }
@@ -2454,21 +2671,22 @@ namespace vkrt {
       err = vkCreatePipelineLayout(logicalDevice, 
         &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
 
-      spv_binary binary = module->getBinary(fillInstanceDataStage.entryPoint, true);
+      std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
+      auto binary = module->getBinary("COMPUTE", entryPoint.c_str());
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary->wordCount * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary->code;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
 
       err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
         NULL, &fillInstanceDataStage.module);
 
       VkPipelineShaderStageCreateInfo shaderStage = {};
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-			shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
       shaderStage.module = fillInstanceDataStage.module; 
-      shaderStage.pName = fillInstanceDataStage.entryPoint.c_str();
+      shaderStage.pName = entryPoint.c_str();
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -2480,7 +2698,7 @@ namespace vkrt {
       err = vkCreateComputePipelines(logicalDevice, 
         cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
 
-      module->releaseBinary(binary);
+      // module->releaseBinary(binary);
 
       //todo, destroy the above stuff
     }
@@ -2506,12 +2724,11 @@ VKRT_API void vkrtContextDestroy(VKRTContext _context)
   LOG("context destroyed...");
 }
 
-VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, const char* spvCode)
+VKRT_API VKRTModule vkrtModuleCreate(VKRTContext _context, std::map<std::string, std::vector<uint8_t>> spvCode)
 {
   LOG_API_CALL();
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Module *module = new vkrt::Module(spvCode);
-  context->setupInternalStages(module);
   LOG("module created...");
   return (VKRTModule)module;
 }
@@ -2775,7 +2992,11 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
     // I guess I need this to use these buffers as input to tree builds?
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+    // means we can use this buffer to transfer into another
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+    // means we can use this buffer to receive data transferred from another
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT
   ;
   const VkMemoryPropertyFlags memoryUsageFlags =
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
@@ -2783,7 +3004,8 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
 
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Buffer *buffer = new vkrt::Buffer(
-    context->physicalDevice, context->logicalDevice,
+    context->physicalDevice, context->logicalDevice, 
+    context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
     getSize(type) * count
   );
@@ -2794,6 +3016,8 @@ vkrtHostPinnedBufferCreate(VKRTContext _context, VKRTDataType type, size_t count
   if (init) {
     void* mapped = buffer->mapped;
     memcpy(mapped, init, getSize(type) * count);
+    buffer->flush();
+    buffer->invalidate();
   }
   LOG("buffer created");
   return (VKRTBuffer)buffer;
@@ -2808,20 +3032,23 @@ vkrtDeviceBufferCreate(VKRTContext _context, VKRTDataType type, size_t count, co
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
     // I guess I need this to use these buffers as input to tree builds?
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+    // means we can use this buffer to transfer into another
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+    // means we can use this buffer to receive data transferred from another
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags =
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // means most efficient for device access
-    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
-    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
 
   vkrt::Context *context = (vkrt::Context*)_context;
   vkrt::Buffer *buffer = new vkrt::Buffer(
     context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
     getSize(type) * count
   );
   
-  if (init) {
+  if (init) {    
     // NOTE, this mapping mechanism wont work for large buffers...
     std::cout<<"WARNING: in vkrtDeviceBufferCreate, need to replace map functionality with a staging function."<<std::endl;
     buffer->map();
@@ -3051,7 +3278,7 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
   raygenShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
     context->logicalDevice, context->raygenShaderBindingTable.buffer);
   raygenShaderSbtEntry.stride = recordSize;
-  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * 1; // only one
+  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * context->raygenPrograms.size();
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
@@ -3066,7 +3293,7 @@ vkrtRayGenLaunch3D(VKRTContext _context, VKRTRayGen _rayGen, int dims_x, int dim
     hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
       context->logicalDevice, context->hitShaderBindingTable.buffer);
     hitShaderSbtEntry.stride = recordSize;
-    hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords; // only one
+    hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{}; // empty

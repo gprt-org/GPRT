@@ -23,29 +23,25 @@
 #include "vkrt.h"
 #include "deviceCode.h"
 
-[[vk::shader_record_ext]]
-ConstantBuffer<RayGenData> raygenSBTData;
-[shader("raygeneration")]
-void simpleRayGen() {
-  uint2 pixelID = DispatchRaysIndex().xy;
 
-  RaytracingAccelerationStructure test = vkrt::getAccelHandle(raygenSBTData.fbPtr);
+GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
+                   (in RayGenData SBTData) 
+{
+  uint2 pixelID = DispatchRaysIndex().xy;
 
   if (pixelID.x == 0 && pixelID.y == 0) {
     printf("Hello from your first raygen program!\n");
-    printf("fbPtr %d\n", raygenSBTData.fbPtr);
-    printf("Screen size %d %d\n", raygenSBTData.fbSize.x, raygenSBTData.fbSize.y);
-    printf("color0 %f %f %f\n", raygenSBTData.color0.x, raygenSBTData.color0.y, raygenSBTData.color0.z);
-    printf("color1 %f %f %f\n", raygenSBTData.color1.x, raygenSBTData.color1.y, raygenSBTData.color1.z);
   }
 
-  // Generate a simple checkerboard pattern as a test. Note that the upper left corner is pixel (0,0).
+  // Generate a simple checkerboard pattern as a test. 
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
   // alternate pattern, showing that pixel (0,0) is in the upper left corner
   // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? raygenSBTData.color1 : raygenSBTData.color0;
+  const float3 color = (pattern & 1) ? SBTData.color1 : SBTData.color0;
 
-  // find the frame buffer location (x + width*y) and put the "computed" result there
-  const int fbOfs = pixelID.x + raygenSBTData.fbSize.x * pixelID.y;
-  vk::RawBufferStore<uint32_t>(raygenSBTData.fbPtr + fbOfs * sizeof(uint32_t), vkrt::make_rgba(color));
+  // find the frame buffer location (x + width*y) and put the result there
+  const int fbOfs = pixelID.x + SBTData.fbSize.x * pixelID.y;
+  vk::RawBufferStore<uint32_t>(
+    SBTData.fbPtr + fbOfs * sizeof(uint32_t), 
+    vkrt::make_rgba(color));
 }

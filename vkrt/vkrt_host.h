@@ -35,6 +35,7 @@ using namespace linalg::ostream_overloads;
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <map>
 
 #ifdef __cplusplus
 # include <cstddef>
@@ -409,7 +410,7 @@ inline std::vector<VKRTVarDecl> getDecls(
   return decls;
 }
 
-VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, const char* spvCode);
+VKRT_API VKRTModule vkrtModuleCreate(VKRTContext context, std::map<std::string, std::vector<uint8_t>> spvCode);
 VKRT_API void vkrtModuleDestroy(VKRTModule module);
 
 VKRT_API VKRTGeom

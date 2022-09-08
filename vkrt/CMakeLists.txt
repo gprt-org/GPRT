@@ -22,6 +22,17 @@
 
 add_library(vkrt)
 
+include(cmake/hlsl_embed_spirv.cmake)
+
+embed_spirv(
+  OUTPUT_TARGET
+    vkrtDeviceCode
+  ENTRY_POINTS
+    vkrtFillInstanceData
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/vkrt_device_code.hlsl
+)
+
 target_sources(vkrt PRIVATE
     vkrt.cpp
     vkrt.h
@@ -47,7 +58,14 @@ set_target_properties(vkrt
 #     )
 # ENDIF(WIN32)
 
-target_link_libraries(vkrt PUBLIC ${Vulkan_LIBRARY} SPIRV-Tools-static)
+target_link_libraries(vkrt 
+    PUBLIC 
+    ${Vulkan_LIBRARY} 
+    SPIRV-Tools-static
+    SPIRV-Tools-opt
+    vkrtDeviceCode
+)
+
 set_target_properties(vkrt PROPERTIES LINKER_LANGUAGE CXX)
 
 target_include_directories(vkrt

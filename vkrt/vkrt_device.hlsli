@@ -39,90 +39,107 @@ namespace vkrt {
   RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 };
 
-#ifndef VKRT_DEVICE_STAGES
-#define VKRT_DEVICE_STAGES
+/*
+  The DXC compiler unfortunately doesn't handle multiple mixed entry points 
+  of different stage kinds in the same compilation step. So we instead 
+  use these macros to selectively filter all but a particular shader type, 
+  and compile repeatedly for all shader kinds (compute, raygen, anyhit, etc)
 
-struct PushConsts {
-	uint64_t instanceBufferAddr;
-	uint64_t transformBufferAddr;
-	uint64_t accelReferencesAddr;
-};
-[[vk::push_constant]] PushConsts pushConsts;
+  Down the road, this could also give us an opportunity to shim in an Embree
+  backend.
+*/
+#ifndef GPRT_COMPUTE_PROGRAM
+#ifdef COMPUTE
+#define GPRT_COMPUTE_PROGRAM(progName)                                  \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(uint3 tid);                                             \
+  [shader("compute")]                                                   \
+  [numthreads(1,1,1)]                                                   \
+  void __compute__##progName( uint3 tid : SV_DispatchThreadID)          \
+  {                                                                     \
+    progName(tid);                                                      \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName                                                         \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_COMPUTE_PROGRAM(progName)                                  \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName                                                           \
+/* program args and body supplied by user ... */   
+#endif
+#endif
 
-typedef enum VkGeometryInstanceFlagBitsKHR {
-    VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR = 0x00000001,
-    VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR = 0x00000002,
-    VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR = 0x00000004,
-    VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR = 0x00000008,
-    VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR = VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR,
-    VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-    VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_NV = VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR,
-    VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_NV = VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR,
-    VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_NV = VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR,
-    VK_GEOMETRY_INSTANCE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
-} VkGeometryInstanceFlagBitsKHR;
 
 
-struct VkAccelerationStructureInstanceKHR {
-    float3x4                      transform;
-    uint32_t                      instanceCustomIndex24Mask8;
-    uint32_t                      instanceShaderBindingTableRecordOffset24Flags8;
-    uint64_t                      accelerationStructureReference;
-};
+#ifndef GPRT_RAYGEN_PROGRAM
+#ifdef RAYGEN
+#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType recordData);                              \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("raygeneration")]                                             \
+  void __raygen__##progName()                                           \
+  {                                                                     \
+    progName(progName##RecordData);                                     \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName                                                         \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName                                                           \
+/* program args and body supplied by user ... */   
+#endif
+#endif
 
-[shader("compute")]
-[numthreads(1, 1, 1)]
-void vkrtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
-{
-  VkAccelerationStructureInstanceKHR instance;
 
-  // instance.transform = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-  // instance.a.x = 0;
-  // instance.a.y = 1;
-  // instance.a.z = 2;
-  // vk::RawBufferStore<TMP>(
-  //   pushConsts.instanceBufferAddr + sizeof(TMP) * DTid.x,
-  //   instance
-  // );
-  
-  instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
-  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 | 0x00 << 24;
+#ifndef GPRT_CLOSEST_HIT_PROGRAM
+#ifdef CLOSESTHIT
+#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)     \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType record, inout PayloadType payload);   \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("closesthit")]                                                \
+  void __closesthit__##progName(inout PayloadType payload)                  \
+  {                                                                     \
+    progName(progName##RecordData, payload);                            \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName                                                         \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)                       \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName                                                           \
+/* program args and body supplied by user ... */   
+#endif
+#endif
 
-  instance.transform = 
-    vk::RawBufferLoad<float3x4>(
-      pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x);
-  
-  instance.accelerationStructureReference = vk::RawBufferLoad<uint64_t>(
-    pushConsts.accelReferencesAddr + sizeof(uint64_t) * DTid.x
-  );
 
-  // printf("accel addr is %d\n", instance.accelerationStructureReference);
 
-  // printf("sizeof instance is %d\n", sizeof(VkAccelerationStructureInstanceKHR));
-  // vk::RawBufferStore<VkAccelerationStructureInstanceKHR>(
-  //   pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
-  //   instance
-  // );
-
-  // for whatever reason, can't just store all values in this structure at once... 
-  vk::RawBufferStore<float3x4>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
-    instance.transform
-  );
-
-  vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4),
-    instance.instanceCustomIndex24Mask8
-  );
-
-  vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t),
-    instance.instanceShaderBindingTableRecordOffset24Flags8
-  );
-
-  vk::RawBufferStore<uint64_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t) + sizeof(uint32_t),
-    instance.accelerationStructureReference
-  );
-}
+#ifndef GPRT_MISS_PROGRAM
+#ifdef MISS
+#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)     \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType record, inout PayloadType payload);   \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("miss")]                                                \
+  void __miss__##progName(inout PayloadType payload)                  \
+  {                                                                     \
+    progName(progName##RecordData, payload);                            \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName                                                         \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)                       \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName                                                           \
+/* program args and body supplied by user ... */   
+#endif
 #endif

@@ -40,7 +40,7 @@
   std::cout << "#vkrt.sample(main): " << message << std::endl;   \
   std::cout << VKRT_TERMINAL_DEFAULT;
 
-extern "C" char sample01_deviceCode_spv[];
+extern std::map<std::string, std::vector<uint8_t>> sample01_deviceCode;
 
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
@@ -94,7 +94,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   VKRTContext context = vkrtContextCreate(nullptr,1);
-  VKRTModule module = vkrtModuleCreate(context,sample01_deviceCode_spv);
+  VKRTModule module = vkrtModuleCreate(context,sample01_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render
@@ -104,15 +104,18 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   VKRTVarDecl trianglesGeomVars[] = {
-    { "index",  VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,index)},
-    { "vertex", VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,vertex)},
-    { "color",  VKRT_FLOAT3, VKRT_OFFSETOF(TrianglesGeomData,color)}
+    { "one", VKRT_INT, VKRT_OFFSETOF(TrianglesGeomData,one)},
+    { "two", VKRT_INT, VKRT_OFFSETOF(TrianglesGeomData,two)},
+    // { "index",  VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,index)},
+    // { "vertex", VKRT_BUFPTR, VKRT_OFFSETOF(TrianglesGeomData,vertex)},
+    // { "color",  VKRT_FLOAT3, VKRT_OFFSETOF(TrianglesGeomData,color)}
+    { /* sentinel to mark end of list */ }
   };
   VKRTGeomType trianglesGeomType
     = vkrtGeomTypeCreate(context,
                         VKRT_TRIANGLES,
                         sizeof(TrianglesGeomData),
-                        trianglesGeomVars,3);
+                        trianglesGeomVars,-1);
   vkrtGeomTypeSetClosestHit(trianglesGeomType,0,
                            module,"TriangleMesh");
 
@@ -126,7 +129,7 @@ int main(int ac, char **av)
   // triangle mesh
   // ------------------------------------------------------------------
   VKRTBuffer vertexBuffer
-    = vkrtDeviceBufferCreate(context,VKRT_FLOAT3,NUM_VERTICES,vertices);
+    = vkrtHostPinnedBufferCreate(context,VKRT_FLOAT3,NUM_VERTICES,vertices);
   VKRTBuffer indexBuffer
     = vkrtDeviceBufferCreate(context,VKRT_INT3,NUM_INDICES,indices);
   VKRTBuffer geometryTransformBuffer
@@ -135,7 +138,16 @@ int main(int ac, char **av)
     = vkrtDeviceBufferCreate(context,VKRT_TRANSFORM,1,instanceTransform);
   VKRTBuffer frameBuffer
     = vkrtHostPinnedBufferCreate(context,VKRT_INT,fbSize.x*fbSize.y);
-  
+
+
+  vkrtBufferMap(indexBuffer);
+  int3* indices_  = (int3*)vkrtBufferGetPointer(indexBuffer);
+  for (uint32_t i = 0; i < NUM_INDICES; ++i) {
+    std::cout<<indices_[i].x << " " <<indices_[i].y << " " <<indices_[i].z << std::endl;
+  }
+  vkrtBufferUnmap(indexBuffer);
+
+
   VKRTGeom trianglesGeom
     = vkrtGeomCreate(context,trianglesGeomType);
 
@@ -144,10 +156,11 @@ int main(int ac, char **av)
   vkrtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
 
-  vkrtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  vkrtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+  // vkrtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  // vkrtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+
   // vkrtGeomSet3f(trianglesGeom,"color",float3(0,1,0));
-  vkrtGeomSet3f(trianglesGeom,"color",0,1,0);
+  // vkrtGeomSet3f(trianglesGeom,"color",0,1,0);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
@@ -188,8 +201,10 @@ int main(int ac, char **av)
   // set up ray gen program
   // -------------------------------------------------------
   VKRTVarDecl rayGenVars[] = {
-    { "fbPtr",         VKRT_BUFPTR, VKRT_OFFSETOF(RayGenData,fbPtr)},
+    { "three",         VKRT_INT, VKRT_OFFSETOF(RayGenData,three)},
+    { "four",          VKRT_INT, VKRT_OFFSETOF(RayGenData,four)},
     { "fbSize",        VKRT_INT2,   VKRT_OFFSETOF(RayGenData,fbSize)},
+    { "fbPtr",         VKRT_BUFPTR, VKRT_OFFSETOF(RayGenData,fbPtr)},
     { "world",         VKRT_ACCEL,  VKRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", VKRT_FLOAT3, VKRT_OFFSETOF(RayGenData,camera.dir_00)},
@@ -218,6 +233,12 @@ int main(int ac, char **av)
 
   // ----------- set variables  ----------------------------
   vkrtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
+  
+  vkrtGeomSet1i(trianglesGeom,"one",1);
+  vkrtGeomSet1i(trianglesGeom,"two",2);
+  vkrtRayGenSet1i(rayGen,"three",3); // on AMD, for some reason this ends up setting SBT record for triangle...
+  vkrtRayGenSet1i(rayGen,"four",4);
+
   // vkrtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
   vkrtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
   vkrtRayGenSetAccel (rayGen,"world",        world);

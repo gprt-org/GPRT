@@ -23,6 +23,8 @@
 embed_spirv(
   OUTPUT_TARGET
     sample01_deviceCode
+  ENTRY_POINTS
+    simpleRayGen
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
