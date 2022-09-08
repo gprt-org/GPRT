@@ -1654,9 +1654,7 @@ namespace gprt {
     std::vector<Accel*> accels;
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-    gprt::Buffer raygenShaderBindingTable;
-    gprt::Buffer missShaderBindingTable;
-    gprt::Buffer hitShaderBindingTable;
+    gprt::Buffer shaderBindingTable;
 
     uint32_t numRayTypes = 1;
 
@@ -2258,9 +2256,7 @@ namespace gprt {
       if (fillInstanceDataStage.module)
         vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
 
-      raygenShaderBindingTable.destroy();
-      missShaderBindingTable.destroy();
-      hitShaderBindingTable.destroy();
+      shaderBindingTable.destroy();
       vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
       vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
       vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
@@ -2314,18 +2310,20 @@ namespace gprt {
       size_t numRayGens = raygenPrograms.size();
       size_t numMissProgs = missPrograms.size();
       size_t numHitRecords = getNumHitRecords();
+      size_t numRecords = numRayGens + numMissProgs + numHitRecords;
+
+      if (shaderBindingTable.size != recordSize * numRecords) {
+        shaderBindingTable.destroy();
+      }
+      if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
+        shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+          bufferUsageFlags, memoryUsageFlags, recordSize * numRecords);
+      }
+      shaderBindingTable.map();
+      uint8_t* mapped = ((uint8_t*) (shaderBindingTable.mapped));
 
       // Raygen records
       if (raygenPrograms.size() > 0) {
-        if (raygenShaderBindingTable.size != recordSize * raygenPrograms.size()) {
-          raygenShaderBindingTable.destroy();
-        }
-        if (raygenShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          raygenShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-            bufferUsageFlags, memoryUsageFlags, recordSize * raygenPrograms.size());
-        }
-        raygenShaderBindingTable.map();
-        uint8_t* mapped = ((uint8_t*) (raygenShaderBindingTable.mapped));
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
@@ -2345,26 +2343,16 @@ namespace gprt {
             memcpy(params + varOffset, var.second.data, varSize);
           }
         }
-        raygenShaderBindingTable.unmap();
       }
 
       // Miss records
       if (missPrograms.size() > 0) {
-        if (missShaderBindingTable.size != recordSize * missPrograms.size()) {
-          missShaderBindingTable.destroy();
-        }
-        if (missShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          missShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-            bufferUsageFlags, memoryUsageFlags, recordSize * missPrograms.size());
-        }
-        missShaderBindingTable.map();        
-        uint8_t* mapped = ((uint8_t*) (missShaderBindingTable.mapped));
         for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx;
+          size_t recordOffset = recordStride * idx + recordStride * numRayGens;
           size_t handleOffset = handleStride * idx + handleStride * numRayGens;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
@@ -2378,23 +2366,11 @@ namespace gprt {
             memcpy(params + varOffset, var.second.data, varSize);
           }
         }
-        missShaderBindingTable.unmap();
       }
 
       // Hit records
       if (numHitRecords > 0)
       {
-        // Now, allocate our hit shader binding table
-        if (hitShaderBindingTable.size != recordSize * numHitRecords) {
-          hitShaderBindingTable.destroy();
-        }
-        if (hitShaderBindingTable.buffer == VK_NULL_HANDLE) {
-          hitShaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-            bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords);
-        }
-
-        hitShaderBindingTable.map();
-        uint8_t* mapped = ((uint8_t*) (hitShaderBindingTable.mapped));
         for (int accelID = 0; accelID < accels.size(); ++accelID) {
           Accel *accel = accels[accelID];
           if (!accel) continue;
@@ -2412,7 +2388,7 @@ namespace gprt {
 
                 // First, copy handle
                 size_t instanceOffset = 0; // TODO
-                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numRayGens + numMissProgs);
                 size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numRayGens + numMissProgs);
                 memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
                 
@@ -2428,7 +2404,6 @@ namespace gprt {
             }
           }
         }
-        hitShaderBindingTable.unmap();
       }
 
 
@@ -3198,25 +3173,24 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+  uint64_t baseAddr = getBufferDeviceAddress(
+    context->logicalDevice, context->shaderBindingTable.buffer);
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-    context->logicalDevice, context->raygenShaderBindingTable.buffer);
+  raygenShaderSbtEntry.deviceAddress = baseAddr;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * context->raygenPrograms.size();
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-      context->logicalDevice, context->missShaderBindingTable.buffer);
+    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size();
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
-    hitShaderSbtEntry.deviceAddress = getBufferDeviceAddress(
-      context->logicalDevice, context->hitShaderBindingTable.buffer);
+    hitShaderSbtEntry.deviceAddress = baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
