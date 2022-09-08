@@ -62,7 +62,6 @@ target_link_libraries(gprt
     PUBLIC 
     ${Vulkan_LIBRARY} 
     SPIRV-Tools-static
-    SPIRV-Tools-opt
     gprtDeviceCode
 )
 

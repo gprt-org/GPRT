@@ -126,7 +126,6 @@ inline void gprtRaise_impl(std::string str)
 
 
 #include "3rdParty/SPIRV-Tools/include/spirv-tools/libspirv.h"
-#include "3rdParty/SPIRV-Tools/include/spirv-tools/optimizer.hpp"
 
 std::string errorString(VkResult errorCode)
 {
@@ -293,7 +292,6 @@ namespace gprt {
       text = std::string(spvText->str);
       spvTextDestroy(spvText);
 
-
       std::string singleEntryPointProgram;
       while (std::regex_search(text, match, re))
       {
@@ -334,52 +332,6 @@ namespace gprt {
       }
       singleEntryPointProgram += text;
       
-      // // hold over until we can get those SPIR-V tools changes in...
-      // if (!isComputeBinary) 
-      // {
-      //   text = singleEntryPointProgram;
-      //   singleEntryPointProgram = "";
-
-      //   std::string newProgram;
-      //   std::regex re("( *)(OpName \%param_var_DTid \"param.var.DTid\")");
-      //   std::smatch match;
-
-      //   while (std::regex_search(text, match, re))
-      //   {
-      //     std::string line = match.str(0);
-      //     std::string opname = match.str(2);
-
-      //     // Remove 
-      //     singleEntryPointProgram += match.prefix();
-      //     text = match.suffix().str();
-      //   }
-      //   singleEntryPointProgram += text;
-      // }
-
-      // if (!isComputeBinary) 
-      // {
-      //   text = singleEntryPointProgram;
-      //   singleEntryPointProgram = "";
-
-      //   std::string newProgram;
-      //   std::regex re("( *)(OpExecutionMode)(.*)");
-      //   std::smatch match;
-
-      //   while (std::regex_search(text, match, re))
-      //   {
-      //     std::string line = match.str(0);
-      //     std::string opname = match.str(2);
-
-      //     // Remove 
-      //     singleEntryPointProgram += match.prefix();
-      //     text = match.suffix().str();
-      //   }
-      //   singleEntryPointProgram += text;
-      // }
-
-      // std::cout<<"final program " << std::endl;
-      // std::cout<<singleEntryPointProgram<<std::endl;
-
       // Now, assemble the IR
       spv_binary binary = nullptr;
       spv_diagnostic diagnostic = nullptr;
@@ -390,37 +342,10 @@ namespace gprt {
         spvDiagnosticDestroy(diagnostic);
       }
 
-
-
-      // //Now, assemble the IR
-      // spv_binary binary = nullptr;
-      // spv_diagnostic diagnostic = nullptr;
-      // spvTextToBinary(spvContext, program.c_str(), program.size(), &binary, &diagnostic);
-      // spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
-      // if (diagnostic) {
-      //   spvDiagnosticPrint(diagnostic);
-      //   spvDiagnosticDestroy(diagnostic);
-      // }
-
-      std::vector<uint32_t> optimizedBinary;
-      auto &optimizer = spvtools::Optimizer(SPV_ENV_VULKAN_1_3);
-      optimizer.RegisterSizePasses();
-      optimizer.RegisterLegalizationPasses();
-      optimizer.RegisterPerformancePasses();
-      // optimizer.RegisterPass(spvtools::CreateInstDebugPrintfPass(7, 23));
-      optimizer.Run(binary->code, binary->wordCount, &optimizedBinary);
+      std::vector<uint32_t> finalBinary(binary->wordCount);
+      memcpy(finalBinary.data(), binary->code, finalBinary.size() * sizeof(uint32_t));
       spvBinaryDestroy(binary);
-
-      diagnostic = nullptr;
-      spv_text txt;
-      spvBinaryToText(spvContext, optimizedBinary.data(), optimizedBinary.size(), 
-        // SPV_BINARY_TO_TEXT_OPTION_PRINT | 
-        // SPV_BINARY_TO_TEXT_OPTION_COLOR | 
-        // SPV_BINARY_TO_TEXT_OPTION_INDENT
-        SPV_BINARY_TO_TEXT_OPTION_NONE
-      , &txt, &diagnostic);
-
-      return optimizedBinary;
+      return finalBinary;
     }
 
     // void releaseBinary(spv_binary binary) {
