@@ -29,7 +29,9 @@ jobs:
       shell: bash
       run: |
         sudo apt -y update
-        sudo apt install -y libglu1-mesa-dev \
+        sudo apt install -y xorg-dev \
+                            libxinerama-dev \
+                            libglu1-mesa-dev \
                             freeglut3-dev \
                             mesa-common-dev
 
