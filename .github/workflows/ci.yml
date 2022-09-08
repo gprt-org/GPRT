@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  # allows us to run workflows manually
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+
+
+jobs:
+  main:
+    runs-on: ubuntu-20.04
+
+  steps:
+    - uses: actions/checkout@v2
+
+    - name: Setup environment
+      shell: bash
+      run: |
+         echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Pull dxc compiler
+      shell: bash
+      run: |
+        wget https://drive.google.com/uc\?export\=download\&id\=1dF6cX5q-3tB3e5zVcZIL_Fa1W8-WRpOq -O dxc-artifacts.tar.gz
+        tar xf dxc-artifactcs.tar.gz
+
+    - name: Build
+      shell: bash
+      run:
+
+    - name: Build
+      shell: bash
+      run: |
+      cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
+      cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
+      make -j4
+
+    - name: Run Samples
+      shell: bash
+      run: |
+      ./sample00_rayGenOnly
+      ./sample01_simpleTriangles
