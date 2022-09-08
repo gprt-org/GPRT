@@ -26,12 +26,15 @@ jobs:
     - name: Pull and unpack dxc compiler
       shell: bash
       run: |
+        cd $HOME
         wget https://drive.google.com/uc\?export\=download\&id\=1dF6cX5q-3tB3e5zVcZIL_Fa1W8-WRpOq -O dxc-artifacts.tar.gz
         tar xf dxc-artifacts.tar.gz
 
     - name: Build
       shell: bash
       run: |
+        mkdir bld
+        cd bld
         cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
         cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
         make -j4
@@ -39,5 +42,6 @@ jobs:
     - name: Run Samples
       shell: bash
       run: |
+        cd bld
         ./sample00_rayGenOnly
         ./sample01_simpleTriangles
