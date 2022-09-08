@@ -25,15 +25,15 @@ cmake_minimum_required(VERSION 3.12)
 # set(CMAKE_DXC_COMPILER ${Vulkan_BIN_DIR}/dxc)
 # set(CMAKE_DXC_COMPILER C:/Users/natevm/git/DirectXShaderCompiler/build/Debug/bin/dxc)
 # Ideally we'd use the DXC that comes with Vulkan, but we need vk::RayBufferStore, which is ToT atm...
-find_program(CMAKE_DXC_COMPILER dxc 
-  DOC "Path to the dxc executable." 
-  HINTS ${Vulkan_BIN_DIR}
+find_program(CMAKE_DXC_COMPILER dxc
+  DOC "Path to the dxc executable."
+  HINTS ${Vulkan_BIN_DIR} ${DXC_BIN_DIR}
   NO_DEFAULT_PATH
 )
 
-find_program(CMAKE_SPIRV_DISASSEMBLER dxc 
-  DOC "Path to the dxc executable." 
-  HINTS ${Vulkan_BIN_DIR}
+find_program(CMAKE_SPIRV_DISASSEMBLER dxc
+  DOC "Path to the dxc executable."
+  HINTS ${Vulkan_BIN_DIR} ${DXC_BIN_DIR}
   NO_DEFAULT_PATH
 )
 
@@ -54,15 +54,15 @@ set(EMBED_SPIRV_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # dxc.exe -spirv -T lib_6_3 -fspv-extension=SPV_NV_ray_tracing -fspv-extension=SPV_KHR_ray_query -fspv-extension=SPV_KHR_non_semantic_info raytracing.hlsl
 
 function(embed_spirv)
-  # processes arguments given to a function, and defines a set of variables 
+  # processes arguments given to a function, and defines a set of variables
   #   which hold the values of the respective options
   set(oneArgs OUTPUT_TARGET)
   set(multiArgs SPIRV_LINK_LIBRARIES SOURCES EMBEDDED_SYMBOL_NAMES ENTRY_POINTS)
   cmake_parse_arguments(EMBED_SPIRV "" "${oneArgs}" "${multiArgs}" ${ARGN})
 
-  
-  
-  
+
+
+
   # list(LENGTH EMBED_SPIRV_ENTRY_POINTS NUM_ENTRY_POINTS)
   # math(EXPR NUM_ENTRY_POINTS_MINUS_ONE "${NUM_ENTRY_POINTS}-1")
   # RDAT_ENUM_VALUE_NODEF(Pixel)
@@ -83,9 +83,9 @@ function(embed_spirv)
 
   # "raygeneration", "intersection", "anyhit", "closesthit", "miss", "callable",
 
-  
+
   unset(EMBED_SPIRV_OUTPUTS)
-  set(ENTRY_POINT_TYPES 
+  set(ENTRY_POINT_TYPES
     "RAYGEN"
     "INTERSECTION"
     "ANYHIT"
@@ -104,7 +104,7 @@ function(embed_spirv)
     # Compile hlsl to SPIRV
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
-      COMMAND ${CMAKE_DXC_COMPILER} 
+      COMMAND ${CMAKE_DXC_COMPILER}
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
       -T lib_6_3
@@ -113,11 +113,11 @@ function(embed_spirv)
       -D ${ENTRY_POINT_TYPE}
       -fspv-extension=SPV_KHR_ray_tracing
       -fspv-extension=SPV_KHR_ray_query
-      -fspv-extension=SPV_KHR_non_semantic_info 
-      -fspv-extension=SPV_KHR_physical_storage_buffer 
+      -fspv-extension=SPV_KHR_non_semantic_info
+      -fspv-extension=SPV_KHR_physical_storage_buffer
       -fcgl
       ${EMBED_SPIRV_SOURCES}
-      -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv 
+      -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
       DEPENDS ${EMBED_SPIRV_SOURCES} ${PROJECT_SOURCE_DIR}/gprt/gprt_device.hlsli ${PROJECT_SOURCE_DIR}/gprt/gprt.h
       COMMENT "compile SPIRV ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv from ${EMBED_SPIRV_SOURCES}"
     )
@@ -128,13 +128,13 @@ function(embed_spirv)
   # # Dissassemble to allow for readable spirv in build folder...
   # add_custom_command(
   #   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.spv
-  #   COMMAND ${CMAKE_SPIRV_DISASSEMBLER} 
+  #   COMMAND ${CMAKE_SPIRV_DISASSEMBLER}
   #   ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_as.spv
   #   -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.spv
   #   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_as.spv
   #   COMMENT "disassemble SPIRV ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_as.spv to ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}.spv"
   # )
-  
+
   # Embed spirv files as binary in a .cpp file
   set(EMBED_SPIRV_RUN ${EMBED_SPIRV_DIR}/bin2c.cmake)
   set(EMBED_SPIRV_CPP_FILE ${EMBED_SPIRV_OUTPUT_TARGET}.cpp)
@@ -153,7 +153,7 @@ function(embed_spirv)
   )
 
   add_library(${EMBED_SPIRV_OUTPUT_TARGET} OBJECT)
-  target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_CPP_FILE}) #${EMBED_SPIRV_H_FILE} #${EMBED_SPIRV_SOURCES} 
+  target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_CPP_FILE}) #${EMBED_SPIRV_H_FILE} #${EMBED_SPIRV_SOURCES}
 endfunction()
 
 
@@ -187,7 +187,7 @@ endfunction()
 
 # set(CMAKE_DXC_COMPILER ${Vulkan_BIN_DIR}/dxc)
 
-# # find_program(CMAKE_DXC_COMPILER dxc DOC "Path to the dxc executable." 
+# # find_program(CMAKE_DXC_COMPILER dxc DOC "Path to the dxc executable."
 #     # HINTS ${Vulkan_BIN_DIR})
 # if(NOT CMAKE_DXC_COMPILER)
 #   message(FATAL_ERROR "dxc not found.")
@@ -198,7 +198,7 @@ endfunction()
 # # dxc.exe -spirv -T lib_6_3 -fspv-extension=SPV_NV_ray_tracing -fspv-extension=SPV_KHR_ray_query -fspv-extension=SPV_KHR_non_semantic_info raytracing.hlsl
 
 # function(embed_spirv)
-#   # processes arguments given to a function, and defines a set of variables 
+#   # processes arguments given to a function, and defines a set of variables
 #   #   which hold the values of the respective options
 #   set(oneArgs OUTPUT_TARGET)
 #   set(multiArgs SPIRV_LINK_LIBRARIES SOURCES EMBEDDED_SYMBOL_NAMES ENTRY_POINTS)
@@ -217,16 +217,16 @@ endfunction()
 #     # Compile entry point to SPIRV
 #     add_custom_command(
 #         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv
-#         COMMAND ${CMAKE_DXC_COMPILER} 
+#         COMMAND ${CMAKE_DXC_COMPILER}
 #         -spirv
 #         -fspv-target-env=vulkan1.1spirv1.4
 #         -T lib_6_3
-#         -fspv-extension=SPV_KHR_ray_tracing 
-#         -fspv-extension=SPV_KHR_ray_query 
+#         -fspv-extension=SPV_KHR_ray_tracing
+#         -fspv-extension=SPV_KHR_ray_query
 #         -fspv-extension=SPV_KHR_non_semantic_info
 #         # -E ${EMBED_SPIRV_ENTRY_POINT}
-#         ${EMBED_SPIRV_SOURCES} 
-#         #-Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv 
+#         ${EMBED_SPIRV_SOURCES}
+#         #-Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_ENTRY_POINT}.spv
 #         DEPENDS ${EMBED_SPIRV_SOURCES}
 #         COMMENT "compile SPIRV ${EMBED_SPIRV_ENTRY_POINT} from ${EMBED_SPIRV_SOURCES}"
 #     )
@@ -251,5 +251,5 @@ endfunction()
 #   )
 
 #   add_library(${EMBED_SPIRV_OUTPUT_TARGET} OBJECT)
-#   target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_CPP_FILE}) #${EMBED_SPIRV_H_FILE} #${EMBED_SPIRV_SOURCES} 
+#   target_sources(${EMBED_SPIRV_OUTPUT_TARGET} PRIVATE ${EMBED_SPIRV_CPP_FILE}) #${EMBED_SPIRV_H_FILE} #${EMBED_SPIRV_SOURCES}
 # endfunction()
