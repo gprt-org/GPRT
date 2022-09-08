@@ -37,12 +37,12 @@ jobs:
     - name: Build
       shell: bash
       run: |
-      cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
-      cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
-      make -j4
+        cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
+        cmake .. -DVulkan_BIN_DIR=$HOME/soft/vkrt/dxc-artifacts/bin
+        make -j4
 
     - name: Run Samples
       shell: bash
       run: |
-      ./sample00_rayGenOnly
-      ./sample01_simpleTriangles
+        ./sample00_rayGenOnly
+        ./sample01_simpleTriangles
