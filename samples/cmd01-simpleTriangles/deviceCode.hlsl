@@ -23,6 +23,7 @@
 #include "deviceCode.h"
 #include "gprt.h"
 
+
 struct Data{
   float3 color;
   bool debug;
@@ -48,9 +49,8 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
   //     int3 indices = vk::RawBufferLoad<int3>(RGSBTData.index + sizeof(int3) * i);
   //     printf("%d %d %d\n", indices.x, indices.y, indices.z);
   //   }
-    printf("RAYGEN TEST %d, %d\n", RGSBTData.three, RGSBTData.four);
+    printf("RAYGEN TEST %lu, %lu\n", RGSBTData.three, RGSBTData.four);
   }
-  
 
   // uint64_t addr = RGSBTData.index;
   // const int   test1  = vk::RawBufferLoad<int>(addr + 1ul * sizeof(int));
@@ -89,7 +89,7 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload)
                         (in TrianglesGeomData geomSBTData, inout Payload prd)// , in float2 attribs
 {
   if (prd.data.debug) {  
-    printf("CHIT TEST %d, %d\n", geomSBTData.one, geomSBTData.two);
+    printf("CHIT TEST %lu, %lu\n", geomSBTData.one, geomSBTData.two);
     // 301380000
     // printf("TEST\n");
     // uint64_t addr = 301380000ul; //geomSBTData.index;
@@ -189,6 +189,15 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload)
 }
 
 GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
+                 (in MissProgData missSBTData, inout Payload prd) 
+{
+  uint2 pixelID = DispatchRaysIndex().xy;  
+  int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
+  prd.data.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
+}
+
+
+GPRT_MISS_PROGRAM(miss2, MissProgData, Payload)
                  (in MissProgData missSBTData, inout Payload prd) 
 {
   uint2 pixelID = DispatchRaysIndex().xy;  

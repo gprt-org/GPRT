@@ -104,8 +104,8 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
-    { "one", GPRT_INT, GPRT_OFFSETOF(TrianglesGeomData,one)},
-    { "two", GPRT_INT, GPRT_OFFSETOF(TrianglesGeomData,two)},
+    { "one", GPRT_UINT64_T, GPRT_OFFSETOF(TrianglesGeomData,one)},
+    { "two", GPRT_UINT64_T, GPRT_OFFSETOF(TrianglesGeomData,two)},
     // { "index",  GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,index)},
     // { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
     // { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)}
@@ -201,8 +201,8 @@ int main(int ac, char **av)
   // set up ray gen program
   // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
-    { "three",         GPRT_INT, GPRT_OFFSETOF(RayGenData,three)},
-    { "four",          GPRT_INT, GPRT_OFFSETOF(RayGenData,four)},
+    { "three",         GPRT_UINT64_T, GPRT_OFFSETOF(RayGenData,three)},
+    { "four",          GPRT_UINT64_T, GPRT_OFFSETOF(RayGenData,four)},
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
     { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
     { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
@@ -234,10 +234,10 @@ int main(int ac, char **av)
   // ----------- set variables  ----------------------------
   gprtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
   
-  gprtGeomSet1i(trianglesGeom,"one",1);
-  gprtGeomSet1i(trianglesGeom,"two",2);
-  gprtRayGenSet1i(rayGen,"three",3); // on AMD, for some reason this ends up setting SBT record for triangle...
-  gprtRayGenSet1i(rayGen,"four",4);
+  gprtGeomSet1ul(trianglesGeom,"one",1);
+  gprtGeomSet1ul(trianglesGeom,"two",2);
+  gprtRayGenSet1ul(rayGen,"three",3); // on AMD, for some reason this ends up setting SBT record for triangle...
+  gprtRayGenSet1ul(rayGen,"four",4);
 
   // gprtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
   gprtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
@@ -263,7 +263,10 @@ int main(int ac, char **av)
   // ##################################################################
 
   LOG("launching ...");
-  gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+
+  while(true) {
+    gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+  }
 
   LOG("done with launch, writing picture ...");
   // for host pinned mem it doesn't matter which device we query...

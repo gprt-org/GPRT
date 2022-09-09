@@ -125,8 +125,6 @@ inline void gprtRaise_impl(std::string str)
 #define GPRT_NOTIMPLEMENTED  { std::cerr<<std::string(__PRETTY_FUNCTION__) << " not implemented" << std::endl; assert(false);};
 
 
-#include "3rdParty/SPIRV-Tools/include/spirv-tools/libspirv.h"
-
 std::string errorString(VkResult errorCode)
 {
   switch (errorCode)
@@ -266,86 +264,89 @@ namespace gprt {
   };
 
   struct Module {
-    spv_context spvContext;
     // std::string program;
     std::map<std::string, std::vector<uint8_t>> program;
 
     Module(std::map<std::string, std::vector<uint8_t>> program) {
       this->program = program;
-      spvContext = spvContextCreate(SPV_ENV_UNIVERSAL_1_4);
     }
 
     ~Module() {
-      spvContextDestroy(spvContext);
     }
 
     std::vector<uint32_t> getBinary(std::string entryType, std::string entryPoint) {
-      std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
-      std::smatch match;
+      size_t sizeOfProgram = program[entryType].size() -  1; // program is null terminated.
+      std::vector<uint32_t> finalProgram(sizeOfProgram / 4);
+      memcpy(finalProgram.data(), program[entryType].data(), sizeOfProgram);
+      return finalProgram;
 
-      std::string text;
 
-      spv_text spvText = nullptr;
-      spv_diagnostic spvTextDiagnostic = nullptr;
-      std::vector<uint8_t> prog = program[entryType];
-      spvBinaryToText(spvContext, (uint32_t*)prog.data(), prog.size() / 4, SPV_BINARY_TO_TEXT_OPTION_NONE, &spvText, &spvTextDiagnostic);
-      text = std::string(spvText->str);
-      spvTextDestroy(spvText);
+      // std::regex re("( *)(OpEntryPoint )(.*? )([%][A-Za-z]*)( \"[A-Za-z]*\" )(.*)");
+      // std::smatch match;
 
-      std::string singleEntryPointProgram;
-      while (std::regex_search(text, match, re))
-      {
-        std::string line = match.str(0);
-        std::string otherEntryPoint = match.str(4);
+      // std::string text;
 
-        if (match.str(4) == (std::string("%") + std::string(entryPoint)) ) {
-          singleEntryPointProgram += match.prefix().str() + match.str(0);
-          text = match.suffix().str();
-        }
-        else {
-          // Remove the other entry points. Currently, SPIRV doesn't support
-          // multiple entry points in combination with debug printf
-          singleEntryPointProgram += match.prefix();
-          text = match.suffix().str();
+      // spv_text spvText = nullptr;
+      // spv_diagnostic spvTextDiagnostic = nullptr;
+      // std::vector<uint8_t> prog = program[entryType];
+      // spvBinaryToText(spvContext, (uint32_t*)prog.data(), prog.size() / 4, SPV_BINARY_TO_TEXT_OPTION_NONE, &spvText, &spvTextDiagnostic);
+      // text = std::string(spvText->str);
+      // spvTextDestroy(spvText);
 
-          // Remove the OpName %entrypoint "entrypoint" line
-          std::regex OpNameRE("( *)(OpName )(" + otherEntryPoint + ")( \"[A-Za-z]*\")");
-          std::smatch OpNameMatch;
-          std::string subtext = text;
-          if (!std::regex_search(subtext, OpNameMatch, OpNameRE)) throw std::runtime_error("Error editing SPIRV");
-          else {
-            // std::cout<<"Found OpName: "<< OpNameMatch.str(0) << " ... removing..."<<std::endl;
-            text = OpNameMatch.prefix().str() + OpNameMatch.suffix().str();
-          }
+      // std::string singleEntryPointProgram;
+      // while (std::regex_search(text, match, re))
+      // {
+      //   std::string line = match.str(0);
+      //   std::string otherEntryPoint = match.str(4);
 
-          // Remove the entrypoint itself.
-          // found by %entrypoint = ... until the first occurance of OpFunctionEnd
-          std::regex OpEntryPointRE("( *)(" + otherEntryPoint + " =[^]*?OpFunctionEnd)");
-          std::smatch OpEntryPointMatch;
-          subtext = text;
-          if (!std::regex_search(subtext, OpEntryPointMatch, OpEntryPointRE)) throw std::runtime_error("Error editing SPIRV");
-          else {
-            // std::cout<<"Found Entry Point: "<< OpEntryPointMatch.str(0) << " ... removing..."<<std::endl;
-            text = OpEntryPointMatch.prefix().str() + OpEntryPointMatch.suffix().str();
-          }
-        }
-      }
-      singleEntryPointProgram += text;
+      //   if (match.str(4) == (std::string("%") + std::string(entryPoint)) ) {
+      //     singleEntryPointProgram += match.prefix().str() + match.str(0);
+      //     text = match.suffix().str();
+      //   }
+      //   else {
+      //     // Remove the other entry points. Currently, SPIRV doesn't support
+      //     // multiple entry points in combination with debug printf
+      //     singleEntryPointProgram += match.prefix();
+      //     text = match.suffix().str();
+
+      //     // Remove the OpName %entrypoint "entrypoint" line
+      //     std::regex OpNameRE("( *)(OpName )(" + otherEntryPoint + ")( \"[A-Za-z]*\")");
+      //     std::smatch OpNameMatch;
+      //     std::string subtext = text;
+      //     if (!std::regex_search(subtext, OpNameMatch, OpNameRE)) throw std::runtime_error("Error editing SPIRV");
+      //     else {
+      //       // std::cout<<"Found OpName: "<< OpNameMatch.str(0) << " ... removing..."<<std::endl;
+      //       text = OpNameMatch.prefix().str() + OpNameMatch.suffix().str();
+      //     }
+
+      //     // Remove the entrypoint itself.
+      //     // found by %entrypoint = ... until the first occurance of OpFunctionEnd
+      //     std::regex OpEntryPointRE("( *)(" + otherEntryPoint + " =[^]*?OpFunctionEnd)");
+      //     std::smatch OpEntryPointMatch;
+      //     subtext = text;
+      //     if (!std::regex_search(subtext, OpEntryPointMatch, OpEntryPointRE)) throw std::runtime_error("Error editing SPIRV");
+      //     else {
+      //       // std::cout<<"Found Entry Point: "<< OpEntryPointMatch.str(0) << " ... removing..."<<std::endl;
+      //       text = OpEntryPointMatch.prefix().str() + OpEntryPointMatch.suffix().str();
+      //     }
+      //   }
+      // }
+      // singleEntryPointProgram += text;
       
-      // Now, assemble the IR
-      spv_binary binary = nullptr;
-      spv_diagnostic diagnostic = nullptr;
-      spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
-      spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
-      if (diagnostic) {
-        spvDiagnosticPrint(diagnostic);
-        spvDiagnosticDestroy(diagnostic);
-      }
+      // // Now, assemble the IR
+      // spv_binary binary = nullptr;
+      // spv_diagnostic diagnostic = nullptr;
+      // spvTextToBinary(spvContext, singleEntryPointProgram.c_str(), singleEntryPointProgram.size(), &binary, &diagnostic);
+      // spvValidateBinary(spvContext, binary->code, binary->wordCount, &diagnostic);
+      // if (diagnostic) {
+      //   spvDiagnosticPrint(diagnostic);
+      //   spvDiagnosticDestroy(diagnostic);
+      // }
 
-      std::vector<uint32_t> finalBinary(binary->wordCount);
-      memcpy(finalBinary.data(), binary->code, finalBinary.size() * sizeof(uint32_t));
-      spvBinaryDestroy(binary);
-      return finalBinary;
+      // std::vector<uint32_t> finalBinary(binary->wordCount);
+      // memcpy(finalBinary.data(), binary->code, finalBinary.size() * sizeof(uint32_t));
+      // spvBinaryDestroy(binary);
+      // return finalBinary;
     }
 
     // void releaseBinary(spv_binary binary) {
@@ -3196,6 +3197,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{}; // empty
+  callableShaderSbtEntry.deviceAddress = 0;
   // callableShaderSbtEntry.stride = handleSizeAligned;
   // callableShaderSbtEntry.size = handleSizeAligned;
 

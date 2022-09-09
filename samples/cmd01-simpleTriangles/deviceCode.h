@@ -22,11 +22,23 @@
 
 #include "gprt.h"
 
+/* variables available to all programs */
+// NOTE: There's an unfortunate bug on AMD GPUs preventing SBT record data 
+// from working... 
+struct PushConstants
+{
+  alignas(8) uint64_t index; // vec3i*
+  alignas(8) uint64_t vertex; // vec3f *
+  
+  /*! base color we use for the entire mesh */
+  alignas(16) float3 color;
+};
+
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData
 {
-  alignas(4) int one;
-  alignas(4) int two;
+  alignas(8) uint64_t one;
+  alignas(8) uint64_t two;
   /*! array/buffer of vertex indices */
   /*! array/buffer of vertex positions */
   // alignas(8) uint64_t index; // vec3i*
@@ -39,8 +51,8 @@ struct TrianglesGeomData
 
 struct RayGenData
 {
-  alignas(4) int three;
-  alignas(4) int four;
+  alignas(8) uint64_t three;
+  alignas(8) uint64_t four;
   alignas(8) uint64_t fbPtr;
 
   alignas(8) int2 fbSize;

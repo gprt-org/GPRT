@@ -100,11 +100,11 @@ void progName                                                           \
 #ifdef CLOSESTHIT
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)     \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload);   \
+  void progName(in RecordType record, inout PayloadType payload);       \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("closesthit")]                                                \
-  void __closesthit__##progName(inout PayloadType payload)                  \
+  void __closesthit__##progName(inout PayloadType payload)              \
   {                                                                     \
     progName(progName##RecordData, payload);                            \
   }                                                                     \
@@ -112,7 +112,7 @@ void progName                                                           \
   void progName                                                         \
 /* program args and body supplied by user ... */                      
 #else
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)                       \
+#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName                                                           \
 /* program args and body supplied by user ... */   

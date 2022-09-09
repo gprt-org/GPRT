@@ -109,16 +109,3 @@ if(GPRT_BUILD_SAMPLES)
     endif()
   endif()
 endif()
-
-# SPIRV tools
-set(SPIRV_TOOLS_BUILD_STATIC ON CACHE BOOL
-  "Build ${SPIRV_TOOLS}-static target. ${SPIRV_TOOLS} will alias to ${SPIRV_TOOLS}-static or ${SPIRV_TOOLS}-shared based on BUILD_SHARED_LIBS" 
-  FORCE)
-set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL
-  "Skip building the executable and tests along with the library"
-  FORCE)
-set(SPIRV_SKIP_TESTS ON CACHE BOOL
-  "Skip building tests along with the library" 
-  FORCE)
-add_subdirectory(SPIRV-Tools EXCLUDE_FROM_ALL)
-
