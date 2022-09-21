@@ -28,29 +28,16 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData
 {
-  // unfortunately, a bug on AMD prevents us from using geometry SBT data
-  int tmp; 
-  // alignas(8) uint64_t one;
-  // alignas(8) uint64_t two;
   /*! array/buffer of vertex indices */
+  alignas(8) uint64_t index; // vec3i*
   /*! array/buffer of vertex positions */
-  // alignas(8) uint64_t index; // vec3i*
-  // alignas(8) uint64_t vertex; // vec3f *  
+  alignas(8) uint64_t vertex; // vec3f *  
   /*! base color we use for the entire mesh */
-  // alignas(16) float3 color;
-
+  alignas(16) float3 color;
 };
 
 struct RayGenData
 {
-  // Temporary until AMD bug is fixed... 
-  alignas(8) uint64_t index;  // int3*
-  alignas(8) uint64_t vertex; // float3*
-  alignas(16) float3 color;
-  // Temporary until AMD bug is fixed... 
-  alignas(16) float3  color0;
-  alignas(16) float3  color1;
-
   alignas(8) uint64_t fbPtr;
 
   alignas(8) int2 fbSize;
@@ -67,7 +54,6 @@ struct RayGenData
 /* variables for the miss program */
 struct MissProgData
 {
-  int tmp; 
-  // alignas(16) float3  color0;
-  // alignas(16) float3  color1;
+  alignas(16) float3  color0;
+  alignas(16) float3  color1;
 };

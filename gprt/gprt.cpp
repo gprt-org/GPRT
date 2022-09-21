@@ -1350,6 +1350,7 @@ namespace gprt {
         uint64_t instanceBufferAddr;
         uint64_t transformBufferAddr;
         uint64_t accelReferencesAddr;
+        uint64_t pad[16-3];
       } pushConstants;
 
       pushConstants.instanceBufferAddr = instancesBuffer->address;
@@ -2558,7 +2559,7 @@ namespace gprt {
       VkPipelineCache cache = VK_NULL_HANDLE;
 
       VkPushConstantRange pushConstantRange = {};
-      pushConstantRange.size = 3 * sizeof(uint64_t);
+      pushConstantRange.size = 128;
       pushConstantRange.offset = 0;
       pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -3180,7 +3181,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
   raygenShaderSbtEntry.deviceAddress = baseAddr;
   raygenShaderSbtEntry.stride = recordSize;
-  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride * context->raygenPrograms.size();
+  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride; // for raygen, can only be one. this needs to be the same as stride.
+  // * context->raygenPrograms.size();
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {

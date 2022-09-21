@@ -39,6 +39,11 @@ namespace gprt {
   RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 };
 
+struct PushConstants {
+  uint64_t r[16];
+};
+[[vk::push_constant]] PushConstants pc;
+
 /*
   The DXC compiler unfortunately doesn't handle multiple mixed entry points 
   of different stage kinds in the same compilation step. So we instead 

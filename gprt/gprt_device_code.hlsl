@@ -1,12 +1,5 @@
 #include "gprt.h"
 
-struct PushConsts {
-	uint64_t instanceBufferAddr;
-	uint64_t transformBufferAddr;
-	uint64_t accelReferencesAddr;
-};
-[[vk::push_constant]] PushConsts pushConsts;
-
 // typedef enum VkGeometryInstanceFlagBitsKHR {
 //     VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR = 0x00000001,
 //     VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR = 0x00000002,
@@ -37,64 +30,68 @@ struct VkAccelerationStructureInstanceKHR {
 
 GPRT_COMPUTE_PROGRAM(gprtFillInstanceData)(uint3 DTid)
 {
+  uint64_t instanceBufferPtr = pc.r[0];
+  uint64_t transformBufferPtr = pc.r[1];
+  uint64_t accelReferencesPtr = pc.r[2];
+
   VkAccelerationStructureInstanceKHR instance;
   // float3x4 transform = vk::RawBufferLoad<float3x4>(
-  //     pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x);;
+  //     transformBufferPtr + sizeof(float3x4) * DTid.x);;
   
   instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
-  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 | 0x00 << 24;    
+  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 | 0x00 << 24;
 
   // this is gross, but AMD has a bug where loading 3x4 transforms causes a random crash when creating shader modules.
   instance.transforma = 
     vk::RawBufferLoad<float4>(
-      pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x);
+      transformBufferPtr + sizeof(float3x4) * DTid.x);
   instance.transformb = 
     vk::RawBufferLoad<float4>(
-      pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x + sizeof(float4));
+      transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4));
   instance.transformc = 
     vk::RawBufferLoad<float4>(
-      pushConsts.transformBufferAddr + sizeof(float3x4) * DTid.x + sizeof(float4) + sizeof(float4));
+      transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4) + sizeof(float4));
   
   instance.accelerationStructureReference = vk::RawBufferLoad<uint64_t>(
-    pushConsts.accelReferencesAddr + sizeof(uint64_t) * DTid.x
+    accelReferencesPtr + sizeof(uint64_t) * DTid.x
   );
 
   // // vk::RawBufferStore<VkAccelerationStructureInstanceKHR>(
-  // //   pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
+  // //   instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
   // //   instance
   // // );
 
   // // for whatever reason, can't just store all values in this structure at once... 
   // vk::RawBufferStore<float3x4>(
-  //   pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
+  //   instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
   //   transform
   // );
   vk::RawBufferStore<float4>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x,
     instance.transforma
   );
   vk::RawBufferStore<float4>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float4),
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float4),
     instance.transformb
   );
   vk::RawBufferStore<float4>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float4) + sizeof(float4),
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float4) + sizeof(float4),
     instance.transformc
   );
 
 
   vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4),
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4),
     instance.instanceCustomIndex24Mask8
   );
 
   vk::RawBufferStore<uint32_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t),
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t),
     instance.instanceShaderBindingTableRecordOffset24Flags8
   );
 
   vk::RawBufferStore<uint64_t>(
-    pushConsts.instanceBufferAddr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t) + sizeof(uint32_t),
+    instanceBufferPtr + sizeof(VkAccelerationStructureInstanceKHR) * DTid.x + sizeof(float3x4) + sizeof(uint32_t) + sizeof(uint32_t),
     instance.accelerationStructureReference
   );
 }

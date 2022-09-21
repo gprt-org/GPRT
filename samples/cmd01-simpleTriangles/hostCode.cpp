@@ -104,9 +104,9 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
-    // { "index",  GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,index)},
-    // { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
-    // { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)}
+    { "index",  GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,index)},
+    { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
+    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType trianglesGeomType
@@ -145,10 +145,9 @@ int main(int ac, char **av)
   gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
 
-  // temporary, bug on AMD breaks CH SBT data...
-  // gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  // gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
-  // gprtGeomSet3f(trianglesGeom,"color",0,1,0);
+  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+  gprtGeomSet3f(trianglesGeom,"color",0,1,0);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
@@ -170,8 +169,8 @@ int main(int ac, char **av)
   // -------------------------------------------------------
   GPRTVarDecl missProgVars[]
     = {
-    // { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
-    // { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
+    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
+    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
     { /* sentinel to mark end of list */ }
   };
   // ----------- create object  ----------------------------
@@ -180,9 +179,8 @@ int main(int ac, char **av)
                         missProgVars,-1);
 
   // ----------- set variables  ----------------------------
-  // temporarily disabled due to AMD bugs...
-  // gprtMissProgSet3f(missProg,"color0",.8f,0.f,0.f);
-  // gprtMissProgSet3f(missProg,"color1",.8f,.8f,.8f);
+  gprtMissProgSet3f(missProg,"color0",.8f,0.f,0.f);
+  gprtMissProgSet3f(missProg,"color1",.8f,.8f,.8f);
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -195,12 +193,6 @@ int main(int ac, char **av)
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
     { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
     { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
-
-    { "index",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,index)},
-    { "vertex",        GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,vertex)},
-    { "color",         GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,color)},
-    { "color0",        GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,color0)},
-    { "color1",        GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,color1)},
     { /* sentinel to mark end of list */ }
   };
 
@@ -235,13 +227,6 @@ int main(int ac, char **av)
   gprtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
   gprtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
   gprtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
-
-  // temporary...
-  gprtRayGenSetBuffer(rayGen,"vertex",vertexBuffer);
-  gprtRayGenSetBuffer(rayGen,"index",indexBuffer);
-  gprtRayGenSet3f(rayGen,"color",0,1,0);
-  gprtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
-  gprtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
 
   // ##################################################################
   // build *SBT* required to trace the groups
