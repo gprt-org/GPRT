@@ -84,16 +84,16 @@ using namespace linalg::ostream_overloads;
 #define GPRT_TERMINAL_CYAN "\e[36m"
 #define GPRT_TERMINAL_LIGHT_RED "\033[1;31m"
 
-typedef struct _GPRTContext       *GPRTContext;
-typedef struct _GPRTBuffer        *GPRTBuffer;
-typedef struct _GPRTTexture       *GPRTTexture;
-typedef struct _GPRTGeom          *GPRTGeom;
-typedef struct _GPRTGeomType      *GPRTGeomType;
-typedef struct _GPRTVariable      *GPRTVariable;
-typedef struct _GPRTModule        *GPRTModule;
-typedef struct _GPRTAccel         *GPRTAccel;
-typedef struct _GPRTRayGen        *GPRTRayGen;
-typedef struct _GPRTMissProg      *GPRTMissProg;
+typedef struct _GPRTContext    *GPRTContext;
+typedef struct _GPRTBuffer     *GPRTBuffer;
+typedef struct _GPRTTexture    *GPRTTexture;
+typedef struct _GPRTGeom       *GPRTGeom;
+typedef struct _GPRTGeomType   *GPRTGeomType;
+typedef struct _GPRTVariable   *GPRTVariable;
+typedef struct _GPRTModule     *GPRTModule;
+typedef struct _GPRTAccel      *GPRTAccel;
+typedef struct _GPRTRayGen     *GPRTRayGen;
+typedef struct _GPRTMiss       *GPRTMiss;
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -281,7 +281,8 @@ typedef enum
 
 typedef enum
   {
-   GPRT_USER,
+   GPRT_UNKNOWN,
+   GPRT_AABBS,
    GPRT_TRIANGLES,
   //  GPRT_CURVES
   }
@@ -447,11 +448,24 @@ GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles,
                                      size_t stride,
                                      size_t offset);
 
+/*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ) 
+  for the given AABB geometry. This _has_ to be set before the accel(s) 
+  that this geom is used in get built. */
+GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, 
+                                    GPRTBuffer positions,
+                                    size_t count,
+                                    size_t stride,
+                                    size_t offset);
+
 /*! technically this is currently a no-op, but we have this function around to
   match OWL */
 GPRT_API void gprtBuildPrograms(GPRTContext context);
 
 GPRT_API void gprtBuildPipeline(GPRTContext context);
+
+// note, must occur _after_ all acceleration structures are built, 
+// because we sometimes store acceleration structure pointers 
+// in shader records.
 GPRT_API void gprtBuildSBT(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 
@@ -495,8 +509,8 @@ gprtRayGenCreate(GPRTContext  context,
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen rayGen);
 
-GPRT_API GPRTMissProg
-gprtMissProgCreate(GPRTContext  context,
+GPRT_API GPRTMiss
+gprtMissCreate(GPRTContext  context,
                    GPRTModule module,
                    const char *programName,
                    size_t      sizeOfVarStruct,
@@ -505,12 +519,12 @@ gprtMissProgCreate(GPRTContext  context,
 
 /*! sets the given miss program for the given ray type */
 GPRT_API void
-gprtMissProgSet(GPRTContext  context,
+gprtMissSet(GPRTContext  context,
                int rayType,
-               GPRTMissProg missProgToUse);
+               GPRTMiss missProgToUse);
 
 GPRT_API void
-gprtMissProgDestroy(GPRTMissProg missProg);
+gprtMissDestroy(GPRTMiss missProg);
 
 // ------------------------------------------------------------------
 /*! create a new acceleration structure for AABB geometries.
@@ -637,27 +651,22 @@ GPRT_API void
 gprtGeomTypeDestroy(GPRTGeomType geomType);
 
 GPRT_API void
-gprtGeomTypeSetClosestHit(GPRTGeomType type,
+gprtGeomTypeSetClosestHitProg(GPRTGeomType type,
                           int rayType,
                           GPRTModule module,
                           const char *progName);
 
 GPRT_API void
-gprtGeomTypeSetAnyHit(GPRTGeomType type,
+gprtGeomTypeSetAnyHitProg(GPRTGeomType type,
                       int rayType,
                       GPRTModule module,
                       const char *progName);
 
 GPRT_API void
-gprtGeomTypeSetIntersectProg(GPRTGeomType type,
+gprtGeomTypeSetIntersectionProg(GPRTGeomType type,
                              int rayType,
                              GPRTModule module,
                              const char *progName);
-
-GPRT_API void
-gprtGeomTypeSetBoundsProg(GPRTGeomType type,
-                          GPRTModule module,
-                          const char *progName);
 
 /*! creates a buffer that uses host pinned memory; that memory is
 pinned on the host and accessible to all devices */
@@ -721,14 +730,14 @@ GPRT_API void gprtRayGenSet2bv(GPRTRayGen raygen, const char *name, const bool *
 GPRT_API void gprtRayGenSet3bv(GPRTRayGen raygen, const char *name, const bool *val);
 GPRT_API void gprtRayGenSet4bv(GPRTRayGen raygen, const char *name, const bool *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1b(GPRTMissProg missprog, const char *name, bool val);
-GPRT_API void gprtMissProgSet2b(GPRTMissProg missprog, const char *name, bool x, bool y);
-GPRT_API void gprtMissProgSet3b(GPRTMissProg missprog, const char *name, bool x, bool y, bool z);
-GPRT_API void gprtMissProgSet4b(GPRTMissProg missprog, const char *name, bool x, bool y, bool z, bool w);
-GPRT_API void gprtMissProgSet2bv(GPRTMissProg missprog, const char *name, const bool *val);
-GPRT_API void gprtMissProgSet3bv(GPRTMissProg missprog, const char *name, const bool *val);
-GPRT_API void gprtMissProgSet4bv(GPRTMissProg missprog, const char *name, const bool *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1b(GPRTMiss miss, const char *name, bool val);
+GPRT_API void gprtMissSet2b(GPRTMiss miss, const char *name, bool x, bool y);
+GPRT_API void gprtMissSet3b(GPRTMiss miss, const char *name, bool x, bool y, bool z);
+GPRT_API void gprtMissSet4b(GPRTMiss miss, const char *name, bool x, bool y, bool z, bool w);
+GPRT_API void gprtMissSet2bv(GPRTMiss miss, const char *name, const bool *val);
+GPRT_API void gprtMissSet3bv(GPRTMiss miss, const char *name, const bool *val);
+GPRT_API void gprtMissSet4bv(GPRTMiss miss, const char *name, const bool *val);
 
 // setters for variables on "Geom"s
 // GPRT_API void gprtGeomSet1b(GPRTGeom geom, const char *name, bool val);
@@ -762,14 +771,14 @@ GPRT_API void gprtRayGenSet2cv(GPRTRayGen raygen, const char *name, const int8_t
 GPRT_API void gprtRayGenSet3cv(GPRTRayGen raygen, const char *name, const int8_t *val);
 GPRT_API void gprtRayGenSet4cv(GPRTRayGen raygen, const char *name, const int8_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1c(GPRTMissProg missprog, const char *name, int8_t val);
-GPRT_API void gprtMissProgSet2c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y);
-GPRT_API void gprtMissProgSet3c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z);
-GPRT_API void gprtMissProgSet4c(GPRTMissProg missprog, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-GPRT_API void gprtMissProgSet2cv(GPRTMissProg missprog, const char *name, const int8_t *val);
-GPRT_API void gprtMissProgSet3cv(GPRTMissProg missprog, const char *name, const int8_t *val);
-GPRT_API void gprtMissProgSet4cv(GPRTMissProg missprog, const char *name, const int8_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1c(GPRTMiss miss, const char *name, int8_t val);
+GPRT_API void gprtMissSet2c(GPRTMiss miss, const char *name, int8_t x, int8_t y);
+GPRT_API void gprtMissSet3c(GPRTMiss miss, const char *name, int8_t x, int8_t y, int8_t z);
+GPRT_API void gprtMissSet4c(GPRTMiss miss, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
+GPRT_API void gprtMissSet2cv(GPRTMiss miss, const char *name, const int8_t *val);
+GPRT_API void gprtMissSet3cv(GPRTMiss miss, const char *name, const int8_t *val);
+GPRT_API void gprtMissSet4cv(GPRTMiss miss, const char *name, const int8_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1c(GPRTGeom geom, const char *name, int8_t val);
@@ -802,14 +811,14 @@ GPRT_API void gprtRayGenSet2ucv(GPRTRayGen raygen, const char *name, const uint8
 GPRT_API void gprtRayGenSet3ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
 GPRT_API void gprtRayGenSet4ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1uc(GPRTMissProg missprog, const char *name, uint8_t val);
-GPRT_API void gprtMissProgSet2uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y);
-GPRT_API void gprtMissProgSet3uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z);
-GPRT_API void gprtMissProgSet4uc(GPRTMissProg missprog, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-GPRT_API void gprtMissProgSet2ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
-GPRT_API void gprtMissProgSet3ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
-GPRT_API void gprtMissProgSet4ucv(GPRTMissProg missprog, const char *name, const uint8_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1uc(GPRTMiss miss, const char *name, uint8_t val);
+GPRT_API void gprtMissSet2uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y);
+GPRT_API void gprtMissSet3uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y, uint8_t z);
+GPRT_API void gprtMissSet4uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
+GPRT_API void gprtMissSet2ucv(GPRTMiss miss, const char *name, const uint8_t *val);
+GPRT_API void gprtMissSet3ucv(GPRTMiss miss, const char *name, const uint8_t *val);
+GPRT_API void gprtMissSet4ucv(GPRTMiss miss, const char *name, const uint8_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1uc(GPRTGeom geom, const char *name, uint8_t val);
@@ -842,14 +851,14 @@ GPRT_API void gprtRayGenSet2sv(GPRTRayGen raygen, const char *name, const int16_
 GPRT_API void gprtRayGenSet3sv(GPRTRayGen raygen, const char *name, const int16_t *val);
 GPRT_API void gprtRayGenSet4sv(GPRTRayGen raygen, const char *name, const int16_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1s(GPRTMissProg missprog, const char *name, int16_t val);
-GPRT_API void gprtMissProgSet2s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y);
-GPRT_API void gprtMissProgSet3s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z);
-GPRT_API void gprtMissProgSet4s(GPRTMissProg missprog, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-GPRT_API void gprtMissProgSet2sv(GPRTMissProg missprog, const char *name, const int16_t *val);
-GPRT_API void gprtMissProgSet3sv(GPRTMissProg missprog, const char *name, const int16_t *val);
-GPRT_API void gprtMissProgSet4sv(GPRTMissProg missprog, const char *name, const int16_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1s(GPRTMiss miss, const char *name, int16_t val);
+GPRT_API void gprtMissSet2s(GPRTMiss miss, const char *name, int16_t x, int16_t y);
+GPRT_API void gprtMissSet3s(GPRTMiss miss, const char *name, int16_t x, int16_t y, int16_t z);
+GPRT_API void gprtMissSet4s(GPRTMiss miss, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
+GPRT_API void gprtMissSet2sv(GPRTMiss miss, const char *name, const int16_t *val);
+GPRT_API void gprtMissSet3sv(GPRTMiss miss, const char *name, const int16_t *val);
+GPRT_API void gprtMissSet4sv(GPRTMiss miss, const char *name, const int16_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1s(GPRTGeom geom, const char *name, int16_t val);
@@ -882,14 +891,14 @@ GPRT_API void gprtRayGenSet2usv(GPRTRayGen raygen, const char *name, const uint1
 GPRT_API void gprtRayGenSet3usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
 GPRT_API void gprtRayGenSet4usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1us(GPRTMissProg missprog, const char *name, uint16_t val);
-GPRT_API void gprtMissProgSet2us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y);
-GPRT_API void gprtMissProgSet3us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z);
-GPRT_API void gprtMissProgSet4us(GPRTMissProg missprog, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-GPRT_API void gprtMissProgSet2usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
-GPRT_API void gprtMissProgSet3usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
-GPRT_API void gprtMissProgSet4usv(GPRTMissProg missprog, const char *name, const uint16_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1us(GPRTMiss miss, const char *name, uint16_t val);
+GPRT_API void gprtMissSet2us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y);
+GPRT_API void gprtMissSet3us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y, uint16_t z);
+GPRT_API void gprtMissSet4us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
+GPRT_API void gprtMissSet2usv(GPRTMiss miss, const char *name, const uint16_t *val);
+GPRT_API void gprtMissSet3usv(GPRTMiss miss, const char *name, const uint16_t *val);
+GPRT_API void gprtMissSet4usv(GPRTMiss miss, const char *name, const uint16_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1us(GPRTGeom geom, const char *name, uint16_t val);
@@ -922,14 +931,14 @@ GPRT_API void gprtRayGenSet2iv(GPRTRayGen raygen, const char *name, const int32_
 GPRT_API void gprtRayGenSet3iv(GPRTRayGen raygen, const char *name, const int32_t *val);
 GPRT_API void gprtRayGenSet4iv(GPRTRayGen raygen, const char *name, const int32_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1i(GPRTMissProg missprog, const char *name, int32_t val);
-GPRT_API void gprtMissProgSet2i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y);
-GPRT_API void gprtMissProgSet3i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z);
-GPRT_API void gprtMissProgSet4i(GPRTMissProg missprog, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-GPRT_API void gprtMissProgSet2iv(GPRTMissProg missprog, const char *name, const int32_t *val);
-GPRT_API void gprtMissProgSet3iv(GPRTMissProg missprog, const char *name, const int32_t *val);
-GPRT_API void gprtMissProgSet4iv(GPRTMissProg missprog, const char *name, const int32_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1i(GPRTMiss miss, const char *name, int32_t val);
+GPRT_API void gprtMissSet2i(GPRTMiss miss, const char *name, int32_t x, int32_t y);
+GPRT_API void gprtMissSet3i(GPRTMiss miss, const char *name, int32_t x, int32_t y, int32_t z);
+GPRT_API void gprtMissSet4i(GPRTMiss miss, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
+GPRT_API void gprtMissSet2iv(GPRTMiss miss, const char *name, const int32_t *val);
+GPRT_API void gprtMissSet3iv(GPRTMiss miss, const char *name, const int32_t *val);
+GPRT_API void gprtMissSet4iv(GPRTMiss miss, const char *name, const int32_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1i(GPRTGeom geom, const char *name, int32_t val);
@@ -962,14 +971,14 @@ GPRT_API void gprtRayGenSet2uiv(GPRTRayGen raygen, const char *name, const uint3
 GPRT_API void gprtRayGenSet3uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
 GPRT_API void gprtRayGenSet4uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1ui(GPRTMissProg missprog, const char *name, uint32_t val);
-GPRT_API void gprtMissProgSet2ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y);
-GPRT_API void gprtMissProgSet3ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z);
-GPRT_API void gprtMissProgSet4ui(GPRTMissProg missprog, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-GPRT_API void gprtMissProgSet2uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
-GPRT_API void gprtMissProgSet3uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
-GPRT_API void gprtMissProgSet4uiv(GPRTMissProg missprog, const char *name, const uint32_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1ui(GPRTMiss miss, const char *name, uint32_t val);
+GPRT_API void gprtMissSet2ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y);
+GPRT_API void gprtMissSet3ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y, uint32_t z);
+GPRT_API void gprtMissSet4ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
+GPRT_API void gprtMissSet2uiv(GPRTMiss miss, const char *name, const uint32_t *val);
+GPRT_API void gprtMissSet3uiv(GPRTMiss miss, const char *name, const uint32_t *val);
+GPRT_API void gprtMissSet4uiv(GPRTMiss miss, const char *name, const uint32_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1ui(GPRTGeom geom, const char *name, uint32_t val);
@@ -1002,14 +1011,14 @@ GPRT_API void gprtRayGenSet2fv(GPRTRayGen raygen, const char *name, const float 
 GPRT_API void gprtRayGenSet3fv(GPRTRayGen raygen, const char *name, const float *val);
 GPRT_API void gprtRayGenSet4fv(GPRTRayGen raygen, const char *name, const float *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1f(GPRTMissProg missprog, const char *name, float val);
-GPRT_API void gprtMissProgSet2f(GPRTMissProg missprog, const char *name, float x, float y);
-GPRT_API void gprtMissProgSet3f(GPRTMissProg missprog, const char *name, float x, float y, float z);
-GPRT_API void gprtMissProgSet4f(GPRTMissProg missprog, const char *name, float x, float y, float z, float w);
-GPRT_API void gprtMissProgSet2fv(GPRTMissProg missprog, const char *name, const float *val);
-GPRT_API void gprtMissProgSet3fv(GPRTMissProg missprog, const char *name, const float *val);
-GPRT_API void gprtMissProgSet4fv(GPRTMissProg missprog, const char *name, const float *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1f(GPRTMiss miss, const char *name, float val);
+GPRT_API void gprtMissSet2f(GPRTMiss miss, const char *name, float x, float y);
+GPRT_API void gprtMissSet3f(GPRTMiss miss, const char *name, float x, float y, float z);
+GPRT_API void gprtMissSet4f(GPRTMiss miss, const char *name, float x, float y, float z, float w);
+GPRT_API void gprtMissSet2fv(GPRTMiss miss, const char *name, const float *val);
+GPRT_API void gprtMissSet3fv(GPRTMiss miss, const char *name, const float *val);
+GPRT_API void gprtMissSet4fv(GPRTMiss miss, const char *name, const float *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1f(GPRTGeom geom, const char *name, float val);
@@ -1042,14 +1051,14 @@ GPRT_API void gprtRayGenSet2dv(GPRTRayGen raygen, const char *name, const double
 GPRT_API void gprtRayGenSet3dv(GPRTRayGen raygen, const char *name, const double *val);
 GPRT_API void gprtRayGenSet4dv(GPRTRayGen raygen, const char *name, const double *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1d(GPRTMissProg missprog, const char *name, double val);
-GPRT_API void gprtMissProgSet2d(GPRTMissProg missprog, const char *name, double x, double y);
-GPRT_API void gprtMissProgSet3d(GPRTMissProg missprog, const char *name, double x, double y, double z);
-GPRT_API void gprtMissProgSet4d(GPRTMissProg missprog, const char *name, double x, double y, double z, double w);
-GPRT_API void gprtMissProgSet2dv(GPRTMissProg missprog, const char *name, const double *val);
-GPRT_API void gprtMissProgSet3dv(GPRTMissProg missprog, const char *name, const double *val);
-GPRT_API void gprtMissProgSet4dv(GPRTMissProg missprog, const char *name, const double *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1d(GPRTMiss miss, const char *name, double val);
+GPRT_API void gprtMissSet2d(GPRTMiss miss, const char *name, double x, double y);
+GPRT_API void gprtMissSet3d(GPRTMiss miss, const char *name, double x, double y, double z);
+GPRT_API void gprtMissSet4d(GPRTMiss miss, const char *name, double x, double y, double z, double w);
+GPRT_API void gprtMissSet2dv(GPRTMiss miss, const char *name, const double *val);
+GPRT_API void gprtMissSet3dv(GPRTMiss miss, const char *name, const double *val);
+GPRT_API void gprtMissSet4dv(GPRTMiss miss, const char *name, const double *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1d(GPRTGeom geom, const char *name, double val);
@@ -1082,14 +1091,14 @@ GPRT_API void gprtRayGenSet2lv(GPRTRayGen raygen, const char *name, const int64_
 GPRT_API void gprtRayGenSet3lv(GPRTRayGen raygen, const char *name, const int64_t *val);
 GPRT_API void gprtRayGenSet4lv(GPRTRayGen raygen, const char *name, const int64_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1l(GPRTMissProg missprog, const char *name, int64_t val);
-GPRT_API void gprtMissProgSet2l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y);
-GPRT_API void gprtMissProgSet3l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z);
-GPRT_API void gprtMissProgSet4l(GPRTMissProg missprog, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-GPRT_API void gprtMissProgSet2lv(GPRTMissProg missprog, const char *name, const int64_t *val);
-GPRT_API void gprtMissProgSet3lv(GPRTMissProg missprog, const char *name, const int64_t *val);
-GPRT_API void gprtMissProgSet4lv(GPRTMissProg missprog, const char *name, const int64_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1l(GPRTMiss miss, const char *name, int64_t val);
+GPRT_API void gprtMissSet2l(GPRTMiss miss, const char *name, int64_t x, int64_t y);
+GPRT_API void gprtMissSet3l(GPRTMiss miss, const char *name, int64_t x, int64_t y, int64_t z);
+GPRT_API void gprtMissSet4l(GPRTMiss miss, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
+GPRT_API void gprtMissSet2lv(GPRTMiss miss, const char *name, const int64_t *val);
+GPRT_API void gprtMissSet3lv(GPRTMiss miss, const char *name, const int64_t *val);
+GPRT_API void gprtMissSet4lv(GPRTMiss miss, const char *name, const int64_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1l(GPRTGeom geom, const char *name, int64_t val);
@@ -1122,14 +1131,14 @@ GPRT_API void gprtRayGenSet2ulv(GPRTRayGen raygen, const char *name, const uint6
 GPRT_API void gprtRayGenSet3ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
 GPRT_API void gprtRayGenSet4ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
 
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissProgSet1ul(GPRTMissProg missprog, const char *name, uint64_t val);
-GPRT_API void gprtMissProgSet2ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y);
-GPRT_API void gprtMissProgSet3ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z);
-GPRT_API void gprtMissProgSet4ul(GPRTMissProg missprog, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-GPRT_API void gprtMissProgSet2ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
-GPRT_API void gprtMissProgSet3ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
-GPRT_API void gprtMissProgSet4ulv(GPRTMissProg missprog, const char *name, const uint64_t *val);
+// setters for variables on "Miss"s
+GPRT_API void gprtMissSet1ul(GPRTMiss miss, const char *name, uint64_t val);
+GPRT_API void gprtMissSet2ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y);
+GPRT_API void gprtMissSet3ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y, uint64_t z);
+GPRT_API void gprtMissSet4ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
+GPRT_API void gprtMissSet2ulv(GPRTMiss miss, const char *name, const uint64_t *val);
+GPRT_API void gprtMissSet3ulv(GPRTMiss miss, const char *name, const uint64_t *val);
+GPRT_API void gprtMissSet4ulv(GPRTMiss miss, const char *name, const uint64_t *val);
 
 // setters for variables on "Geom"s
 GPRT_API void gprtGeomSet1ul(GPRTGeom geom, const char *name, uint64_t val);
@@ -1174,9 +1183,9 @@ GPRT_API void gprtGeomSetRaw(GPRTGeom obj, const char *name, const void *val);
 // GPRT_API void gprtParamsSetAccel(GPRTParams obj, const char *name, GPRTAccel val);
 // GPRT_API void gprtParamsSetRaw(GPRTParams obj, const char *name, const void *val);
 
-// setters for variables on "MissProg"s
-// GPRT_API void gprtMissProgSetTexture(GPRTMissProg missprog, const char *name, GPRTTexture val);
-// GPRT_API void gprtMissProgSetPointer(GPRTMissProg missprog, const char *name, const void *val);
-GPRT_API void gprtMissProgSetBuffer(GPRTMissProg missprog, const char *name, GPRTBuffer val);
-GPRT_API void gprtMissProgSetAccel(GPRTMissProg missprog, const char *name, GPRTAccel val);
-GPRT_API void gprtMissProgSetRaw(GPRTMissProg missprog, const char *name, const void *val);
+// setters for variables on "Miss"s
+// GPRT_API void gprtMissSetTexture(GPRTMiss miss, const char *name, GPRTTexture val);
+// GPRT_API void gprtMissSetPointer(GPRTMiss miss, const char *name, const void *val);
+GPRT_API void gprtMissSetBuffer(GPRTMiss miss, const char *name, GPRTBuffer val);
+GPRT_API void gprtMissSetAccel(GPRTMiss miss, const char *name, GPRTAccel val);
+GPRT_API void gprtMissSetRaw(GPRTMiss miss, const char *name, const void *val);

@@ -29,8 +29,8 @@ embed_spirv(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(sample02_simpleTriangles hostCode.cpp)
-target_link_libraries(sample02_simpleTriangles
+add_executable(sample02_simpleAABBs hostCode.cpp)
+target_link_libraries(sample02_simpleAABBs
   PRIVATE
     sample02_deviceCode
     gprt::gprt

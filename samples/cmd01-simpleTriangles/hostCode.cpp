@@ -66,14 +66,7 @@ int3 indices[NUM_INDICES] =
     { 4,0,2 }, { 4,2,6 }
   };
 
-float geometryTransform[3][4] = 
-  {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
-  };
-
-float instanceTransform[3][4] = 
+float transform[3][4] = 
   {
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
@@ -114,7 +107,7 @@ int main(int ac, char **av)
                         GPRT_TRIANGLES,
                         sizeof(TrianglesGeomData),
                         trianglesGeomVars,-1);
-  gprtGeomTypeSetClosestHit(trianglesGeomType,0,
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
                            module,"TriangleMesh");
 
   // ##################################################################
@@ -130,10 +123,8 @@ int main(int ac, char **av)
     = gprtHostPinnedBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
   GPRTBuffer indexBuffer
     = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
-  GPRTBuffer geometryTransformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,geometryTransform);
-  GPRTBuffer instanceTransformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,instanceTransform);
+  GPRTBuffer transformBuffer
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTBuffer frameBuffer
     = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
@@ -153,11 +144,10 @@ int main(int ac, char **av)
   // the group/accel for that mesh
   // ------------------------------------------------------------------
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
-  gprtTrianglesAccelSetTransforms(trianglesAccel, geometryTransformBuffer);
   gprtAccelBuild(context, trianglesAccel);
   
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(world, instanceTransformBuffer);
+  gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
   // ##################################################################
@@ -174,13 +164,13 @@ int main(int ac, char **av)
     { /* sentinel to mark end of list */ }
   };
   // ----------- create object  ----------------------------
-  GPRTMissProg missProg
-    = gprtMissProgCreate(context,module,"miss",sizeof(MissProgData),
+  GPRTMiss miss
+    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missProgVars,-1);
 
   // ----------- set variables  ----------------------------
-  gprtMissProgSet3f(missProg,"color0",.8f,0.f,0.f);
-  gprtMissProgSet3f(missProg,"color1",.8f,.8f,.8f);
+  gprtMissSet3f(miss,"color0",.8f,0.f,0.f);
+  gprtMissSet3f(miss,"color1",.8f,.8f,.8f);
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -262,10 +252,9 @@ int main(int ac, char **av)
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(geometryTransformBuffer);
-  gprtBufferDestroy(instanceTransformBuffer);
+  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
-  gprtMissProgDestroy(missProg);
+  gprtMissDestroy(miss);
   gprtAccelDestroy(trianglesAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(trianglesGeom);

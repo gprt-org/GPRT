@@ -126,6 +126,30 @@ void progName                                                           \
 
 
 
+#ifndef GPRT_INTERSECTION_PROGRAM
+#ifdef INTERSECTION
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, PayloadType)     \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType record, inout PayloadType payload);       \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("intersection")]                                                \
+  void __intersection__##progName(inout PayloadType payload)              \
+  {                                                                     \
+    progName(progName##RecordData, payload);                            \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName                                                         \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, PayloadType)     \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName                                                           \
+/* program args and body supplied by user ... */   
+#endif
+#endif
+
+
 #ifndef GPRT_MISS_PROGRAM
 #ifdef MISS
 #define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)     \
@@ -148,3 +172,13 @@ void progName                                                           \
 /* program args and body supplied by user ... */   
 #endif
 #endif
+
+// note, for bounds programs, I'd like to pass the SBT records in to enable
+// reading vertices and computing actual AABBs...
+// this is an issue with OWL, where you have to instead store a duplicate of everything
+// in a global launch parameters structure.
+
+// One tricky thing is that there might be multiple ray types, and with each ray type
+// comes a unique SBT record. But an AABB bounds can only have one AABB for all ray types.
+// so I'm thinking we call some wrapper function multiple times, one per SBT record type, or something like that...
+// and then we'd compute the union of all the generated AABBs for all records...

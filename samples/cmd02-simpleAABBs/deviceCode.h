@@ -26,12 +26,12 @@
 
 
 /* variables for the triangle mesh geometry */
-struct TrianglesGeomData
+struct AABBGeomData
 {
   /*! array/buffer of vertex indices */
-  alignas(8) uint64_t index; // vec3i*
+  alignas(8) uint64_t vertex; // vec3f*
   /*! array/buffer of vertex positions */
-  alignas(8) uint64_t vertex; // vec3f *  
+  alignas(8) uint64_t radius; // float *  
   /*! base color we use for the entire mesh */
   alignas(16) float3 color;
 };
