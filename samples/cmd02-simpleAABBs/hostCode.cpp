@@ -42,24 +42,25 @@
 
 extern std::map<std::string, std::vector<uint8_t>> sample02_deviceCode;
 
-const int NUM_VERTICES = 3;
+const int NUM_VERTICES = 1;
 float3 vertices[NUM_VERTICES] =
   {
-    { -1.f,-1.f,-1.f },
-    { +1.f,-1.f,-1.f },
-    { -1.f,+1.f,-1.f },
+    { 0.f,0.f,0.f },
+    // { -1.f,-1.f,-1.f },
+    // { +1.f,-1.f,-1.f },
+    // { -1.f,+1.f,-1.f },
   };
 
 float radii[NUM_VERTICES] =
   {
-    .1f, .2f, .3f
+    1.f //.1f, .2f, .3f
   };
 
 float3 aabbPositions[NUM_VERTICES*2] =
   {
     vertices[0] - radii[0], vertices[0] + radii[0], 
-    vertices[1] - radii[0], vertices[1] + radii[0], 
-    vertices[2] - radii[0], vertices[2] + radii[0] 
+    // vertices[1] - radii[0], vertices[1] + radii[0], 
+    // vertices[2] - radii[0], vertices[2] + radii[0] 
   };
 
 float instanceTransform[3][4] = 
@@ -99,8 +100,8 @@ int main(int ac, char **av)
                         GPRT_AABBS,
                         sizeof(AABBGeomData),
                         aabbGeomVars,-1);
-  // gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
-  //                          module,"AABBClosestHit");
+  gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
+                           module,"AABBClosestHit");
   gprtGeomTypeSetIntersectionProg(aabbGeomType,0,
                            module,"AABBIntersection");
 

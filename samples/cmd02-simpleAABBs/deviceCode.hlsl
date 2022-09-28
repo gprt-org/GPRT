@@ -43,7 +43,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
     + screen.x * RGSBTData.camera.dir_du
     + screen.y * RGSBTData.camera.dir_dv
   );
-  rayDesc.TMin = 0.001;
+  rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(RGSBTData.world);
   TraceRay(
@@ -63,35 +63,26 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
 }
 
 
-// GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload)
-//                         (in TrianglesGeomData geomSBTData, inout Payload prd)// , in float2 attribs
-// {
-//   // compute normal:
-//   const uint    primID = PrimitiveIndex();
-//   const uint64_t indexAddr = geomSBTData.index;
-//   const int3   index  = vk::RawBufferLoad<int3>(indexAddr + sizeof(int3) * primID);
-  
-//   const uint64_t vertexAddr = geomSBTData.vertex;
-//   const float3 A      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.x);
-//   const float3 B      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.y);
-//   const float3 C      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.z);
-
-//   const float3 Ng     = normalize(cross(B-A,C-A));
-//   const float3 rayDir = WorldRayDirection();
-//   prd.color = (.2f + .8f * abs(dot(rayDir,Ng))) * geomSBTData.color;
-// }
-
-struct Attr {
-  int tmp;
+struct Attribute
+{
+  float2 attribs;
 };
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData, Payload)
-                          (in AABBGeomData geomSBTData, inout Payload prd)// , in float2 attribs
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, float2)
+                        (in AABBGeomData geomSBTData, inout Payload prd, in float2 attribs)
 {
-  printf("TEST\n");
-  Attr attr;
-  attr.tmp = 0;
-  ReportHit(0.f, /*hitKind*/ 0, attr);
+  // printf("TEST\n");
+  prd.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
+}
+
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+                          (in AABBGeomData geomSBTData)// , in float2 attribs
+{
+  // prd.color = float3(1.f, 1.f, 1.f);
+  // printf("TEST\n");
+  Attribute attr;
+  attr.attribs = float2(0.f, 0.f);
+  ReportHit(0.1f, /*hitKind*/ 0, attr);
 }
 
 GPRT_MISS_PROGRAM(miss, MissProgData, Payload)

@@ -1295,6 +1295,8 @@ namespace gprt {
         geomRange.primitiveOffset = geometries[gid]->aabb.offset;
         geomRange.firstVertex = 0; // unused 
         geomRange.transformOffset = 0;
+
+        maxPrimitiveCounts[gid] = geometries[gid]->aabb.count;
       }
 
       // Get size info
@@ -1863,6 +1865,10 @@ namespace gprt {
         if (accel->getType() == GPRT_TRIANGLE_ACCEL) {
           TriangleAccel *triAccel = (TriangleAccel*) accel;
           totalGeometries += triAccel->geometries.size();
+        }
+        if (accel->getType() == GPRT_AABB_ACCEL) {
+          AABBAccel *aabbAccel = (AABBAccel*) accel;
+          totalGeometries += aabbAccel->geometries.size();
         }
       }
 
@@ -2538,6 +2544,34 @@ namespace gprt {
 
             for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
               auto &geom = triAccel->geometries[geomID];
+
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                size_t recordStride = recordSize;
+                size_t handleStride = handleSize;
+
+                // First, copy handle
+                size_t instanceOffset = 0; // TODO
+                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numRayGens + numMissProgs);
+                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numRayGens + numMissProgs);
+                memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                
+                // Then, copy params following handle
+                recordOffset = recordOffset + handleSize;
+                uint8_t* params = mapped + recordOffset;
+                for (auto &var : geom->vars) {
+                  size_t varOffset = var.second.decl.offset;
+                  size_t varSize = getSize(var.second.decl.type);
+                  memcpy(params + varOffset, var.second.data, varSize);
+                }
+              }
+            }
+          }
+
+          else if (accel->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) accel;
+
+            for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+              auto &geom = aabbAccel->geometries[geomID];
 
               for (int rayType = 0; rayType < numRayTypes; ++rayType) {
                 size_t recordStride = recordSize;

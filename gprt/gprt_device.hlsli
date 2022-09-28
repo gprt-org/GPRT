@@ -103,21 +103,21 @@ void progName                                                           \
 
 #ifndef GPRT_CLOSEST_HIT_PROGRAM
 #ifdef CLOSESTHIT
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)     \
+#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload);       \
+  void progName(in RecordType record, inout PayloadType payload, in AttributeType attributes);       \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("closesthit")]                                                \
-  void __closesthit__##progName(inout PayloadType payload)              \
+  void __closesthit__##progName(inout PayloadType payload, in AttributeType attributes)              \
   {                                                                     \
-    progName(progName##RecordData, payload);                            \
+    progName(progName##RecordData, payload, attributes);                            \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName                                                         \
 /* program args and body supplied by user ... */                      
 #else
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType)     \
+#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName                                                           \
 /* program args and body supplied by user ... */   
@@ -128,21 +128,21 @@ void progName                                                           \
 
 #ifndef GPRT_INTERSECTION_PROGRAM
 #ifdef INTERSECTION
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, PayloadType)     \
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload);       \
+  void progName(in RecordType record);       \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("intersection")]                                                \
-  void __intersection__##progName(inout PayloadType payload)              \
+  void __intersection__##progName()              \
   {                                                                     \
-    progName(progName##RecordData, payload);                            \
+    progName(progName##RecordData);                            \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName                                                         \
 /* program args and body supplied by user ... */                      
 #else
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, PayloadType)     \
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName                                                           \
 /* program args and body supplied by user ... */   
