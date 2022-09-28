@@ -463,6 +463,10 @@ namespace gprt {
         vkDestroyBuffer(device, buffer, nullptr);
       if (memory)
         vkFreeMemory(device, memory, nullptr);
+      if (stagingBuffer.buffer)
+        vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      if (stagingBuffer.memory)
+        vkFreeMemory(device, stagingBuffer.memory, nullptr);
     }
 
     /* Default Constructor */
@@ -864,6 +868,16 @@ namespace gprt {
         if (closestHitShaderStages[i].module)
           vkDestroyShaderModule(logicalDevice, 
             closestHitShaderStages[i].module, nullptr);
+      }
+      for (uint32_t i = 0; i < anyHitShaderStages.size(); ++i) {
+        if (anyHitShaderStages[i].module)
+          vkDestroyShaderModule(logicalDevice, 
+            anyHitShaderStages[i].module, nullptr);
+      }
+      for (uint32_t i = 0; i < intersectionShaderStages.size(); ++i) {
+        if (intersectionShaderStages[i].module)
+          vkDestroyShaderModule(logicalDevice, 
+            intersectionShaderStages[i].module, nullptr);
       }
     }
     
