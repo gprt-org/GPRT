@@ -29,23 +29,22 @@ struct Payload
 };
 
 GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
-                   (in RayGenData RGSBTData) 
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   float2 screen = (float2(pixelID) + 
-                  float2(.5f, .5f)) / float2(RGSBTData.fbSize);
+                  float2(.5f, .5f)) / float2(record.fbSize);
 
   RayDesc rayDesc;
-  rayDesc.Origin = RGSBTData.camera.pos;
+  rayDesc.Origin = record.camera.pos;
   rayDesc.Direction = 
-    normalize(RGSBTData.camera.dir_00
-    + screen.x * RGSBTData.camera.dir_du
-    + screen.y * RGSBTData.camera.dir_dv
+    normalize(record.camera.dir_00
+    + screen.x * record.camera.dir_du
+    + screen.y * record.camera.dir_dv
   );
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(RGSBTData.world);
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(
     world, // the tree
     RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -57,8 +56,8 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
     payload // the payload IO
   );
 
-  const int fbOfs = pixelID.x + RGSBTData.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(RGSBTData.fbPtr + fbOfs * sizeof(uint32_t), 
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
       gprt::make_rgba(payload.color));
 }
 
@@ -68,15 +67,13 @@ struct Attribute
   float2 attribs;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, float2)
-                        (in AABBGeomData geomSBTData, inout Payload prd, in float2 attribs)
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
 {
   // printf("TEST\n");
-  prd.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
+  payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
-                          (in AABBGeomData geomSBTData)// , in float2 attribs
 {
   // prd.color = float3(1.f, 1.f, 1.f);
   // printf("TEST\n");
@@ -86,9 +83,8 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
 }
 
 GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
-                 (in MissProgData missSBTData, inout Payload prd) 
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
-  prd.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
+  payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

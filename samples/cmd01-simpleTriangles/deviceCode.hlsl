@@ -29,23 +29,22 @@ struct Payload
 };
 
 GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
-                   (in RayGenData RGSBTData) 
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   float2 screen = (float2(pixelID) + 
-                  float2(.5f, .5f)) / float2(RGSBTData.fbSize);
+                  float2(.5f, .5f)) / float2(record.fbSize);
 
   RayDesc rayDesc;
-  rayDesc.Origin = RGSBTData.camera.pos;
+  rayDesc.Origin = record.camera.pos;
   rayDesc.Direction = 
-    normalize(RGSBTData.camera.dir_00
-    + screen.x * RGSBTData.camera.dir_du
-    + screen.y * RGSBTData.camera.dir_dv
+    normalize(record.camera.dir_00
+    + screen.x * record.camera.dir_du
+    + screen.y * record.camera.dir_dv
   );
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(RGSBTData.world);
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(
     world, // the tree
     RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -57,34 +56,35 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
     payload // the payload IO
   );
 
-  const int fbOfs = pixelID.x + RGSBTData.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(RGSBTData.fbPtr + fbOfs * sizeof(uint32_t), 
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
       gprt::make_rgba(payload.color));
 }
 
+struct Attributes {
+  float2 bc;
+};
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload)
-                        (in TrianglesGeomData geomSBTData, inout Payload prd)// , in float2 attribs
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload, Attributes)
 {
   // compute normal:
   const uint    primID = PrimitiveIndex();
-  const uint64_t indexAddr = geomSBTData.index;
+  const uint64_t indexAddr = record.index;
   const int3   index  = vk::RawBufferLoad<int3>(indexAddr + sizeof(int3) * primID);
   
-  const uint64_t vertexAddr = geomSBTData.vertex;
+  const uint64_t vertexAddr = record.vertex;
   const float3 A      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.x);
   const float3 B      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.y);
   const float3 C      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.z);
 
   const float3 Ng     = normalize(cross(B-A,C-A));
   const float3 rayDir = WorldRayDirection();
-  prd.color = (.2f + .8f * abs(dot(rayDir,Ng))) * geomSBTData.color;
+  payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * record.color;
 }
 
 GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
-                 (in MissProgData missSBTData, inout Payload prd) 
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
-  prd.color = (pattern & 1) ? missSBTData.color1 : missSBTData.color0;
+  payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

@@ -23,9 +23,10 @@
 #include "gprt.h"
 #include "deviceCode.h"
 
-
+// The first parameter here is the name of our entry point.
+//
+// The second is the type of the shader record.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
-                   (in RayGenData SBTData) 
 {
   uint2 pixelID = DispatchRaysIndex().xy;
 
@@ -37,11 +38,11 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
   // alternate pattern, showing that pixel (0,0) is in the upper left corner
   // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? SBTData.color1 : SBTData.color0;
+  const float3 color = (pattern & 1) ? record.color1 : record.color0;
 
   // find the frame buffer location (x + width*y) and put the result there
-  const int fbOfs = pixelID.x + SBTData.fbSize.x * pixelID.y;
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
   vk::RawBufferStore<uint32_t>(
-    SBTData.fbPtr + fbOfs * sizeof(uint32_t), 
+    record.fbPtr + fbOfs * sizeof(uint32_t), 
     gprt::make_rgba(color));
 }

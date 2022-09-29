@@ -81,7 +81,7 @@ void progName                                                           \
 #ifdef RAYGEN
 #define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType recordData);                              \
+  void progName(in RecordType record);                              \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("raygeneration")]                                             \
@@ -90,41 +90,38 @@ void progName                                                           \
     progName(progName##RecordData);                                     \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
-  void progName                                                         \
+  void progName(in RecordType record)                                   \
 /* program args and body supplied by user ... */                      
 #else
 #define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
-void progName                                                           \
+void progName(in RecordType record)                                     \
 /* program args and body supplied by user ... */   
 #endif
 #endif
-
 
 #ifndef GPRT_CLOSEST_HIT_PROGRAM
 #ifdef CLOSESTHIT
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload, in AttributeType attributes);       \
+  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute);       \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("closesthit")]                                                \
-  void __closesthit__##progName(inout PayloadType payload, in AttributeType attributes)              \
+  void __closesthit__##progName(inout PayloadType payload, in AttributeType attribute)              \
   {                                                                     \
-    progName(progName##RecordData, payload, attributes);                            \
+    progName(progName##RecordData, payload, attribute);                            \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
-  void progName                                                         \
+  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute) \
 /* program args and body supplied by user ... */                      
 #else
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
-void progName                                                           \
+void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute)                                                           \
 /* program args and body supplied by user ... */   
 #endif
 #endif
-
-
 
 #ifndef GPRT_INTERSECTION_PROGRAM
 #ifdef INTERSECTION
@@ -139,12 +136,35 @@ void progName                                                           \
     progName(progName##RecordData);                            \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
-  void progName                                                         \
+  void progName(in RecordType record)                                                         \
 /* program args and body supplied by user ... */                      
 #else
 #define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
-void progName                                                           \
+void progName(in RecordType record)                                     \
+/* program args and body supplied by user ... */   
+#endif
+#endif
+
+#ifndef GPRT_INTERSECTION_PROGRAM
+#ifdef INTERSECTION
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType record);       \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("intersection")]                                                \
+  void __intersection__##progName()              \
+  {                                                                     \
+    progName(progName##RecordData);                            \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName(Params)                                                  \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName(Params)                                                   \
 /* program args and body supplied by user ... */   
 #endif
 #endif
@@ -163,12 +183,12 @@ void progName                                                           \
     progName(progName##RecordData, payload);                            \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
-  void progName                                                         \
+  void progName(in RecordType record, inout PayloadType payload)        \
 /* program args and body supplied by user ... */                      
 #else
 #define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
-void progName                                                           \
+void progName(in RecordType record, inout PayloadType payload)          \
 /* program args and body supplied by user ... */   
 #endif
 #endif
