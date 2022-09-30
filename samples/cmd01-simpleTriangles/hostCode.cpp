@@ -40,7 +40,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> sample01_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> cmd01_deviceCode;
 
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
@@ -87,7 +87,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,sample01_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,cmd01_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render

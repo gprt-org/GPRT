@@ -25,9 +25,9 @@
 
 // our device-side data structures
 #include "deviceCode.h"
-// external helper stuff for image output
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image_write.h"
+
+// library for windowing
+#include <GLFW/glfw3.h>
 
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
@@ -38,14 +38,11 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> cmd00_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> int00_deviceCode;
 
-// When run, this program produces this PNG as output.
-// In this case the correct result is a red and light gray checkerboard,
-// as nothing is actually rendered
-const char *outFileName = "s00-rayGenOnly.png";
-// image resolution
+// initial image resolution
 const int2 fbSize = {800,600};
+GLuint fbTexture {0};
 
 #include <iostream>
 int main(int ac, char **av)
@@ -68,7 +65,7 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(gprt,cmd00_deviceCode);
+  GPRTModule module = gprtModuleCreate(gprt,int00_deviceCode);
 
   GPRTVarDecl rayGenVars[]
     = {
@@ -110,21 +107,103 @@ int main(int ac, char **av)
   // Build a shader binding table entry for the ray generation record.
   gprtBuildSBT(gprt);
 
+
+  // ##################################################################
+  // create a window we can use to display and interact with the image
+  // ##################################################################
+  if (!glfwInit())
+  {
+      // Initialization failed
+  }
+
+  auto error_callback = [](int error, const char* description)
+  {
+      fprintf(stderr, "Error: %s\n", description);
+  };
+  glfwSetErrorCallback(error_callback);
+
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, "Int00 Raygen Only", 
+    NULL, NULL);
+  if (!window)
+  {
+    // Window or OpenGL context creation failed
+  }
+  glfwMakeContextCurrent(window);
+
+  void* pixels = gprtBufferGetPointer(frameBuffer);
+
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
   LOG("executing the launch ...");
-  gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
+  while (!glfwWindowShouldClose(window))
+  {
+    gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
 
-  LOG("done with launch, writing frame buffer to " << outFileName);
-  const uint32_t *fb = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
-  stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
-                 fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
-  LOG_OK("written rendered frame buffer to file "<<outFileName);
+    if (fbTexture == 0)
+      glGenTextures(1, &fbTexture);
+    
+    glBindTexture(GL_TEXTURE_2D, fbTexture);
+    GLenum texFormat = GL_RGBA;
+    GLenum texelType = GL_UNSIGNED_BYTE;
+    glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
+                  texelType, pixels);
+
+    glDisable(GL_LIGHTING);
+    glColor3f(1, 1, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, fbTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    
+    glDisable(GL_DEPTH_TEST);
+
+    glViewport(0, 0, fbSize.x, fbSize.y);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
+
+    glBegin(GL_QUADS);
+    {
+      glTexCoord2f(0.f, 0.f);
+      glVertex3f(0.f, 0.f, 0.f);
+    
+      glTexCoord2f(0.f, 1.f);
+      glVertex3f(0.f, (float)fbSize.y, 0.f);
+    
+      glTexCoord2f(1.f, 1.f);
+      glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
+    
+      glTexCoord2f(1.f, 0.f);
+      glVertex3f((float)fbSize.x, 0.f, 0.f);
+    }
+    glEnd();
+    
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+  }
+
+  // LOG("done with launch, writing frame buffer to " << outFileName);
+  // const uint32_t *fb = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
+  // stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
+  //                fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
+  // LOG_OK("written rendered frame buffer to file "<<outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
+
+  glfwDestroyWindow(window);
+
+  glfwTerminate();
 
   LOG("cleaning up ...");
   gprtBufferDestroy(frameBuffer);

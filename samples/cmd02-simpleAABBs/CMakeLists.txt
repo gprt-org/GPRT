@@ -22,17 +22,17 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    sample02_deviceCode
+    cmd02_deviceCode
   ENTRY_POINTS
     simpleRayGen
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(sample02_simpleAABBs hostCode.cpp)
-target_link_libraries(sample02_simpleAABBs
+add_executable(cmd02_simpleAABBs hostCode.cpp)
+target_link_libraries(cmd02_simpleAABBs
   PRIVATE
-    sample02_deviceCode
+    cmd02_deviceCode
     gprt::gprt
     stb_image
 )

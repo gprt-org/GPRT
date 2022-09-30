@@ -22,17 +22,18 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    cmd01_deviceCode
-  ENTRY_POINTS
-    simpleRayGen
+    int00_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+    # For whatever reason, including a .h in the spv causes a VK_INITIALIZATION_FAILED (-3) when creating shader modules
+    # ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.h 
 )
 
-add_executable(cmd01_simpleTriangles hostCode.cpp)
-target_link_libraries(cmd01_simpleTriangles
+add_executable(int00_rayGenOnly hostCode.cpp)
+target_link_libraries(int00_rayGenOnly
   PRIVATE
-    cmd01_deviceCode
+    int00_deviceCode
     gprt::gprt
-    stb_image
+    glfw
+    ${OPENGL_gl_LIBRARY}
 )

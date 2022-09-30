@@ -40,7 +40,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> sample02_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> cmd02_deviceCode;
 
 const int NUM_VERTICES = 1;
 float3 vertices[NUM_VERTICES] =
@@ -84,7 +84,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,sample02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,cmd02_deviceCode);
 
   // -------------------------------------------------------
   // declare geometry type

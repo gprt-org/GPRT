@@ -23,3 +23,5 @@
 add_subdirectory(cmd00-rayGenOnly)
 add_subdirectory(cmd01-simpleTriangles)
 add_subdirectory(cmd02-simpleAABBs)
+
+add_subdirectory(int00-rayGenOnly)
