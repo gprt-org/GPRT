@@ -3324,7 +3324,6 @@ GPRT_API void gprtBuildSBT(GPRTContext _context,
   LOG_API_CALL();
   gprt::Context *context = (gprt::Context*)_context;
   context->buildSBT();
-  LOG("SBT created...");
 }
 
 /*! Executes a ray tracing pipeline with the given raygen program.

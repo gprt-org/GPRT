@@ -20,9 +20,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangles)
-add_subdirectory(cmd02-simpleAABBs)
+embed_spirv(
+  OUTPUT_TARGET
+    int01_deviceCode
+  ENTRY_POINTS
+    simpleRayGen
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
 
-add_subdirectory(int00-rayGenOnly)
-add_subdirectory(int01-simpleTriangles)
+add_executable(int01_simpleTriangles hostCode.cpp)
+target_link_libraries(int01_simpleTriangles
+  PRIVATE
+    int01_deviceCode
+    gprt::gprt
+    glfw
+    ${OPENGL_gl_LIBRARY}
+)

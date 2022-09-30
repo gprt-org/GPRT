@@ -112,13 +112,12 @@ int main(int ac, char **av)
   // create a window we can use to display and interact with the image
   // ##################################################################
   if (!glfwInit())
-  {
-      // Initialization failed
-  }
+    // Initialization failed
+    throw std::runtime_error("Can't initialize GLFW");
 
   auto error_callback = [](int error, const char* description)
   {
-      fprintf(stderr, "Error: %s\n", description);
+    fprintf(stderr, "Error: %s\n", description);
   };
   glfwSetErrorCallback(error_callback);
 
@@ -128,9 +127,8 @@ int main(int ac, char **av)
   GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, "Int00 Raygen Only", 
     NULL, NULL);
   if (!window)
-  {
     // Window or OpenGL context creation failed
-  }
+    throw std::runtime_error("Can't create window");
   glfwMakeContextCurrent(window);
 
   void* pixels = gprtBufferGetPointer(frameBuffer);
@@ -191,18 +189,11 @@ int main(int ac, char **av)
     glfwPollEvents();
   }
 
-  // LOG("done with launch, writing frame buffer to " << outFileName);
-  // const uint32_t *fb = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
-  // stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
-  //                fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
-  // LOG_OK("written rendered frame buffer to file "<<outFileName);
-
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
   glfwDestroyWindow(window);
-
   glfwTerminate();
 
   LOG("cleaning up ...");
