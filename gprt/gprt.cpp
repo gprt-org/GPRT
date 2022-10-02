@@ -3379,8 +3379,17 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   uint64_t baseAddr = getBufferDeviceAddress(
     context->logicalDevice, context->shaderBindingTable.buffer);
 
+  // find raygen in current list of raygens
+  int raygenOffset = 0;
+  for (int i = 0; i < context->raygenPrograms.size(); ++i) {
+    if (context->raygenPrograms[i] == raygen) {
+      raygenOffset = i * recordSize;
+      break;
+    }
+  }
+
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr;
+  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride; // for raygen, can only be one. this needs to be the same as stride.
   // * context->raygenPrograms.size();

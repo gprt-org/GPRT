@@ -259,37 +259,77 @@ int main(int ac, char **av)
 
   LOG("launching ...");
 
+  double xpos = 0, ypos = 0, lastxpos, lastypos;
   while (!glfwWindowShouldClose(window))
   {
-    lookFrom = {-4.f * sinf(glfwGetTime()),-4.f* cosf(glfwGetTime()),-4.f};
+    float speed = .001;
+    lastxpos = xpos;
+    lastypos = ypos;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 
-    // ----------- compute variable values  ------------------
-    float3 camera_pos = lookFrom;
-    float3 camera_d00
-      = normalize(lookAt-lookFrom);
-    float aspect = float(fbSize.x) / float(fbSize.y);
-    float3 camera_ddu
-      = cosFovy * aspect * normalize(cross(camera_d00,lookUp));
-    float3 camera_ddv
-      = cosFovy * normalize(cross(camera_ddu,camera_d00));
-    camera_d00 -= 0.5f * camera_ddu;
-    camera_d00 -= 0.5f * camera_ddv;
+    if (state == GLFW_PRESS)
+    {
+      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
+      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
 
-    // ----------- set variables  ----------------------------
-    gprtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
-    // gprtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
-    gprtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
-    gprtRayGenSetAccel (rayGen,"world",        world);
-    // gprtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
-    // gprtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
-    // gprtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
-    // gprtRayGenSet3f    (rayGen,"camera.dir_dv",(const float3&)camera_ddv);
-    gprtRayGenSet3f    (rayGen,"camera.pos",   camera_pos.x, camera_pos.y, camera_pos.z);
-    gprtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
-    gprtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
-    gprtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
-    
-    gprtBuildSBT(context);
+      
+      float viewportWidth = fbSize.x;
+      float viewportHeight = fbSize.y;
+      #define M_PI 3.1415926
+
+      float deltaAngleX = (2 * M_PI / viewportWidth); // a movement from left to right = 2*PI = 360 deg
+      float deltaAngleY = (M_PI / viewportHeight);  // a movement from top to bottom = PI = 180 deg
+      float xAngle = (lastxpos - xpos) * deltaAngleX;
+      float yAngle = (lastypos - ypos) * deltaAngleY;
+
+      // // Extra step to handle the problem when the camera direction is the same as the up vector
+      // float3 viewdir = normalize(pivot - position);
+      // float cosAngle = dot(viewdir, lookUp);
+      // if (cosAngle * ((yDeltaAngle > 0.0) ? 1.f : -1.f) > 0.99f)
+      //     yDeltaAngle = 0;
+
+      // step 2: Rotate the camera around the pivot point on the first axis.
+      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      position = (mul(rotationMatrixX, (position - pivot))) + pivot;
+
+      // step 3: Rotate the camera around the pivot point on the second axis.
+      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float3 finalPosition = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
+
+      
+
+      lookFrom = finalPosition;//{-4.f * sinf(float(xpos * speed)),-4.f * cosf(float(ypos * speed)),-4.f};
+
+      // ----------- compute variable values  ------------------
+      float3 camera_pos = lookFrom;
+      float3 camera_d00
+        = normalize(lookAt-lookFrom);
+      float aspect = float(fbSize.x) / float(fbSize.y);
+      float3 camera_ddu
+        = cosFovy * aspect * normalize(cross(camera_d00,lookUp));
+      float3 camera_ddv
+        = cosFovy * normalize(cross(camera_ddu,camera_d00));
+      camera_d00 -= 0.5f * camera_ddu;
+      camera_d00 -= 0.5f * camera_ddv;
+
+      // ----------- set variables  ----------------------------
+      gprtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
+      // gprtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
+      gprtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
+      gprtRayGenSetAccel (rayGen,"world",        world);
+      // gprtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
+      // gprtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
+      // gprtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
+      // gprtRayGenSet3f    (rayGen,"camera.dir_dv",(const float3&)camera_ddv);
+      gprtRayGenSet3f    (rayGen,"camera.pos",   camera_pos.x, camera_pos.y, camera_pos.z);
+      gprtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
+      gprtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
+      gprtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
+      
+      gprtBuildSBT(context);
+    }
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
 
     if (fbTexture == 0)
@@ -318,7 +358,7 @@ int main(int ac, char **av)
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
+    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
 
     glBegin(GL_QUADS);
     {
