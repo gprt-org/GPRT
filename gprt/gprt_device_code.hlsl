@@ -26,7 +26,7 @@ struct VkAccelerationStructureInstanceKHR {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
+void __compute__gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
 {
   uint64_t instanceBufferPtr = pc.r[0];
   uint64_t transformBufferPtr = pc.r[1];

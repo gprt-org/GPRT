@@ -631,6 +631,7 @@ namespace gprt {
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
+    std::string entryPoint;
 
     Compute(VkDevice  _logicalDevice,
              Module *module,
@@ -640,7 +641,7 @@ namespace gprt {
     {
       std::cout<<"Compute program is being made!"<<std::endl;
 
-      std::string entryPoint = std::string("__compute__") + std::string(_entryPoint);
+      entryPoint = std::string("__compute__") + std::string(_entryPoint);
       auto binary = module->getBinary("COMPUTE");
 
       // store a reference to the logical device this module is made on

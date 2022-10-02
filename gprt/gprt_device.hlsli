@@ -177,21 +177,24 @@ void progName(in RecordType record, inout PayloadType payload)          \
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
   /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);                              \
+  void progName(in RecordType record, \
+   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);          \
   [[vk::shader_record_ext]]                                             \
   ConstantBuffer<RecordType> progName##RecordData;                      \
   [shader("raygeneration")]                                             \
   void __compute__##progName()                                           \
   {                                                                     \
-    progName(progName##RecordData);                                     \
+    progName(progName##RecordData, 0, DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));       \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record)                                   \
+  void progName(in RecordType record,                                   \
+  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
 /* program args and body supplied by user ... */                      
 #else
 #define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record)                                     \
+void progName(in RecordType record, \
+  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
 /* program args and body supplied by user ... */   
 #endif
 #endif
