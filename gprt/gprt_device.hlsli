@@ -53,29 +53,6 @@ struct PushConstants {
   Down the road, this could also give us an opportunity to shim in an Embree
   backend.
 */
-#ifndef GPRT_COMPUTE_PROGRAM
-#ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM(progName)                                  \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(uint3 tid);                                             \
-  [shader("compute")]                                                   \
-  [numthreads(1,1,1)]                                                   \
-  void __compute__##progName( uint3 tid : SV_DispatchThreadID)          \
-  {                                                                     \
-    progName(tid);                                                      \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName                                                         \
-/* program args and body supplied by user ... */                      
-#else
-#define GPRT_COMPUTE_PROGRAM(progName)                                  \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName                                                           \
-/* program args and body supplied by user ... */   
-#endif
-#endif
-
-
 
 #ifndef GPRT_RAYGEN_PROGRAM
 #ifdef RAYGEN
@@ -193,12 +170,50 @@ void progName(in RecordType record, inout PayloadType payload)          \
 #endif
 #endif
 
-// note, for bounds programs, I'd like to pass the SBT records in to enable
-// reading vertices and computing actual AABBs...
-// this is an issue with OWL, where you have to instead store a duplicate of everything
-// in a global launch parameters structure.
+// We currently recycle ray generation programs to implement a user-side
+// compute program. This allows us to recycle existing SBT record API
+// for compute shader IO
+#ifndef GPRT_COMPUTE_PROGRAM
+#ifdef COMPUTE
+#define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RecordType record);                              \
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RecordType> progName##RecordData;                      \
+  [shader("raygeneration")]                                             \
+  void __compute__##progName()                                           \
+  {                                                                     \
+    progName(progName##RecordData);                                     \
+  }                                                                     \
+  /* now the actual device code that the user is writing: */            \
+  void progName(in RecordType record)                                   \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName(in RecordType record)                                     \
+/* program args and body supplied by user ... */   
+#endif
+#endif
 
-// One tricky thing is that there might be multiple ray types, and with each ray type
-// comes a unique SBT record. But an AABB bounds can only have one AABB for all ray types.
-// so I'm thinking we call some wrapper function multiple times, one per SBT record type, or something like that...
-// and then we'd compute the union of all the generated AABBs for all records...
+// #ifndef GPRT_COMPUTE_PROGRAM
+// #ifdef COMPUTE
+// #define GPRT_COMPUTE_PROGRAM(progName)                                  \
+//   /* fwd decl for the kernel func to call */                            \
+//   void progName(uint3 tid);                                             \
+//   [shader("compute")]                                                   \
+//   [numthreads(1,1,1)]                                                   \
+//   void __compute__##progName( uint3 tid : SV_DispatchThreadID)          \
+//   {                                                                     \
+//     progName(tid);                                                      \
+//   }                                                                     \
+//   /* now the actual device code that the user is writing: */            \
+//   void progName                                                         \
+// /* program args and body supplied by user ... */                      
+// #else
+// #define GPRT_COMPUTE_PROGRAM(progName)                                  \
+// /* Dont add entry point decorators, instead treat as just a function. */\
+// void progName                                                           \
+// /* program args and body supplied by user ... */   
+// #endif
+// #endif

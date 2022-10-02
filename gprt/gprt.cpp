@@ -622,13 +622,17 @@ namespace gprt {
     std::unordered_map<std::string, GPRTVarDef> vars;
   };
  
-  struct ComputeProg : public SBTEntry {
+  // At the moment, we actually just use ray generation programs for compute 
+  // kernels. We do this instead of using actual Vulkan compute programs so that
+  // we can recycle the SBT records mechanism for compute IO, without 
+  // introducing VK descriptor sets.
+  struct Compute : public SBTEntry {
     VkShaderModule shaderModule;
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
 
-    ComputeProg(VkDevice  _logicalDevice,
+    Compute(VkDevice  _logicalDevice,
              Module *module,
              const char* _entryPoint,
              size_t      sizeOfVarStruct,
@@ -650,13 +654,14 @@ namespace gprt {
         NULL, &shaderModule));
 
       shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      // shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
       shaderStage.module = shaderModule;
       shaderStage.pName = entryPoint.c_str();
       assert(shaderStage.module != VK_NULL_HANDLE);
       vars = _vars;
     }
-    ~ComputeProg() {}
+    ~Compute() {}
     void destroy() {
       std::cout<<"Compute program is being destroyed!"<<std::endl;
       vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
@@ -706,14 +711,14 @@ namespace gprt {
     }
   };
 
-  struct MissProg : public SBTEntry {
+  struct Miss : public SBTEntry {
     VkShaderModule shaderModule;
     VkPipelineShaderStageCreateInfo shaderStage{};
     VkShaderModuleCreateInfo moduleCreateInfo{};
     VkDevice logicalDevice;
     std::string entryPoint;
 
-    MissProg(VkDevice  _logicalDevice,
+    Miss(VkDevice  _logicalDevice,
              Module *module,
              const char* _entryPoint,
              size_t      sizeOfVarStruct,
@@ -741,7 +746,7 @@ namespace gprt {
       assert(shaderStage.module != VK_NULL_HANDLE);
       vars = _vars;
     }
-    ~MissProg() {}
+    ~Miss() {}
     void destroy() {
       std::cout<<"Miss program is being destroyed!"<<std::endl;
       vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
@@ -1821,8 +1826,9 @@ namespace gprt {
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 
+    std::vector<Compute*> computePrograms;
     std::vector<RayGen*> raygenPrograms;
-    std::vector<MissProg*> missPrograms;
+    std::vector<Miss*> missPrograms;
     std::vector<GeomType*> geomTypes;
 
     std::vector<Accel*> accels;
@@ -2485,10 +2491,12 @@ namespace gprt {
 
       // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
 
+      size_t numComputes = computePrograms.size();
       size_t numRayGens = raygenPrograms.size();
       size_t numMissProgs = missPrograms.size();
       size_t numHitRecords = getNumHitRecords();
-      size_t numRecords = numRayGens + numMissProgs + numHitRecords;
+      
+      size_t numRecords = numComputes + numRayGens + numMissProgs + numHitRecords;
 
       if (shaderBindingTable.size != recordSize * numRecords) {
         shaderBindingTable.destroy();
@@ -2500,6 +2508,29 @@ namespace gprt {
       shaderBindingTable.map();
       uint8_t* mapped = ((uint8_t*) (shaderBindingTable.mapped));
 
+      // Compute records
+      if (computePrograms.size() > 0) {
+        for (uint32_t idx = 0; idx < computePrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
+          
+          // First, copy handle
+          size_t recordOffset = recordStride * idx;
+          size_t handleOffset = handleStride * idx;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t* params = mapped + recordOffset;
+          Compute *compute = computePrograms[idx];
+          for (auto &var : compute->vars) {
+            size_t varOffset = var.second.decl.offset;
+            size_t varSize = getSize(var.second.decl.type);
+            memcpy(params + varOffset, var.second.data, varSize);
+          }
+        }
+      }
+
       // Raygen records
       if (raygenPrograms.size() > 0) {
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
@@ -2507,8 +2538,8 @@ namespace gprt {
           size_t handleStride = handleSize;
           
           // First, copy handle
-          size_t recordOffset = recordStride * idx;
-          size_t handleOffset = handleStride * idx;
+          size_t recordOffset = recordStride * idx + recordStride * numComputes;
+          size_t handleOffset = handleStride * idx + handleStride * numComputes;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
           // Then, copy params following handle
@@ -2530,14 +2561,14 @@ namespace gprt {
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx + recordStride * numRayGens;
-          size_t handleOffset = handleStride * idx + handleStride * numRayGens;
+          size_t recordOffset = recordStride * idx + recordStride * numRayGens + recordStride * numComputes;
+          size_t handleOffset = handleStride * idx + handleStride * numRayGens + handleStride * numComputes;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
           // Then, copy params following handle
           recordOffset = recordOffset + handleSize;
           uint8_t* params = mapped + recordOffset;
-          MissProg *miss = missPrograms[idx];
+          Miss *miss = missPrograms[idx];
           for (auto &var : miss->vars) {
             size_t varOffset = var.second.decl.offset;
             size_t varSize = getSize(var.second.decl.type);
@@ -2565,8 +2596,8 @@ namespace gprt {
 
                 // First, copy handle
                 size_t instanceOffset = 0; // TODO
-                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numRayGens + numMissProgs);
-                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numRayGens + numMissProgs);
+                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                 memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
                 
                 // Then, copy params following handle
@@ -2593,8 +2624,8 @@ namespace gprt {
 
                 // First, copy handle
                 size_t instanceOffset = 0; // TODO
-                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numRayGens + numMissProgs);
-                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numRayGens + numMissProgs);
+                size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                 memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
                 
                 // Then, copy params following handle
@@ -2667,6 +2698,21 @@ namespace gprt {
         Setup ray tracing shader groups
       */
       std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+
+      // Compute program groups
+      {
+        for (auto compute : computePrograms) {
+          shaderStages.push_back(compute->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
+      }
 
       // Ray generation groups
       {
@@ -2966,6 +3012,38 @@ gprtRayGenDestroy(GPRTRayGen _rayGen)
   LOG("raygen destroyed...");
 }
 
+GPRT_API GPRTCompute
+gprtComputeCreate(GPRTContext _context,
+                 GPRTModule  _module,
+                 const char  *programName,
+                 size_t       sizeOfVarStruct,
+                 GPRTVarDecl *vars,
+                 int          numVars)
+{
+  LOG_API_CALL();
+  gprt::Context *context = (gprt::Context*)_context;
+  gprt::Module *module = (gprt::Module*)_module;
+
+  gprt::Compute *compute = new gprt::Compute(
+    context->logicalDevice, module, programName,
+    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+
+  context->computePrograms.push_back(compute);
+
+  LOG("compute created...");
+  return (GPRTCompute)compute;
+}
+
+GPRT_API void
+gprtComputeDestroy(GPRTCompute _compute)
+{
+  LOG_API_CALL();
+  gprt::Compute *compute = (gprt::Compute*)_compute;
+  compute->destroy();
+  delete compute;
+  LOG("compute destroyed...");
+}
+
 GPRT_API GPRTMiss
 gprtMissCreate(GPRTContext _context,
                    GPRTModule  _module,
@@ -2978,7 +3056,7 @@ gprtMissCreate(GPRTContext _context,
   gprt::Context *context = (gprt::Context*)_context;
   gprt::Module *module = (gprt::Module*)_module;
 
-  gprt::MissProg *missProg = new gprt::MissProg(
+  gprt::Miss *missProg = new gprt::Miss(
     context->logicalDevice, module, programName,
     sizeOfVarStruct, checkAndPackVariables(vars, numVars));
 
@@ -3002,7 +3080,7 @@ GPRT_API void
 gprtMissDestroy(GPRTMiss _miss)
 {
   LOG_API_CALL();
-  gprt::MissProg *missProg = (gprt::MissProg*)_miss;
+  gprt::Miss *missProg = (gprt::Miss*)_miss;
   missProg->destroy();
   delete missProg;
   LOG("miss program destroyed...");
@@ -3326,8 +3404,13 @@ GPRT_API void gprtBuildSBT(GPRTContext _context,
   context->buildSBT();
 }
 
-/*! Executes a ray tracing pipeline with the given raygen program.
-  This call will block until the raygen program returns. */
+GPRT_API void
+gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x)
+{
+  LOG_API_CALL();
+  gprtRayGenLaunch2D(_context, _rayGen,dims_x,1);
+}
+
 GPRT_API void
 gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dims_y)
 {
@@ -3335,7 +3418,6 @@ gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   gprtRayGenLaunch3D(_context, _rayGen,dims_x,dims_y,1);
 }
 
-/*! 3D-launch variant of \see gprtRayGenLaunch2D */
 GPRT_API void
 gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dims_y, int dims_z)
 {
@@ -3380,6 +3462,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
     context->logicalDevice, context->shaderBindingTable.buffer);
 
   // find raygen in current list of raygens
+  int computeOffset = context->computePrograms.size() * recordSize;
   int raygenOffset = 0;
   for (int i = 0; i < context->raygenPrograms.size(); ++i) {
     if (context->raygenPrograms[i] == raygen) {
@@ -3389,7 +3472,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   }
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset;
+  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset + computeOffset;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride; // for raygen, can only be one. this needs to be the same as stride.
   // * context->raygenPrograms.size();
@@ -3413,6 +3496,112 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   // callableShaderSbtEntry.stride = handleSizeAligned;
   // callableShaderSbtEntry.size = handleSizeAligned;
 
+  gprt::vkCmdTraceRaysKHR(
+    context->graphicsCommandBuffer,
+    &raygenShaderSbtEntry,
+    &missShaderSbtEntry,
+    &hitShaderSbtEntry,
+    &callableShaderSbtEntry,
+    dims_x,
+    dims_y,
+    dims_z);
+
+  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  if (err) GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
+
+  VkSubmitInfo submitInfo;
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+  submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) GPRT_RAISE("failed to submit to queue! : \n" + errorString(err));
+
+  err = vkQueueWaitIdle(context->graphicsQueue);
+  if (err) GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+}
+
+GPRT_API void
+gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, int dims_x)
+{
+  LOG_API_CALL();
+  gprtComputeLaunch2D(_context, _compute,dims_x,1);
+}
+
+GPRT_API void
+gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y)
+{
+  LOG_API_CALL();
+  gprtComputeLaunch3D(_context, _compute,dims_x,dims_y,1);
+}
+
+GPRT_API void
+gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z)
+{
+  LOG_API_CALL();
+  assert(_compute);
+
+  gprt::Context *context = (gprt::Context*)_context;
+  gprt::Compute *compute = (gprt::Compute*)_compute;
+  VkResult err;
+
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  vkCmdBindPipeline(
+    context->graphicsCommandBuffer,
+    VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+    context->pipeline);
+
+  auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t
+	{
+		VkBufferDeviceAddressInfoKHR bufferDeviceAI{};
+		bufferDeviceAI.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+		bufferDeviceAI.buffer = buffer;
+		return gprt::vkGetBufferDeviceAddressKHR(device, &bufferDeviceAI);
+	};
+
+  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t
+  {
+    return (value + alignment - 1) & ~(alignment - 1);
+  };
+
+  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
+  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
+  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
+  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
+
+  // for the moment, just assume the max group size
+  const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+  uint64_t baseAddr = getBufferDeviceAddress(
+    context->logicalDevice, context->shaderBindingTable.buffer);
+
+  // find compute program in current list of compute programs
+  int computeOffset = 0;
+  for (int i = 0; i < context->computePrograms.size(); ++i) {
+    if (context->computePrograms[i] == compute) {
+      computeOffset = i * recordSize;
+      break;
+    }
+  }
+
+  VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
+  raygenShaderSbtEntry.deviceAddress = baseAddr + computeOffset;
+  raygenShaderSbtEntry.stride = recordSize;
+  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride; // can only be one.
+
+  VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
+  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
+  
   gprt::vkCmdTraceRaysKHR(
     context->graphicsCommandBuffer,
     &raygenShaderSbtEntry,
@@ -3544,7 +3733,7 @@ GPRT_API void gprtRayGenSet4bv(GPRTRayGen _raygen, const char *name, const bool 
 GPRT_API void gprtMissSet1b(GPRTMiss _miss, const char *name, bool x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL);
   bool val[] = {x};
@@ -3554,7 +3743,7 @@ GPRT_API void gprtMissSet1b(GPRTMiss _miss, const char *name, bool x)
 GPRT_API void gprtMissSet2b(GPRTMiss _miss, const char *name, bool x, bool y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
   bool val[] = {x, y};
@@ -3564,7 +3753,7 @@ GPRT_API void gprtMissSet2b(GPRTMiss _miss, const char *name, bool x, bool y)
 GPRT_API void gprtMissSet3b(GPRTMiss _miss, const char *name, bool x, bool y, bool z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
   bool val[] = {x, y, z};
@@ -3574,7 +3763,7 @@ GPRT_API void gprtMissSet3b(GPRTMiss _miss, const char *name, bool x, bool y, bo
 GPRT_API void gprtMissSet4b(GPRTMiss _miss, const char *name, bool x, bool y, bool z, bool w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
   bool val[] = {x, y, z, w};
@@ -3584,7 +3773,7 @@ GPRT_API void gprtMissSet4b(GPRTMiss _miss, const char *name, bool x, bool y, bo
 GPRT_API void gprtMissSet2bv(GPRTMiss _miss, const char *name, const bool *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
   memcpy(var.second, &val, var.first);
@@ -3593,7 +3782,7 @@ GPRT_API void gprtMissSet2bv(GPRTMiss _miss, const char *name, const bool *val)
 GPRT_API void gprtMissSet3bv(GPRTMiss _miss, const char *name, const bool *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
   memcpy(var.second, &val, var.first);
@@ -3602,7 +3791,7 @@ GPRT_API void gprtMissSet3bv(GPRTMiss _miss, const char *name, const bool *val)
 GPRT_API void gprtMissSet4bv(GPRTMiss _miss, const char *name, const bool *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
   memcpy(var.second, &val, var.first);
@@ -3764,7 +3953,7 @@ GPRT_API void gprtRayGenSet4cv(GPRTRayGen _raygen, const char *name, const int8_
 GPRT_API void gprtMissSet1c(GPRTMiss _miss, const char *name, int8_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
   int8_t val[] = {x};
@@ -3774,7 +3963,7 @@ GPRT_API void gprtMissSet1c(GPRTMiss _miss, const char *name, int8_t x)
 GPRT_API void gprtMissSet2c(GPRTMiss _miss, const char *name, int8_t x, int8_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
   int8_t val[] = {x, y};
@@ -3784,7 +3973,7 @@ GPRT_API void gprtMissSet2c(GPRTMiss _miss, const char *name, int8_t x, int8_t y
 GPRT_API void gprtMissSet3c(GPRTMiss _miss, const char *name, int8_t x, int8_t y, int8_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
   int8_t val[] = {x, y, z};
@@ -3794,7 +3983,7 @@ GPRT_API void gprtMissSet3c(GPRTMiss _miss, const char *name, int8_t x, int8_t y
 GPRT_API void gprtMissSet4c(GPRTMiss _miss, const char *name, int8_t x, int8_t y, int8_t z, int8_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
   int8_t val[] = {x, y, z, w};
@@ -3804,7 +3993,7 @@ GPRT_API void gprtMissSet4c(GPRTMiss _miss, const char *name, int8_t x, int8_t y
 GPRT_API void gprtMissSet2cv(GPRTMiss _miss, const char *name, const int8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
   memcpy(var.second, &val, var.first);
@@ -3813,7 +4002,7 @@ GPRT_API void gprtMissSet2cv(GPRTMiss _miss, const char *name, const int8_t *val
 GPRT_API void gprtMissSet3cv(GPRTMiss _miss, const char *name, const int8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
   memcpy(var.second, &val, var.first);
@@ -3822,7 +4011,7 @@ GPRT_API void gprtMissSet3cv(GPRTMiss _miss, const char *name, const int8_t *val
 GPRT_API void gprtMissSet4cv(GPRTMiss _miss, const char *name, const int8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
   memcpy(var.second, &val, var.first);
@@ -3984,7 +4173,7 @@ GPRT_API void gprtRayGenSet4ucv(GPRTRayGen _raygen, const char *name, const uint
 GPRT_API void gprtMissSet1uc(GPRTMiss _miss, const char *name, uint8_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
   uint8_t val[] = {x};
@@ -3994,7 +4183,7 @@ GPRT_API void gprtMissSet1uc(GPRTMiss _miss, const char *name, uint8_t x)
 GPRT_API void gprtMissSet2uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
   uint8_t val[] = {x, y};
@@ -4004,7 +4193,7 @@ GPRT_API void gprtMissSet2uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_
 GPRT_API void gprtMissSet3uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y, uint8_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
   uint8_t val[] = {x, y, z};
@@ -4014,7 +4203,7 @@ GPRT_API void gprtMissSet3uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_
 GPRT_API void gprtMissSet4uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
   uint8_t val[] = {x, y, z, w};
@@ -4024,7 +4213,7 @@ GPRT_API void gprtMissSet4uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_
 GPRT_API void gprtMissSet2ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
   memcpy(var.second, &val, var.first);
@@ -4033,7 +4222,7 @@ GPRT_API void gprtMissSet2ucv(GPRTMiss _miss, const char *name, const uint8_t *v
 GPRT_API void gprtMissSet3ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
   memcpy(var.second, &val, var.first);
@@ -4042,7 +4231,7 @@ GPRT_API void gprtMissSet3ucv(GPRTMiss _miss, const char *name, const uint8_t *v
 GPRT_API void gprtMissSet4ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
   memcpy(var.second, &val, var.first);
@@ -4204,7 +4393,7 @@ GPRT_API void gprtRayGenSet4sv(GPRTRayGen _raygen, const char *name, const int16
 GPRT_API void gprtMissSet1s(GPRTMiss _miss, const char *name, int16_t val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
   memcpy(var.second, &val, var.first);
@@ -4213,7 +4402,7 @@ GPRT_API void gprtMissSet1s(GPRTMiss _miss, const char *name, int16_t val)
 GPRT_API void gprtMissSet2s(GPRTMiss _miss, const char *name, int16_t x, int16_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
   int16_t val[] = {x, y};
@@ -4223,7 +4412,7 @@ GPRT_API void gprtMissSet2s(GPRTMiss _miss, const char *name, int16_t x, int16_t
 GPRT_API void gprtMissSet3s(GPRTMiss _miss, const char *name, int16_t x, int16_t y, int16_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
   int16_t val[] = {x, y, z};
@@ -4233,7 +4422,7 @@ GPRT_API void gprtMissSet3s(GPRTMiss _miss, const char *name, int16_t x, int16_t
 GPRT_API void gprtMissSet4s(GPRTMiss _miss, const char *name, int16_t x, int16_t y, int16_t z, int16_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
   int16_t val[] = {x, y, z, w};
@@ -4243,7 +4432,7 @@ GPRT_API void gprtMissSet4s(GPRTMiss _miss, const char *name, int16_t x, int16_t
 GPRT_API void gprtMissSet2sv(GPRTMiss _miss, const char *name, const int16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
   memcpy(var.second, &val, var.first);
@@ -4252,7 +4441,7 @@ GPRT_API void gprtMissSet2sv(GPRTMiss _miss, const char *name, const int16_t *va
 GPRT_API void gprtMissSet3sv(GPRTMiss _miss, const char *name, const int16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
   memcpy(var.second, &val, var.first);
@@ -4261,7 +4450,7 @@ GPRT_API void gprtMissSet3sv(GPRTMiss _miss, const char *name, const int16_t *va
 GPRT_API void gprtMissSet4sv(GPRTMiss _miss, const char *name, const int16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
   memcpy(var.second, &val, var.first);
@@ -4423,7 +4612,7 @@ GPRT_API void gprtRayGenSet4usv(GPRTRayGen _raygen, const char *name, const uint
 GPRT_API void gprtMissSet1us(GPRTMiss _miss, const char *name, uint16_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
   uint16_t val[] = {x};
@@ -4433,7 +4622,7 @@ GPRT_API void gprtMissSet1us(GPRTMiss _miss, const char *name, uint16_t x)
 GPRT_API void gprtMissSet2us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
   uint16_t val[] = {x, y};
@@ -4443,7 +4632,7 @@ GPRT_API void gprtMissSet2us(GPRTMiss _miss, const char *name, uint16_t x, uint1
 GPRT_API void gprtMissSet3us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y, uint16_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
   uint16_t val[] = {x, y, z};
@@ -4453,7 +4642,7 @@ GPRT_API void gprtMissSet3us(GPRTMiss _miss, const char *name, uint16_t x, uint1
 GPRT_API void gprtMissSet4us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
   uint16_t val[] = {x, y, z, w};
@@ -4463,7 +4652,7 @@ GPRT_API void gprtMissSet4us(GPRTMiss _miss, const char *name, uint16_t x, uint1
 GPRT_API void gprtMissSet2usv(GPRTMiss _miss, const char *name, const uint16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
   memcpy(var.second, &val, var.first);
@@ -4472,7 +4661,7 @@ GPRT_API void gprtMissSet2usv(GPRTMiss _miss, const char *name, const uint16_t *
 GPRT_API void gprtMissSet3usv(GPRTMiss _miss, const char *name, const uint16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
   memcpy(var.second, &val, var.first);
@@ -4481,7 +4670,7 @@ GPRT_API void gprtMissSet3usv(GPRTMiss _miss, const char *name, const uint16_t *
 GPRT_API void gprtMissSet4usv(GPRTMiss _miss, const char *name, const uint16_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
   memcpy(var.second, &val, var.first);
@@ -4643,7 +4832,7 @@ GPRT_API void gprtRayGenSet4iv(GPRTRayGen _raygen, const char *name, const int32
 GPRT_API void gprtMissSet1i(GPRTMiss _miss, const char *name, int32_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
   int32_t val[] = {x};
@@ -4653,7 +4842,7 @@ GPRT_API void gprtMissSet1i(GPRTMiss _miss, const char *name, int32_t x)
 GPRT_API void gprtMissSet2i(GPRTMiss _miss, const char *name, int32_t x, int32_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
   int32_t val[] = {x, y};
@@ -4663,7 +4852,7 @@ GPRT_API void gprtMissSet2i(GPRTMiss _miss, const char *name, int32_t x, int32_t
 GPRT_API void gprtMissSet3i(GPRTMiss _miss, const char *name, int32_t x, int32_t y, int32_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
   int32_t val[] = {x, y, z};
@@ -4673,7 +4862,7 @@ GPRT_API void gprtMissSet3i(GPRTMiss _miss, const char *name, int32_t x, int32_t
 GPRT_API void gprtMissSet4i(GPRTMiss _miss, const char *name, int32_t x, int32_t y, int32_t z, int32_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
   int32_t val[] = {x, y, z, w};
@@ -4683,7 +4872,7 @@ GPRT_API void gprtMissSet4i(GPRTMiss _miss, const char *name, int32_t x, int32_t
 GPRT_API void gprtMissSet2iv(GPRTMiss _miss, const char *name, const int32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
   memcpy(var.second, &val, var.first);
@@ -4692,7 +4881,7 @@ GPRT_API void gprtMissSet2iv(GPRTMiss _miss, const char *name, const int32_t *va
 GPRT_API void gprtMissSet3iv(GPRTMiss _miss, const char *name, const int32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
   memcpy(var.second, &val, var.first);
@@ -4701,7 +4890,7 @@ GPRT_API void gprtMissSet3iv(GPRTMiss _miss, const char *name, const int32_t *va
 GPRT_API void gprtMissSet4iv(GPRTMiss _miss, const char *name, const int32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
   memcpy(var.second, &val, var.first);
@@ -4863,7 +5052,7 @@ GPRT_API void gprtRayGenSet4uiv(GPRTRayGen _raygen, const char *name, const uint
 GPRT_API void gprtMissSet1ui(GPRTMiss _miss, const char *name, uint32_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
   uint32_t val[] = {x};
@@ -4873,7 +5062,7 @@ GPRT_API void gprtMissSet1ui(GPRTMiss _miss, const char *name, uint32_t x)
 GPRT_API void gprtMissSet2ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
   uint32_t val[] = {x, y};
@@ -4883,7 +5072,7 @@ GPRT_API void gprtMissSet2ui(GPRTMiss _miss, const char *name, uint32_t x, uint3
 GPRT_API void gprtMissSet3ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y, uint32_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
   uint32_t val[] = {x, y, z};
@@ -4893,7 +5082,7 @@ GPRT_API void gprtMissSet3ui(GPRTMiss _miss, const char *name, uint32_t x, uint3
 GPRT_API void gprtMissSet4ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
   uint32_t val[] = {x, y, z, w};
@@ -4903,7 +5092,7 @@ GPRT_API void gprtMissSet4ui(GPRTMiss _miss, const char *name, uint32_t x, uint3
 GPRT_API void gprtMissSet2uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
   memcpy(var.second, &val, var.first);
@@ -4912,7 +5101,7 @@ GPRT_API void gprtMissSet2uiv(GPRTMiss _miss, const char *name, const uint32_t *
 GPRT_API void gprtMissSet3uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
   memcpy(var.second, &val, var.first);
@@ -4921,7 +5110,7 @@ GPRT_API void gprtMissSet3uiv(GPRTMiss _miss, const char *name, const uint32_t *
 GPRT_API void gprtMissSet4uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
   memcpy(var.second, &val, var.first);
@@ -5083,7 +5272,7 @@ GPRT_API void gprtRayGenSet4fv(GPRTRayGen _raygen, const char *name, const float
 GPRT_API void gprtMissSet1f(GPRTMiss _miss, const char *name, float x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
   float val[] = {x};
@@ -5093,7 +5282,7 @@ GPRT_API void gprtMissSet1f(GPRTMiss _miss, const char *name, float x)
 GPRT_API void gprtMissSet2f(GPRTMiss _miss, const char *name, float x, float y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
   float val[] = {x, y};
@@ -5103,7 +5292,7 @@ GPRT_API void gprtMissSet2f(GPRTMiss _miss, const char *name, float x, float y)
 GPRT_API void gprtMissSet3f(GPRTMiss _miss, const char *name, float x, float y, float z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
   float val[] = {x, y, z};
@@ -5113,7 +5302,7 @@ GPRT_API void gprtMissSet3f(GPRTMiss _miss, const char *name, float x, float y, 
 GPRT_API void gprtMissSet4f(GPRTMiss _miss, const char *name, float x, float y, float z, float w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
   float val[] = {x, y, z, w};
@@ -5123,7 +5312,7 @@ GPRT_API void gprtMissSet4f(GPRTMiss _miss, const char *name, float x, float y, 
 GPRT_API void gprtMissSet2fv(GPRTMiss _miss, const char *name, const float *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
   memcpy(var.second, &val, var.first);
@@ -5132,7 +5321,7 @@ GPRT_API void gprtMissSet2fv(GPRTMiss _miss, const char *name, const float *val)
 GPRT_API void gprtMissSet3fv(GPRTMiss _miss, const char *name, const float *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
   memcpy(var.second, &val, var.first);
@@ -5141,7 +5330,7 @@ GPRT_API void gprtMissSet3fv(GPRTMiss _miss, const char *name, const float *val)
 GPRT_API void gprtMissSet4fv(GPRTMiss _miss, const char *name, const float *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
   memcpy(var.second, &val, var.first);
@@ -5303,7 +5492,7 @@ GPRT_API void gprtRayGenSet4dv(GPRTRayGen _raygen, const char *name, const doubl
 GPRT_API void gprtMissSet1d(GPRTMiss _miss, const char *name, double x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
   double val[] = {x};
@@ -5313,7 +5502,7 @@ GPRT_API void gprtMissSet1d(GPRTMiss _miss, const char *name, double x)
 GPRT_API void gprtMissSet2d(GPRTMiss _miss, const char *name, double x, double y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
   double val[] = {x, y};
@@ -5323,7 +5512,7 @@ GPRT_API void gprtMissSet2d(GPRTMiss _miss, const char *name, double x, double y
 GPRT_API void gprtMissSet3d(GPRTMiss _miss, const char *name, double x, double y, double z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
   double val[] = {x, y, z};
@@ -5333,7 +5522,7 @@ GPRT_API void gprtMissSet3d(GPRTMiss _miss, const char *name, double x, double y
 GPRT_API void gprtMissSet4d(GPRTMiss _miss, const char *name, double x, double y, double z, double w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
   double val[] = {x, y, z, w};
@@ -5343,7 +5532,7 @@ GPRT_API void gprtMissSet4d(GPRTMiss _miss, const char *name, double x, double y
 GPRT_API void gprtMissSet2dv(GPRTMiss _miss, const char *name, const double *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
   memcpy(var.second, &val, var.first);
@@ -5352,7 +5541,7 @@ GPRT_API void gprtMissSet2dv(GPRTMiss _miss, const char *name, const double *val
 GPRT_API void gprtMissSet3dv(GPRTMiss _miss, const char *name, const double *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
   memcpy(var.second, &val, var.first);
@@ -5361,7 +5550,7 @@ GPRT_API void gprtMissSet3dv(GPRTMiss _miss, const char *name, const double *val
 GPRT_API void gprtMissSet4dv(GPRTMiss _miss, const char *name, const double *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
   memcpy(var.second, &val, var.first);
@@ -5523,7 +5712,7 @@ GPRT_API void gprtRayGenSet4lv(GPRTRayGen _raygen, const char *name, const int64
 GPRT_API void gprtMissSet1l(GPRTMiss _miss, const char *name, int64_t x)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
   int64_t val[] = {x};
@@ -5533,7 +5722,7 @@ GPRT_API void gprtMissSet1l(GPRTMiss _miss, const char *name, int64_t x)
 GPRT_API void gprtMissSet2l(GPRTMiss _miss, const char *name, int64_t x, int64_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
   int64_t val[] = {x, y};
@@ -5543,7 +5732,7 @@ GPRT_API void gprtMissSet2l(GPRTMiss _miss, const char *name, int64_t x, int64_t
 GPRT_API void gprtMissSet3l(GPRTMiss _miss, const char *name, int64_t x, int64_t y, int64_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
   int64_t val[] = {x, y, z};
@@ -5553,7 +5742,7 @@ GPRT_API void gprtMissSet3l(GPRTMiss _miss, const char *name, int64_t x, int64_t
 GPRT_API void gprtMissSet4l(GPRTMiss _miss, const char *name, int64_t x, int64_t y, int64_t z, int64_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
   int64_t val[] = {x, y, z, w};
@@ -5563,7 +5752,7 @@ GPRT_API void gprtMissSet4l(GPRTMiss _miss, const char *name, int64_t x, int64_t
 GPRT_API void gprtMissSet2lv(GPRTMiss _miss, const char *name, const int64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
   memcpy(var.second, &val, var.first);
@@ -5572,7 +5761,7 @@ GPRT_API void gprtMissSet2lv(GPRTMiss _miss, const char *name, const int64_t *va
 GPRT_API void gprtMissSet3lv(GPRTMiss _miss, const char *name, const int64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
   memcpy(var.second, &val, var.first);
@@ -5581,7 +5770,7 @@ GPRT_API void gprtMissSet3lv(GPRTMiss _miss, const char *name, const int64_t *va
 GPRT_API void gprtMissSet4lv(GPRTMiss _miss, const char *name, const int64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
   memcpy(var.second, &val, var.first);
@@ -5742,7 +5931,7 @@ GPRT_API void gprtRayGenSet4ulv(GPRTRayGen _raygen, const char *name, const uint
 GPRT_API void gprtMissSet1ul(GPRTMiss _miss, const char *name, uint64_t val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
   memcpy(var.second, &val, var.first);
@@ -5751,7 +5940,7 @@ GPRT_API void gprtMissSet1ul(GPRTMiss _miss, const char *name, uint64_t val)
 GPRT_API void gprtMissSet2ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
   uint64_t val[] = {x, y};
@@ -5761,7 +5950,7 @@ GPRT_API void gprtMissSet2ul(GPRTMiss _miss, const char *name, uint64_t x, uint6
 GPRT_API void gprtMissSet3ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y, uint64_t z)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
   uint64_t val[] = {x, y, z};
@@ -5771,7 +5960,7 @@ GPRT_API void gprtMissSet3ul(GPRTMiss _miss, const char *name, uint64_t x, uint6
 GPRT_API void gprtMissSet4ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
   uint64_t val[] = {x, y, z, w};
@@ -5781,7 +5970,7 @@ GPRT_API void gprtMissSet4ul(GPRTMiss _miss, const char *name, uint64_t x, uint6
 GPRT_API void gprtMissSet2ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
   memcpy(var.second, &val, var.first);
@@ -5790,7 +5979,7 @@ GPRT_API void gprtMissSet2ulv(GPRTMiss _miss, const char *name, const uint64_t *
 GPRT_API void gprtMissSet3ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
   memcpy(var.second, &val, var.first);
@@ -5799,7 +5988,7 @@ GPRT_API void gprtMissSet3ulv(GPRTMiss _miss, const char *name, const uint64_t *
 GPRT_API void gprtMissSet4ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *entry = (gprt::MissProg*)_miss;
+  gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
   memcpy(var.second, &val, var.first);
@@ -6062,7 +6251,7 @@ GPRT_API void gprtGeomSetRaw(GPRTGeom _geom, const char *name, const void *val)
 GPRT_API void gprtMissSetBuffer(GPRTMiss _miss, const char *name, GPRTBuffer _val)
 {
   LOG_API_CALL();
-  gprt::MissProg *miss = (gprt::MissProg*)_miss;
+  gprt::Miss *miss = (gprt::Miss*)_miss;
   assert(miss);
 
   gprt::Buffer *val = (gprt::Buffer*)_val;
@@ -6086,7 +6275,7 @@ GPRT_API void gprtMissSetBuffer(GPRTMiss _miss, const char *name, GPRTBuffer _va
 GPRT_API void gprtMissSetAccel(GPRTMiss _miss, const char *name, GPRTAccel _val)
 {
   LOG_API_CALL();
-  gprt::MissProg *miss = (gprt::MissProg*)_miss;
+  gprt::Miss *miss = (gprt::Miss*)_miss;
   assert(miss);
 
   gprt::Accel *val = (gprt::Accel*)_val;
@@ -6109,7 +6298,7 @@ GPRT_API void gprtMissSetAccel(GPRTMiss _miss, const char *name, GPRTAccel _val)
 GPRT_API void gprtMissSetRaw(GPRTMiss _miss, const char *name, const void *val)
 {
   LOG_API_CALL();
-  gprt::MissProg *missProg = (gprt::MissProg*)_miss;
+  gprt::Miss *missProg = (gprt::Miss*)_miss;
   assert(missProg);
 
   // 1. Figure out if the variable "name" exists
