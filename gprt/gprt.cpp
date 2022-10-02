@@ -3660,6 +3660,74 @@ std::pair<size_t, void*> gprtGetVariable(
 // setters for variables of type "bool" (bools only on c++)
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1b(GPRTCompute _compute, const char *name, bool x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL);
+  bool val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2b(GPRTCompute _compute, const char *name, bool x, bool y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
+  bool val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3b(GPRTCompute _compute, const char *name, bool x, bool y, bool z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
+  bool val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4b(GPRTCompute _compute, const char *name, bool x, bool y, bool z, bool w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
+  bool val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2bv(GPRTCompute _compute, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3bv(GPRTCompute _compute, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4bv(GPRTCompute _compute, const char *name, const bool *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
+  memcpy(var.second, &val, var.first);
+}
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1b(GPRTRayGen _raygen, const char *name, bool x) 
 {
@@ -3879,6 +3947,74 @@ GPRT_API void gprtGeomSet4bv(GPRTGeom _geom, const char *name, const bool *val)
 // ------------------------------------------------------------------
 // setters for variables of type "char"
 // ------------------------------------------------------------------
+
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1c(GPRTCompute _compute, const char *name, int8_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
+  int8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2c(GPRTCompute _compute, const char *name, int8_t x, int8_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
+  int8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3c(GPRTCompute _compute, const char *name, int8_t x, int8_t y, int8_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
+  int8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4c(GPRTCompute _compute, const char *name, int8_t x, int8_t y, int8_t z, int8_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
+  int8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2cv(GPRTCompute _compute, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3cv(GPRTCompute _compute, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4cv(GPRTCompute _compute, const char *name, const int8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
+  memcpy(var.second, &val, var.first);
+}
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1c(GPRTRayGen _raygen, const char *name, int8_t x) 
@@ -4100,6 +4236,74 @@ GPRT_API void gprtGeomSet4cv(GPRTGeom _geom, const char *name, const int8_t *val
 // setters for variables of type "uint8_t"
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1uc(GPRTCompute _compute, const char *name, uint8_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
+  uint8_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
+  uint8_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y, uint8_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
+  uint8_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
+  uint8_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1uc(GPRTRayGen _raygen, const char *name, uint8_t x) 
 {
@@ -4320,6 +4524,74 @@ GPRT_API void gprtGeomSet4ucv(GPRTGeom _geom, const char *name, const uint8_t *v
 // setters for variables of type "int16_t"
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1s(GPRTCompute _compute, const char *name, int16_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
+  int16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2s(GPRTCompute _compute, const char *name, int16_t x, int16_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
+  int16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3s(GPRTCompute _compute, const char *name, int16_t x, int16_t y, int16_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
+  int16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4s(GPRTCompute _compute, const char *name, int16_t x, int16_t y, int16_t z, int16_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
+  int16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2sv(GPRTCompute _compute, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3sv(GPRTCompute _compute, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4sv(GPRTCompute _compute, const char *name, const int16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1s(GPRTRayGen _raygen, const char *name, int16_t x) 
 {
@@ -4538,6 +4810,74 @@ GPRT_API void gprtGeomSet4sv(GPRTGeom _geom, const char *name, const int16_t *va
 // ------------------------------------------------------------------
 // setters for variables of type "uint16_t"
 // ------------------------------------------------------------------
+
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1us(GPRTCompute _compute, const char *name, uint16_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
+  uint16_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
+  uint16_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y, uint16_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
+  uint16_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
+  uint16_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
+  memcpy(var.second, &val, var.first);
+}
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1us(GPRTRayGen _raygen, const char *name, uint16_t x) 
@@ -4759,6 +5099,74 @@ GPRT_API void gprtGeomSet4usv(GPRTGeom _geom, const char *name, const uint16_t *
 // setters for variables of type "int"
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1i(GPRTCompute _compute, const char *name, int32_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
+  int32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2i(GPRTCompute _compute, const char *name, int32_t x, int32_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
+  int32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3i(GPRTCompute _compute, const char *name, int32_t x, int32_t y, int32_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
+  int32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4i(GPRTCompute _compute, const char *name, int32_t x, int32_t y, int32_t z, int32_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
+  int32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2iv(GPRTCompute _compute, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3iv(GPRTCompute _compute, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4iv(GPRTCompute _compute, const char *name, const int32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
+  memcpy(var.second, &val, var.first);
+}
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1i(GPRTRayGen _raygen, const char *name, int32_t x) 
 {
@@ -4978,6 +5386,74 @@ GPRT_API void gprtGeomSet4iv(GPRTGeom _geom, const char *name, const int32_t *va
 // ------------------------------------------------------------------
 // setters for variables of type "uint32_t"
 // ------------------------------------------------------------------
+
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1ui(GPRTCompute _compute, const char *name, uint32_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
+  uint32_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
+  uint32_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y, uint32_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
+  uint32_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
+  uint32_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
+  memcpy(var.second, &val, var.first);
+}
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1ui(GPRTRayGen _raygen, const char *name, uint32_t x) 
@@ -5199,6 +5675,74 @@ GPRT_API void gprtGeomSet4uiv(GPRTGeom _geom, const char *name, const uint32_t *
 // setters for variables of type "float"
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1f(GPRTCompute _compute, const char *name, float x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
+  float val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2f(GPRTCompute _compute, const char *name, float x, float y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
+  float val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3f(GPRTCompute _compute, const char *name, float x, float y, float z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
+  float val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4f(GPRTCompute _compute, const char *name, float x, float y, float z, float w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
+  float val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2fv(GPRTCompute _compute, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3fv(GPRTCompute _compute, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4fv(GPRTCompute _compute, const char *name, const float *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
+  memcpy(var.second, &val, var.first);
+}
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1f(GPRTRayGen _raygen, const char *name, float x) 
 {
@@ -5418,6 +5962,74 @@ GPRT_API void gprtGeomSet4fv(GPRTGeom _geom, const char *name, const float *val)
 // ------------------------------------------------------------------
 // setters for variables of type "double"
 // ------------------------------------------------------------------
+
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1d(GPRTCompute _compute, const char *name, double x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
+  double val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2d(GPRTCompute _compute, const char *name, double x, double y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
+  double val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3d(GPRTCompute _compute, const char *name, double x, double y, double z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
+  double val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4d(GPRTCompute _compute, const char *name, double x, double y, double z, double w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
+  double val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2dv(GPRTCompute _compute, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3dv(GPRTCompute _compute, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4dv(GPRTCompute _compute, const char *name, const double *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
+  memcpy(var.second, &val, var.first);
+}
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1d(GPRTRayGen _raygen, const char *name, double x) 
@@ -5639,6 +6251,75 @@ GPRT_API void gprtGeomSet4dv(GPRTGeom _geom, const char *name, const double *val
 // setters for variables of type "int64_t"
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1l(GPRTCompute _compute, const char *name, int64_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
+  int64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2l(GPRTCompute _compute, const char *name, int64_t x, int64_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
+  int64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3l(GPRTCompute _compute, const char *name, int64_t x, int64_t y, int64_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
+  int64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4l(GPRTCompute _compute, const char *name, int64_t x, int64_t y, int64_t z, int64_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
+  int64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2lv(GPRTCompute _compute, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3lv(GPRTCompute _compute, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4lv(GPRTCompute _compute, const char *name, const int64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
+  memcpy(var.second, &val, var.first);
+}
+
+
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1l(GPRTRayGen _raygen, const char *name, int64_t x) 
 {
@@ -5858,6 +6539,74 @@ GPRT_API void gprtGeomSet4lv(GPRTGeom _geom, const char *name, const int64_t *va
 // ------------------------------------------------------------------
 // setters for variables of type "uint64_t"
 // ------------------------------------------------------------------
+
+// setters for variables on "Compute"s
+GPRT_API void gprtComputeSet1ul(GPRTCompute _compute, const char *name, uint64_t x) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
+  uint64_t val[] = {x};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
+  uint64_t val[] = {x, y};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y, uint64_t z) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
+  uint64_t val[] = {x, y, z};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
+  uint64_t val[] = {x, y, z, w};
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet2ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet3ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
+  memcpy(var.second, &val, var.first);
+}
+
+GPRT_API void gprtComputeSet4ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
+{
+  LOG_API_CALL();
+  gprt::Compute *entry = (gprt::Compute*)_compute;
+  assert(entry);
+  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
+  memcpy(var.second, &val, var.first);
+}
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1ul(GPRTRayGen _raygen, const char *name, uint64_t x) 
@@ -6105,13 +6854,79 @@ GPRT_API void gprtGeomSet4ulv(GPRTGeom _geom, const char *name, const uint64_t *
 // setters for "meta" types
 // ------------------------------------------------------------------
 
+// setters for variables on "Compute"s
+// GPRT_API void gprtComputeSetTexture(GPRTCompute _compute, const char *name, GPRTTexture val) 
+// GPRT_API void gprtComputeSetPointer(GPRTCompute _compute, const char *name, const void *val) 
+GPRT_API void gprtComputeSetBuffer(GPRTCompute _rayGen, const char *name, GPRTBuffer _val)
+{
+  LOG_API_CALL();
+  gprt::Compute *raygen = (gprt::Compute*)_rayGen;
+  assert(raygen);
+
+  gprt::Buffer *val = (gprt::Buffer*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // The found variable must be a buffer
+  assert(raygen->vars[name].decl.type == GPRT_BUFFER || 
+         raygen->vars[name].decl.type == GPRT_BUFPTR);
+
+  // Buffer pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(raygen->vars[name].data, &addr, size);
+}
+
+GPRT_API void gprtComputeSetAccel(GPRTCompute _compute, const char *name, GPRTAccel _val)
+{
+  LOG_API_CALL();
+  gprt::Compute *raygen = (gprt::Compute*)_compute;
+  assert(raygen);
+
+  gprt::Accel *val = (gprt::Accel*)_val;
+  assert(val);
+
+  // 1. Figure out if the variable "name" exists
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // The found variable must be an acceleration structure
+  assert(raygen->vars[name].decl.type == GPRT_ACCEL);
+
+  // Acceleration structure pointers are 64 bits
+  size_t size = sizeof(uint64_t);
+
+  // 3. Assign the value to that variable
+  VkDeviceAddress addr = val->address;
+  memcpy(raygen->vars[name].data, &addr, size);
+}
+
+GPRT_API void gprtComputeSetRaw(GPRTCompute _compute, const char *name, const void *val)
+{
+  LOG_API_CALL();
+  gprt::Compute *raygen = (gprt::Compute*)_compute;
+  assert(raygen);
+
+  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
+  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
+
+  // 2. Get the expected size for this variable
+  size_t size = getSize(raygen->vars[name].decl.type);
+
+  // 3. Assign the value to that variable
+  memcpy(raygen->vars[name].data, val, size);
+}
+
 // setters for variables on "RayGen"s
 // GPRT_API void gprtRayGenSetTexture(GPRTRayGen _raygen, const char *name, GPRTTexture val) 
 // GPRT_API void gprtRayGenSetPointer(GPRTRayGen _raygen, const char *name, const void *val) 
-GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _rayGen, const char *name, GPRTBuffer _val)
+GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _raygen, const char *name, GPRTBuffer _val)
 {
   LOG_API_CALL();
-  gprt::RayGen *raygen = (gprt::RayGen*)_rayGen;
+  gprt::RayGen *raygen = (gprt::RayGen*)_raygen;
   assert(raygen);
 
   gprt::Buffer *val = (gprt::Buffer*)_val;
