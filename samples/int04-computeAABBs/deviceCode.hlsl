@@ -64,13 +64,19 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, RayGenData)
 
 struct Attribute
 {
-  float2 attribs;
+  float radius;
+  float3 position;
 };
 
 GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
 {
+  float3 origin = attribute.position;
+  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
+
+  float3 normal = normalize(hitPos - origin);
+  
   // printf("TEST\n");
-  payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
+  payload.color = normal;//float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
 GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
@@ -86,11 +92,25 @@ GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
 {
-  // prd.color = float3(1.f, 1.f, 1.f);
-  // printf("TEST\n");
+  uint primID = PrimitiveIndex();
+  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
+  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
+
+  float3 ro = ObjectRayOrigin();
+  float3 rd = ObjectRayDirection();
+
+  float3 oc = ro - position;
+	float b = dot( oc, rd );
+	float c = dot( oc, oc ) - radius * radius;
+	float h = b*b - c;
+
+	if( h<0.0 ) return; // -1.0;
+	float tHit = -b - sqrt( h );
+
   Attribute attr;
-  attr.attribs = float2(0.f, 0.f);
-  ReportHit(0.1f, /*hitKind*/ 0, attr);
+  attr.radius = radius;
+  attr.position = position;
+  ReportHit(tHit, /*hitKind*/ 0, attr);
 }
 
 GPRT_MISS_PROGRAM(miss, MissProgData, Payload)

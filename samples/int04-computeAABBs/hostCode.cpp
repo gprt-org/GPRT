@@ -43,18 +43,18 @@
 
 extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
 
-const int NUM_VERTICES = 1;
+const int NUM_VERTICES = 4;
 float3 vertices[NUM_VERTICES] =
   {
     { 0.f,0.f,0.f },
-    // { -1.f,-1.f,-1.f },
-    // { +1.f,-1.f,-1.f },
-    // { -1.f,+1.f,-1.f },
+    { -1.f,-1.f,-1.f },
+    { +1.f,-1.f,-1.f },
+    { -1.f,+1.f,-1.f },
   };
 
 float radii[NUM_VERTICES] =
   {
-    1.f //.1f, .2f, .3f
+    1.f, .5f, .25f, .1f
   };
 
 float transform[3][4] = 
@@ -186,7 +186,7 @@ int main(int ac, char **av)
   
   // compute AABBs in parallel with a compute shader
   gprtBuildSBT(context);
-  gprtComputeLaunch1D(context,boundsProgram,1);
+  gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
@@ -205,8 +205,8 @@ int main(int ac, char **av)
   
 
   // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",.8f,0.f,0.f);
-  gprtMissSet3f(miss,"color1",.8f,.8f,.8f);
+  gprtMissSet3f(miss,"color0",.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
 
 
 
