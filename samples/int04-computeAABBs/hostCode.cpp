@@ -41,30 +41,20 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> int01_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
 
-const int NUM_VERTICES = 8;
+const int NUM_VERTICES = 1;
 float3 vertices[NUM_VERTICES] =
   {
-    { -1.f,-1.f,-1.f },
-    { +1.f,-1.f,-1.f },
-    { -1.f,+1.f,-1.f },
-    { +1.f,+1.f,-1.f },
-    { -1.f,-1.f,+1.f },
-    { +1.f,-1.f,+1.f },
-    { -1.f,+1.f,+1.f },
-    { +1.f,+1.f,+1.f }
+    { 0.f,0.f,0.f },
+    // { -1.f,-1.f,-1.f },
+    // { +1.f,-1.f,-1.f },
+    // { -1.f,+1.f,-1.f },
   };
 
-const int NUM_INDICES = 12;
-int3 indices[NUM_INDICES] =
+float radii[NUM_VERTICES] =
   {
-    { 0,1,3 }, { 2,3,0 },
-    { 5,7,6 }, { 5,6,4 },
-    { 0,4,5 }, { 0,5,1 },
-    { 2,3,7 }, { 2,7,6 },
-    { 1,5,7 }, { 1,7,3 },
-    { 4,0,2 }, { 4,2,6 }
+    1.f //.1f, .2f, .3f
   };
 
 float transform[3][4] = 
@@ -90,92 +80,29 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int01_deviceCode);
-
-  // ##################################################################
-  // set up all the *GEOMETRY* graph we want to render
-  // ##################################################################
+  GPRTModule module = gprtModuleCreate(context,int04_deviceCode);
 
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTVarDecl trianglesGeomVars[] = {
-    { "index",  GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,index)},
-    { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)},
+  GPRTVarDecl aabbGeomVars[] = {
+    { "vertex",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,vertex)},
+    { "radius",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,radius)},
+    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
-  GPRTGeomType trianglesGeomType
+  GPRTGeomType aabbGeomType
     = gprtGeomTypeCreate(context,
-                        GPRT_TRIANGLES,
-                        sizeof(TrianglesGeomData),
-                        trianglesGeomVars,-1);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
-                           module,"TriangleMesh");
+                        GPRT_AABBS,
+                        sizeof(AABBGeomData),
+                        aabbGeomVars,-1);
+  gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
+                           module,"AABBClosestHit");
+  gprtGeomTypeSetIntersectionProg(aabbGeomType,0,
+                           module,"AABBIntersection");
 
-  // ##################################################################
-  // set up all the *GEOMS* we want to run that code on
-  // ##################################################################
 
-  LOG("building geometries ...");
-
-  // ------------------------------------------------------------------
-  // triangle mesh
-  // ------------------------------------------------------------------
-  GPRTBuffer vertexBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
-  GPRTBuffer indexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
-  GPRTBuffer transformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
-  GPRTBuffer frameBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-
-  GPRTGeom trianglesGeom
-    = gprtGeomCreate(context,trianglesGeomType);
-
-  gprtTrianglesSetVertices(trianglesGeom,vertexBuffer,
-                           NUM_VERTICES,sizeof(float3),0);
-  gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
-                          NUM_INDICES,sizeof(int3),0);
-
-  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
-  gprtGeomSet3f(trianglesGeom,"color",0,1,0);
-
-  // ------------------------------------------------------------------
-  // the group/accel for that mesh
-  // ------------------------------------------------------------------
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-  
-  GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
-
-  // ##################################################################
-  // set miss and raygen program required for SBT
-  // ##################################################################
-
-  // -------------------------------------------------------
-  // set up miss prog
-  // -------------------------------------------------------
-  GPRTVarDecl missProgVars[]
-    = {
-    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
-    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
-    { /* sentinel to mark end of list */ }
-  };
-  // ----------- create object  ----------------------------
-  GPRTMiss miss
-    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
-                        missProgVars,-1);
-
-  // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",.8f,0.f,0.f);
-  gprtMissSet3f(miss,"color1",.8f,.8f,.8f);
-
-  // -------------------------------------------------------
+    // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
@@ -191,9 +118,108 @@ int main(int ac, char **av)
 
   // ----------- create object  ----------------------------
   GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"simpleRayGen",
+    = gprtRayGenCreate(context,module,"AABBRayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
+
+  // -------------------------------------------------------
+  // set up miss
+  // -------------------------------------------------------
+  GPRTVarDecl missVars[]
+    = {
+    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
+    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
+    { /* sentinel to mark end of list */ }
+  };
+  // ----------- create object  ----------------------------
+  GPRTMiss miss
+    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
+                        missVars,-1);
+
+  // -------------------------------------------------------
+  // set up bounding box compute program
+  // -------------------------------------------------------
+  GPRTVarDecl computeVars[] = {
+    { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,vertex)},
+    { "radius", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,radius)},
+    { "aabbs",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
+    { /* sentinel to mark end of list */ }
+  };
+
+  // ----------- create object  ----------------------------
+  GPRTCompute boundsProgram
+    = gprtComputeCreate(context,module,"AABBBounds",
+                      sizeof(AABBBoundsData),
+                      computeVars,-1);
+
+  gprtBuildPrograms(context);
+  gprtBuildPipeline(context);
+
+  LOG("building geometries ...");
+
+  // ------------------------------------------------------------------
+  // aabb mesh
+  // ------------------------------------------------------------------
+  GPRTBuffer vertexBuffer
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+  GPRTBuffer radiusBuffer
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT,NUM_VERTICES,radii);
+  GPRTBuffer aabbPositionsBuffer
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES * 2,nullptr);
+  GPRTBuffer transformBuffer
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
+  GPRTBuffer frameBuffer
+    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+
+  GPRTGeom aabbGeom
+    = gprtGeomCreate(context,aabbGeomType);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 
+                        NUM_VERTICES, 2 * sizeof(float3), 0);
+  
+  gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
+  gprtGeomSet3f(aabbGeom,"color",0,0,1);
+
+  gprtComputeSetBuffer(boundsProgram, "vertex", vertexBuffer);
+  gprtComputeSetBuffer(boundsProgram, "radius", radiusBuffer);
+  gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
+  
+  // compute AABBs in parallel with a compute shader
+  gprtBuildSBT(context);
+  gprtComputeLaunch1D(context,boundsProgram,1);
+
+  // ------------------------------------------------------------------
+  // the group/accel for that mesh
+  // ------------------------------------------------------------------
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
+  gprtAccelBuild(context, aabbAccel);
+  
+  GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
+  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtAccelBuild(context, world);
+
+  // ##################################################################
+  // set miss and raygen program required for SBT
+  // ##################################################################
+
+  
+
+  // ----------- set variables  ----------------------------
+  gprtMissSet3f(miss,"color0",.8f,0.f,0.f);
+  gprtMissSet3f(miss,"color1",.8f,.8f,.8f);
+
+
+
+  
+  
+  
+
+
+  // build SBT so compute shader can access its record
+  
+  
+
+
 
   // ----------- set variables  ----------------------------
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
@@ -203,8 +229,7 @@ int main(int ac, char **av)
   // ##################################################################
   // build *SBT* required to trace the groups
   // ##################################################################
-  gprtBuildPrograms(context);
-  gprtBuildPipeline(context);
+  
   gprtBuildSBT(context);
 
   // ##################################################################
@@ -224,7 +249,7 @@ int main(int ac, char **av)
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, 
-    "Int01 Simple Triangles", NULL, NULL);
+    "Int02 Simple AABBs", NULL, NULL);
   if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
   glfwMakeContextCurrent(window);
 
@@ -356,15 +381,16 @@ int main(int ac, char **av)
   glfwTerminate();
 
   gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
+  gprtBufferDestroy(radiusBuffer);
+  gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
+  gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
-  gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomDestroy(aabbGeom);
+  gprtGeomTypeDestroy(aabbGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

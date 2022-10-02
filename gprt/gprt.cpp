@@ -459,14 +459,23 @@ namespace gprt {
     /*! Calls vkDestroy on the buffer, and frees underlying memory */
     void destroy()
     {
-      if (buffer)
+      if (buffer) {
         vkDestroyBuffer(device, buffer, nullptr);
-      if (memory)
+        buffer = VK_NULL_HANDLE;
+      }
+      if (memory) {
         vkFreeMemory(device, memory, nullptr);
-      if (stagingBuffer.buffer)
+        memory = VK_NULL_HANDLE;
+      }
+      if (stagingBuffer.buffer) {
         vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
-      if (stagingBuffer.memory)
+        stagingBuffer.buffer = VK_NULL_HANDLE;
+      }
+      if (stagingBuffer.memory) {
         vkFreeMemory(device, stagingBuffer.memory, nullptr);
+        stagingBuffer.memory = VK_NULL_HANDLE;
+      }
+
     }
 
     /* Default Constructor */
@@ -3480,14 +3489,14 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size();
+    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size() + recordSize * context->computePrograms.size() ;
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
-    hitShaderSbtEntry.deviceAddress = baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
+    hitShaderSbtEntry.deviceAddress = baseAddr + recordSize * (context->computePrograms.size() + context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
@@ -3708,7 +3717,7 @@ GPRT_API void gprtComputeSet2bv(GPRTCompute _compute, const char *name, const bo
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3bv(GPRTCompute _compute, const char *name, const bool *val) 
@@ -3717,7 +3726,7 @@ GPRT_API void gprtComputeSet3bv(GPRTCompute _compute, const char *name, const bo
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4bv(GPRTCompute _compute, const char *name, const bool *val) 
@@ -3726,7 +3735,7 @@ GPRT_API void gprtComputeSet4bv(GPRTCompute _compute, const char *name, const bo
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -3776,7 +3785,7 @@ GPRT_API void gprtRayGenSet2bv(GPRTRayGen _raygen, const char *name, const bool 
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3bv(GPRTRayGen _raygen, const char *name, const bool *val) 
@@ -3785,7 +3794,7 @@ GPRT_API void gprtRayGenSet3bv(GPRTRayGen _raygen, const char *name, const bool 
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4bv(GPRTRayGen _raygen, const char *name, const bool *val) 
@@ -3794,7 +3803,7 @@ GPRT_API void gprtRayGenSet4bv(GPRTRayGen _raygen, const char *name, const bool 
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -3845,7 +3854,7 @@ GPRT_API void gprtMissSet2bv(GPRTMiss _miss, const char *name, const bool *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3bv(GPRTMiss _miss, const char *name, const bool *val)
@@ -3854,7 +3863,7 @@ GPRT_API void gprtMissSet3bv(GPRTMiss _miss, const char *name, const bool *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4bv(GPRTMiss _miss, const char *name, const bool *val)
@@ -3863,7 +3872,7 @@ GPRT_API void gprtMissSet4bv(GPRTMiss _miss, const char *name, const bool *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -3914,7 +3923,7 @@ GPRT_API void gprtGeomSet2bv(GPRTGeom _geom, const char *name, const bool *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3bv(GPRTGeom _geom, const char *name, const bool *val)
@@ -3923,7 +3932,7 @@ GPRT_API void gprtGeomSet3bv(GPRTGeom _geom, const char *name, const bool *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4bv(GPRTGeom _geom, const char *name, const bool *val)
@@ -3932,7 +3941,7 @@ GPRT_API void gprtGeomSet4bv(GPRTGeom _geom, const char *name, const bool *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // // setters for variables on "Params"s
@@ -3996,7 +4005,7 @@ GPRT_API void gprtComputeSet2cv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3cv(GPRTCompute _compute, const char *name, const int8_t *val) 
@@ -4005,7 +4014,7 @@ GPRT_API void gprtComputeSet3cv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4cv(GPRTCompute _compute, const char *name, const int8_t *val) 
@@ -4014,7 +4023,7 @@ GPRT_API void gprtComputeSet4cv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -4064,7 +4073,7 @@ GPRT_API void gprtRayGenSet2cv(GPRTRayGen _raygen, const char *name, const int8_
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3cv(GPRTRayGen _raygen, const char *name, const int8_t *val) 
@@ -4073,7 +4082,7 @@ GPRT_API void gprtRayGenSet3cv(GPRTRayGen _raygen, const char *name, const int8_
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4cv(GPRTRayGen _raygen, const char *name, const int8_t *val) 
@@ -4082,7 +4091,7 @@ GPRT_API void gprtRayGenSet4cv(GPRTRayGen _raygen, const char *name, const int8_
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4133,7 +4142,7 @@ GPRT_API void gprtMissSet2cv(GPRTMiss _miss, const char *name, const int8_t *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3cv(GPRTMiss _miss, const char *name, const int8_t *val)
@@ -4142,7 +4151,7 @@ GPRT_API void gprtMissSet3cv(GPRTMiss _miss, const char *name, const int8_t *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4cv(GPRTMiss _miss, const char *name, const int8_t *val)
@@ -4151,7 +4160,7 @@ GPRT_API void gprtMissSet4cv(GPRTMiss _miss, const char *name, const int8_t *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4202,7 +4211,7 @@ GPRT_API void gprtGeomSet2cv(GPRTGeom _geom, const char *name, const int8_t *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3cv(GPRTGeom _geom, const char *name, const int8_t *val)
@@ -4211,7 +4220,7 @@ GPRT_API void gprtGeomSet3cv(GPRTGeom _geom, const char *name, const int8_t *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4cv(GPRTGeom _geom, const char *name, const int8_t *val)
@@ -4220,7 +4229,7 @@ GPRT_API void gprtGeomSet4cv(GPRTGeom _geom, const char *name, const int8_t *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4284,7 +4293,7 @@ GPRT_API void gprtComputeSet2ucv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
@@ -4293,7 +4302,7 @@ GPRT_API void gprtComputeSet3ucv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
@@ -4302,7 +4311,7 @@ GPRT_API void gprtComputeSet4ucv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -4352,7 +4361,7 @@ GPRT_API void gprtRayGenSet2ucv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3ucv(GPRTRayGen _raygen, const char *name, const uint8_t *val) 
@@ -4361,7 +4370,7 @@ GPRT_API void gprtRayGenSet3ucv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4ucv(GPRTRayGen _raygen, const char *name, const uint8_t *val) 
@@ -4370,7 +4379,7 @@ GPRT_API void gprtRayGenSet4ucv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4421,7 +4430,7 @@ GPRT_API void gprtMissSet2ucv(GPRTMiss _miss, const char *name, const uint8_t *v
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
@@ -4430,7 +4439,7 @@ GPRT_API void gprtMissSet3ucv(GPRTMiss _miss, const char *name, const uint8_t *v
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
@@ -4439,7 +4448,7 @@ GPRT_API void gprtMissSet4ucv(GPRTMiss _miss, const char *name, const uint8_t *v
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4490,7 +4499,7 @@ GPRT_API void gprtGeomSet2ucv(GPRTGeom _geom, const char *name, const uint8_t *v
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3ucv(GPRTGeom _geom, const char *name, const uint8_t *val)
@@ -4499,7 +4508,7 @@ GPRT_API void gprtGeomSet3ucv(GPRTGeom _geom, const char *name, const uint8_t *v
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4ucv(GPRTGeom _geom, const char *name, const uint8_t *val)
@@ -4508,7 +4517,7 @@ GPRT_API void gprtGeomSet4ucv(GPRTGeom _geom, const char *name, const uint8_t *v
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4572,7 +4581,7 @@ GPRT_API void gprtComputeSet2sv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3sv(GPRTCompute _compute, const char *name, const int16_t *val) 
@@ -4581,7 +4590,7 @@ GPRT_API void gprtComputeSet3sv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4sv(GPRTCompute _compute, const char *name, const int16_t *val) 
@@ -4590,7 +4599,7 @@ GPRT_API void gprtComputeSet4sv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -4640,7 +4649,7 @@ GPRT_API void gprtRayGenSet2sv(GPRTRayGen _raygen, const char *name, const int16
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3sv(GPRTRayGen _raygen, const char *name, const int16_t *val) 
@@ -4649,7 +4658,7 @@ GPRT_API void gprtRayGenSet3sv(GPRTRayGen _raygen, const char *name, const int16
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4sv(GPRTRayGen _raygen, const char *name, const int16_t *val) 
@@ -4658,7 +4667,7 @@ GPRT_API void gprtRayGenSet4sv(GPRTRayGen _raygen, const char *name, const int16
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4669,7 +4678,7 @@ GPRT_API void gprtMissSet1s(GPRTMiss _miss, const char *name, int16_t val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet2s(GPRTMiss _miss, const char *name, int16_t x, int16_t y)
@@ -4708,7 +4717,7 @@ GPRT_API void gprtMissSet2sv(GPRTMiss _miss, const char *name, const int16_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3sv(GPRTMiss _miss, const char *name, const int16_t *val)
@@ -4717,7 +4726,7 @@ GPRT_API void gprtMissSet3sv(GPRTMiss _miss, const char *name, const int16_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4sv(GPRTMiss _miss, const char *name, const int16_t *val)
@@ -4726,7 +4735,7 @@ GPRT_API void gprtMissSet4sv(GPRTMiss _miss, const char *name, const int16_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4777,7 +4786,7 @@ GPRT_API void gprtGeomSet2sv(GPRTGeom _geom, const char *name, const int16_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3sv(GPRTGeom _geom, const char *name, const int16_t *val)
@@ -4786,7 +4795,7 @@ GPRT_API void gprtGeomSet3sv(GPRTGeom _geom, const char *name, const int16_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4sv(GPRTGeom _geom, const char *name, const int16_t *val)
@@ -4795,7 +4804,7 @@ GPRT_API void gprtGeomSet4sv(GPRTGeom _geom, const char *name, const int16_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4859,7 +4868,7 @@ GPRT_API void gprtComputeSet2usv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
@@ -4868,7 +4877,7 @@ GPRT_API void gprtComputeSet3usv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
@@ -4877,7 +4886,7 @@ GPRT_API void gprtComputeSet4usv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -4927,7 +4936,7 @@ GPRT_API void gprtRayGenSet2usv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3usv(GPRTRayGen _raygen, const char *name, const uint16_t *val) 
@@ -4936,7 +4945,7 @@ GPRT_API void gprtRayGenSet3usv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4usv(GPRTRayGen _raygen, const char *name, const uint16_t *val) 
@@ -4945,7 +4954,7 @@ GPRT_API void gprtRayGenSet4usv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -4996,7 +5005,7 @@ GPRT_API void gprtMissSet2usv(GPRTMiss _miss, const char *name, const uint16_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3usv(GPRTMiss _miss, const char *name, const uint16_t *val)
@@ -5005,7 +5014,7 @@ GPRT_API void gprtMissSet3usv(GPRTMiss _miss, const char *name, const uint16_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4usv(GPRTMiss _miss, const char *name, const uint16_t *val)
@@ -5014,7 +5023,7 @@ GPRT_API void gprtMissSet4usv(GPRTMiss _miss, const char *name, const uint16_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5065,7 +5074,7 @@ GPRT_API void gprtGeomSet2usv(GPRTGeom _geom, const char *name, const uint16_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3usv(GPRTGeom _geom, const char *name, const uint16_t *val)
@@ -5074,7 +5083,7 @@ GPRT_API void gprtGeomSet3usv(GPRTGeom _geom, const char *name, const uint16_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4usv(GPRTGeom _geom, const char *name, const uint16_t *val)
@@ -5083,7 +5092,7 @@ GPRT_API void gprtGeomSet4usv(GPRTGeom _geom, const char *name, const uint16_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5147,7 +5156,7 @@ GPRT_API void gprtComputeSet2iv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3iv(GPRTCompute _compute, const char *name, const int32_t *val) 
@@ -5156,7 +5165,7 @@ GPRT_API void gprtComputeSet3iv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4iv(GPRTCompute _compute, const char *name, const int32_t *val) 
@@ -5165,7 +5174,7 @@ GPRT_API void gprtComputeSet4iv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -5215,7 +5224,7 @@ GPRT_API void gprtRayGenSet2iv(GPRTRayGen _raygen, const char *name, const int32
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3iv(GPRTRayGen _raygen, const char *name, const int32_t *val) 
@@ -5224,7 +5233,7 @@ GPRT_API void gprtRayGenSet3iv(GPRTRayGen _raygen, const char *name, const int32
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4iv(GPRTRayGen _raygen, const char *name, const int32_t *val) 
@@ -5233,7 +5242,7 @@ GPRT_API void gprtRayGenSet4iv(GPRTRayGen _raygen, const char *name, const int32
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5284,7 +5293,7 @@ GPRT_API void gprtMissSet2iv(GPRTMiss _miss, const char *name, const int32_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3iv(GPRTMiss _miss, const char *name, const int32_t *val)
@@ -5293,7 +5302,7 @@ GPRT_API void gprtMissSet3iv(GPRTMiss _miss, const char *name, const int32_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4iv(GPRTMiss _miss, const char *name, const int32_t *val)
@@ -5302,7 +5311,7 @@ GPRT_API void gprtMissSet4iv(GPRTMiss _miss, const char *name, const int32_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5353,7 +5362,7 @@ GPRT_API void gprtGeomSet2iv(GPRTGeom _geom, const char *name, const int32_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3iv(GPRTGeom _geom, const char *name, const int32_t *val)
@@ -5362,7 +5371,7 @@ GPRT_API void gprtGeomSet3iv(GPRTGeom _geom, const char *name, const int32_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4iv(GPRTGeom _geom, const char *name, const int32_t *val)
@@ -5371,7 +5380,7 @@ GPRT_API void gprtGeomSet4iv(GPRTGeom _geom, const char *name, const int32_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5435,7 +5444,7 @@ GPRT_API void gprtComputeSet2uiv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
@@ -5444,7 +5453,7 @@ GPRT_API void gprtComputeSet3uiv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
@@ -5453,7 +5462,7 @@ GPRT_API void gprtComputeSet4uiv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -5503,7 +5512,7 @@ GPRT_API void gprtRayGenSet2uiv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3uiv(GPRTRayGen _raygen, const char *name, const uint32_t *val) 
@@ -5512,7 +5521,7 @@ GPRT_API void gprtRayGenSet3uiv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4uiv(GPRTRayGen _raygen, const char *name, const uint32_t *val) 
@@ -5521,7 +5530,7 @@ GPRT_API void gprtRayGenSet4uiv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5572,7 +5581,7 @@ GPRT_API void gprtMissSet2uiv(GPRTMiss _miss, const char *name, const uint32_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
@@ -5581,7 +5590,7 @@ GPRT_API void gprtMissSet3uiv(GPRTMiss _miss, const char *name, const uint32_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
@@ -5590,7 +5599,7 @@ GPRT_API void gprtMissSet4uiv(GPRTMiss _miss, const char *name, const uint32_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5641,7 +5650,7 @@ GPRT_API void gprtGeomSet2uiv(GPRTGeom _geom, const char *name, const uint32_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3uiv(GPRTGeom _geom, const char *name, const uint32_t *val)
@@ -5650,7 +5659,7 @@ GPRT_API void gprtGeomSet3uiv(GPRTGeom _geom, const char *name, const uint32_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4uiv(GPRTGeom _geom, const char *name, const uint32_t *val)
@@ -5659,7 +5668,7 @@ GPRT_API void gprtGeomSet4uiv(GPRTGeom _geom, const char *name, const uint32_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5723,7 +5732,7 @@ GPRT_API void gprtComputeSet2fv(GPRTCompute _compute, const char *name, const fl
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3fv(GPRTCompute _compute, const char *name, const float *val) 
@@ -5732,7 +5741,7 @@ GPRT_API void gprtComputeSet3fv(GPRTCompute _compute, const char *name, const fl
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4fv(GPRTCompute _compute, const char *name, const float *val) 
@@ -5741,7 +5750,7 @@ GPRT_API void gprtComputeSet4fv(GPRTCompute _compute, const char *name, const fl
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -5791,7 +5800,7 @@ GPRT_API void gprtRayGenSet2fv(GPRTRayGen _raygen, const char *name, const float
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3fv(GPRTRayGen _raygen, const char *name, const float *val) 
@@ -5800,7 +5809,7 @@ GPRT_API void gprtRayGenSet3fv(GPRTRayGen _raygen, const char *name, const float
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4fv(GPRTRayGen _raygen, const char *name, const float *val) 
@@ -5809,7 +5818,7 @@ GPRT_API void gprtRayGenSet4fv(GPRTRayGen _raygen, const char *name, const float
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5860,7 +5869,7 @@ GPRT_API void gprtMissSet2fv(GPRTMiss _miss, const char *name, const float *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3fv(GPRTMiss _miss, const char *name, const float *val)
@@ -5869,7 +5878,7 @@ GPRT_API void gprtMissSet3fv(GPRTMiss _miss, const char *name, const float *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4fv(GPRTMiss _miss, const char *name, const float *val)
@@ -5878,7 +5887,7 @@ GPRT_API void gprtMissSet4fv(GPRTMiss _miss, const char *name, const float *val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -5929,7 +5938,7 @@ GPRT_API void gprtGeomSet2fv(GPRTGeom _geom, const char *name, const float *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3fv(GPRTGeom _geom, const char *name, const float *val)
@@ -5938,7 +5947,7 @@ GPRT_API void gprtGeomSet3fv(GPRTGeom _geom, const char *name, const float *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4fv(GPRTGeom _geom, const char *name, const float *val)
@@ -5947,7 +5956,7 @@ GPRT_API void gprtGeomSet4fv(GPRTGeom _geom, const char *name, const float *val)
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6011,7 +6020,7 @@ GPRT_API void gprtComputeSet2dv(GPRTCompute _compute, const char *name, const do
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3dv(GPRTCompute _compute, const char *name, const double *val) 
@@ -6020,7 +6029,7 @@ GPRT_API void gprtComputeSet3dv(GPRTCompute _compute, const char *name, const do
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4dv(GPRTCompute _compute, const char *name, const double *val) 
@@ -6029,7 +6038,7 @@ GPRT_API void gprtComputeSet4dv(GPRTCompute _compute, const char *name, const do
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -6079,7 +6088,7 @@ GPRT_API void gprtRayGenSet2dv(GPRTRayGen _raygen, const char *name, const doubl
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3dv(GPRTRayGen _raygen, const char *name, const double *val) 
@@ -6088,7 +6097,7 @@ GPRT_API void gprtRayGenSet3dv(GPRTRayGen _raygen, const char *name, const doubl
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4dv(GPRTRayGen _raygen, const char *name, const double *val) 
@@ -6097,7 +6106,7 @@ GPRT_API void gprtRayGenSet4dv(GPRTRayGen _raygen, const char *name, const doubl
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6148,7 +6157,7 @@ GPRT_API void gprtMissSet2dv(GPRTMiss _miss, const char *name, const double *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3dv(GPRTMiss _miss, const char *name, const double *val)
@@ -6157,7 +6166,7 @@ GPRT_API void gprtMissSet3dv(GPRTMiss _miss, const char *name, const double *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4dv(GPRTMiss _miss, const char *name, const double *val)
@@ -6166,7 +6175,7 @@ GPRT_API void gprtMissSet4dv(GPRTMiss _miss, const char *name, const double *val
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6217,7 +6226,7 @@ GPRT_API void gprtGeomSet2dv(GPRTGeom _geom, const char *name, const double *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3dv(GPRTGeom _geom, const char *name, const double *val)
@@ -6226,7 +6235,7 @@ GPRT_API void gprtGeomSet3dv(GPRTGeom _geom, const char *name, const double *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4dv(GPRTGeom _geom, const char *name, const double *val)
@@ -6235,7 +6244,7 @@ GPRT_API void gprtGeomSet4dv(GPRTGeom _geom, const char *name, const double *val
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6299,7 +6308,7 @@ GPRT_API void gprtComputeSet2lv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3lv(GPRTCompute _compute, const char *name, const int64_t *val) 
@@ -6308,7 +6317,7 @@ GPRT_API void gprtComputeSet3lv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4lv(GPRTCompute _compute, const char *name, const int64_t *val) 
@@ -6317,7 +6326,7 @@ GPRT_API void gprtComputeSet4lv(GPRTCompute _compute, const char *name, const in
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6368,7 +6377,7 @@ GPRT_API void gprtRayGenSet2lv(GPRTRayGen _raygen, const char *name, const int64
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3lv(GPRTRayGen _raygen, const char *name, const int64_t *val) 
@@ -6377,7 +6386,7 @@ GPRT_API void gprtRayGenSet3lv(GPRTRayGen _raygen, const char *name, const int64
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4lv(GPRTRayGen _raygen, const char *name, const int64_t *val) 
@@ -6386,7 +6395,7 @@ GPRT_API void gprtRayGenSet4lv(GPRTRayGen _raygen, const char *name, const int64
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6437,7 +6446,7 @@ GPRT_API void gprtMissSet2lv(GPRTMiss _miss, const char *name, const int64_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3lv(GPRTMiss _miss, const char *name, const int64_t *val)
@@ -6446,7 +6455,7 @@ GPRT_API void gprtMissSet3lv(GPRTMiss _miss, const char *name, const int64_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4lv(GPRTMiss _miss, const char *name, const int64_t *val)
@@ -6455,7 +6464,7 @@ GPRT_API void gprtMissSet4lv(GPRTMiss _miss, const char *name, const int64_t *va
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6506,7 +6515,7 @@ GPRT_API void gprtGeomSet2lv(GPRTGeom _geom, const char *name, const int64_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3lv(GPRTGeom _geom, const char *name, const int64_t *val)
@@ -6515,7 +6524,7 @@ GPRT_API void gprtGeomSet3lv(GPRTGeom _geom, const char *name, const int64_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4lv(GPRTGeom _geom, const char *name, const int64_t *val)
@@ -6524,7 +6533,7 @@ GPRT_API void gprtGeomSet4lv(GPRTGeom _geom, const char *name, const int64_t *va
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6588,7 +6597,7 @@ GPRT_API void gprtComputeSet2ulv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet3ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
@@ -6597,7 +6606,7 @@ GPRT_API void gprtComputeSet3ulv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtComputeSet4ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
@@ -6606,7 +6615,7 @@ GPRT_API void gprtComputeSet4ulv(GPRTCompute _compute, const char *name, const u
   gprt::Compute *entry = (gprt::Compute*)_compute;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "RayGen"s
@@ -6656,7 +6665,7 @@ GPRT_API void gprtRayGenSet2ulv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet3ulv(GPRTRayGen _raygen, const char *name, const uint64_t *val) 
@@ -6665,7 +6674,7 @@ GPRT_API void gprtRayGenSet3ulv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtRayGenSet4ulv(GPRTRayGen _raygen, const char *name, const uint64_t *val) 
@@ -6674,7 +6683,7 @@ GPRT_API void gprtRayGenSet4ulv(GPRTRayGen _raygen, const char *name, const uint
   gprt::RayGen *entry = (gprt::RayGen*)_raygen;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 // setters for variables on "MissProg"s
@@ -6684,7 +6693,7 @@ GPRT_API void gprtMissSet1ul(GPRTMiss _miss, const char *name, uint64_t val)
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet2ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y)
@@ -6723,7 +6732,7 @@ GPRT_API void gprtMissSet2ulv(GPRTMiss _miss, const char *name, const uint64_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet3ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
@@ -6732,7 +6741,7 @@ GPRT_API void gprtMissSet3ulv(GPRTMiss _miss, const char *name, const uint64_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtMissSet4ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
@@ -6741,7 +6750,7 @@ GPRT_API void gprtMissSet4ulv(GPRTMiss _miss, const char *name, const uint64_t *
   gprt::Miss *entry = (gprt::Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
@@ -6792,7 +6801,7 @@ GPRT_API void gprtGeomSet2ulv(GPRTGeom _geom, const char *name, const uint64_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet3ulv(GPRTGeom _geom, const char *name, const uint64_t *val)
@@ -6801,7 +6810,7 @@ GPRT_API void gprtGeomSet3ulv(GPRTGeom _geom, const char *name, const uint64_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 GPRT_API void gprtGeomSet4ulv(GPRTGeom _geom, const char *name, const uint64_t *val)
@@ -6810,7 +6819,7 @@ GPRT_API void gprtGeomSet4ulv(GPRTGeom _geom, const char *name, const uint64_t *
   gprt::Geom *entry = (gprt::Geom*)_geom;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, &val, var.first);
+  memcpy(var.second, (void*)val, var.first);
 }
 
 
