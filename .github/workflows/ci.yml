@@ -52,6 +52,7 @@ jobs:
       run: |
         mkdir bld
         cd bld
+        cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
         make VERBOSE=1 -j4
