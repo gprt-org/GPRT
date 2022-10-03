@@ -1345,43 +1345,64 @@ namespace gprt {
         maxPrimitiveCounts.data(),
         &accelerationStructureBuildSizesInfo
       );
+
+      if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize)
+      {
+        // Destroy old accel handle too
+        vkDestroyAccelerationStructureKHR(logicalDevice, accelerationStructure, nullptr);
+        accelerationStructure = VK_NULL_HANDLE;
+        accelBuffer->destroy();
+        delete(accelBuffer);
+        accelBuffer = nullptr;
+      }
       
-      accelBuffer = new gprt::Buffer(
-        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-        // means we can use this buffer as a means of storing an acceleration structure
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-        // means that this memory is stored directly on the device 
-        //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        accelerationStructureBuildSizesInfo.accelerationStructureSize
-      );
+      if (!accelBuffer) {
+        accelBuffer = new gprt::Buffer(
+          physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+          // means we can use this buffer as a means of storing an acceleration structure
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          accelerationStructureBuildSizesInfo.accelerationStructureSize
+        );
 
-      scratchBuffer = new gprt::Buffer(
-        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-        // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-        // means that this memory is stored directly on the device 
-        //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        accelerationStructureBuildSizesInfo.buildScratchSize
-      );
+        VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+        accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+        accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+        accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        err = vkCreateAccelerationStructureKHR(
+          logicalDevice,
+          &accelerationStructureCreateInfo, 
+          nullptr,
+          &accelerationStructure
+        );
+        if (err) GPRT_RAISE("failed to create acceleration structure for AABB accel build! : \n" + errorString(err));
+      }
 
-      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
-      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
-      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      err = vkCreateAccelerationStructureKHR(
-        logicalDevice,
-        &accelerationStructureCreateInfo, 
-        nullptr,
-        &accelerationStructure
-      );
-      if (err) GPRT_RAISE("failed to create acceleration structure for AABB accel build! : \n" + errorString(err));
+      if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize)
+      {
+        scratchBuffer->destroy();
+        delete(scratchBuffer);
+        scratchBuffer = nullptr;
+      }
+      
+      if (!scratchBuffer) {
+        scratchBuffer = new gprt::Buffer(
+          physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+          // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          accelerationStructureBuildSizesInfo.buildScratchSize
+        );
+      }
 
       VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
       accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -1488,11 +1509,19 @@ namespace gprt {
         sizeof(uint64_t) * numInstances
       );
 
-      std::vector<uint64_t> addresses(numInstances);
-      for (uint32_t i = 0; i < numInstances; ++i) 
-        addresses[i] = this->instances[i]->address;
-      accelAddressesBuffer->map();
-      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
+      instancesBuffer = new gprt::Buffer(
+        physicalDevice, logicalDevice, commandBuffer, queue,
+        // I guess I need this to use these buffers as input to tree builds?
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+        // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        sizeof(VkAccelerationStructureInstanceKHR) * this->instances.size()
+      );
     };
     
     ~InstanceAccel() {};
@@ -1513,25 +1542,13 @@ namespace gprt {
     void build(std::map<std::string, Stage> internalStages) {
       VkResult err;
 
-      // todo, transfer instance transforms into instances buffer
-
-      instancesBuffer = new gprt::Buffer(
-        physicalDevice, logicalDevice, commandBuffer, queue,
-        // I guess I need this to use these buffers as input to tree builds?
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-        // means that this memory is stored directly on the device 
-        //  (rather than the host, or in a special host/device section)
-        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-        // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        sizeof(VkAccelerationStructureInstanceKHR) * instances.size()
-      );
-
+      std::vector<uint64_t> addresses(instances.size());
+      for (uint32_t i = 0; i < instances.size(); ++i) 
+        addresses[i] = this->instances[i]->address;
+      accelAddressesBuffer->map();
+      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * instances.size());
 
       // Use a compute shader to copy transforms into instances buffer
-      
       VkCommandBufferBeginInfo cmdBufInfo{};
       struct PushContants {
         uint64_t instanceBufferAddr;
@@ -1571,16 +1588,6 @@ namespace gprt {
       err = vkQueueWaitIdle(queue);
       if (err) GPRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
-      VkAccelerationStructureInstanceKHR instance{};
-      // struct TMP {
-      //   uint32_t a;
-      //   uint32_t b;
-      //   uint32_t c;
-      // };
-      // TMP tmp;
-      instancesBuffer->map();
-      memcpy(&instance, instancesBuffer->mapped, sizeof(VkAccelerationStructureInstanceKHR));
-
       VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
       accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -1613,42 +1620,64 @@ namespace gprt {
         &primitive_count,
         &accelerationStructureBuildSizesInfo);
       
-      accelBuffer = new gprt::Buffer(
-        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-        // means we can use this buffer as a means of storing an acceleration structure
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-        // means that this memory is stored directly on the device 
-        //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        accelerationStructureBuildSizesInfo.accelerationStructureSize
-      );
 
-      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
-      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
-      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-      err = vkCreateAccelerationStructureKHR(
-        logicalDevice,
-        &accelerationStructureCreateInfo, 
-        nullptr,
-        &accelerationStructure
-      );
-      if (err) GPRT_RAISE("failed to create acceleration structure for instance accel build! : \n" + errorString(err));
+      if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize)
+      {
+        // Destroy old accel handle too
+        vkDestroyAccelerationStructureKHR(logicalDevice, accelerationStructure, nullptr);
+        accelerationStructure = VK_NULL_HANDLE;
+        accelBuffer->destroy();
+        delete(accelBuffer);
+        accelBuffer = nullptr;
+      }
 
-      scratchBuffer = new gprt::Buffer(
-        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
-        // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-        // means that this memory is stored directly on the device 
-        //  (rather than the host, or in a special host/device section)
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        accelerationStructureBuildSizesInfo.buildScratchSize
-      );
+      if (!accelBuffer) {
+        accelBuffer = new gprt::Buffer(
+          physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+          // means we can use this buffer as a means of storing an acceleration structure
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          accelerationStructureBuildSizesInfo.accelerationStructureSize
+        );
+
+        VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+        accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+        accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+        accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        err = vkCreateAccelerationStructureKHR(
+          logicalDevice,
+          &accelerationStructureCreateInfo, 
+          nullptr,
+          &accelerationStructure
+        );
+        if (err) GPRT_RAISE("failed to create acceleration structure for instance accel build! : \n" + errorString(err));
+      }
+
+      if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize)
+      {
+        scratchBuffer->destroy();
+        delete(scratchBuffer);
+        scratchBuffer = nullptr;
+      }
+
+      if (!scratchBuffer) {
+        scratchBuffer = new gprt::Buffer(
+          physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          accelerationStructureBuildSizesInfo.buildScratchSize
+        );
+      }
 
       VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
       accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -2688,12 +2717,13 @@ namespace gprt {
       }
     }
 
-    void buildPrograms()
-    {
-      // At the moment, we don't actually build our programs here. 
-    }
+    // void buildPrograms()
+    // {
+    //   // At the moment, we don't actually build our programs here. 
+    // }
 
-    void buildPipeline()
+    // void buildPipeline()
+    void buildPrograms()
     {
       VkPipelineLayoutCreateInfo pipelineLayoutCI{};
       pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -3396,14 +3426,6 @@ GPRT_API void gprtAccelBuild(GPRTContext _context, GPRTAccel _accel)
 GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
 {
   GPRT_NOTIMPLEMENTED;
-}
-
-GPRT_API void gprtBuildPipeline(GPRTContext _context)
-{
-  LOG_API_CALL();
-  gprt::Context *context = (gprt::Context*)_context;
-  context->buildPipeline();
-  LOG("pipeline created...");
 }
 
 GPRT_API void gprtBuildSBT(GPRTContext _context,

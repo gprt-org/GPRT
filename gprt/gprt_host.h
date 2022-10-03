@@ -103,11 +103,12 @@ typedef struct _GPRTLaunchParams  *GPRTLaunchParams, *GPRTParams, *GPRTGlobals;
 
 typedef enum
 {
-  GPRT_SBT_HITGROUPS = 0x1,
-  GPRT_SBT_GEOMS     = GPRT_SBT_HITGROUPS,
-  GPRT_SBT_RAYGENS   = 0x2,
-  GPRT_SBT_MISSPROGS = 0x4,
-  GPRT_SBT_ALL   = 0x7
+  GPRT_SBT_HITGROUP = 0x1,
+  GPRT_SBT_GEOM     = GPRT_SBT_HITGROUP,
+  GPRT_SBT_RAYGEN   = 0x2,
+  GPRT_SBT_MISSPROG = 0x4,
+  GPRT_SBT_COMPUTE   = 0x8,
+  GPRT_SBT_ALL   = 0x15
 } GPRTBuildSBTFlags;
 
 /*! enum that specifies the different possible memory layouts for
@@ -459,15 +460,8 @@ GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs,
                                     size_t stride,
                                     size_t offset);
 
-/*! technically this is currently a no-op, but we have this function around to
-  match OWL */
 GPRT_API void gprtBuildPrograms(GPRTContext context);
 
-GPRT_API void gprtBuildPipeline(GPRTContext context);
-
-// note, must occur _after_ all acceleration structures are built, 
-// because we sometimes store acceleration structure pointers 
-// in shader records.
 GPRT_API void gprtBuildSBT(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 

@@ -41,22 +41,9 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> int05_deviceCode;
 
-const int NUM_VERTICES = 4;
-float3 vertices[NUM_VERTICES] =
-  {
-    { 0.f,0.f,0.f },
-    { -1.f,-1.f,-1.f },
-    { +1.f,-1.f,-1.f },
-    { -1.f,+1.f,-1.f },
-  };
-
-float radii[NUM_VERTICES] =
-  {
-    1.f, .5f, .25f, .1f
-  };
-
+const int NUM_VERTICES = 10000;
 float transform[3][4] = 
   {
     1.0f, 0.0f, 0.0f, 0.0f,
@@ -65,7 +52,7 @@ float transform[3][4] =
   };
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {1080,720};
 GLuint fbTexture {0};
 
 float3 lookFrom = {-4.f,-3.f,-2.f};
@@ -78,7 +65,7 @@ int main(int ac, char **av)
 {
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int04_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int05_deviceCode);
 
   // -------------------------------------------------------
   // Setup programs and geometry types
@@ -124,7 +111,18 @@ int main(int ac, char **av)
     = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missVars,-1);
 
-  GPRTVarDecl computeVars[] = {
+  GPRTVarDecl vertexVars[] = {
+    { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(AABBPrimitiveData,vertex)},
+    { "radius", GPRT_BUFPTR, GPRT_OFFSETOF(AABBPrimitiveData,radius)},
+    { "now", GPRT_FLOAT, GPRT_OFFSETOF(AABBPrimitiveData,now)},
+    { /* sentinel to mark end of list */ }
+  };
+  GPRTCompute vertexProgram
+    = gprtComputeCreate(context,module,"AABBVertex",
+                      sizeof(AABBPrimitiveData),
+                      vertexVars,-1);
+
+  GPRTVarDecl boundsVars[] = {
     { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,vertex)},
     { "radius", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,radius)},
     { "aabbs",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
@@ -133,7 +131,7 @@ int main(int ac, char **av)
   GPRTCompute boundsProgram
     = gprtComputeCreate(context,module,"AABBBounds",
                       sizeof(AABBBoundsData),
-                      computeVars,-1);
+                      boundsVars,-1);
 
   gprtBuildPrograms(context);
 
@@ -141,9 +139,9 @@ int main(int ac, char **av)
   // aabb mesh
   // ------------------------------------------------------------------
   GPRTBuffer vertexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,nullptr);
   GPRTBuffer radiusBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT,NUM_VERTICES,radii);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT,NUM_VERTICES,nullptr);
   GPRTBuffer aabbPositionsBuffer
     = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES * 2,nullptr);
 
@@ -156,12 +154,17 @@ int main(int ac, char **av)
   gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
   gprtGeomSet3f(aabbGeom,"color",0,0,1);
 
+  gprtComputeSetBuffer(vertexProgram, "vertex", vertexBuffer);
+  gprtComputeSetBuffer(vertexProgram, "radius", radiusBuffer);
+  gprtComputeSet1f(vertexProgram, "now", 0.0f);
+
   gprtComputeSetBuffer(boundsProgram, "vertex", vertexBuffer);
   gprtComputeSetBuffer(boundsProgram, "radius", radiusBuffer);
   gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
   
   // compute AABBs in parallel with a compute shader
   gprtBuildSBT(context, GPRT_SBT_COMPUTE);
+  gprtComputeLaunch1D(context,vertexProgram,NUM_VERTICES);
   gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
 
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
@@ -275,9 +278,19 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
-      
       gprtBuildSBT(context, GPRT_SBT_RAYGEN);
     }
+
+    // update time to move primitives. then, rebuild accel.
+    gprtComputeSet1f(vertexProgram, "now", float(glfwGetTime()));
+    gprtBuildSBT(context, GPRT_SBT_COMPUTE);
+    gprtComputeLaunch1D(context,vertexProgram,NUM_VERTICES);
+    gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
+    gprtAccelBuild(context, aabbAccel);
+    gprtAccelBuild(context, world);
+
+    gprtRayGenSetAccel(rayGen, "world", world);
+    gprtBuildSBT(context, GPRT_SBT_HITGROUP);
 
     // Now, trace rays
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
@@ -348,6 +361,8 @@ int main(int ac, char **av)
   gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
+  gprtComputeDestroy(vertexProgram);
+  gprtComputeDestroy(boundsProgram);
   gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(aabbGeom);
