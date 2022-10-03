@@ -52,9 +52,10 @@ jobs:
       run: |
         mkdir bld
         cd bld
+        cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
-        make -j4
+        make VERBOSE=1 -j4
 
     # Just checking build until a CPU backend is ready
     # - name: Run Samples
