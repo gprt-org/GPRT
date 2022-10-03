@@ -84,9 +84,6 @@ int main(int ac, char **av)
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPrograms(gprt);
 
-  // Create the pipeline.
-  gprtBuildPipeline(gprt);
-
   // ------------------------------------------------------------------
   // alloc buffers
   // ------------------------------------------------------------------
@@ -124,7 +121,7 @@ int main(int ac, char **av)
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, "Int00 Raygen Only", 
+  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, "Int00 Raygen Only",
     NULL, NULL);
   if (!window)
     // Window or OpenGL context creation failed
@@ -143,7 +140,7 @@ int main(int ac, char **av)
 
     if (fbTexture == 0)
       glGenTextures(1, &fbTexture);
-    
+
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     GLenum texFormat = GL_RGBA;
     GLenum texelType = GL_UNSIGNED_BYTE;
@@ -160,7 +157,7 @@ int main(int ac, char **av)
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    
+
     glDisable(GL_DEPTH_TEST);
 
     glViewport(0, 0, fbSize.x, fbSize.y);
@@ -173,18 +170,18 @@ int main(int ac, char **av)
     {
       glTexCoord2f(0.f, 0.f);
       glVertex3f(0.f, 0.f, 0.f);
-    
+
       glTexCoord2f(0.f, 1.f);
       glVertex3f(0.f, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 1.f);
       glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 0.f);
       glVertex3f((float)fbSize.x, 0.f, 0.f);
     }
     glEnd();
-    
+
     glfwSwapBuffers(window);
     glfwPollEvents();
   }

@@ -87,9 +87,6 @@ int main(int ac, char **av)
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPrograms(gprt);
 
-  // Create the pipeline.
-  gprtBuildPipeline(gprt);
-
   // ------------------------------------------------------------------
   // alloc buffers
   // ------------------------------------------------------------------

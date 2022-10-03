@@ -58,12 +58,12 @@ float radii[NUM_VERTICES] =
 
 float3 aabbPositions[NUM_VERTICES*2] =
   {
-    vertices[0] - radii[0], vertices[0] + radii[0], 
-    // vertices[1] - radii[0], vertices[1] + radii[0], 
-    // vertices[2] - radii[0], vertices[2] + radii[0] 
+    vertices[0] - radii[0], vertices[0] + radii[0],
+    // vertices[1] - radii[0], vertices[1] + radii[0],
+    // vertices[2] - radii[0], vertices[2] + radii[0]
   };
 
-float transform[3][4] = 
+float transform[3][4] =
   {
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
@@ -123,9 +123,9 @@ int main(int ac, char **av)
 
   GPRTGeom aabbGeom
     = gprtGeomCreate(context,aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
                         NUM_VERTICES, 2 * sizeof(float3), 0);
-  
+
   gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
   gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
   gprtGeomSet3f(aabbGeom,"color",0,0,1);
@@ -135,7 +135,7 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
   gprtAccelBuild(context, aabbAccel);
-  
+
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
   gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
@@ -212,7 +212,6 @@ int main(int ac, char **av)
   // build *SBT* required to trace the groups
   // ##################################################################
   gprtBuildPrograms(context);
-  gprtBuildPipeline(context);
   gprtBuildSBT(context);
 
   // ##################################################################

@@ -59,12 +59,12 @@ float radii[NUM_VERTICES] =
 
 float3 aabbPositions[NUM_VERTICES*2] =
   {
-    vertices[0] - radii[0], vertices[0] + radii[0], 
-    // vertices[1] - radii[0], vertices[1] + radii[0], 
-    // vertices[2] - radii[0], vertices[2] + radii[0] 
+    vertices[0] - radii[0], vertices[0] + radii[0],
+    // vertices[1] - radii[0], vertices[1] + radii[0],
+    // vertices[2] - radii[0], vertices[2] + radii[0]
   };
 
-float transform[3][4] = 
+float transform[3][4] =
   {
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
@@ -126,9 +126,9 @@ int main(int ac, char **av)
 
   GPRTGeom aabbGeom
     = gprtGeomCreate(context,aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
                         NUM_VERTICES, 2 * sizeof(float3), 0);
-  
+
   gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
   gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
   gprtGeomSet3f(aabbGeom,"color",0,0,1);
@@ -138,7 +138,7 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
   gprtAccelBuild(context, aabbAccel);
-  
+
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
   gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
@@ -194,7 +194,6 @@ int main(int ac, char **av)
   // build *SBT* required to trace the groups
   // ##################################################################
   gprtBuildPrograms(context);
-  gprtBuildPipeline(context);
   gprtBuildSBT(context);
 
   // ##################################################################
@@ -213,7 +212,7 @@ int main(int ac, char **av)
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, 
+  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y,
     "Int02 Simple AABBs", NULL, NULL);
   if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
   glfwMakeContextCurrent(window);
@@ -279,7 +278,7 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
-      
+
       gprtBuildSBT(context);
     }
 
@@ -290,7 +289,7 @@ int main(int ac, char **av)
     void* pixels = gprtBufferGetPointer(frameBuffer);
     if (fbTexture == 0)
       glGenTextures(1, &fbTexture);
-    
+
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     GLenum texFormat = GL_RGBA;
     GLenum texelType = GL_UNSIGNED_BYTE;
@@ -307,7 +306,7 @@ int main(int ac, char **av)
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    
+
     glDisable(GL_DEPTH_TEST);
 
     glViewport(0, 0, fbSize.x, fbSize.y);
@@ -320,18 +319,18 @@ int main(int ac, char **av)
     {
       glTexCoord2f(0.f, 0.f);
       glVertex3f(0.f, 0.f, 0.f);
-    
+
       glTexCoord2f(0.f, 1.f);
       glVertex3f(0.f, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 1.f);
       glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 0.f);
       glVertex3f((float)fbSize.x, 0.f, 0.f);
     }
     glEnd();
-    
+
     glfwSwapBuffers(window);
     glfwPollEvents();
   }
