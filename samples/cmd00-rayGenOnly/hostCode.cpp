@@ -100,8 +100,8 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // build Shader Binding Table (SBT) required to trace the groups
   // ------------------------------------------------------------------
-  gprtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
-  gprtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
+  gprtRayGenSet3f(rayGen,"color0",0.1f,0.1f,0.1f);
+  gprtRayGenSet3f(rayGen,"color1",.0f,.0f,.0f);
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
   gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the ray generation record.

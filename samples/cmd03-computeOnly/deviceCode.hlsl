@@ -28,6 +28,7 @@
 // The second is the type of the shader record.
 GPRT_COMPUTE_PROGRAM(simpleCompute, (ComputeData, record))
 {
+  // TODO, make this demonstrate something only a compute shader could do.
   uint2 pixelID = DispatchThreadID.xy;
 
   if (pixelID.x == 0 && pixelID.y == 0) {

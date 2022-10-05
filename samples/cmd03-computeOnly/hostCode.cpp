@@ -100,8 +100,8 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // build Shader Binding Table (SBT) required to launch kernels
   // ------------------------------------------------------------------
-  gprtComputeSet3f(compute,"color0",.8f,0.f,0.f);
-  gprtComputeSet3f(compute,"color1",.8f,.8f,.8f);
+  gprtComputeSet3f(compute,"color0",0.1f,0.1f,0.1f);
+  gprtComputeSet3f(compute,"color1",.0f,.0f,.0f);
   gprtComputeSetBuffer(compute,"fbPtr",frameBuffer);
   gprtComputeSet2i(compute,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the compute record.

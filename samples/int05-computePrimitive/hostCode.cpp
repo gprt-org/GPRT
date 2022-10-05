@@ -180,7 +180,7 @@ int main(int ac, char **av)
   gprtAccelBuild(context, world);
 
   // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
   gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
 
   // ----------- set raygen variables  ----------------------------
