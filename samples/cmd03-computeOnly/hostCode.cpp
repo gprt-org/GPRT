@@ -88,7 +88,7 @@ int main(int ac, char **av)
   gprtBuildPrograms(gprt);
 
   // Create the pipeline.
-  gprtBuildPipeline(gprt);
+  // gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
   // alloc buffers

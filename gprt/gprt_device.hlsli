@@ -199,6 +199,56 @@ void progName(in RecordType record, \
 #endif
 #endif
 
+
+
+
+
+
+
+
+
+
+
+
+#define TYPE_NAME_EXPAND(type_, name_) type_ name_   
+#define TYPE_EXPAND(type_, name_) type_ 
+#define NAME_EXPAND(type_, name_) name_ 
+#define RAW(...) __VA_ARGS__
+
+// We currently recycle ray generation programs to implement a user-side
+// compute program. This allows us to recycle existing SBT record API
+// for compute shader IO
+#ifndef GPRT_COMPUTE_PROGRAM_NEW
+#ifdef COMPUTE
+#define GPRT_COMPUTE_PROGRAM_NEW(progName, RecordDecl)                   \
+  /* fwd decl for the kernel func to call */                            \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
+   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);          \
+  
+  
+  [[vk::shader_record_ext]]                                             \
+  ConstantBuffer<RAW(TYPE_EXPAND)RecordDecl> progName##RAW(TYPE_EXPAND)RecordDecl;                      \
+//   [shader("raygeneration")]                                             \
+//   void __compute__##progName()                                           \
+//   {                                                                     \
+//     progName(progName##RecordData, 0, DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));       \
+//   }                                                                     \
+//   /* now the actual device code that the user is writing: */            \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                                   \
+  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
+/* program args and body supplied by user ... */                      
+#else
+#define GPRT_COMPUTE_PROGRAM_NEW(progName, RecordDecl)                       \
+/* Dont add entry point decorators, instead treat as just a function. */\
+void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
+  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
+/* program args and body supplied by user ... */   
+#endif
+#endif
+
+
+
+
 // #ifndef GPRT_COMPUTE_PROGRAM
 // #ifdef COMPUTE
 // #define GPRT_COMPUTE_PROGRAM(progName)                                  \

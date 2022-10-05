@@ -38,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> cmd00_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> cmd00_deviceCode; // wrap this map into some internal type
 
 // When run, this program produces this PNG as output.
 // In this case the correct result is a red and light gray checkerboard,
@@ -82,13 +82,13 @@ int main(int ac, char **av)
   // hold on to it with the "gprt" context
   GPRTRayGen rayGen
       = gprtRayGenCreate(gprt, module, "simpleRayGen",
-                      sizeof(RayGenData),rayGenVars,-1);
+                      sizeof(RayGenData),rayGenVars,-1); // -1 maybe should be the default here...
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPrograms(gprt);
 
   // Create the pipeline.
-  gprtBuildPipeline(gprt);
+  // gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
   // alloc buffers
@@ -103,8 +103,8 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // build Shader Binding Table (SBT) required to trace the groups
   // ------------------------------------------------------------------
-  gprtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
   gprtRayGenSet3f(rayGen,"color1",.8f,.8f,.8f);
+  gprtRayGenSet3f(rayGen,"color0",.8f,0.f,0.f);
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
   gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the ray generation record.
