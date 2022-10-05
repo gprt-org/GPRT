@@ -54,6 +54,9 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 
 # ------------------------------------------------------------------

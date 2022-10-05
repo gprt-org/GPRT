@@ -66,7 +66,7 @@ int3 indices[NUM_INDICES] =
     { 4,0,2 }, { 4,2,6 }
   };
 
-float transform[3][4] = 
+float transform[3][4] =
   {
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
@@ -145,7 +145,7 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
-  
+
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
   gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
@@ -222,7 +222,6 @@ int main(int ac, char **av)
   // build *SBT* required to trace the groups
   // ##################################################################
   gprtBuildPrograms(context);
-  gprtBuildPipeline(context);
   gprtBuildSBT(context);
 
   // ##################################################################
