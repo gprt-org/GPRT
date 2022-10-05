@@ -80,7 +80,7 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
 }
 
 
-GPRT_COMPUTE_PROGRAM_NEW(AABBBounds2, (AABBBoundsData, record))
+GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
 {
   int primID = DispatchThreadID.x;
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
@@ -90,20 +90,6 @@ GPRT_COMPUTE_PROGRAM_NEW(AABBBounds2, (AABBBoundsData, record))
   vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, aabbMin);
   vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
 }
-
-
-GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
-{
-  int primID = DispatchThreadID.x;
-  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
-  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
-  float3 aabbMin = position - float3(radius, radius, radius);
-  float3 aabbMax = position + float3(radius, radius, radius);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, aabbMin);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
-}
-
-
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
 {

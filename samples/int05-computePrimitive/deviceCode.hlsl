@@ -23,7 +23,7 @@
 #include "deviceCode.h"
 #include "gprt.h"
 
-GPRT_COMPUTE_PROGRAM(AABBPrimitive, AABBPrimitiveData)
+GPRT_COMPUTE_PROGRAM(AABBPrimitive, (AABBPrimitiveData, record))
 {
   int primID = DispatchThreadID.x;
   float p = (primID / 10000.f);
@@ -41,7 +41,7 @@ GPRT_COMPUTE_PROGRAM(AABBPrimitive, AABBPrimitiveData)
   vk::RawBufferStore<float>(record.radius + sizeof(float) * primID, radius);
 }
 
-GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
+GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
 {
   int primID = DispatchThreadID.x;
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
