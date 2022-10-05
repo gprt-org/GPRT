@@ -45,9 +45,9 @@ struct PushConstants {
 [[vk::push_constant]] PushConstants pc;
 
 /*
-  The DXC compiler unfortunately doesn't handle multiple mixed entry points 
-  of different stage kinds in the same compilation step. So we instead 
-  use these macros to selectively filter all but a particular shader type, 
+  The DXC compiler unfortunately doesn't handle multiple mixed entry points
+  of different stage kinds in the same compilation step. So we instead
+  use these macros to selectively filter all but a particular shader type,
   and compile repeatedly for all shader kinds (compute, raygen, anyhit, etc)
 
   Down the road, this could also give us an opportunity to shim in an Embree
@@ -68,12 +68,12 @@ struct PushConstants {
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName(in RecordType record)                                   \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -91,12 +91,12 @@ void progName(in RecordType record)                                     \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute) \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute)                                                           \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -114,12 +114,12 @@ void progName(in RecordType record, inout PayloadType payload, in AttributeType 
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName(in RecordType record)                                                         \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -137,12 +137,12 @@ void progName(in RecordType record)                                     \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName(Params)                                                  \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(Params)                                                   \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -161,12 +161,12 @@ void progName(Params)                                                   \
   }                                                                     \
   /* now the actual device code that the user is writing: */            \
   void progName(in RecordType record, inout PayloadType payload)        \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RecordType record, inout PayloadType payload)          \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -189,13 +189,13 @@ void progName(in RecordType record, inout PayloadType payload)          \
   /* now the actual device code that the user is writing: */            \
   void progName(in RecordType record,                                   \
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RecordType record, \
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -210,9 +210,11 @@ void progName(in RecordType record, \
 
 
 
-#define TYPE_NAME_EXPAND(type_, name_) type_ name_   
-#define TYPE_EXPAND(type_, name_) type_ 
-#define NAME_EXPAND(type_, name_) name_ 
+#define TYPE_NAME_EXPAND(type_, name_) type_ name_
+#define TYPE_EXPAND(type_, name_) type_
+#define NAME_EXPAND(type_, name_) name_
+#define CAT_(A, B) A##B
+#define CAT(A, B) CAT_(A, B)
 #define RAW(...) __VA_ARGS__
 
 // We currently recycle ray generation programs to implement a user-side
@@ -224,25 +226,23 @@ void progName(in RecordType record, \
   /* fwd decl for the kernel func to call */                            \
   void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
    uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);          \
-  
-  
   [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RAW(TYPE_EXPAND)RecordDecl> progName##RAW(TYPE_EXPAND)RecordDecl;                      \
-//   [shader("raygeneration")]                                             \
-//   void __compute__##progName()                                           \
-//   {                                                                     \
-//     progName(progName##RecordData, 0, DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));       \
-//   }                                                                     \
-//   /* now the actual device code that the user is writing: */            \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                      \
+   [shader("raygeneration")]                                             \
+   void __compute__##progName()                                           \
+   {                                                                     \
+     progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)), 0, DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));       \
+   }                                                                     \
+  /* now the actual device code that the user is writing: */            \
   void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                                   \
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */                      
+/* program args and body supplied by user ... */
 #else
 #define GPRT_COMPUTE_PROGRAM_NEW(progName, RecordDecl)                       \
 /* Dont add entry point decorators, instead treat as just a function. */\
 void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */   
+/* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -262,11 +262,11 @@ void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
 //   }                                                                     \
 //   /* now the actual device code that the user is writing: */            \
 //   void progName                                                         \
-// /* program args and body supplied by user ... */                      
+// /* program args and body supplied by user ... */
 // #else
 // #define GPRT_COMPUTE_PROGRAM(progName)                                  \
 // /* Dont add entry point decorators, instead treat as just a function. */\
 // void progName                                                           \
-// /* program args and body supplied by user ... */   
+// /* program args and body supplied by user ... */
 // #endif
 // #endif
