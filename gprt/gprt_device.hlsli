@@ -74,24 +74,28 @@ where ARG is "(type_, name)". */
 
 #ifndef GPRT_RAYGEN_PROGRAM
 #ifdef RAYGEN
-#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);                              \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("raygeneration")]                                             \
-  void __raygen__##progName()                                           \
-  {                                                                     \
-    progName(progName##RecordData);                                     \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record)                                   \
+#define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                               \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl);                            \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("raygeneration")]                                                     \
+  void __raygen__##progName()                                                   \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)));                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */
+#define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                               \
+  /* Dont add entry point decorators, instead treat as just a function. */        \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                               \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 

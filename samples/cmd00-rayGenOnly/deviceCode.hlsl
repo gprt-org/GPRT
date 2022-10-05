@@ -26,7 +26,7 @@
 // The first parameter here is the name of our entry point.
 //
 // The second is the type of the shader record.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   uint2 pixelID = DispatchRaysIndex().xy;
 
