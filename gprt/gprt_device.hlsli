@@ -97,70 +97,66 @@ void progName(in RecordType record)                                     \
 
 #ifndef GPRT_CLOSEST_HIT_PROGRAM
 #ifdef CLOSESTHIT
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("closesthit")]                                                \
-  void __closesthit__##progName(inout PayloadType payload, in AttributeType attribute)              \
-  {                                                                     \
-    progName(progName##RecordData, payload, attribute);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute) \
+#define GPRT_CLOSEST_HIT_PROGRAM(progName,                                      \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl);                         \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("closesthit")]                                                        \
+  void __closesthit__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl,         \
+                                in RAW(TYPE_NAME_EXPAND)AttributeDecl)          \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                    \
+             RAW(NAME_EXPAND PayloadDecl),                                      \
+             RAW(NAME_EXPAND AttributeDecl));                                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute)                                                           \
-/* program args and body supplied by user ... */
+#define GPRT_CLOSEST_HIT_PROGRAM(progName,                                      \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_INTERSECTION_PROGRAM
 #ifdef INTERSECTION
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("intersection")]                                                \
-  void __intersection__##progName()              \
-  {                                                                     \
-    progName(progName##RecordData);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record)                                                         \
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                         \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl);                            \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("intersection")]                                                      \
+  void __intersection__##progName()                                             \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)));                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */
-#endif
-#endif
-
-#ifndef GPRT_INTERSECTION_PROGRAM
-#ifdef INTERSECTION
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("intersection")]                                                \
-  void __intersection__##progName()              \
-  {                                                                     \
-    progName(progName##RecordData);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(Params)                                                  \
-/* program args and body supplied by user ... */
-#else
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(Params)                                                   \
-/* program args and body supplied by user ... */
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                         \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 

@@ -67,7 +67,7 @@ struct Attribute
   float2 attribs;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
   // printf("TEST\n");
   payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;

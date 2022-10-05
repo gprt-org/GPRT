@@ -96,7 +96,7 @@ struct Attribute
   float3 position;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
   float3 origin = attribute.position;
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();

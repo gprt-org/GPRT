@@ -65,7 +65,7 @@ struct Attributes {
   float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload, Attributes)
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
   // compute normal:
   const uint    primID = PrimitiveIndex();
