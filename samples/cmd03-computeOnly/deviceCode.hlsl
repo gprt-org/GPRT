@@ -26,7 +26,7 @@
 // The first parameter here is the name of our entry point.
 //
 // The second is the type of the shader record.
-GPRT_COMPUTE_PROGRAM(simpleCompute, ComputeData)
+GPRT_COMPUTE_PROGRAM(simpleCompute, (ComputeData, record))
 {
   uint2 pixelID = DispatchThreadID.xy;
 

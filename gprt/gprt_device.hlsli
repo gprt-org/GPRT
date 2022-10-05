@@ -45,128 +45,192 @@ struct PushConstants {
 [[vk::push_constant]] PushConstants pc;
 
 /*
-  The DXC compiler unfortunately doesn't handle multiple mixed entry points 
-  of different stage kinds in the same compilation step. So we instead 
-  use these macros to selectively filter all but a particular shader type, 
+  The DXC compiler unfortunately doesn't handle multiple mixed entry points
+  of different stage kinds in the same compilation step. So we instead
+  use these macros to selectively filter all but a particular shader type,
   and compile repeatedly for all shader kinds (compute, raygen, anyhit, etc)
 
   Down the road, this could also give us an opportunity to shim in an Embree
   backend.
 */
 
+
+/* RAW here makes sure macro expansion doesn't get ignored when generated as 
+part of the parent macro expansion. */
+#define RAW(...) __VA_ARGS__
+
+/* CAT here is similar to RAW, making sure concatenation is preserved as 
+part of the parent macro expansion */
+#define CAT_(A, B) A##B
+#define CAT(A, B) CAT_(A, B)
+
+/* TYPE_NAME_EXPAND transforms "(A,B)"" into "A B". We usually include the 
+parenthesis as part of the argument in the macro, like "TYPE_NAME_EXPAND ARG, 
+where ARG is "(type_, name)". */
+#define TYPE_NAME_EXPAND(type_, name_) type_ name_
+#define TYPE_EXPAND(type_, name_) type_
+#define NAME_EXPAND(type_, name_) name_
+
+
 #ifndef GPRT_RAYGEN_PROGRAM
 #ifdef RAYGEN
-#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);                              \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("raygeneration")]                                             \
-  void __raygen__##progName()                                           \
-  {                                                                     \
-    progName(progName##RecordData);                                     \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record)                                   \
-/* program args and body supplied by user ... */                      
+#define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                               \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl);                            \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("raygeneration")]                                                     \
+  void __raygen__##progName()                                                   \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)));                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
+/* program args and body supplied by user ... */
 #else
-#define GPRT_RAYGEN_PROGRAM(progName, RecordType)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */   
+#define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                               \
+  /* Dont add entry point decorators, instead treat as just a function. */        \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                               \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_CLOSEST_HIT_PROGRAM
 #ifdef CLOSESTHIT
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("closesthit")]                                                \
-  void __closesthit__##progName(inout PayloadType payload, in AttributeType attribute)              \
-  {                                                                     \
-    progName(progName##RecordData, payload, attribute);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute) \
-/* program args and body supplied by user ... */                      
+#define GPRT_CLOSEST_HIT_PROGRAM(progName,                                      \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl);                         \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("closesthit")]                                                        \
+  void __closesthit__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl,         \
+                                in RAW(TYPE_NAME_EXPAND)AttributeDecl)          \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                    \
+             RAW(NAME_EXPAND PayloadDecl),                                      \
+             RAW(NAME_EXPAND AttributeDecl));                                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
+/* program args and body supplied by user ... */
 #else
-#define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordType, PayloadType, AttributeType)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record, inout PayloadType payload, in AttributeType attribute)                                                           \
-/* program args and body supplied by user ... */   
+#define GPRT_CLOSEST_HIT_PROGRAM(progName,                                      \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
+  /* program args and body supplied by user ... */
+#endif
+#endif
+
+#ifndef GPRT_ANY_HIT_PROGRAM
+#ifdef ANYHIT
+#define GPRT_ANY_HIT_PROGRAM(progName,                                          \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl);                         \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("anyhit")]                                                            \
+  void __anyhit__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl,             \
+                                in RAW(TYPE_NAME_EXPAND)AttributeDecl)          \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                    \
+             RAW(NAME_EXPAND PayloadDecl),                                      \
+             RAW(NAME_EXPAND AttributeDecl));                                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
+/* program args and body supplied by user ... */
+#else
+#define GPRT_ANY_HIT_PROGRAM(progName,                                          \
+                                 RecordDecl, PayloadDecl, AttributeDecl)        \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+    void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                           \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl,                         \
+                in RAW(TYPE_NAME_EXPAND)AttributeDecl)                          \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_INTERSECTION_PROGRAM
 #ifdef INTERSECTION
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("intersection")]                                                \
-  void __intersection__##progName()              \
-  {                                                                     \
-    progName(progName##RecordData);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record)                                                         \
-/* program args and body supplied by user ... */                      
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                         \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl);                            \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("intersection")]                                                      \
+  void __intersection__##progName()                                             \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)));                   \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
+/* program args and body supplied by user ... */
 #else
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record)                                     \
-/* program args and body supplied by user ... */   
-#endif
-#endif
-
-#ifndef GPRT_INTERSECTION_PROGRAM
-#ifdef INTERSECTION
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record);       \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("intersection")]                                                \
-  void __intersection__##progName()              \
-  {                                                                     \
-    progName(progName##RecordData);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(Params)                                                  \
-/* program args and body supplied by user ... */                      
-#else
-#define GPRT_INTERSECTION_PROGRAM(progName, RecordType, Params)     \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(Params)                                                   \
-/* program args and body supplied by user ... */   
+#define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                         \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl)                             \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
 
 #ifndef GPRT_MISS_PROGRAM
 #ifdef MISS
-#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload);   \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("miss")]                                                \
-  void __miss__##progName(inout PayloadType payload)                  \
-  {                                                                     \
-    progName(progName##RecordData, payload);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record, inout PayloadType payload)        \
-/* program args and body supplied by user ... */                      
+#define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                    \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl);                        \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("miss")]                                                              \
+  void __miss__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl)               \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                     \
+             RAW(NAME_EXPAND PayloadDecl));                                     \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+              inout RAW(TYPE_NAME_EXPAND)PayloadDecl)                           \
+/* program args and body supplied by user ... */
 #else
-#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record, inout PayloadType payload)          \
-/* program args and body supplied by user ... */   
+#define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                    \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl)                         \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -175,48 +239,31 @@ void progName(in RecordType record, inout PayloadType payload)          \
 // for compute shader IO
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, \
-   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);          \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("raygeneration")]                                             \
-  void __compute__##progName()                                           \
-  {                                                                     \
-    progName(progName##RecordData, 0, DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));       \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record,                                   \
-  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */                      
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                              \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);\
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("raygeneration")]                                                     \
+  void __compute__##progName()                                                  \
+  {                                                                             \
+   progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)), 0,                  \
+     DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));                          \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)  \
+/* program args and body supplied by user ... */
 #else
-#define GPRT_COMPUTE_PROGRAM(progName, RecordType)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record, \
-  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */   
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                              \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+    uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)\
+  /* program args and body supplied by user ... */
 #endif
 #endif
-
-// #ifndef GPRT_COMPUTE_PROGRAM
-// #ifdef COMPUTE
-// #define GPRT_COMPUTE_PROGRAM(progName)                                  \
-//   /* fwd decl for the kernel func to call */                            \
-//   void progName(uint3 tid);                                             \
-//   [shader("compute")]                                                   \
-//   [numthreads(1,1,1)]                                                   \
-//   void __compute__##progName( uint3 tid : SV_DispatchThreadID)          \
-//   {                                                                     \
-//     progName(tid);                                                      \
-//   }                                                                     \
-//   /* now the actual device code that the user is writing: */            \
-//   void progName                                                         \
-// /* program args and body supplied by user ... */                      
-// #else
-// #define GPRT_COMPUTE_PROGRAM(progName)                                  \
-// /* Dont add entry point decorators, instead treat as just a function. */\
-// void progName                                                           \
-// /* program args and body supplied by user ... */   
-// #endif
-// #endif

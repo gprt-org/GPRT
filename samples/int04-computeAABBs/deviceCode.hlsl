@@ -28,7 +28,7 @@ struct Payload
 [[vk::location(0)]] float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(AABBRayGen, RayGenData)
+GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -68,7 +68,7 @@ struct Attribute
   float3 position;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
   float3 origin = attribute.position;
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
@@ -79,7 +79,8 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
   payload.color = normal;//float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
-GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
+
+GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
 {
   int primID = DispatchThreadID.x;
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
@@ -90,7 +91,7 @@ GPRT_COMPUTE_PROGRAM(AABBBounds, AABBBoundsData)
   vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   uint primID = PrimitiveIndex();
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
@@ -113,7 +114,7 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
   ReportHit(tHit, /*hitKind*/ 0, attr);
 }
 
-GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);

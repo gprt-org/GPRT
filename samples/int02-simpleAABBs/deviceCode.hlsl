@@ -28,7 +28,7 @@ struct Payload
 [[vk::location(0)]] float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(AABBRayGen, RayGenData)
+GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -67,13 +67,13 @@ struct Attribute
   float2 attribs;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
   // printf("TEST\n");
   payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   // prd.color = float3(1.f, 1.f, 1.f);
   // printf("TEST\n");
@@ -82,7 +82,7 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
   ReportHit(0.1f, /*hitKind*/ 0, attr);
 }
 
-GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);

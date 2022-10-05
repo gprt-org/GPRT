@@ -28,7 +28,7 @@ struct Payload
 [[vk::location(0)]] float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(simpleRayGen, RayGenData)
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -65,7 +65,7 @@ struct Attributes {
   float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload, Attributes)
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
   // compute normal:
   const uint    primID = PrimitiveIndex();
@@ -82,7 +82,7 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, TrianglesGeomData, Payload, Attributes)
   payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * record.color;
 }
 
-GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
