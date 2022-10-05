@@ -91,7 +91,7 @@ GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
   vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   uint primID = PrimitiveIndex();
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);

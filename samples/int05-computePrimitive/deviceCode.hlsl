@@ -107,7 +107,7 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
   payload.color = normal;//float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   uint primID = PrimitiveIndex();
   float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);

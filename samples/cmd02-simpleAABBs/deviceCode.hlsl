@@ -73,7 +73,7 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, AABBGeomData, Payload, Attribute)
   payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   // prd.color = float3(1.f, 1.f, 1.f);
   // printf("TEST\n");
