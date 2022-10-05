@@ -167,24 +167,32 @@ void progName(Params)                                                   \
 
 #ifndef GPRT_MISS_PROGRAM
 #ifdef MISS
-#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)     \
-  /* fwd decl for the kernel func to call */                            \
-  void progName(in RecordType record, inout PayloadType payload);   \
-  [[vk::shader_record_ext]]                                             \
-  ConstantBuffer<RecordType> progName##RecordData;                      \
-  [shader("miss")]                                                \
-  void __miss__##progName(inout PayloadType payload)                  \
-  {                                                                     \
-    progName(progName##RecordData, payload);                            \
-  }                                                                     \
-  /* now the actual device code that the user is writing: */            \
-  void progName(in RecordType record, inout PayloadType payload)        \
+#define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                    \
+  /* fwd decl for the kernel func to call */                                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl);                        \
+                                                                                \
+  [[vk::shader_record_ext]]                                                     \
+  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+    CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
+                                                                                \
+  [shader("miss")]                                                              \
+  void __miss__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl)               \
+  {                                                                             \
+    progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                     \
+             RAW(NAME_EXPAND PayloadDecl));                                     \
+  }                                                                             \
+                                                                                \
+  /* now the actual device code that the user is writing: */                    \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+              inout RAW(TYPE_NAME_EXPAND)PayloadDecl)                           \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_MISS_PROGRAM(progName, RecordType, PayloadType)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RecordType record, inout PayloadType payload)          \
-/* program args and body supplied by user ... */
+#define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                    \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+                inout RAW(TYPE_NAME_EXPAND)PayloadDecl)                         \
+  /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -214,10 +222,10 @@ void progName(in RecordType record, inout PayloadType payload)          \
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)  \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                       \
-/* Dont add entry point decorators, instead treat as just a function. */\
-void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl, \
-  uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID) \
-/* program args and body supplied by user ... */
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                              \
+  /* Dont add entry point decorators, instead treat as just a function. */      \
+  void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
+    uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)\
+  /* program args and body supplied by user ... */
 #endif
 #endif

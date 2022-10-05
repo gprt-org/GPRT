@@ -82,7 +82,7 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, AABBGeomData)
   ReportHit(0.1f, /*hitKind*/ 0, attr);
 }
 
-GPRT_MISS_PROGRAM(miss, MissProgData, Payload)
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
