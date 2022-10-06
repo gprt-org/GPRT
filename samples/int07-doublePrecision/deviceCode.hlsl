@@ -129,6 +129,8 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
 
   double3 ro = double3(raydata1.x, raydata1.y, raydata1.z);//ObjectRayOrigin();
   double3 rd = double3(raydata2.x, raydata2.y, raydata2.z);//ObjectRayDirection();
+  double tMin = raydata1.w;
+  double tCurrent = raydata2.w;
 
   int primID = PrimitiveIndex();
   int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
@@ -149,11 +151,15 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
 
   if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
   
-  if (t > 0.0) {
-    Attribute attr;
-    attr.bc = double2(u, v);
-    float f32t = float(t);
-    if (double(f32t) < t) f32t = next_after(f32t);
-    ReportHit(f32t, /*hitKind*/ 0, attr);
-  }
+  if (t > tCurrent) return;
+  if (t < tMin) return;
+  
+  // update current double precision thit
+  vk::RawBufferStore<double4>(addr + 7 * sizeof(double), t);
+
+  Attribute attr;
+  attr.bc = double2(u, v);
+  float f32t = float(t);
+  if (double(f32t) < t) f32t = next_after(f32t);
+  ReportHit(f32t, /*hitKind*/ 0, attr);
 }
