@@ -48,8 +48,8 @@ extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
   See gprt_data/double_teapot.c for details */
 extern uint32_t double_teapot_indices[];
 extern double double_teapot_vertices[];
-const int NUM_VERTICES = 13508;
-const int NUM_INDICES = 23744;
+const int NUM_VERTICES = 95112;
+const int NUM_INDICES = 623886/3;
 
 float transform[3][4] = 
   {
@@ -62,9 +62,9 @@ float transform[3][4] =
 const int2 fbSize = {1080,720};
 GLuint fbTexture {0};
 
-float3 lookFrom = {-100.f,-100.f,-100.f};
+float3 lookFrom = {-1.f,-1.f,-1.f};
 float3 lookAt = {0.f,0.f,0.f};
-float3 lookUp = {0.f,1.f,0.f};
+float3 lookUp = {0.f,-1.f,0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
@@ -81,6 +81,8 @@ int main(int ac, char **av)
     { "vertex",  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,vertex)},
     { "index" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,index)},
     { "aabbs" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,aabbs)},
+    { "dpRays" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,dpRays)},
+    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(DPTriangleData,fbSize)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType DPTriangleType
@@ -100,6 +102,7 @@ int main(int ac, char **av)
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
     { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "dpRays",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,dpRays)},
     { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
@@ -170,9 +173,19 @@ int main(int ac, char **av)
   // ----------- set raygen variables  ----------------------------
   GPRTBuffer frameBuffer
     = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+  
+  // need this to communicate double precision rays to intersection program
+  // ray origin xyz + tmin, then ray direction xyz + tmax
+  GPRTBuffer doubleRayBuffer
+    = gprtDeviceBufferCreate(context,GPRT_DOUBLE,fbSize.x*fbSize.y*8);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
+  gprtRayGenSetBuffer(rayGen,"dpRays", doubleRayBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
   gprtRayGenSetAccel(rayGen,"world", world);
+  
+  // Also set on geometry for intersection program
+  gprtGeomSetBuffer(dpTeapotGeom,"dpRays", doubleRayBuffer);
+  gprtGeomSet2iv(dpTeapotGeom,"fbSize", (int32_t*)&fbSize);
 
   // ##################################################################
   // build *SBT* required to trace the groups
@@ -331,6 +344,7 @@ int main(int ac, char **av)
   gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
+  gprtBufferDestroy(doubleRayBuffer);  
   gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);

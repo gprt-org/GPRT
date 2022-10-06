@@ -27,7 +27,10 @@ embed_spirv(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int07_doublePrecision ${PROJECT_SOURCE_DIR}/gprt/gprt_data/double_teapot.cpp hostCode.cpp)
+add_executable(int07_doublePrecision 
+${PROJECT_SOURCE_DIR}/gprt/gprt_data/double_teapot.cpp 
+${PROJECT_SOURCE_DIR}/gprt/gprt_data/double_cube.cpp 
+  hostCode.cpp)
 target_link_libraries(int07_doublePrecision
   PRIVATE
     int07_deviceCode

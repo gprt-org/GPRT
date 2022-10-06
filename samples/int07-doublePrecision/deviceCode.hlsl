@@ -34,6 +34,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   uint2 pixelID = DispatchRaysIndex().xy;
   float2 screen = (float2(pixelID) + 
                   float2(.5f, .5f)) / float2(record.fbSize);
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -45,6 +46,14 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+
+  // store double precision ray
+  uint64_t addr = record.dpRays + fbOfs * sizeof(double4) * 2;
+  double4 raydata = double4(rayDesc.Origin.x, rayDesc.Origin.y, rayDesc.Origin.z, rayDesc.TMin);
+  vk::RawBufferStore<double4>(addr, raydata);
+
+  raydata = double4(rayDesc.Direction.x, rayDesc.Direction.y, rayDesc.Direction.z, rayDesc.TMax);
+  vk::RawBufferStore<double4>(addr + sizeof(double4), raydata);
   TraceRay(
     world, // the tree
     RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -56,9 +65,9 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
     payload // the payload IO
   );
 
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
-      gprt::make_rgba(payload.color));
+  
+  vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
+    gprt::make_rgba(payload.color));
 }
 
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
@@ -78,9 +87,9 @@ GPRT_COMPUTE_PROGRAM(DPTriangle, (DPTriangleData, record))
 {
   int primID = DispatchThreadID.x;
   int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
-  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.x);
-  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.y);
-  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.z);
+  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.x);
+  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.y);
+  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.z);
   double3 dpaabbmin = min(min(A, B), C);
   double3 dpaabbmax = max(max(A, B), C);
   float3 fpaabbmin = float3(dpaabbmin) - float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
@@ -101,37 +110,50 @@ GPRT_CLOSEST_HIT_PROGRAM(DPTriangle, (DPTriangleData, record), (Payload, payload
   payload.color = float3(barycentrics.x, barycentrics.y, 0.0);
 }
 
+double3 dcross (in double3 a, in double3 b) { return double3(a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x); }
+
+float next_after(float a) {
+  uint a_ = asuint(a);
+  a_ += a < 0 ? -1 : 1;
+  return asfloat(a);
+}
+
 GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
 {
-  float3 ro = ObjectRayOrigin();
-  float3 rd = ObjectRayDirection();
+  uint2 pixelID = DispatchRaysIndex().xy;
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+  uint64_t addr = record.dpRays + fbOfs * sizeof(double4) * 2;
+
+  double4 raydata1 = vk::RawBufferLoad<double4>(addr);
+  double4 raydata2 = vk::RawBufferLoad<double4>(addr + sizeof(double4));
+
+  double3 ro = double3(raydata1.x, raydata1.y, raydata1.z);//ObjectRayOrigin();
+  double3 rd = double3(raydata2.x, raydata2.y, raydata2.z);//ObjectRayDirection();
 
   int primID = PrimitiveIndex();
   int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
-  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.x);
-  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.y);
-  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.z);
+  double3 v0 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.x);
+  double3 v1 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.y);
+  double3 v2 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.z);
 
-  float3 v0 = float3(A);
-  float3 v1 = float3(B);
-  float3 v2 = float3(C);
+  double3 v1v0 = v1 - v0;
+  double3 v2v0 = v2 - v0;
+  double3 rov0 = ro - v0;
 
-  float3 v1v0 = v1 - v0;
-  float3 v2v0 = v2 - v0;
-  float3 rov0 = ro - v0;
-
-  float3  n = cross( v1v0, v2v0 );
-  float3  q = cross( rov0, rd );
-  float d = 1.0/dot( rd, n );
-  float u = d*dot( -q, v2v0 );
-  float v = d*dot(  q, v1v0 );
-  float t = d*dot( -n, rov0 );
+  double3  n = dcross( v1v0, v2v0 );
+  double3  q = dcross( rov0, rd );
+  double d = 1.0/dot( rd, n );
+  double u = d*dot( -q, v2v0 );
+  double v = d*dot(  q, v1v0 );
+  double t = d*dot( -n, rov0 );
 
   if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
   
   if (t > 0.0) {
     Attribute attr;
     attr.bc = double2(u, v);
-    ReportHit(t, /*hitKind*/ 0, attr);
+    float f32t = float(t);
+    if (double(f32t) < t) f32t = next_after(f32t);
+    ReportHit(f32t, /*hitKind*/ 0, attr);
   }
 }

@@ -31,11 +31,15 @@ struct DPTriangleData
   alignas(8) uint64_t vertex; // float *
   /*! array/buffer of AABBs */
   alignas(8) uint64_t aabbs;
+  /*! array/buffer of double precision rays */
+  alignas(8) uint64_t dpRays;
+  alignas(8) int2 fbSize;
 };
 
 struct RayGenData
 {
   alignas(8) uint64_t fbPtr;
+  alignas(8) uint64_t dpRays;
 
   alignas(8) int2 fbSize;
   alignas(8) uint64_t world; // RaytracingAccelerationStructure*
