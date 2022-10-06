@@ -23,35 +23,6 @@
 #include "deviceCode.h"
 #include "gprt.h"
 
-GPRT_COMPUTE_PROGRAM(AABBPrimitive, (AABBPrimitiveData, record))
-{
-  int primID = DispatchThreadID.x;
-  float p = (primID / 10000.f);
-
-  float r = 2 * lerp(0.0, 1.0, sin(record.now + 3.14 * p * 10000) * .25 + .75);
-  float theta = p * 6.28 * lerp(100, 101, sin(record.now * .5) * .5  + .5);
-  float phi =   p * 3.14;
-  float3 position = float3(
-    r * sin(phi) * cos(theta),
-    r * sin(phi) * sin(theta),
-    r * cos(phi)
-  );
-  float radius = .02f;
-  vk::RawBufferStore<float3>(record.vertex + sizeof(float3) * primID, position);
-  vk::RawBufferStore<float>(record.radius + sizeof(float) * primID, radius);
-}
-
-GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
-{
-  int primID = DispatchThreadID.x;
-  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
-  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
-  float3 aabbMin = position - float3(radius, radius, radius);
-  float3 aabbMax = position + float3(radius, radius, radius);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, aabbMin);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
-}
-
 struct Payload
 {
 [[vk::location(0)]] float3 color;
@@ -90,49 +61,77 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
       gprt::make_rgba(payload.color));
 }
 
-struct Attribute
-{
-  float radius;
-  float3 position;
-};
-
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
-{
-  float3 origin = attribute.position;
-  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
-
-  float3 normal = normalize(hitPos - origin);
-  
-  // printf("TEST\n");
-  payload.color = normal;//float3(1.f, 1.f, 1.f); //geomSBTData.color;
-}
-
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
-{
-  uint primID = PrimitiveIndex();
-  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
-  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
-
-  float3 ro = ObjectRayOrigin();
-  float3 rd = ObjectRayDirection();
-
-  float3 oc = ro - position;
-	float b = dot( oc, rd );
-	float c = dot( oc, oc ) - radius * radius;
-	float h = b*b - c;
-
-	if( h<0.0 ) return; // -1.0;
-	float tHit = -b - sqrt( h );
-
-  Attribute attr;
-  attr.radius = radius;
-  attr.position = position;
-  ReportHit(tHit, /*hitKind*/ 0, attr);
-}
-
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
   payload.color = (pattern & 1) ? record.color1 : record.color0;
+}
+
+struct Attribute
+{
+  double2 bc;
+};
+
+#define EPSILON 2.2204460492503130808472633361816E-16
+GPRT_COMPUTE_PROGRAM(DPTriangle, (DPTriangleData, record))
+{
+  int primID = DispatchThreadID.x;
+  int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
+  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.x);
+  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.y);
+  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.z);
+  double3 dpaabbmin = min(min(A, B), C);
+  double3 dpaabbmax = max(max(A, B), C);
+  float3 fpaabbmin = float3(dpaabbmin) - float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
+  float3 fpaabbmax = float3(dpaabbmax) + float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
+  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, fpaabbmin);
+  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), fpaabbmax);
+
+  if (primID == 0) {
+    printf("%f %f %f %f %f %f\n", 
+    fpaabbmin.x, fpaabbmin.y, fpaabbmin.z,
+    fpaabbmax.x, fpaabbmax.y, fpaabbmax.z);
+  }
+}
+
+GPRT_CLOSEST_HIT_PROGRAM(DPTriangle, (DPTriangleData, record), (Payload, payload), (Attribute, attribute))
+{
+  double2 barycentrics = attribute.bc;
+  payload.color = float3(barycentrics.x, barycentrics.y, 0.0);
+}
+
+GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
+{
+  float3 ro = ObjectRayOrigin();
+  float3 rd = ObjectRayDirection();
+
+  int primID = PrimitiveIndex();
+  int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
+  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.x);
+  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.y);
+  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(int3) * indices.z);
+
+  float3 v0 = float3(A);
+  float3 v1 = float3(B);
+  float3 v2 = float3(C);
+
+  float3 v1v0 = v1 - v0;
+  float3 v2v0 = v2 - v0;
+  float3 rov0 = ro - v0;
+
+  float3  n = cross( v1v0, v2v0 );
+  float3  q = cross( rov0, rd );
+  float d = 1.0/dot( rd, n );
+  float u = d*dot( -q, v2v0 );
+  float v = d*dot(  q, v1v0 );
+  float t = d*dot( -n, rov0 );
+
+  if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
+  
+  if (t > 0.0) {
+    Attribute attr;
+    attr.bc = double2(u, v);
+    ReportHit(t, /*hitKind*/ 0, attr);
+  }
 }

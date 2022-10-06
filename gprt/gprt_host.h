@@ -500,7 +500,7 @@ gprtComputeCreate(GPRTContext  context,
                  const char *programName,
                  size_t      sizeOfVarStruct,
                  GPRTVarDecl *vars,
-                 int         numVars);
+                 int         numVars GPRT_IF_CPP(=-1));
 
 GPRT_API void
 gprtComputeDestroy(GPRTCompute compute);
@@ -511,7 +511,7 @@ gprtRayGenCreate(GPRTContext  context,
                  const char *programName,
                  size_t      sizeOfVarStruct,
                  GPRTVarDecl *vars,
-                 int         numVars);
+                 int         numVars GPRT_IF_CPP(=-1));
 
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen rayGen);
@@ -522,7 +522,7 @@ gprtMissCreate(GPRTContext  context,
                    const char *programName,
                    size_t      sizeOfVarStruct,
                    GPRTVarDecl *vars,
-                   int         numVars);
+                   int         numVars GPRT_IF_CPP(=-1));
 
 /*! sets the given miss program for the given ray type */
 GPRT_API void
@@ -652,7 +652,7 @@ gprtGeomTypeCreate(GPRTContext  context,
                    GPRTGeomKind kind,
                    size_t       sizeOfVarStruct,
                    GPRTVarDecl  *vars,
-                   int          numVars);
+                   int          numVars GPRT_IF_CPP(=-1));
 
 GPRT_API void
 gprtGeomTypeDestroy(GPRTGeomType geomType);

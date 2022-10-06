@@ -22,34 +22,15 @@
 
 #include "gprt.h"
 
-struct AABBPrimitiveData
+/* variables for the triangle mesh geometry */
+struct DPTriangleData
 {
   /*! array/buffer of vertex indices */
-  alignas(8) uint64_t vertex; // vec3f*
+  alignas(8) uint64_t index; // vec3f*
   /*! array/buffer of vertex positions */
-  alignas(8) uint64_t radius; // float *
-  alignas(4) float now;
-};
-
-struct AABBBoundsData
-{
-  /*! array/buffer of vertex indices */
-  alignas(8) uint64_t vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(8) uint64_t radius; // float *  
+  alignas(8) uint64_t vertex; // float *
   /*! array/buffer of AABBs */
   alignas(8) uint64_t aabbs;
-};
-
-/* variables for the triangle mesh geometry */
-struct AABBGeomData
-{
-  /*! array/buffer of vertex indices */
-  alignas(8) uint64_t vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(8) uint64_t radius; // float *  
-  /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
 };
 
 struct RayGenData
