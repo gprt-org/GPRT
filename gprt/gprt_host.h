@@ -487,6 +487,11 @@ gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=nullptr),
 GPRT_API void
 gprtContextDestroy(GPRTContext context);
 
+/*! enable motion blur for this context. this _has_ to be called
+    before context creation. */
+GPRT_API void
+gprtEnableMotionBlur(GPRTContext context);
+
 /*! set number of ray types to be used in this context; this should be
   done before any programs, pipelines, geometries, etc get
   created */

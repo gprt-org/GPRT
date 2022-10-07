@@ -72,10 +72,10 @@ float transform[3][4] =
   };
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {1080,720};
 GLuint fbTexture {0};
 
-float3 lookFrom = {-4.f,-3.f,-2.f};
+float3 lookFrom = {-8.f,-3.f,-2.f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,1.f,0.f};
 float cosFovy = 0.66f;
