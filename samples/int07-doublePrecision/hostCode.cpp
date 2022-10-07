@@ -49,8 +49,8 @@ extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
   See gprt_data/double_teapot.c for details */
 extern uint32_t double_teapot_indices[];
 extern double double_teapot_vertices[];
-const int NUM_VERTICES = 95112;
-const int NUM_INDICES = 623886/3;
+extern int double_teapot_num_indices;
+extern int double_teapot_num_vertices;
 
 float transform[3][4] = 
   {
@@ -127,16 +127,16 @@ int main(int ac, char **av)
   // aabb mesh
   // ------------------------------------------------------------------
   GPRTBuffer vertexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_DOUBLE3,NUM_VERTICES,double_teapot_vertices);
+    = gprtDeviceBufferCreate(context,GPRT_DOUBLE3,double_teapot_num_vertices,double_teapot_vertices);
   GPRTBuffer indexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,double_teapot_indices);
+    = gprtDeviceBufferCreate(context,GPRT_INT3,double_teapot_num_indices,double_teapot_indices);
   GPRTBuffer aabbPositionsBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_INDICES * 2,nullptr);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,double_teapot_num_indices * 2,nullptr);
 
   GPRTGeom dpTeapotGeom
     = gprtGeomCreate(context,DPTriangleType);
   gprtAABBsSetPositions(dpTeapotGeom, aabbPositionsBuffer, 
-                        NUM_INDICES, 2 * sizeof(float3), 0);
+                        double_teapot_num_indices, 2 * sizeof(float3), 0);
 
   gprtGeomSetBuffer(dpTeapotGeom,"vertex",vertexBuffer);
   gprtGeomSetBuffer(dpTeapotGeom,"index",indexBuffer);
@@ -148,7 +148,7 @@ int main(int ac, char **av)
   
   // compute AABBs in parallel with a compute shader
   gprtBuildSBT(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context,DPTriangleBoundsProgram,NUM_INDICES);
+  gprtComputeLaunch1D(context,DPTriangleBoundsProgram,double_teapot_num_indices);
 
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&dpTeapotGeom);
   gprtAccelBuild(context, aabbAccel);
@@ -156,15 +156,15 @@ int main(int ac, char **av)
   // compute centroid to look at
   double3 aabbmin = double3(double_teapot_vertices[0],double_teapot_vertices[1],double_teapot_vertices[2]);
   double3 aabbmax = aabbmin;
-  for (uint32_t i = 1; i < NUM_VERTICES; ++i) {
+  for (uint32_t i = 1; i < double_teapot_num_vertices; ++i) {
     aabbmin = linalg::min(aabbmin, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
     aabbmax = linalg::max(aabbmax, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
   }
   double3 aabbCentroid = aabbmin + (aabbmax - aabbmin) * 0.5;
 
-  float3 lookFrom = float3(float(aabbCentroid.x), float(aabbCentroid.y), float(aabbCentroid.z) - 1.f);
+  float3 lookFrom = float3(float(aabbCentroid.x), float(aabbCentroid.y)  - 50.f, float(aabbCentroid.z));
   float3 lookAt = float3(float(aabbCentroid.x),float(aabbCentroid.y),float(aabbCentroid.z));
-  float3 lookUp = {0.f,-1.f,0.f};
+  float3 lookUp = {0.f,0.f,-1.f};
   float cosFovy = 0.66f;
 
   // ------------------------------------------------------------------
