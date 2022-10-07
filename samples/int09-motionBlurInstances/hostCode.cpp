@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
+extern std::map<std::string, std::vector<uint8_t>> int09_deviceCode;
 
 const int NUM_VERTICES = 4;
 float3 vertices[NUM_VERTICES] =
@@ -76,9 +76,12 @@ float cosFovy = 0.66f;
 #include <iostream>
 int main(int ac, char **av)
 {
+
+  std::cout<<sizeof(VkAccelerationStructureMatrixMotionInstanceNV)<<std::endl;
+  
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int04_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int09_deviceCode);
 
   // -------------------------------------------------------
   // Setup programs and geometry types

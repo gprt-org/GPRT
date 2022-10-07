@@ -1876,6 +1876,7 @@ namespace gprt {
     gprt::Buffer shaderBindingTable;
 
     uint32_t numRayTypes = 1;
+    bool motionBlurEnabled = false;
 
     // struct InternalStages {
     //   // for copying transforms into the instance buffer
@@ -2320,6 +2321,10 @@ namespace gprt {
 
       // Required by VK_KHR_spirv_1_4
       enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+
+      if (motionBlurEnabled) {
+        enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME);
+      }
 
       // if (useSwapChain)
       // {
@@ -2898,6 +2903,10 @@ namespace gprt {
         cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
       //todo, destroy the above stuff
     }
+  
+    void enableMotionBlur() {
+      motionBlurEnabled = true;
+    }
   };
 }
 
@@ -2918,6 +2927,14 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   context->destroy();
   delete context;
   LOG("context destroyed...");
+}
+
+GPRT_API void
+gprtEnableMotionBlur(GPRTContext _context)
+{
+  LOG_API_CALL();
+  gprt::Context *context = (gprt::Context*)_context;
+  context->enableMotionBlur();
 }
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, std::map<std::string, std::vector<uint8_t>> spvCode)

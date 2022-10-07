@@ -22,15 +22,15 @@
 
 embed_spirv(
   OUTPUT_TARGET
-    int04_deviceCode
+    int09_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int04_computeAABBs hostCode.cpp)
-target_link_libraries(int04_computeAABBs
+add_executable(int09_motionBlurInstances hostCode.cpp)
+target_link_libraries(int09_motionBlurInstances
   PRIVATE
-    int04_deviceCode
+    int09_deviceCode
     gprt::gprt
     glfw
     ${OPENGL_gl_LIBRARY}

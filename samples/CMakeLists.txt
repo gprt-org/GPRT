@@ -31,3 +31,5 @@ add_subdirectory(int02-simpleAABBs)
 
 add_subdirectory(int04-computeAABBs)
 add_subdirectory(int05-computePrimitive)
+
+add_subdirectory(int09-motionBlurInstances)
