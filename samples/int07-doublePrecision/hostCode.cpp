@@ -30,6 +30,7 @@
 #include "deviceCode.h"
 
 // library for windowing
+#define NOMINMAX
 #include <GLFW/glfw3.h>
 
 #define LOG(message)                                            \
@@ -61,11 +62,6 @@ float transform[3][4] =
 // initial image resolution
 const int2 fbSize = {1080,720};
 GLuint fbTexture {0};
-
-float3 lookFrom = {-1.f,-1.f,-1.f};
-float3 lookAt = {0.f,0.f,0.f};
-float3 lookUp = {0.f,-1.f,0.f};
-float cosFovy = 0.66f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -156,6 +152,20 @@ int main(int ac, char **av)
 
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&dpTeapotGeom);
   gprtAccelBuild(context, aabbAccel);
+
+  // compute centroid to look at
+  double3 aabbmin = double3(double_teapot_vertices[0],double_teapot_vertices[1],double_teapot_vertices[2]);
+  double3 aabbmax = aabbmin;
+  for (uint32_t i = 1; i < NUM_VERTICES; ++i) {
+    aabbmin = linalg::min(aabbmin, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
+    aabbmax = linalg::max(aabbmax, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
+  }
+  double3 aabbCentroid = aabbmin + (aabbmax - aabbmin) * 0.5;
+
+  float3 lookFrom = float3(float(aabbCentroid.x), float(aabbCentroid.y), float(aabbCentroid.z) - 1.f);
+  float3 lookAt = float3(float(aabbCentroid.x),float(aabbCentroid.y),float(aabbCentroid.z));
+  float3 lookUp = {0.f,-1.f,0.f};
+  float cosFovy = 0.66f;
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
