@@ -2725,12 +2725,29 @@ namespace gprt {
     // void buildPipeline()
     void buildPrograms()
     {
+
+      VkPushConstantRange pushConstantRange = {};
+      pushConstantRange.size = 128;
+      pushConstantRange.offset = 0;
+      pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                                   | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                                   | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                                   | VK_SHADER_STAGE_MISS_BIT_KHR 
+                                   | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+      VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+      pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
+			pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
+
       VkPipelineLayoutCreateInfo pipelineLayoutCI{};
       pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
       // pipelineLayoutCI.setLayoutCount = 1;
       // pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
       pipelineLayoutCI.setLayoutCount = 0;
       pipelineLayoutCI.pSetLayouts = nullptr;
+      pipelineLayoutCI.pushConstantRangeCount = 1;
+      pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
       VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI,
         nullptr, &pipelineLayout));
 

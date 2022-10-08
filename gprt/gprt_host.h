@@ -131,7 +131,9 @@ typedef enum
   {
    GPRT_INVALID_TYPE = 0,
 
+   /* a 128-bit buffer type containing a pointer and a size */
    GPRT_BUFFER=10,
+
    /*! a 64-bit int representing the number of elements in a buffer */
    GPRT_BUFFER_SIZE,
    GPRT_BUFFER_ID,
