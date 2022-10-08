@@ -20,6 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+struct PushConstants {
+  uint64_t r[16];
+};
+[[vk::push_constant]] PushConstants pc;
+
 namespace gprt {
   inline uint32_t make_8bit(const float f)
   {
@@ -37,12 +42,30 @@ namespace gprt {
 
   [[vk::ext_instruction(4447)]]
   RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
+
+  void amdkludge() {
+    if (pc.r[15]) {
+      struct Stubstruct {
+        int tmp;
+      } stubstruct;
+      RaytracingAccelerationStructure stubtree = getAccelHandle(0); 
+      RayDesc rayDesc;
+      TraceRay(
+        stubtree, // the tree
+        RAY_FLAG_FORCE_OPAQUE, // ray flags
+        0xff, // instance inclusion mask
+        0, // ray type
+        0, // number of ray types
+        0, // miss type
+        rayDesc, // the ray to trace
+        stubstruct // the payload IO
+      );
+      vk::RawBufferStore<int>(0, stubstruct.tmp);
+    }
+  }
 };
 
-struct PushConstants {
-  uint64_t r[16];
-};
-[[vk::push_constant]] PushConstants pc;
+
 
 /*
   The DXC compiler unfortunately doesn't handle multiple mixed entry points
@@ -116,6 +139,7 @@ where ARG is "(type_, name)". */
   void __closesthit__##progName(inout RAW(TYPE_NAME_EXPAND)PayloadDecl,         \
                                 in RAW(TYPE_NAME_EXPAND)AttributeDecl)          \
   {                                                                             \
+    gprt::amdkludge();                                                                \
     progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)),                    \
              RAW(NAME_EXPAND PayloadDecl),                                      \
              RAW(NAME_EXPAND AttributeDecl));                                   \
