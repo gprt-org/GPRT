@@ -25,7 +25,7 @@
 
 struct Payload
 {
-[[vk::location(0)]] float3 color;
+  float3 color;
 };
 
 GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
