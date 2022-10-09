@@ -79,6 +79,7 @@ function(embed_spirv)
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
       COMMAND ${CMAKE_DXC_COMPILER}
+      -HV 2021
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
       -HV 2021
