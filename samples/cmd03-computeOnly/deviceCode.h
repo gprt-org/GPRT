@@ -25,7 +25,7 @@
 struct ComputeData
 {
   // pointers are represented using uint64_t
-  alignas(8) uint64_t fbPtr;
+  alignas(16) gprt::Buffer fbPtr;
   alignas(8) int2 fbSize;
 
   alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <stdalign.h>
 #include <vulkan/vulkan.h>
 
 #include "linalg.h"
@@ -96,6 +97,10 @@ typedef struct _GPRTRayGen     *GPRTRayGen;
 typedef struct _GPRTMiss       *GPRTMiss;
 typedef struct _GPRTCompute    *GPRTCompute;
 
+namespace gprt {
+  typedef uint64_t2 Buffer;
+  typedef uint64_t2 Accel;
+}
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -140,7 +145,11 @@ typedef enum
    GPRT_BUFFER_POINTER,
    GPRT_BUFPTR=GPRT_BUFFER_POINTER,
 
+  // 128 bits, 64 for address, 64 for kind
    GPRT_ACCEL=20,
+
+   // just the raw 64-bit address
+   GPRT_ACCEL_POINTER,
 
    /*! implicit variable of type integer that specifies the *index*
      of the given device. this variable type is implicit in the
@@ -340,7 +349,7 @@ typedef enum
     else if (type == GPRT_INT64_T3) return sizeof(uint64_t) * 3;
     else if (type == GPRT_INT64_T4) return sizeof(uint64_t) * 4;
 
-    else if (type == GPRT_BUFFER) return sizeof(uint64_t);
+    else if (type == GPRT_BUFFER) return 2 * sizeof(uint64_t);
     else if (type == GPRT_BUFPTR) return sizeof(uint64_t);
 
     else if (type == GPRT_FLOAT) return sizeof(float);
@@ -358,8 +367,7 @@ typedef enum
     else if (type == GPRT_BOOL3) return sizeof(bool) * 3;
     else if (type == GPRT_BOOL4) return sizeof(bool) * 4;
 
-    else if (type == GPRT_BUFFER) return sizeof(uint64_t);
-    else if (type == GPRT_ACCEL) return sizeof(uint64_t);
+    else if (type == GPRT_ACCEL) return 2 * sizeof(uint64_t);
     else if (type == GPRT_TRANSFORM) return sizeof(float) * 3 * 4;
 
     // User Types have size encoded in their type enum

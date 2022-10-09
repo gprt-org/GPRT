@@ -57,8 +57,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   );
 
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
-      gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
 
@@ -83,19 +82,19 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, paylo
 GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
 {
   int primID = DispatchThreadID.x;
-  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
-  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
+  float3 position = gprt::load<float3>(record.vertex, primID);
+  float radius = gprt::load<float>(record.radius, primID);
   float3 aabbMin = position - float3(radius, radius, radius);
   float3 aabbMax = position + float3(radius, radius, radius);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, aabbMin);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), aabbMax);
+  gprt::store(record.aabbs, 2 * primID, aabbMin);
+  gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
 }
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
   uint primID = PrimitiveIndex();
-  float3 position = vk::RawBufferLoad<float3>(record.vertex + sizeof(float3) * primID);
-  float radius = vk::RawBufferLoad<float>(record.radius + sizeof(float) * primID);
+  float3 position = gprt::load<float3>(record.vertex, primID);
+  float radius = gprt::load<float>(record.radius, primID);
 
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();

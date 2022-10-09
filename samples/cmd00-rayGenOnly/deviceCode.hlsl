@@ -30,9 +30,8 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   uint2 pixelID = DispatchRaysIndex().xy;
 
-  if (pixelID.x == 0 && pixelID.y == 0) {
+  if (pixelID.x == 0 && pixelID.y == 0)
     printf("Hello from your first raygen program!\n");
-  } 
 
   // Generate a simple checkerboard pattern as a test. 
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
@@ -43,8 +42,4 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
   // find the frame buffer location (x + width*y) and put the result there
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
   gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(color));
-
-  // vk::RawBufferStore<uint32_t>(
-  //   record.fbPtr.x + fbOfs * sizeof(uint32_t), 
-  //   gprt::make_rgba(color));
 }
