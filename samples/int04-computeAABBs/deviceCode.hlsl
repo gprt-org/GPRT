@@ -32,8 +32,12 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 dims = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + 
                   float2(.5f, .5f)) / float2(record.fbSize);
+  bool showCross = false;
+  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
+    showCross = true;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -56,6 +60,8 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
     payload // the payload IO
   );
 
+  if (showCross) payload.color = float3(1.0, 1.0, 1.0);
+
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
   gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
@@ -76,6 +82,15 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, paylo
   
   // printf("TEST\n");
   payload.color = normal;//float3(1.f, 1.f, 1.f); //geomSBTData.color;
+
+
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 dims = DispatchRaysDimensions().xy;
+  bool debug = false;
+  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
+    debug = true;
+  if (debug) printf("closesthit primID %d pos %f %f %f radius %f \n", 
+    PrimitiveIndex(), attribute.position.x, attribute.position.y, attribute.position.z, attribute.radius);
 }
 
 
@@ -92,9 +107,18 @@ GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 dims = DispatchRaysDimensions().xy;
+  bool debug = false;
+  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
+    debug = true;
+  
   uint primID = PrimitiveIndex();
+
   float3 position = gprt::load<float3>(record.vertex, primID);
   float radius = gprt::load<float>(record.radius, primID);
+
+  if (debug) printf("intersection primID %d pos %f %f %f radius %f \n", primID, position.x, position.y, position.z, radius);
 
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();

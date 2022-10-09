@@ -46,7 +46,7 @@ extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
 const int NUM_VERTICES = 4;
 float3 vertices[NUM_VERTICES] =
   {
-    { 0.f,0.f,0.f },
+    { 0.1f,0.2f,0.3f },
     { -1.f,-1.f,-1.f },
     { +1.f,-1.f,-1.f },
     { -1.f,+1.f,-1.f },
