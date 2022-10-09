@@ -31,22 +31,12 @@ find_program(CMAKE_DXC_COMPILER dxc
   NO_DEFAULT_PATH
 )
 
-find_program(CMAKE_SPIRV_DISASSEMBLER dxc
-  DOC "Path to the dxc executable."
-  HINTS ${Vulkan_BIN_DIR} ${DXC_BIN_DIR}
-  NO_DEFAULT_PATH
-)
-
 # set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
 # set(CMAKE_SPIRV_ASSEMBLER ${Vulkan_BIN_DIR}/spirv-as)
 # set(CMAKE_SPIRV_DISASSEMBLER ${Vulkan_BIN_DIR}/spirv-dis)
 
 if(NOT CMAKE_DXC_COMPILER)
   message(FATAL_ERROR "dxc not found.")
-endif()
-
-if (NOT CMAKE_SPIRV_DISASSEMBLER)
-  message(FATAL_ERROR "spirv-disc not found.")
 endif()
 
 set(EMBED_SPIRV_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
