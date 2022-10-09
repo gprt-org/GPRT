@@ -25,7 +25,31 @@
 #ifdef GPRT_DEVICE
 #include "gprt_device.hlsli"
 #define alignas(alignment)
+
+// ideally this buffer type would be a struct...
+// but I'm running into a compiler bug reading one struct inside another one.
+namespace gprt {
+  // struct Buffer {
+  //   uint64_t x;
+  //   uint64_t y;
+  // };
+  
+  typedef uint64_t2 Buffer;
+
+  template<typename T> 
+  T load(in Buffer buffer, uint64_t index) {
+    return vk::RawBufferLoad<T>(buffer.x + index * sizeof(T));
+  }
+  template<typename T> 
+  void store(in Buffer buffer, uint64_t index, in T value) {
+    vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
+  }
+}
 #else 
 #include <stdalign.h>
 #include "gprt_host.h"
+
+namespace gprt{
+  typedef uint64_t2 Buffer;
+}
 #endif

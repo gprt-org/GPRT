@@ -81,6 +81,7 @@ function(embed_spirv)
       COMMAND ${CMAKE_DXC_COMPILER}
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
+      -HV 2021
       -T lib_6_3
       -I ${PROJECT_SOURCE_DIR}/gprt
       -D GPRT_DEVICE
