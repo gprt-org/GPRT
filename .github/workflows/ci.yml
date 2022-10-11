@@ -43,9 +43,7 @@ jobs:
     - name: Pull and unpack dxc compiler
       shell: bash
       run: |
-        cd $HOME
-        wget https://drive.google.com/uc\?export\=download\&id\=1dF6cX5q-3tB3e5zVcZIL_Fa1W8-WRpOq -O dxc-artifacts.tar.gz
-        tar xf dxc-artifacts.tar.gz
+        ./util/download-dxc.sh
 
     - name: Build
       shell: bash
