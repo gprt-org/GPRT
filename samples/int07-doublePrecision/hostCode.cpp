@@ -74,11 +74,11 @@ int main(int ac, char **av)
   // Setup programs and geometry types
   // -------------------------------------------------------
   GPRTVarDecl DPTriangleVars[] = {
-    { "vertex",  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,vertex)},
-    { "index" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,index)},
-    { "aabbs" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,aabbs)},
-    { "dpRays" ,  GPRT_BUFPTR, GPRT_OFFSETOF(DPTriangleData,dpRays)},
-    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(DPTriangleData,fbSize)},
+    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(DPTriangleData,vertex)},
+    { "index" ,  GPRT_BUFFER, GPRT_OFFSETOF(DPTriangleData,index)},
+    { "aabbs" ,  GPRT_BUFFER, GPRT_OFFSETOF(DPTriangleData,aabbs)},
+    { "dpRays" , GPRT_BUFFER, GPRT_OFFSETOF(DPTriangleData,dpRays)},
+    { "fbSize",  GPRT_INT2,   GPRT_OFFSETOF(DPTriangleData,fbSize)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType DPTriangleType
@@ -97,8 +97,8 @@ int main(int ac, char **av)
 
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
-    { "dpRays",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,dpRays)},
+    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "dpRays",        GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,dpRays)},
     { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},

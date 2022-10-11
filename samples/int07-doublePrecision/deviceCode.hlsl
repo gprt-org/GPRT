@@ -48,12 +48,9 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
 
   // store double precision ray
-  uint64_t addr = record.dpRays + fbOfs * sizeof(double4) * 2;
-  double4 raydata = double4(rayDesc.Origin.x, rayDesc.Origin.y, rayDesc.Origin.z, rayDesc.TMin);
-  vk::RawBufferStore<double4>(addr, raydata);
+  gprt::store(record.dpRays, fbOfs * 2 + 0, double4(rayDesc.Origin.x, rayDesc.Origin.y, rayDesc.Origin.z, rayDesc.TMin));
+  gprt::store(record.dpRays, fbOfs * 2 + 1, double4(rayDesc.Direction.x, rayDesc.Direction.y, rayDesc.Direction.z, rayDesc.TMax));
 
-  raydata = double4(rayDesc.Direction.x, rayDesc.Direction.y, rayDesc.Direction.z, rayDesc.TMax);
-  vk::RawBufferStore<double4>(addr + sizeof(double4), raydata);
   TraceRay(
     world, // the tree
     RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -65,9 +62,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
     payload // the payload IO
   );
 
-  
-  vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
-    gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
@@ -86,22 +81,16 @@ struct Attribute
 GPRT_COMPUTE_PROGRAM(DPTriangle, (DPTriangleData, record))
 {
   int primID = DispatchThreadID.x;
-  int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
-  double3 A = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.x);
-  double3 B = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.y);
-  double3 C = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.z);
+  int3 indices = gprt::load<int3>(record.index, primID);
+  double3 A = gprt::load<double3>(record.vertex, indices.x);
+  double3 B = gprt::load<double3>(record.vertex, indices.y);
+  double3 C = gprt::load<double3>(record.vertex, indices.z);
   double3 dpaabbmin = min(min(A, B), C);
   double3 dpaabbmax = max(max(A, B), C);
   float3 fpaabbmin = float3(dpaabbmin) - float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
   float3 fpaabbmax = float3(dpaabbmax) + float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID, fpaabbmin);
-  vk::RawBufferStore<float3>(record.aabbs + 2 * sizeof(float3) * primID + sizeof(float3), fpaabbmax);
-
-  if (primID == 0) {
-    printf("%f %f %f %f %f %f\n", 
-    fpaabbmin.x, fpaabbmin.y, fpaabbmin.z,
-    fpaabbmax.x, fpaabbmax.y, fpaabbmax.z);
-  }
+  gprt::store(record.aabbs, 2 * primID + 0, fpaabbmin);
+  gprt::store(record.aabbs, 2 * primID + 1, fpaabbmax);
 }
 
 GPRT_CLOSEST_HIT_PROGRAM(DPTriangle, (DPTriangleData, record), (Payload, payload), (Attribute, attribute))
@@ -122,10 +111,9 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
 {
   uint2 pixelID = DispatchRaysIndex().xy;
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  uint64_t addr = record.dpRays + fbOfs * sizeof(double4) * 2;
-
-  double4 raydata1 = vk::RawBufferLoad<double4>(addr);
-  double4 raydata2 = vk::RawBufferLoad<double4>(addr + sizeof(double4));
+  
+  double4 raydata1 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 0);
+  double4 raydata2 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 1);
 
   double3 ro = double3(raydata1.x, raydata1.y, raydata1.z);//ObjectRayOrigin();
   double3 rd = double3(raydata2.x, raydata2.y, raydata2.z);//ObjectRayDirection();
@@ -133,10 +121,10 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
   double tCurrent = raydata2.w;
 
   int primID = PrimitiveIndex();
-  int3 indices = vk::RawBufferLoad<int3>(record.index + sizeof(int3) * primID);
-  double3 v0 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.x);
-  double3 v1 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.y);
-  double3 v2 = vk::RawBufferLoad<double3>(record.vertex + sizeof(double3) * indices.z);
+  int3 indices = gprt::load<int3>(record.index, primID);
+  double3 v0 = gprt::load<double3>(record.vertex, indices.x);
+  double3 v1 = gprt::load<double3>(record.vertex, indices.y);
+  double3 v2 = gprt::load<double3>(record.vertex, indices.z);
 
   double3 v1v0 = v1 - v0;
   double3 v2v0 = v2 - v0;
@@ -155,7 +143,7 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
   if (t < tMin) return;
   
   // update current double precision thit
-  vk::RawBufferStore<double4>(addr + 7 * sizeof(double), t);
+  gprt::store<double>(record.dpRays, fbOfs * 8 + 7, t);
 
   Attribute attr;
   attr.bc = double2(u, v);

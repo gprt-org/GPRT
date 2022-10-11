@@ -26,23 +26,23 @@
 struct DPTriangleData
 {
   /*! array/buffer of vertex indices */
-  alignas(8) uint64_t index; // vec3f*
+  alignas(16) gprt::Buffer index; // vec3f*
   /*! array/buffer of vertex positions */
-  alignas(8) uint64_t vertex; // float *
+  alignas(16) gprt::Buffer vertex; // float *
   /*! array/buffer of AABBs */
-  alignas(8) uint64_t aabbs;
+  alignas(16) gprt::Buffer aabbs;
   /*! array/buffer of double precision rays */
-  alignas(8) uint64_t dpRays;
+  alignas(16) gprt::Buffer dpRays;
   alignas(8) int2 fbSize;
 };
 
 struct RayGenData
 {
-  alignas(8) uint64_t fbPtr;
-  alignas(8) uint64_t dpRays;
+  alignas(16) gprt::Buffer fbPtr;
+  alignas(16) gprt::Buffer dpRays;
 
   alignas(8) int2 fbSize;
-  alignas(8) uint64_t world; // RaytracingAccelerationStructure*
+  alignas(16) gprt::Accel world;
 
   struct { 
     alignas(16) float3 pos;   
