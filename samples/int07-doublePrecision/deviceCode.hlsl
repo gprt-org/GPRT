@@ -53,8 +53,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
 
   TraceRay(
     world, // the tree
-    // RAY_FLAG_NONE,// RAY_FLAG_CULL_FRONT_FACING_TRIANGLES, // ray flags
-    RAY_FLAG_CULL_FRONT_FACING_TRIANGLES, // | RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+    RAY_FLAG_NONE, // ray flags
     0xff, // instance inclusion mask
     0, // ray type
     1, // number of ray types
@@ -182,11 +181,11 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
   bool useOrientation = false;
   int orientation = 0;
   if ((flags & RAY_FLAG_CULL_BACK_FACING_TRIANGLES) != 0) {
-    orientation = 1;
+    orientation = -1;
     useOrientation = true;
   } 
   else if ((flags & RAY_FLAG_CULL_FRONT_FACING_TRIANGLES) != 0) {
-    orientation = -1;
+    orientation = 1;
     useOrientation = true;
   }
 
