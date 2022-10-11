@@ -24,8 +24,6 @@
 
 #ifdef GPRT_DEVICE
 #include "gprt_device.hlsli"
-#define alignas(alignment)
 #else 
-#include <stdalign.h>
 #include "gprt_host.h"
 #endif

@@ -609,6 +609,11 @@ namespace linalg
         typedef vec<bool,2> bool2; typedef vec<uint8_t,2> byte2; typedef vec<int16_t,2> short2; typedef vec<uint16_t,2> ushort2; 
         typedef vec<bool,3> bool3; typedef vec<uint8_t,3> byte3; typedef vec<int16_t,3> short3; typedef vec<uint16_t,3> ushort3; 
         typedef vec<bool,4> bool4; typedef vec<uint8_t,4> byte4; typedef vec<int16_t,4> short4; typedef vec<uint16_t,4> ushort4;
+
+        typedef vec<uint64_t,2> uint64_t2;
+        typedef vec<uint64_t,3> uint64_t3;
+        typedef vec<uint64_t,4> uint64_t4;
+
         typedef vec<int,1> int1; typedef vec<unsigned,1> uint1; typedef vec<float,1> float1; typedef vec<double,1> double1;
         typedef vec<int,2> int2; typedef vec<unsigned,2> uint2; typedef vec<float,2> float2; typedef vec<double,2> double2;
         typedef vec<int,3> int3; typedef vec<unsigned,3> uint3; typedef vec<float,3> float3; typedef vec<double,3> double3;

@@ -25,7 +25,7 @@
 
 struct Payload
 {
-[[vk::location(0)]] float3 color;
+  float3 color;
 };
 
 GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
@@ -57,8 +57,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   );
 
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
-      gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
 

@@ -93,8 +93,8 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl aabbGeomVars[] = {
-    { "vertex",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,vertex)},
-    { "radius",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,radius)},
+    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,vertex)},
+    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,radius)},
     { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
@@ -170,7 +170,7 @@ int main(int ac, char **av)
   // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
     { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},

@@ -25,7 +25,7 @@
 
 struct Payload
 {
-[[vk::location(0)]] float3 color;
+  float3 color;
 };
 
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
@@ -57,8 +57,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
   );
 
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    vk::RawBufferStore<uint32_t>(record.fbPtr + fbOfs * sizeof(uint32_t), 
-      gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
 struct Attributes {
@@ -68,17 +67,13 @@ struct Attributes {
 GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
   // compute normal:
-  const uint    primID = PrimitiveIndex();
-  const uint64_t indexAddr = record.index;
-  const int3   index  = vk::RawBufferLoad<int3>(indexAddr + sizeof(int3) * primID);
-  
-  const uint64_t vertexAddr = record.vertex;
-  const float3 A      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.x);
-  const float3 B      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.y);
-  const float3 C      = vk::RawBufferLoad<float3>(vertexAddr + sizeof(float3) * index.z);
-
-  const float3 Ng     = normalize(cross(B-A,C-A));
-  const float3 rayDir = WorldRayDirection();
+  uint   primID = PrimitiveIndex();
+  int3   index  = gprt::load<int3>(record.index, primID);
+  float3 A      = gprt::load<float3>(record.vertex, index.x);
+  float3 B      = gprt::load<float3>(record.vertex, index.y);
+  float3 C      = gprt::load<float3>(record.vertex, index.z);
+  float3 Ng     = normalize(cross(B-A,C-A));
+  float3 rayDir = WorldRayDirection();
   payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * record.color;
 }
 

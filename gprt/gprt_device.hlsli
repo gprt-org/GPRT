@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#define alignas(alignment)
+
 struct PushConstants {
   uint64_t r[16];
 };
@@ -40,8 +42,34 @@ namespace gprt {
       (0xffU << 24);
   }
 
+    // struct Buffer {
+  //   uint64_t x;
+  //   uint64_t y;
+  // };
+  
+  // ideally this buffer type would be a struct...
+  // but I'm running into a compiler bug reading one struct inside another one.
+  // x stores pointer, y stores size.
+  typedef uint64_t2 Buffer;
+
+  template<typename T> 
+  T load(in Buffer buffer, uint64_t index) {
+    return vk::RawBufferLoad<T>(buffer.x + index * sizeof(T));
+  }
+  template<typename T> 
+  void store(in Buffer buffer, uint64_t index, in T value) {
+    vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
+  }
+
+  // x stores pointer, y stores type
+  typedef uint64_t2 Accel;
+
   [[vk::ext_instruction(4447)]]
   RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
+
+  RaytracingAccelerationStructure getAccelHandle(Accel accel) {
+    return getAccelHandle(accel.x);
+  }
 
   void amdkludge() {
     if (pc.r[15]) {

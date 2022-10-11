@@ -43,7 +43,5 @@ GPRT_COMPUTE_PROGRAM(simpleCompute, (ComputeData, record))
 
   // find the frame buffer location (x + width*y) and put the result there
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  vk::RawBufferStore<uint32_t>(
-    record.fbPtr + fbOfs * sizeof(uint32_t), 
-    gprt::make_rgba(color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(color));
 }

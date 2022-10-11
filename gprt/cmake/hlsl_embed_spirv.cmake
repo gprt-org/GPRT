@@ -31,22 +31,12 @@ find_program(CMAKE_DXC_COMPILER dxc
   NO_DEFAULT_PATH
 )
 
-find_program(CMAKE_SPIRV_DISASSEMBLER dxc
-  DOC "Path to the dxc executable."
-  HINTS ${Vulkan_BIN_DIR} ${DXC_BIN_DIR}
-  NO_DEFAULT_PATH
-)
-
 # set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
 # set(CMAKE_SPIRV_ASSEMBLER ${Vulkan_BIN_DIR}/spirv-as)
 # set(CMAKE_SPIRV_DISASSEMBLER ${Vulkan_BIN_DIR}/spirv-dis)
 
 if(NOT CMAKE_DXC_COMPILER)
   message(FATAL_ERROR "dxc not found.")
-endif()
-
-if (NOT CMAKE_SPIRV_DISASSEMBLER)
-  message(FATAL_ERROR "spirv-disc not found.")
 endif()
 
 set(EMBED_SPIRV_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
@@ -82,6 +72,7 @@ function(embed_spirv)
       -HV 2021
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
+      -HV 2021
       -T lib_6_3
       -I ${PROJECT_SOURCE_DIR}/gprt
       -D GPRT_DEVICE
@@ -90,6 +81,7 @@ function(embed_spirv)
       -fspv-extension=SPV_KHR_ray_query
       -fspv-extension=SPV_KHR_non_semantic_info
       -fspv-extension=SPV_KHR_physical_storage_buffer
+      -fspv-extension=SPV_KHR_vulkan_memory_model
       -fcgl
       ${EMBED_SPIRV_SOURCES}
       -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv

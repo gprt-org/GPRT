@@ -46,7 +46,7 @@ extern std::map<std::string, std::vector<uint8_t>> int04_deviceCode;
 const int NUM_VERTICES = 4;
 float3 vertices[NUM_VERTICES] =
   {
-    { 0.f,0.f,0.f },
+    { 0.1f,0.2f,0.3f },
     { -1.f,-1.f,-1.f },
     { +1.f,-1.f,-1.f },
     { -1.f,+1.f,-1.f },
@@ -84,8 +84,8 @@ int main(int ac, char **av)
   // Setup programs and geometry types
   // -------------------------------------------------------
   GPRTVarDecl aabbGeomVars[] = {
-    { "vertex",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,vertex)},
-    { "radius",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBGeomData,radius)},
+    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,vertex)},
+    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,radius)},
     { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
@@ -101,7 +101,7 @@ int main(int ac, char **av)
 
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         GPRT_BUFPTR, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
     { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
@@ -125,9 +125,9 @@ int main(int ac, char **av)
                         missVars,-1);
 
   GPRTVarDecl computeVars[] = {
-    { "vertex", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,vertex)},
-    { "radius", GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,radius)},
-    { "aabbs",  GPRT_BUFPTR, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
+    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,vertex)},
+    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,radius)},
+    { "aabbs",  GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
     { /* sentinel to mark end of list */ }
   };
   GPRTCompute boundsProgram
