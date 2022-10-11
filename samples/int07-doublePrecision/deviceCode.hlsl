@@ -53,7 +53,8 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
 
   TraceRay(
     world, // the tree
-    RAY_FLAG_FORCE_OPAQUE, // ray flags
+    // RAY_FLAG_NONE,// RAY_FLAG_CULL_FRONT_FACING_TRIANGLES, // ray flags
+    RAY_FLAG_CULL_FRONT_FACING_TRIANGLES, // | RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
     0xff, // instance inclusion mask
     0, // ray type
     1, // number of ray types
@@ -165,13 +166,37 @@ double plucker_edge_test( in double3 vertexa, in double3 vertexb, in double3 ray
 
 GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
 {
+
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 dims = DispatchRaysDimensions().xy;
+  bool debug = false;
+  if ((pixelID.x == dims.x / 2) && (pixelID.y == dims.y / 2)) debug = true;
+
+  uint flags = RayFlags();
+
+
+  // Just skip if we for some reason cull both...
+  if ( ((flags & RAY_FLAG_CULL_BACK_FACING_TRIANGLES) != 0) && 
+       ((flags & RAY_FLAG_CULL_FRONT_FACING_TRIANGLES) != 0)) return;
+
+  bool useOrientation = false;
+  int orientation = 0;
+  if ((flags & RAY_FLAG_CULL_BACK_FACING_TRIANGLES) != 0) {
+    orientation = 1;
+    useOrientation = true;
+  } 
+  else if ((flags & RAY_FLAG_CULL_FRONT_FACING_TRIANGLES) != 0) {
+    orientation = -1;
+    useOrientation = true;
+  }
+
   int primID = PrimitiveIndex();
   int3 indices = gprt::load<int3>(record.index, primID);
   double3 v0 = gprt::load<double3>(record.vertex, indices.x);
   double3 v1 = gprt::load<double3>(record.vertex, indices.y);
   double3 v2 = gprt::load<double3>(record.vertex, indices.z);
 
-  uint2 pixelID = DispatchRaysIndex().xy;
+//  uint2 pixelID = DispatchRaysIndex().xy;
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
   double4 raydata1 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 0);
   double4 raydata2 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 1);
@@ -193,39 +218,31 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
 
   // If orientation is set, confirm that sign of plucker_coordinate indicate
   // correct orientation of intersection
-  // if( orientation && ( *orientation ) * plucker_coord0 > 0 ) { return EXIT_EARLY; }
+  if( useOrientation && orientation * plucker_coord0 > 0 ) {
+    return;
+  }
 
   // Determine the value of the second Plucker coordinate from edge 1
   double plucker_coord1 = plucker_edge_test( v1, v2, raya, rayb );
 
-  // // If orientation is set, confirm that sign of plucker_coordinate indicate
-  // // correct orientation of intersection
-  // if( orientation )
-  // {
-  //     if( ( *orientation ) * plucker_coord1 > 0 ) { return EXIT_EARLY; }
-  //     // If the orientation is not specified, all plucker_coords must be the same sign or
-  //     // zero.
-  // }
-  //else 
-  if( ( 0.0 < plucker_coord0 && 0.0 > plucker_coord1 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord1 ) )
-  {
-    return;// EXIT_EARLY;
-  }
+  // If orientation is set, confirm that sign of plucker_coordinate indicate
+  // correct orientation of intersection
+  if( useOrientation &&  orientation * plucker_coord1 > 0) return;
+  
+  // If the orientation is not specified, all plucker_coords must be the same sign or
+  // zero.
+  else if( ( 0.0 < plucker_coord0 && 0.0 > plucker_coord1 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord1 ) ) return;
 
   // Determine the value of the second Plucker coordinate from edge 2
   double plucker_coord2 = plucker_edge_test( v2, v0, raya, rayb );
 
-  // // If orientation is set, confirm that sign of plucker_coordinate indicate
-  // // correct orientation of intersection
-  // if( orientation )
-  // {
-  //     if( ( *orientation ) * plucker_coord2 > 0 ) { return EXIT_EARLY; }
-  //     // If the orientation is not specified, all plucker_coords must be the same sign or
-  //     // zero.
-  // }
-  // else 
-  if( ( 0.0 < plucker_coord1 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord1 && 0.0 < plucker_coord2 ) ||
-      ( 0.0 < plucker_coord0 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord2 ) )
+  // If orientation is set, confirm that sign of plucker_coordinate indicate
+  // correct orientation of intersection
+  if( useOrientation && orientation * plucker_coord2 > 0) return;
+  // If the orientation is not specified, all plucker_coords must be the same sign or
+  // zero.
+  else if( ( 0.0 < plucker_coord1 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord1 && 0.0 < plucker_coord2 ) ||
+           ( 0.0 < plucker_coord0 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord2 ) )
   {
     return; // EXIT_EARLY;
   }
@@ -271,10 +288,6 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
   // // if( type )
   // //     *type = type_list[( ( 0.0 == plucker_coord2 ) << 2 ) + ( ( 0.0 == plucker_coord1 ) << 1 ) +
   // //                       ( 0.0 == plucker_coord0 )];
-
-  // return true;
-
-
 
 
   if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
