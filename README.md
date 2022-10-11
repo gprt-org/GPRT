@@ -17,7 +17,8 @@ GPRT used CMake for configuration. For a build directory, `bld`, in the top
 directory of this repository it can be configured with
 
 ```shell
-cmake ..
+./util/download-dxc.sh /path/to/dxc/dir/
+cmake .. -DDXC_BIN_DIR=/path/to/dxc/dir/bin/
 ```
 
 And built with
