@@ -93,7 +93,7 @@ int main(int ac, char **av)
   gprtGeomTypeSetClosestHitProg(DPTriangleType,0,
                            module,"DPTriangle");
   gprtGeomTypeSetIntersectionProg(DPTriangleType,0,
-                           module,"DPTriangle");
+                           module,"DPTrianglePlucker");
 
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},

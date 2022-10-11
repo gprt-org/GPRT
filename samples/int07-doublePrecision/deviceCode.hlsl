@@ -78,6 +78,9 @@ struct Attribute
 };
 
 #define EPSILON 2.2204460492503130808472633361816E-16
+#define FLT_EPSILON	1.19209290e-7F
+#define DBL_EPSILON	2.2204460492503131e-16
+
 GPRT_COMPUTE_PROGRAM(DPTriangle, (DPTriangleData, record))
 {
   int primID = DispatchThreadID.x;
@@ -87,8 +90,8 @@ GPRT_COMPUTE_PROGRAM(DPTriangle, (DPTriangleData, record))
   double3 C = gprt::load<double3>(record.vertex, indices.z);
   double3 dpaabbmin = min(min(A, B), C);
   double3 dpaabbmax = max(max(A, B), C);
-  float3 fpaabbmin = float3(dpaabbmin) - float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
-  float3 fpaabbmax = float3(dpaabbmax) + float3(EPSILON, EPSILON, EPSILON); // todo, round this below smallest float 
+  float3 fpaabbmin = float3(dpaabbmin) - float3(FLT_EPSILON, FLT_EPSILON, FLT_EPSILON); // todo, round this below smallest float 
+  float3 fpaabbmax = float3(dpaabbmax) + float3(FLT_EPSILON, FLT_EPSILON, FLT_EPSILON); // todo, round this below smallest float 
   gprt::store(record.aabbs, 2 * primID + 0, fpaabbmin);
   gprt::store(record.aabbs, 2 * primID + 1, fpaabbmax);
 }
@@ -107,11 +110,200 @@ float next_after(float a) {
   return asfloat(a);
 }
 
-GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
+/* Function to return the vertex with the lowest coordinates. To force the same
+    ray-edge computation, the Plücker test needs to use consistent edge
+    representation. This would be more simple with MOAB handles instead of
+    coordinates... */
+inline bool first( in double3 a, in double3 b )
 {
+    if( a.x < b.x ) { return true; }
+    else if( a.x == b.x )
+    {
+        if( a.y < b.y ) { return true; }
+        else if( a.y == b.y )
+        {
+            if( a.z < b.z ) { return true; }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+
+double plucker_edge_test( in double3 vertexa, in double3 vertexb, in double3 ray, in double3 ray_normal )
+{
+  double pip;
+  const double near_zero = 10 * DBL_EPSILON;
+
+  if( first( vertexa, vertexb ) )
+  {
+      double3 edge        = vertexb - vertexa;
+      double3 edge_normal = dcross(edge, vertexa);
+      pip                 = dot(ray, edge_normal) + dot(ray_normal, edge);
+  }
+  else
+  {
+      double3 edge        = vertexa - vertexb;
+      double3 edge_normal = dcross(edge, vertexb);
+      pip                = dot(ray, edge_normal) + dot(ray_normal, edge);
+      pip                = -pip;
+  }
+
+  if( near_zero > abs( pip ) ) pip = 0.0;
+
+  return pip;
+}
+
+GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
+{
+  int primID = PrimitiveIndex();
+  int3 indices = gprt::load<int3>(record.index, primID);
+  double3 v0 = gprt::load<double3>(record.vertex, indices.x);
+  double3 v1 = gprt::load<double3>(record.vertex, indices.y);
+  double3 v2 = gprt::load<double3>(record.vertex, indices.z);
+
   uint2 pixelID = DispatchRaysIndex().xy;
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+  double4 raydata1 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 0);
+  double4 raydata2 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 1);
+  double3 origin = double3(raydata1.x, raydata1.y, raydata1.z);//ObjectRayOrigin();
+  double3 direction = double3(raydata2.x, raydata2.y, raydata2.z);//ObjectRayDirection();
+  double tMin = raydata1.w;
+  double tCurrent = raydata2.w;
   
+  // const double nonneg_ray_len = 1.#INF;
+  // dist_out = 1.#INF;
+
+  
+
+  const double3 raya = direction;
+  const double3 rayb = dcross(direction, origin);
+
+  // Determine the value of the first Plucker coordinate from edge 0
+  double plucker_coord0 = plucker_edge_test(v0, v1, raya, rayb);
+
+  // If orientation is set, confirm that sign of plucker_coordinate indicate
+  // correct orientation of intersection
+  // if( orientation && ( *orientation ) * plucker_coord0 > 0 ) { return EXIT_EARLY; }
+
+  // Determine the value of the second Plucker coordinate from edge 1
+  double plucker_coord1 = plucker_edge_test( v1, v2, raya, rayb );
+
+  // // If orientation is set, confirm that sign of plucker_coordinate indicate
+  // // correct orientation of intersection
+  // if( orientation )
+  // {
+  //     if( ( *orientation ) * plucker_coord1 > 0 ) { return EXIT_EARLY; }
+  //     // If the orientation is not specified, all plucker_coords must be the same sign or
+  //     // zero.
+  // }
+  //else 
+  if( ( 0.0 < plucker_coord0 && 0.0 > plucker_coord1 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord1 ) )
+  {
+    return;// EXIT_EARLY;
+  }
+
+  // Determine the value of the second Plucker coordinate from edge 2
+  double plucker_coord2 = plucker_edge_test( v2, v0, raya, rayb );
+
+  // // If orientation is set, confirm that sign of plucker_coordinate indicate
+  // // correct orientation of intersection
+  // if( orientation )
+  // {
+  //     if( ( *orientation ) * plucker_coord2 > 0 ) { return EXIT_EARLY; }
+  //     // If the orientation is not specified, all plucker_coords must be the same sign or
+  //     // zero.
+  // }
+  // else 
+  if( ( 0.0 < plucker_coord1 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord1 && 0.0 < plucker_coord2 ) ||
+      ( 0.0 < plucker_coord0 && 0.0 > plucker_coord2 ) || ( 0.0 > plucker_coord0 && 0.0 < plucker_coord2 ) )
+  {
+    return; // EXIT_EARLY;
+  }
+
+  // check for coplanar case to avoid dividing by zero
+  if( 0.0 == plucker_coord0 && 0.0 == plucker_coord1 && 0.0 == plucker_coord2 ) { 
+    return; // EXIT_EARLY; 
+  }
+
+  // get the distance to intersection
+  const double inverse_sum = 1.0 / ( plucker_coord0 + plucker_coord1 + plucker_coord2 );
+  // assert( 0.0 != inverse_sum );
+  const double3 intersection = double3( plucker_coord0 * inverse_sum * v2 +
+                                        plucker_coord1 * inverse_sum * v0 +
+                                        plucker_coord2 * inverse_sum * v1 );
+
+  // To minimize numerical error, get index of largest magnitude direction.
+  int idx            = 0;
+  double max_abs_dir = 0;
+  for( unsigned int i = 0; i < 3; ++i )
+  {
+      if( abs( direction[i] ) > max_abs_dir )
+      {
+          idx         = i;
+          max_abs_dir = abs( direction[i] );
+      }
+  }
+  const double dist = ( intersection[idx] - origin[idx] ) / direction[idx];
+
+  // is the intersection within distance limits?
+  // if( ( nonneg_ray_len && nonneg_ray_len < dist ) ||  // intersection is beyond positive limit
+  //     ( neg_ray_len && *neg_ray_len >= dist ) ||       // intersection is behind negative limit
+  //     ( !neg_ray_len && 0 > dist ) )
+  // {  // Unless a neg_ray_len is used, don't return negative distances
+  //     return EXIT_EARLY;
+  // }
+
+  // dist_out = dist;
+  double t = dist;
+  double u = plucker_coord2 * inverse_sum;
+  double v = plucker_coord0 * inverse_sum;
+
+  // // if( type )
+  // //     *type = type_list[( ( 0.0 == plucker_coord2 ) << 2 ) + ( ( 0.0 == plucker_coord1 ) << 1 ) +
+  // //                       ( 0.0 == plucker_coord0 )];
+
+  // return true;
+
+
+
+
+  if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
+
+  if (t > tCurrent) return;
+  if (t < tMin) return;
+  
+  // update current double precision thit
+  gprt::store<double>(record.dpRays, fbOfs * 8 + 7, t);
+
+  Attribute attr;
+  attr.bc = double2(u, v);
+  float f32t = float(t);
+  if (double(f32t) < t) f32t = next_after(f32t);
+  ReportHit(f32t, /*hitKind*/ 0, attr);
+}
+
+
+GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
+{
+  int primID = PrimitiveIndex();
+  int3 indices = gprt::load<int3>(record.index, primID);
+  double3 v0 = gprt::load<double3>(record.vertex, indices.x);
+  double3 v1 = gprt::load<double3>(record.vertex, indices.y);
+  double3 v2 = gprt::load<double3>(record.vertex, indices.z);
+
+
+  uint2 pixelID = DispatchRaysIndex().xy;
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
   double4 raydata1 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 0);
   double4 raydata2 = gprt::load<double4>(record.dpRays, fbOfs * 2 + 1);
 
@@ -120,11 +312,6 @@ GPRT_INTERSECTION_PROGRAM(DPTriangle, (DPTriangleData, record))
   double tMin = raydata1.w;
   double tCurrent = raydata2.w;
 
-  int primID = PrimitiveIndex();
-  int3 indices = gprt::load<int3>(record.index, primID);
-  double3 v0 = gprt::load<double3>(record.vertex, indices.x);
-  double3 v1 = gprt::load<double3>(record.vertex, indices.y);
-  double3 v2 = gprt::load<double3>(record.vertex, indices.z);
 
   double3 v1v0 = v1 - v0;
   double3 v2v0 = v2 - v0;
