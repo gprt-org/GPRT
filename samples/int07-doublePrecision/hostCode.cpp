@@ -47,21 +47,10 @@ extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
 
 /* forward declarations to double precision teapot. 
   See gprt_data/double_teapot.c for details */
-// extern uint32_t double_teapot_indices[];
-// extern double double_teapot_vertices[];
-// extern int double_teapot_num_indices;
-// extern int double_teapot_num_vertices;
-
-uint32_t double_triangle_indices[] = {
-  0, 1, 2
-};
-double double_triangle_vertices[] = {
-  0.0, 0.0, 0.0,
-  0.0, 1.0, 0.0,
-  0.0, 1.0, 1.0
-};
-int double_triangle_num_indices;
-int double_triangle_num_vertices;
+extern uint32_t double_teapot_indices[];
+extern double double_teapot_vertices[];
+extern int double_teapot_num_indices;
+extern int double_teapot_num_vertices;
 
 float transform[3][4] = 
   {
