@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+int double_cube_num_vertices = 16;
 double double_cube_vertices[] = {
   4, -4, 4,
   -4, -4, -4,
@@ -19,6 +20,7 @@ double double_cube_vertices[] = {
   -5, 5, 5
 };
 
+int double_cube_num_indices = 24;
 uint32_t double_cube_indices[] = {
   12, 9, 10,
   10, 9, 1,

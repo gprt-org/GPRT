@@ -45,12 +45,12 @@
 extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
 
 
-/* forward declarations to double precision teapot. 
-  See gprt_data/double_teapot.c for details */
-extern uint32_t double_teapot_indices[];
-extern double double_teapot_vertices[];
-extern int double_teapot_num_indices;
-extern int double_teapot_num_vertices;
+/* forward declarations to double precision cube. 
+  See gprt_data/double_cube.cpp for details */
+extern uint32_t double_cube_indices[];
+extern double double_cube_vertices[];
+extern int double_cube_num_indices;
+extern int double_cube_num_vertices;
 
 float transform[3][4] = 
   {
@@ -127,20 +127,20 @@ int main(int ac, char **av)
   // aabb mesh
   // ------------------------------------------------------------------
   GPRTBuffer vertexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_DOUBLE3,double_teapot_num_vertices,double_teapot_vertices);
+    = gprtDeviceBufferCreate(context,GPRT_DOUBLE3,double_cube_num_vertices,double_cube_vertices);
   GPRTBuffer indexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT3,double_teapot_num_indices,double_teapot_indices);
+    = gprtDeviceBufferCreate(context,GPRT_INT3,double_cube_num_indices,double_cube_indices);
   GPRTBuffer aabbPositionsBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,double_teapot_num_indices * 2,nullptr);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,double_cube_num_indices * 2,nullptr);
 
-  GPRTGeom dpTeapotGeom
+  GPRTGeom dpCubeGeom
     = gprtGeomCreate(context,DPTriangleType);
-  gprtAABBsSetPositions(dpTeapotGeom, aabbPositionsBuffer, 
-                        double_teapot_num_indices, 2 * sizeof(float3), 0);
+  gprtAABBsSetPositions(dpCubeGeom, aabbPositionsBuffer, 
+                        double_cube_num_indices, 2 * sizeof(float3), 0);
 
-  gprtGeomSetBuffer(dpTeapotGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(dpTeapotGeom,"index",indexBuffer);
-  gprtGeomSetBuffer(dpTeapotGeom, "aabbs", aabbPositionsBuffer);
+  gprtGeomSetBuffer(dpCubeGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(dpCubeGeom,"index",indexBuffer);
+  gprtGeomSetBuffer(dpCubeGeom, "aabbs", aabbPositionsBuffer);
 
   gprtComputeSetBuffer(DPTriangleBoundsProgram, "vertex", vertexBuffer);
   gprtComputeSetBuffer(DPTriangleBoundsProgram, "index", indexBuffer);
@@ -148,21 +148,21 @@ int main(int ac, char **av)
   
   // compute AABBs in parallel with a compute shader
   gprtBuildSBT(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context,DPTriangleBoundsProgram,double_teapot_num_indices);
+  gprtComputeLaunch1D(context,DPTriangleBoundsProgram,double_cube_num_indices);
 
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&dpTeapotGeom);
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&dpCubeGeom);
   gprtAccelBuild(context, aabbAccel);
 
   // compute centroid to look at
-  double3 aabbmin = double3(double_teapot_vertices[0],double_teapot_vertices[1],double_teapot_vertices[2]);
+  double3 aabbmin = double3(double_cube_vertices[0],double_cube_vertices[1],double_cube_vertices[2]);
   double3 aabbmax = aabbmin;
-  for (uint32_t i = 1; i < double_teapot_num_vertices; ++i) {
-    aabbmin = linalg::min(aabbmin, double3(double_teapot_vertices[i * 3 + 0],
-                                           double_teapot_vertices[i * 3 + 1],
-                                           double_teapot_vertices[i * 3 + 2]));
-    aabbmax = linalg::max(aabbmax, double3(double_teapot_vertices[i * 3 + 0],
-                                           double_teapot_vertices[i * 3 + 1],
-                                           double_teapot_vertices[i * 3 + 2]));
+  for (uint32_t i = 1; i < double_cube_num_vertices; ++i) {
+    aabbmin = linalg::min(aabbmin, double3(double_cube_vertices[i * 3 + 0],
+                                           double_cube_vertices[i * 3 + 1],
+                                           double_cube_vertices[i * 3 + 2]));
+    aabbmax = linalg::max(aabbmax, double3(double_cube_vertices[i * 3 + 0],
+                                           double_cube_vertices[i * 3 + 1],
+                                           double_cube_vertices[i * 3 + 2]));
   }
   double3 aabbCentroid = aabbmin + (aabbmax - aabbmin) * 0.5;
 
@@ -198,8 +198,8 @@ int main(int ac, char **av)
   gprtRayGenSetAccel(rayGen,"world", world);
   
   // Also set on geometry for intersection program
-  gprtGeomSetBuffer(dpTeapotGeom,"dpRays", doubleRayBuffer);
-  gprtGeomSet2iv(dpTeapotGeom,"fbSize", (int32_t*)&fbSize);
+  gprtGeomSetBuffer(dpCubeGeom,"dpRays", doubleRayBuffer);
+  gprtGeomSet2iv(dpCubeGeom,"fbSize", (int32_t*)&fbSize);
 
   // ##################################################################
   // build *SBT* required to trace the groups
@@ -365,7 +365,7 @@ int main(int ac, char **av)
   gprtComputeDestroy(DPTriangleBoundsProgram);
   gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(dpTeapotGeom);
+  gprtGeomDestroy(dpCubeGeom);
   gprtGeomTypeDestroy(DPTriangleType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
