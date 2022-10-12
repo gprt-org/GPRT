@@ -116,27 +116,13 @@ float next_after(float a) {
     coordinates... */
 inline bool first( in double3 a, in double3 b )
 {
-    if( a.x < b.x ) { return true; }
-    else if( a.x == b.x )
-    {
-        if( a.y < b.y ) { return true; }
-        else if( a.y == b.y )
-        {
-            if( a.z < b.z ) { return true; }
-            else
-            {
-                return false;
-            }
-        }
-        else
-        {
-            return false;
-        }
-    }
-    else
-    {
-        return false;
-    }
+  if(a.x < b.x) return true;
+
+  if (a.x == b.x && a.y < b.y) return true;
+
+  if (a.y == b.y && a.z < b.z) return true;
+
+  return false;
 }
 
 double plucker_edge_test( in double3 vertexa, in double3 vertexb, in double3 ray, in double3 ray_normal )
