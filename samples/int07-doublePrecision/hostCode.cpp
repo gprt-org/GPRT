@@ -47,10 +47,21 @@ extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
 
 /* forward declarations to double precision teapot. 
   See gprt_data/double_teapot.c for details */
-extern uint32_t double_teapot_indices[];
-extern double double_teapot_vertices[];
-extern int double_teapot_num_indices;
-extern int double_teapot_num_vertices;
+// extern uint32_t double_teapot_indices[];
+// extern double double_teapot_vertices[];
+// extern int double_teapot_num_indices;
+// extern int double_teapot_num_vertices;
+
+uint32_t double_triangle_indices[] = {
+  0, 1, 2
+};
+double double_triangle_vertices[] = {
+  0.0, 0.0, 0.0,
+  0.0, 1.0, 0.0,
+  0.0, 1.0, 1.0
+};
+int double_triangle_num_indices;
+int double_triangle_num_vertices;
 
 float transform[3][4] = 
   {
@@ -157,8 +168,12 @@ int main(int ac, char **av)
   double3 aabbmin = double3(double_teapot_vertices[0],double_teapot_vertices[1],double_teapot_vertices[2]);
   double3 aabbmax = aabbmin;
   for (uint32_t i = 1; i < double_teapot_num_vertices; ++i) {
-    aabbmin = linalg::min(aabbmin, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
-    aabbmax = linalg::max(aabbmax, double3(double_teapot_vertices[i * 3 + 0],double_teapot_vertices[i * 3 + 1],double_teapot_vertices[i * 3 + 2]));
+    aabbmin = linalg::min(aabbmin, double3(double_teapot_vertices[i * 3 + 0],
+                                           double_teapot_vertices[i * 3 + 1],
+                                           double_teapot_vertices[i * 3 + 2]));
+    aabbmax = linalg::max(aabbmax, double3(double_teapot_vertices[i * 3 + 0],
+                                           double_teapot_vertices[i * 3 + 1],
+                                           double_teapot_vertices[i * 3 + 2]));
   }
   double3 aabbCentroid = aabbmin + (aabbmax - aabbmin) * 0.5;
 

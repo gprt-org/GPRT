@@ -204,11 +204,6 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
   double tMin = raydata1.w;
   double tCurrent = raydata2.w;
   
-  // const double nonneg_ray_len = 1.#INF;
-  // dist_out = 1.#INF;
-
-  
-
   const double3 raya = direction;
   const double3 rayb = dcross(direction, origin);
 
@@ -271,23 +266,10 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
   }
   const double dist = ( intersection[idx] - origin[idx] ) / direction[idx];
 
-  // is the intersection within distance limits?
-  // if( ( nonneg_ray_len && nonneg_ray_len < dist ) ||  // intersection is beyond positive limit
-  //     ( neg_ray_len && *neg_ray_len >= dist ) ||       // intersection is behind negative limit
-  //     ( !neg_ray_len && 0 > dist ) )
-  // {  // Unless a neg_ray_len is used, don't return negative distances
-  //     return EXIT_EARLY;
-  // }
 
-  // dist_out = dist;
   double t = dist;
   double u = plucker_coord2 * inverse_sum;
   double v = plucker_coord0 * inverse_sum;
-
-  // // if( type )
-  // //     *type = type_list[( ( 0.0 == plucker_coord2 ) << 2 ) + ( ( 0.0 == plucker_coord1 ) << 1 ) +
-  // //                       ( 0.0 == plucker_coord0 )];
-
 
   if( u<0.0 || v<0.0 || (u+v)>1.0 ) t = -1.0;
 
