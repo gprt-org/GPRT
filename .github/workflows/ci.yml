@@ -45,14 +45,23 @@ jobs:
       run: |
         ./util/download-dxc.sh
 
-    - name: Build
+    - name: Build Static
       shell: bash
       run: |
-        mkdir bld
-        cd bld
+        mkdir bld-static
+        cd bld-static
         cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
-        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
+        make VERBOSE=1 -j4
+
+    - name: Build Shared
+      shell: bash
+      run: |
+        mkdir bld-shared
+        cd bld-shared
+        cmake --version
+        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin \
+                 -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
 
     # Just checking build until a CPU backend is ready

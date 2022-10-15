@@ -44,6 +44,14 @@ if (NOT GPRT_IS_SUBPROJECT)
 endif()
 
 # ------------------------------------------------------------------
+# Configuration Options
+# ------------------------------------------------------------------
+option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
+set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
+
+option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
+
+# ------------------------------------------------------------------
 # first, include some dependencies
 # ------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/gprt/cmake/")
@@ -53,24 +61,22 @@ endif()
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if (GPRT_BUILD_SHARED)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
 
+add_subdirectory(3rdParty)
+
+
 # ------------------------------------------------------------------
 # gprt library itself
 # ------------------------------------------------------------------
-option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
-set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
 add_subdirectory(gprt)
-
-option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
-# add_compile_definitions(GPRT_BUILDING_ALL_SAMPLES)
-# option(GPRT_BUILD_ADVANCED_TESTS "Build the *advanced* test-cases?" OFF)
-
-add_subdirectory(3rdParty)
 
 # ------------------------------------------------------------------
 # tutorial/samples
