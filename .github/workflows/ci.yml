@@ -12,7 +12,7 @@ on:
       - master
 
 jobs:
-  main:
+  ubuntu:
     runs-on: ubuntu-20.04
 
     steps:
@@ -64,10 +64,32 @@ jobs:
                  -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
 
-    # Just checking build until a CPU backend is ready
-    # - name: Run Samples
-    #   shell: bash
-    #   run: |
-    #     cd bld
-    #     ./sample00_rayGenOnly
-    #     ./sample01_simpleTriangles
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Prepare Vulkan SDK
+      uses: humbletim/setup-vulkan-sdk@v1.2.0
+      with:
+        vulkan-query-version: 1.3.204.0
+        vulkan-components: Vulkan-Headers, Vulkan-Loader
+        vulkan-use-cache: true
+
+    - name: Pull and unpack dxc compiler
+      run: |
+        cd $HOME
+        C:\msys64\usr\bin\wget.exe https://anl.box.com/shared/static/63jh85qcoedxi4hi84lizp9e0c9h0jo5.zip -O dxc-artifacts.zip
+        unzip dxc-artifacts
+
+
+    - name: Build
+      shell: bash
+      run: |
+        mkdir bld
+        cd bld
+        cmake --version
+        cmake .. -DVulkan_BIN_DIR=$HOME/bin
+        cmake --build .
