@@ -52,6 +52,15 @@ set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
 option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
 
 # ------------------------------------------------------------------
+# External configuration variables
+# ------------------------------------------------------------------
+
+# provide these varaibles at both a local and parent scope
+set(GPRT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gprt PARENT_SCOPE)
+set(GPRT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gprt)
+
+
+# ------------------------------------------------------------------
 # first, include some dependencies
 # ------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/gprt/cmake/")
@@ -88,6 +97,7 @@ endif()
 if (GPRT_IS_SUBPROJECT)
   return()
 endif()
+
 
 # include(CTest)
 # if (BUILD_TESTING)

@@ -74,7 +74,7 @@ function(embed_spirv)
       -fspv-target-env=vulkan1.1spirv1.4
       -HV 2021
       -T lib_6_3
-      -I ${PROJECT_SOURCE_DIR}/gprt
+      -I ${GPRT_INCLUDE_DIR}
       -D GPRT_DEVICE
       -D ${ENTRY_POINT_TYPE}
       -fspv-extension=SPV_KHR_ray_tracing
@@ -85,7 +85,7 @@ function(embed_spirv)
       -fcgl
       ${EMBED_SPIRV_SOURCES}
       -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
-      DEPENDS ${EMBED_SPIRV_SOURCES} ${PROJECT_SOURCE_DIR}/gprt/gprt_device.hlsli ${PROJECT_SOURCE_DIR}/gprt/gprt.h
+      DEPENDS ${EMBED_SPIRV_SOURCES} ${GPRT_INCLUDE_DIR}/gprt_device.hlsli ${GPRT_INCLUDE_DIR}/gprt.h
       COMMENT "compile SPIRV ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SPIRV_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv from ${EMBED_SPIRV_SOURCES}"
     )
 
