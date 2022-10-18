@@ -56,7 +56,9 @@ option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
 # ------------------------------------------------------------------
 
 # provide these varaibles at both a local and parent scope
-set(GPRT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gprt PARENT_SCOPE)
+if (GPRT_IS_SUBPROJECT)
+  set(GPRT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gprt PARENT_SCOPE)
+endif()
 set(GPRT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gprt)
 
 
