@@ -122,7 +122,7 @@ int main(int ac, char **av)
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTBuffer frameBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
   GPRTGeom aabbGeom
     = gprtGeomCreate(context,aabbGeomType);

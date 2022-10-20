@@ -120,13 +120,13 @@ int main(int ac, char **av)
   // triangle mesh
   // ------------------------------------------------------------------
   GPRTBuffer vertexBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+    = gprtHostBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
   GPRTBuffer indexBuffer
     = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTBuffer frameBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
   GPRTGeom trianglesGeom
     = gprtGeomCreate(context,trianglesGeomType);

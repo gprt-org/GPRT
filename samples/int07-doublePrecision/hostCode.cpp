@@ -186,7 +186,7 @@ int main(int ac, char **av)
 
   // ----------- set raygen variables  ----------------------------
   GPRTBuffer frameBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   
   // need this to communicate double precision rays to intersection program
   // ray origin xyz + tmin, then ray direction xyz + tmax
