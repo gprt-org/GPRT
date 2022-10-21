@@ -267,9 +267,9 @@ struct Stage {
 
 struct Module {
   // std::string program;
-  std::map<std::string, std::vector<uint8_t>> program;
+  GPRTProgram program;
 
-  Module(std::map<std::string, std::vector<uint8_t>> program) {
+  Module(GPRTProgram program) {
     this->program = program;
   }
 
@@ -2917,7 +2917,7 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   LOG("context destroyed...");
 }
 
-GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, std::map<std::string, std::vector<uint8_t>> spvCode)
+GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;

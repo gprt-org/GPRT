@@ -97,6 +97,8 @@ typedef struct _GPRTRayGen     *GPRTRayGen;
 typedef struct _GPRTMiss       *GPRTMiss;
 typedef struct _GPRTCompute    *GPRTCompute;
 
+typedef std::map<std::string, std::vector<uint8_t>> GPRTProgram;
+
 namespace gprt {
   typedef uint64_t2 Buffer;
   typedef uint64_t2 Accel;
@@ -424,7 +426,7 @@ inline std::vector<GPRTVarDecl> getDecls(
   return decls;
 }
 
-GPRT_API GPRTModule gprtModuleCreate(GPRTContext context, std::map<std::string, std::vector<uint8_t>> spvCode);
+GPRT_API GPRTModule gprtModuleCreate(GPRTContext context, GPRTProgram spvCode);
 GPRT_API void gprtModuleDestroy(GPRTModule module);
 
 GPRT_API GPRTGeom

@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> int05_deviceCode;
+extern GPRTProgram int05_deviceCode;
 
 const int NUM_VERTICES = 10000;
 float transform[3][4] = 

@@ -38,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> cmd03_deviceCode;
+extern GPRTProgram cmd03_deviceCode;
 
 // When run, this program produces this PNG as output.
 // In this case the correct result is a red and light gray checkerboard,
