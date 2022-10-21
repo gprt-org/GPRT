@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_spirv(
+embed_devicecode(
   OUTPUT_TARGET
     cmd03_deviceCode
   SOURCES
