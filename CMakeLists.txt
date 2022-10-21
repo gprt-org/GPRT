@@ -51,6 +51,9 @@ set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
 
 option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
 
+option(GPRT_ENABLE_VULKAN "Build the Vulkan backend. Requires the Vulkan SDK and DXC" ON)
+option(GPRT_ENABLE_EMBREE "Build the Embree + SYCL backend. Requires the oneAPI Rendering Toolkit" OFF)
+
 # ------------------------------------------------------------------
 # External configuration variables
 # ------------------------------------------------------------------

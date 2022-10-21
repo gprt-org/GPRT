@@ -24,55 +24,42 @@ add_library(gprt)
 if (GPRT_BUILD_SHARED)
   set_property(TARGET gprt PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
-include(cmake/hlsl_embed_spirv.cmake)
 
-embed_spirv(
-  OUTPUT_TARGET
-    gprtDeviceCode
-  ENTRY_POINTS
-    gprtFillInstanceData
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device_code.hlsl
-)
+if (GPRT_ENABLE_VULKAN)
+  include(cmake/hlsl_embed_spirv.cmake)
 
-target_sources(gprt PRIVATE
-    gprt.cpp
-    gprt.h
-)
+  embed_spirv(
+    OUTPUT_TARGET
+      gprtVulkanDeviceCode
+    ENTRY_POINTS
+      gprtFillInstanceData
+    SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device_code.hlsl
+  )
+  
+  target_sources(gprt PRIVATE
+      gprt.cpp
+      gprt.h
+  )
+  target_link_libraries(gprt
+      PUBLIC
+      ${Vulkan_LIBRARY}
+      gprtVulkanDeviceCode
+  )
+
+  target_include_directories(gprt
+    PUBLIC
+      ${Vulkan_INCLUDE_DIR}
+      ${PROJECT_SOURCE_DIR}
+      ${CMAKE_CURRENT_LIST_DIR}
+  )
+endif()
 
 set_target_properties(gprt
     PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# IF(WIN32)
-# 	# Nothing here (yet)
-# ELSEIF(APPLE)
-# 	target_link_libraries(gprt ${Vulkan_LIBRARY} "-framework AppKit" "-framework QuartzCore")
-# ELSE(WIN32)
-# 	target_link_libraries(gprt
-#         ${XCB_LIBRARIES}
-#         ${Vulkan_LIBRARY}
-#         ${Vulkan_LIBRARY}
-#         ${DIRECTFB_LIBRARIES}
-#         ${WAYLAND_CLIENT_LIBRARIES}
-#         ${CMAKE_THREAD_LIBS_INIT}
-#     )
-# ENDIF(WIN32)
-
-target_link_libraries(gprt
-    PUBLIC
-    ${Vulkan_LIBRARY}
-    gprtDeviceCode
-)
-
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
-
-target_include_directories(gprt
-  PUBLIC
-    ${Vulkan_INCLUDE_DIR}
-    ${PROJECT_SOURCE_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}
-)
 
 add_library(gprt::gprt ALIAS gprt)
