@@ -3210,7 +3210,7 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
 }
 
 GPRT_API GPRTBuffer
-gprtHostPinnedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -3277,6 +3277,46 @@ gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
     void* mapped = buffer->mapped;
     memcpy(mapped, init, getSize(type) * count);
     buffer->unmap();
+  }
+  LOG("buffer created");
+  return (GPRTBuffer)buffer;
+}
+
+GPRT_API GPRTBuffer
+gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+{
+  LOG_API_CALL();
+  const VkBufferUsageFlags bufferUsageFlags =
+    // means we can get this buffer's address with vkGetBufferDeviceAddress
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+    // I guess I need this to use these buffers as input to tree builds?
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+    // means we can use this buffer to transfer into another
+    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+    // means we can use this buffer to receive data transferred from another
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |  // means "flush" and "invalidate"  not needed
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+
+  Context *context = (Context*)_context;
+  Buffer *buffer = new Buffer(
+    context->physicalDevice, context->logicalDevice, 
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    bufferUsageFlags, memoryUsageFlags,
+    getSize(type) * count
+  );
+
+  // Pin the buffer to the host
+  buffer->map();
+  
+  if (init) {
+    void* mapped = buffer->mapped;
+    memcpy(mapped, init, getSize(type) * count);
+    buffer->flush();
+    buffer->invalidate();
   }
   LOG("buffer created");
   return (GPRTBuffer)buffer;

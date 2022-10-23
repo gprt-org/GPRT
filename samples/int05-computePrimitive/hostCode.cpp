@@ -185,7 +185,7 @@ int main(int ac, char **av)
 
   // ----------- set raygen variables  ----------------------------
   GPRTBuffer frameBuffer
-    = gprtHostPinnedBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
   gprtRayGenSetAccel(rayGen,"world", world);

@@ -685,16 +685,24 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType type,
                              GPRTModule module,
                              const char *progName);
 
-/*! creates a buffer that uses host pinned memory; that memory is
-pinned on the host and accessible to all devices */
+/*! Creates a buffer that uses memory located on the host; that memory is 
+accessible to all devices, but is slower to access on device.  */
 GPRT_API GPRTBuffer
-gprtHostPinnedBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+gprtHostBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
-/*! creates a device buffer where every device has its own local copy
-  of the given buffer */
+/*! Creates a buffer that uses memory located on the device; that memory is 
+accessible only to the device, and requires mapping and unmapping to access 
+on the host. */
 GPRT_API GPRTBuffer
 gprtDeviceBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+/*! Creates a buffer that uses memory located on the device; that memory is 
+accessible to all devices, but is slower to access on the host, and is typically
+limited in size depending on resizable BAR availability. */
+GPRT_API GPRTBuffer
+gprtSharedBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any

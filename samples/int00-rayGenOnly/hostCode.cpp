@@ -90,7 +90,7 @@ int main(int ac, char **av)
   LOG("allocating frame buffer");
   // Create a frame buffer as page-locked, aka "pinned" memory.
   // GPU writes to CPU memory directly (slow) but no transfers needed
-  GPRTBuffer frameBuffer = gprtHostPinnedBufferCreate(gprt,
+  GPRTBuffer frameBuffer = gprtHostBufferCreate(gprt,
                                           /*type:*/GPRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
 
