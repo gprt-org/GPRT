@@ -42,7 +42,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> int07_deviceCode;
+extern GPRTProgram int07_deviceCode;
 
 
 /* forward declarations to double precision cube. 

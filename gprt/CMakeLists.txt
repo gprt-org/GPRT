@@ -24,9 +24,9 @@ add_library(gprt)
 if (GPRT_BUILD_SHARED)
   set_property(TARGET gprt PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
-include(cmake/hlsl_embed_spirv.cmake)
+include(cmake/embed_hlsl.cmake)
 
-embed_spirv(
+embed_devicecode(
   OUTPUT_TARGET
     gprtDeviceCode
   ENTRY_POINTS

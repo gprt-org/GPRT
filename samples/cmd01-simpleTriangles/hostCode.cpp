@@ -40,7 +40,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern std::map<std::string, std::vector<uint8_t>> cmd01_deviceCode;
+extern GPRTProgram cmd01_deviceCode;
 
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
