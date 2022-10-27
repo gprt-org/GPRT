@@ -2490,7 +2490,7 @@ struct Context {
     const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
     // for the moment, just assume the max group size
-    const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
     const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
     const uint32_t sbtSize = groupCount * handleSize;
@@ -3538,7 +3538,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
   // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
   uint64_t baseAddr = getBufferDeviceAddress(
     context->logicalDevice, context->shaderBindingTable.buffer);
 
@@ -3673,7 +3673,7 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
   // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(maxGroupSize, groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
   uint64_t baseAddr = getBufferDeviceAddress(
     context->logicalDevice, context->shaderBindingTable.buffer);
 
