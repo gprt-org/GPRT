@@ -243,7 +243,7 @@ namespace gprt{
   PFN_vkCmdTraceRaysKHR vkCmdTraceRays;
   PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandles;
   PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelines;
-
+  
   PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
   VkDebugUtilsMessengerEXT debugUtilsMessenger;
@@ -2717,8 +2717,7 @@ struct Context {
   //   // At the moment, we don't actually build our programs here. 
   // }
 
-  // void buildPipeline()
-  void buildPrograms()
+  void buildPipeline()
   {
 
     VkPushConstantRange pushConstantRange = {};
@@ -2743,6 +2742,11 @@ struct Context {
     pipelineLayoutCI.pSetLayouts = nullptr;
     pipelineLayoutCI.pushConstantRangeCount = 1;
     pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+
+    if (pipelineLayout != VK_NULL_HANDLE) {
+      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+      pipelineLayout = VK_NULL_HANDLE;
+    }
     VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI,
       nullptr, &pipelineLayout));
 
@@ -2750,6 +2754,7 @@ struct Context {
       Setup ray tracing shader groups
     */
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+    shaderGroups.clear();
 
     // Compute program groups
     {
@@ -2885,49 +2890,6 @@ struct Context {
       }
     }
 
-
-
-
-    // {
-    //   for (auto geomType : geomTypes) {
-    //     for (uint32_t rayType = 0; rayType < numRayTypes; ++rayType) {
-    //       VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-    //       shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-
-    //       GPRTGeomKind kind = geomType->getKind();
-    //       if (kind == GPRT_TRIANGLES)
-    //         shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-    //       else if (kind == GPRT_AABBS)
-    //         shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-    //       else {
-    //         GPRT_NOTIMPLEMENTED;
-    //       }
-
-    //       // init all to unused
-    //       shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-    //       shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-    //       shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-    //       shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-    //       if (geomType->closestHitShadersUsed) {
-    //         shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
-    //         shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-    //       }
-
-    //       if (geomType->anyHitShadersUsed) {
-    //         shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
-    //         shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-    //       }
-
-    //       if (geomType->intersectionShadersUsed) {
-    //         shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
-    //         shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-    //       }
-    //       shaderGroups.push_back(shaderGroup);
-    //     }
-    //   }
-    // }
-
     /*
       Create the ray tracing pipeline
     */
@@ -2940,6 +2902,10 @@ struct Context {
     rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1; // WHA!?
     rayTracingPipelineCI.layout = pipelineLayout;
 
+    if (pipeline != VK_NULL_HANDLE) {
+      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      pipeline = VK_NULL_HANDLE;
+    }
     VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice,
       VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI,
       nullptr, &pipeline
@@ -3463,11 +3429,11 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID)
 
 
 
-GPRT_API void gprtBuildPrograms(GPRTContext _context)
+GPRT_API void gprtBuildPipeline(GPRTContext _context)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
-  context->buildPrograms();
+  context->buildPipeline();
   LOG("programs built...");
 }
 
@@ -3571,7 +3537,7 @@ GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
   GPRT_NOTIMPLEMENTED;
 }
 
-GPRT_API void gprtBuildSBT(GPRTContext _context,
+GPRT_API void gprtBuildShaderBindingTable(GPRTContext _context,
                            GPRTBuildSBTFlags flags)
 {
   LOG_API_CALL();

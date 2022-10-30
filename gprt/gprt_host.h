@@ -472,9 +472,12 @@ GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs,
                                     size_t stride,
                                     size_t offset);
 
-GPRT_API void gprtBuildPrograms(GPRTContext context);
+/* Builds the ray tracing pipeline over the raytracing programs. 
+  This must be called after any acceleration structures are created.
+*/
+GPRT_API void gprtBuildPipeline(GPRTContext context);
 
-GPRT_API void gprtBuildSBT(GPRTContext context,
+GPRT_API void gprtBuildShaderBindingTable(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 
 /*! creates a new device context with the gives list of devices.

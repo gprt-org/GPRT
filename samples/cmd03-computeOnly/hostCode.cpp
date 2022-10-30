@@ -85,7 +85,7 @@ int main(int ac, char **av)
                       sizeof(ComputeData),computeVars,-1);
 
   // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPrograms(gprt);
+  gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
   // alloc buffers
@@ -105,7 +105,7 @@ int main(int ac, char **av)
   gprtComputeSetBuffer(compute,"fbPtr",frameBuffer);
   gprtComputeSet2i(compute,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the compute record.
-  gprtBuildSBT(gprt);
+  gprtBuildShaderBindingTable(gprt);
 
   // ##################################################################
   // now that everything is ready: launch it ....
