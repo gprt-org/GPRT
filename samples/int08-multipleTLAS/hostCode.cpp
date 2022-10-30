@@ -100,7 +100,7 @@ struct TetrahedralMesh {
 const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
-float3 lookFrom = {0.f,-2.f,1.f};
+float3 lookFrom = {0.f,-4.f,1.f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,0.f,1.f};
 float cosFovy = 0.66f;
@@ -146,6 +146,8 @@ int main(int ac, char **av)
                         GPRT_AABBS,
                         sizeof(TrianglesGeomData),
                         tetrahedraGeomVars,-1);
+  gprtGeomTypeSetIntersectionProg(tetrahedraGeomType,0,
+                           module,"TetrahedralMesh");
   gprtGeomTypeSetClosestHitProg(tetrahedraGeomType,0,
                            module,"TetrahedralMesh");
 
@@ -205,17 +207,19 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer);
-  gprtAccelBuild(context, trianglesTLAS);
-
   GPRTAccel tetrahedraAccel = gprtAABBAccelCreate(context,1,&tetrahedraGeom);
   gprtAccelBuild(context, tetrahedraAccel);
   GPRTAccel tetrahedraTLAS = gprtInstanceAccelCreate(context,1,&tetrahedraAccel);
   gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer);
   gprtAccelBuild(context, tetrahedraTLAS);
+
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
+  gprtAccelBuild(context, trianglesAccel);
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesAccel);
+  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer);
+  gprtAccelBuild(context, trianglesTLAS);
+  
+
 
   // ##################################################################
   // set miss and raygen program required for SBT

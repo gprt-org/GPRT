@@ -1063,7 +1063,7 @@ struct Accel {
   
   ~Accel() {};
 
-  virtual void build(std::map<std::string, Stage> internalStages) { };
+  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) { };
   virtual void destroy() { };
   virtual AccelType getType() {return GPRT_UNKNOWN_ACCEL;}
 };
@@ -1085,7 +1085,7 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() {return GPRT_TRIANGLE_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1292,7 +1292,7 @@ struct AABBAccel : public Accel {
 
   AccelType getType() {return GPRT_AABB_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1480,6 +1480,8 @@ struct AABBAccel : public Accel {
 struct InstanceAccel : public Accel {
   std::vector<Accel*> instances; 
 
+  size_t instanceOffset = -1;
+
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
 
@@ -1541,7 +1543,7 @@ struct InstanceAccel : public Accel {
 
   AccelType getType() {return GPRT_INSTANCE_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<uint64_t> addresses(instances.size());
@@ -1550,18 +1552,49 @@ struct InstanceAccel : public Accel {
     accelAddressesBuffer->map();
     memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * instances.size());
 
+    // The instance shader binding table record offset is the total number 
+    // of geometries referenced by all instances up until this instance tree
+    // multiplied by the number of ray types.
+    uint64_t instanceShaderBindingTableRecordOffset = 0;
+    for (uint32_t i = 0; i < accels.size(); ++i) {
+      if (accels[i] == this) break;
+      if (accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel *instanceAccel = (InstanceAccel*) accels[i];
+
+        uint64_t numGeometry = 0;
+        for (uint32_t j = 0; j < instanceAccel->instances.size(); ++j) {
+          if (instanceAccel->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triangleAccel = (TriangleAccel*) instanceAccel->instances[j];
+            numGeometry += triangleAccel->geometries.size();
+          }
+          else if (instanceAccel->instances[j]->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) instanceAccel->instances[j];
+            numGeometry += aabbAccel->geometries.size();
+          }
+          else {
+            throw std::runtime_error("Unaccounted for tree type in instance SBT offset!");
+          }
+        }
+        instanceShaderBindingTableRecordOffset += numGeometry * numRayTypes;
+      }
+    }
+
+    instanceOffset = instanceShaderBindingTableRecordOffset;
+
     // Use a compute shader to copy transforms into instances buffer
     VkCommandBufferBeginInfo cmdBufInfo{};
     struct PushConstants {
       uint64_t instanceBufferAddr;
       uint64_t transformBufferAddr;
       uint64_t accelReferencesAddr;
-      uint64_t pad[16-3];
+      uint64_t instanceShaderBindingTableRecordOffset;
+      uint64_t pad[16-4];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
     pushConstants.transformBufferAddr = transforms.buffer->address;
     pushConstants.accelReferencesAddr = accelAddressesBuffer->address;
+    pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -1918,18 +1951,25 @@ struct Context {
   }
 
   size_t getNumHitRecords() {
+    // The total number of geometries is the number of geometries referenced 
+    // by each top level acceleration structure.
     int totalGeometries = 0;
     for (int accelID = 0; accelID < accels.size(); ++accelID) {
       Accel *accel = accels[accelID];
       if (!accel) continue;
-      if (accel->getType() == GPRT_INSTANCE_ACCEL) continue;
-      if (accel->getType() == GPRT_TRIANGLE_ACCEL) {
-        TriangleAccel *triAccel = (TriangleAccel*) accel;
-        totalGeometries += triAccel->geometries.size();
-      }
-      if (accel->getType() == GPRT_AABB_ACCEL) {
-        AABBAccel *aabbAccel = (AABBAccel*) accel;
-        totalGeometries += aabbAccel->geometries.size();
+      if (accel->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel* tlas = (InstanceAccel*) accel;
+        for (int blasID = 0; blasID < tlas->instances.size(); ++blasID) {
+          Accel *blas = tlas->instances[blasID];
+          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triAccel = (TriangleAccel*) blas;
+            totalGeometries += triAccel->geometries.size();
+          }
+          if (blas->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) blas;
+            totalGeometries += aabbAccel->geometries.size();
+          }
+        }
       }
     }
 
@@ -2508,7 +2548,6 @@ struct Context {
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
 
-
     // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
 
     size_t numComputes = computePrograms.size();
@@ -2600,101 +2639,76 @@ struct Context {
     // Hit records
     if (numHitRecords > 0)
     {
-      for (int accelID = 0; accelID < accels.size(); ++accelID) {
-        Accel *accel = accels[accelID];
-        if (!accel) continue;
-        if (accel->getType() == GPRT_INSTANCE_ACCEL) continue;
-        if (accel->getType() == GPRT_TRIANGLE_ACCEL) {
-          TriangleAccel *triAccel = (TriangleAccel*) accel;
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+        Accel *tlas = accels[tlasID];
+        if (!tlas) continue;
+        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+          InstanceAccel *instanceAccel = (InstanceAccel*) tlas;
+          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+            
+            Accel *blas = instanceAccel->instances[blasID];
+            if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+              TriangleAccel *triAccel = (TriangleAccel*) blas;
 
-          for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-            auto &geom = triAccel->geometries[geomID];
+              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                auto &geom = triAccel->geometries[geomID];
 
-            for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-              size_t recordStride = recordSize;
-              size_t handleStride = handleSize;
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  size_t recordStride = recordSize;
+                  size_t handleStride = handleSize;
 
-              // First, copy handle
-              size_t instanceOffset = 0; // TODO
-              size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
-              size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
-              memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-              
-              // Then, copy params following handle
-              recordOffset = recordOffset + handleSize;
-              uint8_t* params = mapped + recordOffset;
-              for (auto &var : geom->vars) {
-                size_t varOffset = var.second.decl.offset;
-                size_t varSize = getSize(var.second.decl.type);
-                memcpy(params + varOffset, var.second.data, varSize);
+                  // First, copy handle
+                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
+                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                  
+                  // Then, copy params following handle
+                  recordOffset = recordOffset + handleSize;
+                  uint8_t* params = mapped + recordOffset;
+                  for (auto &var : geom->vars) {
+                    size_t varOffset = var.second.decl.offset;
+                    size_t varSize = getSize(var.second.decl.type);
+                    memcpy(params + varOffset, var.second.data, varSize);
+                  }
+                }
               }
             }
-          }
-        }
 
-        else if (accel->getType() == GPRT_AABB_ACCEL) {
-          AABBAccel *aabbAccel = (AABBAccel*) accel;
+            else if (blas->getType() == GPRT_AABB_ACCEL) {
+              AABBAccel *aabbAccel = (AABBAccel*) blas;
 
-          for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
-            auto &geom = aabbAccel->geometries[geomID];
+              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                auto &geom = aabbAccel->geometries[geomID];
 
-            for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-              size_t recordStride = recordSize;
-              size_t handleStride = handleSize;
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  size_t recordStride = recordSize;
+                  size_t handleStride = handleSize;
 
-              // First, copy handle
-              size_t instanceOffset = 0; // TODO
-              size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
-              size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
-              memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-              
-              // Then, copy params following handle
-              recordOffset = recordOffset + handleSize;
-              uint8_t* params = mapped + recordOffset;
-              for (auto &var : geom->vars) {
-                size_t varOffset = var.second.decl.offset;
-                size_t varSize = getSize(var.second.decl.type);
-                memcpy(params + varOffset, var.second.data, varSize);
+                  // First, copy handle
+                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
+                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                  
+                  // Then, copy params following handle
+                  recordOffset = recordOffset + handleSize;
+                  uint8_t* params = mapped + recordOffset;
+                  for (auto &var : geom->vars) {
+                    size_t varOffset = var.second.decl.offset;
+                    size_t varSize = getSize(var.second.decl.type);
+                    memcpy(params + varOffset, var.second.data, varSize);
+                  }
+                }
               }
+            }
+            
+            else {
+              throw std::runtime_error("Unaccounted for BLAS type!");
             }
           }
         }
       }
-    }
-
-
-    // {
-    //     TrianglesAccel *triAccel = (TrianglesAccel*) accel;
-
-    //     const size_t sbtOffset = 0 ; // triAccel->sbtOffset; //?????
-    //     std::cout<<"TODO, compute correct sbt offset for a triangle accel!"<<std::endl;
-    //     for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-    //       for (int rayTypeID = 0; rayTypeID < numRayTypes; ++rayTypeID) {
-
-    //         size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-    //         uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
-
-    //         int HG_stride = ;
-    //         int R_stride = numRayTypes;
-    //         int R_offset = rayTypeID;
-    //         int G_ID = geomID;
-    //         int I_offset = ;
-    //         void* HG = hitShaderBindingTable.mapped + (HG_stride * (R_offset + R_stride * G_ID + I_offset));
-
-    //       }
-    //     }
-    //   }
-
-
-    // if (hitgroupPrograms.size() > 0) 
-    {
-      
-      
-      
-      
-
-      // TODO: hit programs...
-      
     }
   }
 
@@ -2782,46 +2796,137 @@ struct Context {
       }
     }
 
-    // Closest hit group
-    {
-      for (auto geomType : geomTypes) {
-        for (uint32_t rayType = 0; rayType < numRayTypes; ++rayType) {
-          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    // Hit groups
 
-          GPRTGeomKind kind = geomType->getKind();
-          if (kind == GPRT_TRIANGLES)
-            shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-          else if (kind == GPRT_AABBS)
-            shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+    // Go over all TLAS
+    for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      Accel *tlas = accels[tlasID];
+      if (!tlas) continue;
+      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+        // Iterate over all BLAS stored in the TLAS
+        InstanceAccel *instanceAccel = (InstanceAccel*) tlas;
+        for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+          Accel *blas = instanceAccel->instances[blasID];
+          // Handle different BLAS types...
+          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triAccel = (TriangleAccel*) blas;
+            // Add a record for every geometry-raytype permutation
+            for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+              auto &geom = triAccel->geometries[geomID];
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+
+                // init all to unused
+                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                // populate hit group programs using geometry type
+                if (geom->geomType->closestHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->anyHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->intersectionShadersUsed) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+                shaderGroups.push_back(shaderGroup);
+              }
+            }
+          }
+          else if (blas->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) blas;
+            // Add a record for every geometry-raytype permutation
+            for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+              auto &geom = aabbAccel->geometries[geomID];
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+
+                // init all to unused
+                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                // populate hit group programs using geometry type
+                if (geom->geomType->closestHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->anyHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->intersectionShadersUsed) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+                shaderGroups.push_back(shaderGroup);
+              }
+            }
+          }
           else {
-            GPRT_NOTIMPLEMENTED;
+            throw std::runtime_error("Unaccounted for BLAS type!");
           }
-
-          // init all to unused
-          shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-          if (geomType->closestHitShadersUsed) {
-            shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
-            shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-
-          if (geomType->anyHitShadersUsed) {
-            shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
-            shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-
-          if (geomType->intersectionShadersUsed) {
-            shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
-            shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-          shaderGroups.push_back(shaderGroup);
         }
       }
     }
+
+
+
+
+    // {
+    //   for (auto geomType : geomTypes) {
+    //     for (uint32_t rayType = 0; rayType < numRayTypes; ++rayType) {
+    //       VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+    //       shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+
+    //       GPRTGeomKind kind = geomType->getKind();
+    //       if (kind == GPRT_TRIANGLES)
+    //         shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    //       else if (kind == GPRT_AABBS)
+    //         shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+    //       else {
+    //         GPRT_NOTIMPLEMENTED;
+    //       }
+
+    //       // init all to unused
+    //       shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+    //       shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+    //       shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+    //       shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+    //       if (geomType->closestHitShadersUsed) {
+    //         shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
+    //         shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+    //       }
+
+    //       if (geomType->anyHitShadersUsed) {
+    //         shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
+    //         shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+    //       }
+
+    //       if (geomType->intersectionShadersUsed) {
+    //         shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
+    //         shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+    //       }
+    //       shaderGroups.push_back(shaderGroup);
+    //     }
+    //   }
+    // }
 
     /*
       Create the ray tracing pipeline
@@ -3456,8 +3561,9 @@ GPRT_API void gprtAccelBuild(GPRTContext _context, GPRTAccel _accel)
   Accel *accel = (Accel*)_accel;
   Context *context = (Context*)_context;
   accel->build({
-    {"gprtFillInstanceData", context->fillInstanceDataStage}
-  });
+    {"gprtFillInstanceData", context->fillInstanceDataStage}},
+    context->accels, context->numRayTypes
+  );
 }
 
 GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
