@@ -81,7 +81,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
   RaytracingAccelerationStructure cells = gprt::getAccelHandle(record.cells);
   float3 color = float3(0.0, 0.0, 0.0);
   float alpha = 0.0;
-  for (float t = rayDesc.TMin; t < rayDesc.TMax; t += .05f) {
+  for (float t = rayDesc.TMin; t < rayDesc.TMax; t += .02f) {
     if (alpha > .99f) break;
     float3 x = rayDesc.Origin + rayDesc.Direction * t;
 
