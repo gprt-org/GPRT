@@ -106,8 +106,12 @@ double3 dcross (in double3 a, in double3 b) { return double3(a.y*b.z-a.z*b.y, a.
 
 float next_after(float a) {
   uint a_ = asuint(a);
-  a_ += a < 0 ? -1 : 1;
-  return asfloat(a);
+  if (a < 0) {
+    a_--;
+  } else {
+    a_++;
+  }
+  return asfloat(a_);
 }
 
 /* Function to return the vertex with the lowest coordinates. To force the same
@@ -158,7 +162,6 @@ GPRT_INTERSECTION_PROGRAM(DPTrianglePlucker, (DPTriangleData, record))
   if ((pixelID.x == dims.x / 2) && (pixelID.y == dims.y / 2)) debug = true;
 
   uint flags = RayFlags();
-
 
   // Just skip if we for some reason cull both...
   if ( ((flags & RAY_FLAG_CULL_BACK_FACING_TRIANGLES) != 0) && 

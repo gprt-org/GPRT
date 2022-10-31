@@ -255,7 +255,9 @@ int main(int ac, char **av)
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
+      #ifndef M_PI
       #define M_PI 3.1415926f
+      #endif
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
