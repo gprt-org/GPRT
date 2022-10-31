@@ -47,10 +47,10 @@ struct TriangleMesh {
   const int NUM_VERTICES = 4;
   float3 vertices[4] =
     {
-      { -1.f,-1.f,-1.f },
-      { +1.f,-1.f,-1.f },
-      { -1.f,+1.f,-1.f },
-      { +1.f,+1.f,-1.f }
+      { -2.f,-2.f,-1.f },
+      { +2.f,-2.f,-1.f },
+      { -2.f,+2.f,-1.f },
+      { +2.f,+2.f,-1.f }
     };
 
   const int NUM_INDICES = 2;
@@ -100,7 +100,7 @@ struct TetrahedralMesh {
 const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
-float3 lookFrom = {0.f,-4.f,1.f};
+float3 lookFrom = {0.f,-5.f,1.f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,0.f,1.f};
 float cosFovy = 0.66f;
@@ -138,7 +138,6 @@ int main(int ac, char **av)
   GPRTVarDecl tetrahedraGeomVars[] = {
     { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TetrahedraGeomData,index)},
     { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(TetrahedraGeomData,vertex)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TetrahedraGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType tetrahedraGeomType
@@ -194,7 +193,7 @@ int main(int ac, char **av)
                           triangleMesh.NUM_INDICES,sizeof(int3),0);
   gprtGeomSetBuffer(trianglesGeom,"vertex",triangleVertexBuffer);
   gprtGeomSetBuffer(trianglesGeom,"index",triangleIndexBuffer);
-  gprtGeomSet3f(trianglesGeom,"color",0,1,0);
+  gprtGeomSet3f(trianglesGeom,"color",1,1,1);
 
   GPRTGeom tetrahedraGeom
     = gprtGeomCreate(context,tetrahedraGeomType);
@@ -202,7 +201,6 @@ int main(int ac, char **av)
                            tetrahedralMesh.NUM_INDICES,sizeof(float3) * 2,0);
   gprtGeomSetBuffer(tetrahedraGeom,"vertex",tetrahedraVertexBuffer);
   gprtGeomSetBuffer(tetrahedraGeom,"index",tetrahedraIndexBuffer);
-  gprtGeomSet3f(tetrahedraGeom,"color",0,1,0);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh

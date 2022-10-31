@@ -175,7 +175,7 @@ GPRT_INTERSECTION_PROGRAM(TetrahedralMesh, (TetrahedraGeomData, record))
 
 GPRT_CLOSEST_HIT_PROGRAM(TetrahedralMesh, (TetrahedraGeomData, record), (Payload, payload), (TetrahedraAttributes, attributes))
 {
-  payload.color = float4(1.0, 0.0, 0.0, .1);
+  payload.color = float4(attributes.bc.x, attributes.bc.y, attributes.bc.z, .1);
   payload.tHit = 1.f;
 }
 
