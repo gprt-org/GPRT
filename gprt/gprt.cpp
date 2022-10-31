@@ -4761,7 +4761,7 @@ GPRT_API void gprtMissSet1s(GPRTMiss _miss, const char *name, int16_t val)
   Miss *entry = (Miss*)_miss;
   assert(entry);
   auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  memcpy(var.second, (void*)val, var.first);
+  memcpy(var.second, (void*)&val, var.first);
 }
 
 GPRT_API void gprtMissSet2s(GPRTMiss _miss, const char *name, int16_t x, int16_t y)

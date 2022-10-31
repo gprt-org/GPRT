@@ -22,13 +22,9 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-# set(CMAKE_DXC_COMPILER ${Vulkan_BIN_DIR}/dxc)
-# set(CMAKE_DXC_COMPILER C:/Users/natevm/git/DirectXShaderCompiler/build/Debug/bin/dxc)
-# Ideally we'd use the DXC that comes with Vulkan, but we need vk::RayBufferStore, which is ToT atm...
 find_program(CMAKE_DXC_COMPILER dxc
   DOC "Path to the dxc executable."
   HINTS ${Vulkan_BIN_DIR} ${DXC_BIN_DIR}
-  NO_DEFAULT_PATH
 )
 
 # set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
@@ -86,7 +82,6 @@ function(embed_devicecode)
       ${EMBED_DEVICECODE_SOURCES}
       -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
       DEPENDS ${EMBED_DEVICECODE_SOURCES} ${GPRT_INCLUDE_DIR}/gprt_device.hlsli ${GPRT_INCLUDE_DIR}/gprt.h
-      COMMENT "compile SPIRV ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv from ${EMBED_DEVICECODE_SOURCES}"
     )
 
     list(APPEND EMBED_DEVICECODE_OUTPUTS ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv)
@@ -106,9 +101,8 @@ function(embed_devicecode)
       -P ${EMBED_DEVICECODE_RUN}
     VERBATIM
     DEPENDS ${EMBED_DEVICECODE_OUTPUTS}
-    COMMENT "Generating embedded SPIRV file: ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}"
-  )
-
+    )
+  
   add_library(${EMBED_DEVICECODE_OUTPUT_TARGET} OBJECT)
   target_sources(${EMBED_DEVICECODE_OUTPUT_TARGET} PRIVATE ${EMBED_DEVICECODE_CPP_FILE}) #${EMBED_DEVICECODE_H_FILE} #${EMBED_DEVICECODE_SOURCES}
 endfunction()
