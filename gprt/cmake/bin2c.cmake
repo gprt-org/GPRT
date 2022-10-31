@@ -7,8 +7,8 @@ file(APPEND ${OUTPUT_C} "#include <map>\n")
 file(APPEND ${OUTPUT_C} "#include <vector>\n")
 file(APPEND ${OUTPUT_C} "#include <string>\n")
 
-message(STATUS "BIN2C: Add the following to your program:")
-message(STATUS "\nextern std::map<std::string, std::vector<uint8_t>> ${OUTPUT_VAR};")
+# message(STATUS "BIN2C: Add the following to your program:")
+# message(STATUS "\nextern std::map<std::string, std::vector<uint8_t>> ${OUTPUT_VAR};")
 file(APPEND ${OUTPUT_C} "std::map<std::string, std::vector<uint8_t>> ${OUTPUT_VAR} = {\n")
 
 # Create header of H file
