@@ -203,8 +203,8 @@ int main(int ac, char **av)
   // ##################################################################
   // build *SBT* required to trace the groups
   // ##################################################################
-  gprtBuildPrograms(context);
-  gprtBuildSBT(context);
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // create a window we can use to display and interact with the image
@@ -291,7 +291,7 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
 
-      gprtBuildSBT(context);
+      gprtBuildShaderBindingTable(context);
     }
 
     // Now, trace rays

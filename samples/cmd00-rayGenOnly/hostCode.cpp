@@ -85,7 +85,7 @@ int main(int ac, char **av)
                       sizeof(RayGenData),rayGenVars,-1); // -1 maybe should be the default here...
 
   // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPrograms(gprt);
+  gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
   // alloc buffers
@@ -105,7 +105,7 @@ int main(int ac, char **av)
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
   gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
   // Build a shader binding table entry for the ray generation record.
-  gprtBuildSBT(gprt);
+  gprtBuildShaderBindingTable(gprt);
 
   // ##################################################################
   // now that everything is ready: launch it ....
