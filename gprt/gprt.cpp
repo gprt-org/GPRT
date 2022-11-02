@@ -1867,6 +1867,9 @@ struct Context {
   VkCommandPool graphicsCommandPool;
   VkCommandPool computeCommandPool;
   VkCommandPool transferCommandPool;
+  VkQueryPool queryPool;
+  bool queryRequested = false;
+
   /** @brief Pipeline stages used to wait at for graphics queue submissions */
   VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // not sure I need this one
   // Contains command buffers and semaphores to be presented to the queue
@@ -2107,8 +2110,6 @@ struct Context {
     // If requested, we enable the default validation layers for debugging
     if (validation())
     {
-
-
       gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
       gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
@@ -2352,11 +2353,13 @@ struct Context {
       enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     #endif
 
+
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
     bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
     bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
+    bufferDeviceAddressFeatures.pNext = nullptr;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -2459,6 +2462,18 @@ struct Context {
     computeCommandPool = createCommandPool(queueFamilyIndices.compute);
     transferCommandPool = createCommandPool(queueFamilyIndices.transfer);
 
+    /// 4.5 Create a query pool to measure performance
+    VkQueryPoolCreateInfo queryPoolCreateInfo{};
+    queryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    queryPoolCreateInfo.pNext = nullptr; // Optional
+    queryPoolCreateInfo.flags = 0; // Reserved for future use, must be 0!
+
+    queryPoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    queryPoolCreateInfo.queryCount = 2; // for now, just two queries, a before and an after.
+
+    err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
+    if (err) throw std::runtime_error("Failed to create time query pool!");
+
     /// 5. Allocate command buffers
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
     cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -2507,6 +2522,7 @@ struct Context {
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+    vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
     freeDebugCallback(instance);
@@ -3574,6 +3590,11 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
+  if (context->queryRequested) {
+    vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+  }
+
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
     VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
@@ -3658,6 +3679,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
     dims_x,
     dims_y,
     dims_z);
+  
+  if (context->queryRequested)
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err) GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
@@ -3709,6 +3733,11 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
+  if (context->queryRequested) {
+    vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+  }
+  
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
     VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
@@ -3777,6 +3806,9 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
     dims_y,
     dims_z);
 
+  if (context->queryRequested)
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err) GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
 
@@ -3796,6 +3828,31 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err) GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+}
+
+GPRT_API void gprtBeginProfile(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context*)_context;
+  context->queryRequested = true;  
+}
+
+GPRT_API float gprtEndProfile(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context*)_context;
+
+  if (context->queryRequested != true) GPRT_RAISE("Requested profile data without calling gprtBeginProfile");
+  context->queryRequested = false;  
+
+  uint64_t buffer[2];
+  VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2, buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+  if (result != VK_SUCCESS) throw std::runtime_error("Failed to receive query results!");
+  uint64_t timeResults = buffer[1] - buffer[0];
+  float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
+  return time;
 }
 
 std::pair<size_t, void*> gprtGetVariable(

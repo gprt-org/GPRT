@@ -297,7 +297,10 @@ int main(int ac, char **av)
     }
 
     // Now, trace rays
+    gprtBeginProfile(context);
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+    float ms = gprtEndProfile(context) * 0.000001;
+    std::cout<<"time " << ms << " ms" << std::endl;
 
     // Render results to screen
     void* pixels = gprtBufferGetPointer(frameBuffer);
@@ -347,6 +350,7 @@ int main(int ac, char **av)
     
     glfwSwapBuffers(window);
     glfwPollEvents();
+    
   }
 
   // ##################################################################

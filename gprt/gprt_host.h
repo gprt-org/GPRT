@@ -754,6 +754,10 @@ gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, int dims_x, int di
 GPRT_API void
 gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, int dims_x, int dims_y, int dims_z);
 
+GPRT_API void gprtBeginProfile(GPRTContext context);
+
+// returned results are in nanoseconds
+GPRT_API float gprtEndProfile(GPRTContext context);
 #ifdef __cplusplus
 // ------------------------------------------------------------------
 // setters for variables of type "bool" (bools only on c++)
