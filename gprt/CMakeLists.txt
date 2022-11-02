@@ -26,14 +26,7 @@ if (GPRT_BUILD_SHARED)
 endif()
 include(cmake/embed_devicecode.cmake)
 
-embed_devicecode(
-  OUTPUT_TARGET
-    gprtDeviceCode
-  ENTRY_POINTS
-    gprtFillInstanceData
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device_code.hlsl
-)
+add_subdirectory(gprt_kernels)
 
 target_sources(gprt PRIVATE
     gprt.cpp
@@ -64,6 +57,7 @@ target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
     gprtDeviceCode
+    gprtRadixSortDeviceCode
 )
 
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)

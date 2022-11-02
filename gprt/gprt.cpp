@@ -223,6 +223,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
 // Contains definitions for internal entry points 
 // (bounds programs, transform programs...)
 extern std::map<std::string, std::vector<uint8_t>> gprtDeviceCode;
+extern std::map<std::string, std::vector<uint8_t>> gprtRadixSortDeviceCode;
 
 // forward declarations...
 struct Geom; 
