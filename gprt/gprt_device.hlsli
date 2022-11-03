@@ -122,6 +122,8 @@ where ARG is "(type_, name)". */
 #define TYPE_EXPAND(type_, name_) type_
 #define NAME_EXPAND(type_, name_) name_
 
+/* Drops the surrounding parenthesis */
+#define VEC3_EXPAND(xyz_) xyz_
 
 #ifndef GPRT_RAYGEN_PROGRAM
 #ifdef RAYGEN
@@ -286,25 +288,33 @@ where ARG is "(type_, name)". */
 #endif
 #endif
 
-// We currently recycle ray generation programs to implement a user-side
-// compute program. This allows us to recycle existing SBT record API
-// for compute shader IO
+
+
+
+
+
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                              \
+#define GPRT_COMPUTE_PROGRAM(progName, numThreads, RecordDecl)                              \
   /* fwd decl for the kernel func to call */                                    \
   void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
    uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID);\
                                                                                 \
-  [[vk::shader_record_ext]]                                                     \
-  ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>                                   \
+                                                       \
+  [[vk::binding(0, 0)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)>             \
     CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl));                             \
                                                                                 \
-  [shader("raygeneration")]                                                     \
-  void __compute__##progName()                                                  \
+  [shader("compute")]                                                           \
+  [numthreads RAW(VEC3_EXPAND(numThreads))]                                                      \
+  void __compute__##progName(                                                   \
+    uint GroupIndex : SV_GroupIndex,                                            \
+    uint3 DispatchThreadID : SV_DispatchThreadID,                               \
+    uint3 GroupThreadID : SV_GroupThreadID,                                     \
+    uint3 GroupID : SV_GroupID                                                  \
+  )                                                                             \
   {                                                                             \
-   progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)), 0,                  \
-     DispatchRaysIndex(), uint3(0,0,0), uint3(0,0,0));                          \
+   progName(CAT(RAW(progName),RAW(TYPE_EXPAND RecordDecl)), GroupIndex,         \
+     DispatchThreadID, GroupThreadID, GroupID);                                 \
   }                                                                             \
                                                                                 \
   /* now the actual device code that the user is writing: */                    \
@@ -312,7 +322,7 @@ where ARG is "(type_, name)". */
   uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)  \
 /* program args and body supplied by user ... */
 #else
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                              \
+#define GPRT_COMPUTE_PROGRAM(progName, numThreads, RecordDecl)                              \
   /* Dont add entry point decorators, instead treat as just a function. */      \
   void progName(in RAW(TYPE_NAME_EXPAND)RecordDecl,                             \
     uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID, uint3 GroupID)\

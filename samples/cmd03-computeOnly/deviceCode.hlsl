@@ -26,7 +26,7 @@
 // The first parameter here is the name of our entry point.
 //
 // The second is the type of the shader record.
-GPRT_COMPUTE_PROGRAM(simpleCompute, (ComputeData, record))
+GPRT_COMPUTE_PROGRAM(simpleCompute, (1,1,1), (ComputeData, record))
 {
   // TODO, make this demonstrate something only a compute shader could do.
   uint2 pixelID = DispatchThreadID.xy;
@@ -34,6 +34,7 @@ GPRT_COMPUTE_PROGRAM(simpleCompute, (ComputeData, record))
   if (pixelID.x == 0 && pixelID.y == 0) {
     printf("Hello from your first compute program!\n");
   }
+
 
   // Generate a simple checkerboard pattern as a test. 
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
