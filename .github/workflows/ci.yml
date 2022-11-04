@@ -96,11 +96,12 @@ jobs:
 
   documentation:
     runs-on: ubuntu-20.04
-
+    
     steps:  
-    - name: Prepare Python
     - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
+    
+    - name: Prepare Python
+      uses: actions/setup-python@v4
       with:
         python-version: '3.9'
         cache: 'pip' # caching pip dependencies
