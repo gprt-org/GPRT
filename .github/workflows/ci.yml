@@ -124,20 +124,3 @@ jobs:
                             freeglut3-dev \
                             mesa-common-dev \
                             doxygen
-                            
-    - name: Setup environment
-      shell: bash
-      run: |
-         echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
-    - name: Pull and unpack dxc compiler
-      shell: bash
-      run: |
-        ./util/download-dxc.sh
-    - name: Build Documentation
-      shell: bash
-      run: |
-        mkdir bld-docs
-        cd bld-docs
-        cmake --version
-        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin -DBUILD_DOC=ON
-        cmake --build . --target sphinx --config Release
