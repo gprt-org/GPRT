@@ -95,6 +95,9 @@ jobs:
         cmake --build .
 
   documentation:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-20.04
     
     steps:  
@@ -140,3 +143,13 @@ jobs:
         cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin -DBUILD_DOC=ON
         cmake --build . --target sphinx --config Release
+    - name: Setup Pages
+      uses: actions/configure-pages@v2
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v1
+      with:
+        # Upload entire repository
+        path: './bld-docs/build/html'
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v1
