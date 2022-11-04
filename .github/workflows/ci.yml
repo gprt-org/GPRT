@@ -93,3 +93,51 @@ jobs:
         cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/bin
         cmake --build .
+
+  documentation:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Prepare Python
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install sphinx sphinx_rtd_theme breathe
+    
+    - name: Prepare Vulkan SDK
+      uses: humbletim/setup-vulkan-sdk@v1.2.0
+      with:
+        vulkan-query-version: 1.3.204.0
+        vulkan-components: Vulkan-Headers, Vulkan-Loader
+        vulkan-use-cache: true
+
+    - name: Apt dependencies
+      shell: bash
+      run: |
+        sudo apt -y update
+        sudo apt install -y xorg-dev \
+                            libxinerama-dev \
+                            libglu1-mesa-dev \
+                            freeglut3-dev \
+                            mesa-common-dev \
+                            doxygen
+                            
+    - name: Setup environment
+      shell: bash
+      run: |
+         echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
+    - name: Pull and unpack dxc compiler
+      shell: bash
+      run: |
+        ./util/download-dxc.sh
+    - name: Build Documentation
+      shell: bash
+      run: |
+        mkdir bld-docs
+        cd bld-docs
+        cmake --version
+        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin -DBUILD_DOC=ON
+        cmake --build . --target sphinx --config Release
