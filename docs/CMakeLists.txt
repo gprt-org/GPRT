@@ -20,7 +20,7 @@ else (DOXYGEN_FOUND)
 endif (DOXYGEN_FOUND)
 
 set(SPHINX_RUN ${CMAKE_CURRENT_SOURCE_DIR}/sphinx.cmake)
-add_custom_target(sphix ALL
+add_custom_target(sphinx ALL
     COMMAND ${CMAKE_COMMAND}
       "-DDOC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P ${SPHINX_RUN}
