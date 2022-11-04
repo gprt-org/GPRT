@@ -138,20 +138,18 @@ jobs:
     - name: Build Documentation
       shell: bash
       run: |
-        mkdir bld-docs
-        cd bld-docs
+        mkdir bld
+        cd bld
         cmake --version
         cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin -DBUILD_DOC=ON
         cmake --build . --target sphinx --config Release
     - name: Setup Pages
       uses: actions/configure-pages@v2
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v1
       with:
         # Upload entire repository
-        path: './bld-docs/build/html'
+        path: '${GITHUB_WORKSPACE}/bld/html'
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v1
