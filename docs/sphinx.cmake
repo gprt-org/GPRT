@@ -14,9 +14,13 @@ message("Error: Please verify that python, sphinx, sphinx_rtd_theme, and breathe
 # else()
 endif()
 
-# message(${RESULT})
-message(${OUTPUT})
+if (RESULT)
+message(${RESULT})
+endif()
 
+if (OUTPUT)
+message(${OUTPUT})
+endif()
 
 if (ERROR)
 message(${ERROR})

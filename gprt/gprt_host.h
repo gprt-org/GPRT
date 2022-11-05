@@ -744,6 +744,9 @@ gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 GPRT_API void
 gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
+GPRT_API void
+gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, int dims_x);
+
 /*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
 GPRT_API void
