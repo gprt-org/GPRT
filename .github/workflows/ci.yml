@@ -145,13 +145,13 @@ jobs:
         cmake --build . --target sphinx --config Release
     - name: Setup Pages
       uses: actions/configure-pages@v2
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+#     - name: Setup tmate session
+#       uses: mxschmitt/action-tmate@v3
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v1
       with:
         # Upload entire repository
-        path: '$GITHUB_WORKSPACE/bld/html'
+        path: '$GITHUB_WORKSPACE/build/html'
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v1
