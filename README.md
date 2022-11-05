@@ -6,6 +6,9 @@
 
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 
+## Documentation
+https://gprt-org.github.io/GPRT/
+
 ## Build Instructions
 
 GPRT currently requires a custom version of the dxc compiler found [here for
