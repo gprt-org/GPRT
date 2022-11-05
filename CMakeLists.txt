@@ -79,7 +79,8 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-option(OWL_BUILD_SAMPLES "Build the Samples?" ON)
+option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
+option(BUILD_DOC "Build documentation" OFF)
 
 add_subdirectory(3rdParty)
 
@@ -100,6 +101,13 @@ if (GPRT_IS_SUBPROJECT)
   return()
 endif()
 
+# ------------------------------------------------------------------
+# documentation
+# ------------------------------------------------------------------
+
+if (BUILD_DOC)
+  add_subdirectory(docs)
+endif()
 
 # include(CTest)
 # if (BUILD_TESTING)
