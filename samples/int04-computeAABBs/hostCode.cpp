@@ -57,7 +57,7 @@ float radii[NUM_VERTICES] =
     1.f, .5f, .25f, .1f
   };
 
-float transform[3][4] = 
+float transform[3][4] =
   {
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
@@ -152,9 +152,9 @@ int main(int ac, char **av)
 
   GPRTGeom aabbGeom
     = gprtGeomCreate(context,aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
                         NUM_VERTICES, 2 * sizeof(float3), 0);
-  
+
   gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
   gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
   gprtGeomSet3f(aabbGeom,"color",0,0,1);
@@ -162,7 +162,7 @@ int main(int ac, char **av)
   gprtComputeSetBuffer(boundsProgram, "vertex", vertexBuffer);
   gprtComputeSetBuffer(boundsProgram, "radius", radiusBuffer);
   gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
-  
+
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
@@ -193,11 +193,10 @@ int main(int ac, char **av)
   // ##################################################################
   // build *SBT* required to trace the groups
   // ##################################################################
-  
+
   // re-build the pipeline to account for newly introduced geometry
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-
 
   // ##################################################################
   // create a window we can use to display and interact with the image
@@ -215,7 +214,7 @@ int main(int ac, char **av)
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, 
+  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y,
     "Int02 Simple AABBs", NULL, NULL);
   if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
   glfwMakeContextCurrent(window);
@@ -247,8 +246,9 @@ int main(int ac, char **av)
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
+      #ifndef M_PI
       #define M_PI 3.1415926f
-
+      #endif
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
@@ -281,7 +281,6 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
-      
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
@@ -292,7 +291,7 @@ int main(int ac, char **av)
     void* pixels = gprtBufferGetPointer(frameBuffer);
     if (fbTexture == 0)
       glGenTextures(1, &fbTexture);
-    
+
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     GLenum texFormat = GL_RGBA;
     GLenum texelType = GL_UNSIGNED_BYTE;
@@ -309,7 +308,7 @@ int main(int ac, char **av)
     glBindTexture(GL_TEXTURE_2D, fbTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    
+
     glDisable(GL_DEPTH_TEST);
 
     glViewport(0, 0, fbSize.x, fbSize.y);
@@ -322,18 +321,18 @@ int main(int ac, char **av)
     {
       glTexCoord2f(0.f, 0.f);
       glVertex3f(0.f, 0.f, 0.f);
-    
+
       glTexCoord2f(0.f, 1.f);
       glVertex3f(0.f, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 1.f);
       glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-    
+
       glTexCoord2f(1.f, 0.f);
       glVertex3f((float)fbSize.x, 0.f, 0.f);
     }
     glEnd();
-    
+
     glfwSwapBuffers(window);
     glfwPollEvents();
   }
