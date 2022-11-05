@@ -31,13 +31,15 @@ void __compute__gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   uint64_t instanceBufferPtr = pc.r[0];
   uint64_t transformBufferPtr = pc.r[1];
   uint64_t accelReferencesPtr = pc.r[2];
+  uint64_t instanceShaderBindingTableRecordOffset = pc.r[3];
 
   VkAccelerationStructureInstanceKHR instance;
   // float3x4 transform = vk::RawBufferLoad<float3x4>(
   //     transformBufferPtr + sizeof(float3x4) * DTid.x);;
   
   instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
-  instance.instanceShaderBindingTableRecordOffset24Flags8 = 0 | 0x00 << 24;
+  instance.instanceShaderBindingTableRecordOffset24Flags8 = 
+    int(instanceShaderBindingTableRecordOffset) | 0x00 << 24;
 
   // this is gross, but AMD has a bug where loading 3x4 transforms causes a random crash when creating shader modules.
   instance.transforma = 

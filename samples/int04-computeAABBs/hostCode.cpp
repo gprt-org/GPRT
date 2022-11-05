@@ -135,7 +135,10 @@ int main(int ac, char **av)
                       sizeof(AABBBoundsData),
                       computeVars,-1);
 
-  gprtBuildPrograms(context);
+  // Note, we'll need to call this again after creating our acceleration 
+  // structures, as acceleration structures will introduce new shader 
+  // binding table records to the pipeline.
+  gprtBuildPipeline(context);
 
   // ------------------------------------------------------------------
   // aabb mesh
@@ -161,7 +164,7 @@ int main(int ac, char **av)
   gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
 
   // compute AABBs in parallel with a compute shader
-  gprtBuildSBT(context, GPRT_SBT_COMPUTE);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
 
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
@@ -191,7 +194,9 @@ int main(int ac, char **av)
   // build *SBT* required to trace the groups
   // ##################################################################
 
-  gprtBuildSBT(context, GPRT_SBT_ALL);
+  // re-build the pipeline to account for newly introduced geometry
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
   // create a window we can use to display and interact with the image
@@ -276,8 +281,7 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
-
-      gprtBuildSBT(context, GPRT_SBT_RAYGEN);
+      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
     // Now, trace rays

@@ -221,8 +221,8 @@ int main(int ac, char **av)
   // ##################################################################
   // build *SBT* required to trace the groups
   // ##################################################################
-  gprtBuildPrograms(context);
-  gprtBuildSBT(context);
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....

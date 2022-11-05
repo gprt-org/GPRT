@@ -243,7 +243,7 @@ namespace gprt{
   PFN_vkCmdTraceRaysKHR vkCmdTraceRays;
   PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandles;
   PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelines;
-
+  
   PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
   PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
   VkDebugUtilsMessengerEXT debugUtilsMessenger;
@@ -1063,7 +1063,7 @@ struct Accel {
   
   ~Accel() {};
 
-  virtual void build(std::map<std::string, Stage> internalStages) { };
+  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) { };
   virtual void destroy() { };
   virtual AccelType getType() {return GPRT_UNKNOWN_ACCEL;}
 };
@@ -1085,7 +1085,7 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() {return GPRT_TRIANGLE_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1292,7 +1292,7 @@ struct AABBAccel : public Accel {
 
   AccelType getType() {return GPRT_AABB_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -1480,6 +1480,8 @@ struct AABBAccel : public Accel {
 struct InstanceAccel : public Accel {
   std::vector<Accel*> instances; 
 
+  size_t instanceOffset = -1;
+
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
 
@@ -1541,7 +1543,7 @@ struct InstanceAccel : public Accel {
 
   AccelType getType() {return GPRT_INSTANCE_ACCEL;}
 
-  void build(std::map<std::string, Stage> internalStages) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
     std::vector<uint64_t> addresses(instances.size());
@@ -1550,18 +1552,49 @@ struct InstanceAccel : public Accel {
     accelAddressesBuffer->map();
     memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * instances.size());
 
+    // The instance shader binding table record offset is the total number 
+    // of geometries referenced by all instances up until this instance tree
+    // multiplied by the number of ray types.
+    uint64_t instanceShaderBindingTableRecordOffset = 0;
+    for (uint32_t i = 0; i < accels.size(); ++i) {
+      if (accels[i] == this) break;
+      if (accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel *instanceAccel = (InstanceAccel*) accels[i];
+
+        uint64_t numGeometry = 0;
+        for (uint32_t j = 0; j < instanceAccel->instances.size(); ++j) {
+          if (instanceAccel->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triangleAccel = (TriangleAccel*) instanceAccel->instances[j];
+            numGeometry += triangleAccel->geometries.size();
+          }
+          else if (instanceAccel->instances[j]->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) instanceAccel->instances[j];
+            numGeometry += aabbAccel->geometries.size();
+          }
+          else {
+            throw std::runtime_error("Unaccounted for tree type in instance SBT offset!");
+          }
+        }
+        instanceShaderBindingTableRecordOffset += numGeometry * numRayTypes;
+      }
+    }
+
+    instanceOffset = instanceShaderBindingTableRecordOffset;
+
     // Use a compute shader to copy transforms into instances buffer
     VkCommandBufferBeginInfo cmdBufInfo{};
     struct PushConstants {
       uint64_t instanceBufferAddr;
       uint64_t transformBufferAddr;
       uint64_t accelReferencesAddr;
-      uint64_t pad[16-3];
+      uint64_t instanceShaderBindingTableRecordOffset;
+      uint64_t pad[16-4];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
     pushConstants.transformBufferAddr = transforms.buffer->address;
     pushConstants.accelReferencesAddr = accelAddressesBuffer->address;
+    pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -1834,6 +1867,9 @@ struct Context {
   VkCommandPool graphicsCommandPool;
   VkCommandPool computeCommandPool;
   VkCommandPool transferCommandPool;
+  VkQueryPool queryPool;
+  bool queryRequested = false;
+
   /** @brief Pipeline stages used to wait at for graphics queue submissions */
   VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // not sure I need this one
   // Contains command buffers and semaphores to be presented to the queue
@@ -1918,18 +1954,25 @@ struct Context {
   }
 
   size_t getNumHitRecords() {
+    // The total number of geometries is the number of geometries referenced 
+    // by each top level acceleration structure.
     int totalGeometries = 0;
     for (int accelID = 0; accelID < accels.size(); ++accelID) {
       Accel *accel = accels[accelID];
       if (!accel) continue;
-      if (accel->getType() == GPRT_INSTANCE_ACCEL) continue;
-      if (accel->getType() == GPRT_TRIANGLE_ACCEL) {
-        TriangleAccel *triAccel = (TriangleAccel*) accel;
-        totalGeometries += triAccel->geometries.size();
-      }
-      if (accel->getType() == GPRT_AABB_ACCEL) {
-        AABBAccel *aabbAccel = (AABBAccel*) accel;
-        totalGeometries += aabbAccel->geometries.size();
+      if (accel->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel* tlas = (InstanceAccel*) accel;
+        for (int blasID = 0; blasID < tlas->instances.size(); ++blasID) {
+          Accel *blas = tlas->instances[blasID];
+          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triAccel = (TriangleAccel*) blas;
+            totalGeometries += triAccel->geometries.size();
+          }
+          if (blas->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) blas;
+            totalGeometries += aabbAccel->geometries.size();
+          }
+        }
       }
     }
 
@@ -2067,8 +2110,6 @@ struct Context {
     // If requested, we enable the default validation layers for debugging
     if (validation())
     {
-
-
       gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
       gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
@@ -2312,11 +2353,13 @@ struct Context {
       enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     #endif
 
+
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
     bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
     bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
+    bufferDeviceAddressFeatures.pNext = nullptr;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -2419,6 +2462,18 @@ struct Context {
     computeCommandPool = createCommandPool(queueFamilyIndices.compute);
     transferCommandPool = createCommandPool(queueFamilyIndices.transfer);
 
+    /// 4.5 Create a query pool to measure performance
+    VkQueryPoolCreateInfo queryPoolCreateInfo{};
+    queryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    queryPoolCreateInfo.pNext = nullptr; // Optional
+    queryPoolCreateInfo.flags = 0; // Reserved for future use, must be 0!
+
+    queryPoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    queryPoolCreateInfo.queryCount = 2; // for now, just two queries, a before and an after.
+
+    err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
+    if (err) throw std::runtime_error("Failed to create time query pool!");
+
     /// 5. Allocate command buffers
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
     cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -2467,6 +2522,7 @@ struct Context {
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+    vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
     freeDebugCallback(instance);
@@ -2507,7 +2563,6 @@ struct Context {
     const VkMemoryPropertyFlags memoryUsageFlags = 
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
-
 
     // std::cout<<"Todo, get some smarter memory allocation working..." <<std::endl;
 
@@ -2600,101 +2655,76 @@ struct Context {
     // Hit records
     if (numHitRecords > 0)
     {
-      for (int accelID = 0; accelID < accels.size(); ++accelID) {
-        Accel *accel = accels[accelID];
-        if (!accel) continue;
-        if (accel->getType() == GPRT_INSTANCE_ACCEL) continue;
-        if (accel->getType() == GPRT_TRIANGLE_ACCEL) {
-          TriangleAccel *triAccel = (TriangleAccel*) accel;
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+        Accel *tlas = accels[tlasID];
+        if (!tlas) continue;
+        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+          InstanceAccel *instanceAccel = (InstanceAccel*) tlas;
+          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+            
+            Accel *blas = instanceAccel->instances[blasID];
+            if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+              TriangleAccel *triAccel = (TriangleAccel*) blas;
 
-          for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-            auto &geom = triAccel->geometries[geomID];
+              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                auto &geom = triAccel->geometries[geomID];
 
-            for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-              size_t recordStride = recordSize;
-              size_t handleStride = handleSize;
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  size_t recordStride = recordSize;
+                  size_t handleStride = handleSize;
 
-              // First, copy handle
-              size_t instanceOffset = 0; // TODO
-              size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
-              size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
-              memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-              
-              // Then, copy params following handle
-              recordOffset = recordOffset + handleSize;
-              uint8_t* params = mapped + recordOffset;
-              for (auto &var : geom->vars) {
-                size_t varOffset = var.second.decl.offset;
-                size_t varSize = getSize(var.second.decl.type);
-                memcpy(params + varOffset, var.second.data, varSize);
+                  // First, copy handle
+                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
+                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                  
+                  // Then, copy params following handle
+                  recordOffset = recordOffset + handleSize;
+                  uint8_t* params = mapped + recordOffset;
+                  for (auto &var : geom->vars) {
+                    size_t varOffset = var.second.decl.offset;
+                    size_t varSize = getSize(var.second.decl.type);
+                    memcpy(params + varOffset, var.second.data, varSize);
+                  }
+                }
               }
             }
-          }
-        }
 
-        else if (accel->getType() == GPRT_AABB_ACCEL) {
-          AABBAccel *aabbAccel = (AABBAccel*) accel;
+            else if (blas->getType() == GPRT_AABB_ACCEL) {
+              AABBAccel *aabbAccel = (AABBAccel*) blas;
 
-          for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
-            auto &geom = aabbAccel->geometries[geomID];
+              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                auto &geom = aabbAccel->geometries[geomID];
 
-            for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-              size_t recordStride = recordSize;
-              size_t handleStride = handleSize;
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  size_t recordStride = recordSize;
+                  size_t handleStride = handleSize;
 
-              // First, copy handle
-              size_t instanceOffset = 0; // TODO
-              size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
-              size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
-              memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-              
-              // Then, copy params following handle
-              recordOffset = recordOffset + handleSize;
-              uint8_t* params = mapped + recordOffset;
-              for (auto &var : geom->vars) {
-                size_t varOffset = var.second.decl.offset;
-                size_t varSize = getSize(var.second.decl.type);
-                memcpy(params + varOffset, var.second.data, varSize);
+                  // First, copy handle
+                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
+                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
+                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                  
+                  // Then, copy params following handle
+                  recordOffset = recordOffset + handleSize;
+                  uint8_t* params = mapped + recordOffset;
+                  for (auto &var : geom->vars) {
+                    size_t varOffset = var.second.decl.offset;
+                    size_t varSize = getSize(var.second.decl.type);
+                    memcpy(params + varOffset, var.second.data, varSize);
+                  }
+                }
               }
+            }
+            
+            else {
+              throw std::runtime_error("Unaccounted for BLAS type!");
             }
           }
         }
       }
-    }
-
-
-    // {
-    //     TrianglesAccel *triAccel = (TrianglesAccel*) accel;
-
-    //     const size_t sbtOffset = 0 ; // triAccel->sbtOffset; //?????
-    //     std::cout<<"TODO, compute correct sbt offset for a triangle accel!"<<std::endl;
-    //     for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-    //       for (int rayTypeID = 0; rayTypeID < numRayTypes; ++rayTypeID) {
-
-    //         size_t offset = stride * idx + handleSize /* params start after shader identifier */ ;
-    //         uint8_t* params = ((uint8_t*) (raygenShaderBindingTable.mapped)) + offset;
-
-    //         int HG_stride = ;
-    //         int R_stride = numRayTypes;
-    //         int R_offset = rayTypeID;
-    //         int G_ID = geomID;
-    //         int I_offset = ;
-    //         void* HG = hitShaderBindingTable.mapped + (HG_stride * (R_offset + R_stride * G_ID + I_offset));
-
-    //       }
-    //     }
-    //   }
-
-
-    // if (hitgroupPrograms.size() > 0) 
-    {
-      
-      
-      
-      
-
-      // TODO: hit programs...
-      
     }
   }
 
@@ -2703,8 +2733,7 @@ struct Context {
   //   // At the moment, we don't actually build our programs here. 
   // }
 
-  // void buildPipeline()
-  void buildPrograms()
+  void buildPipeline()
   {
 
     VkPushConstantRange pushConstantRange = {};
@@ -2729,6 +2758,11 @@ struct Context {
     pipelineLayoutCI.pSetLayouts = nullptr;
     pipelineLayoutCI.pushConstantRangeCount = 1;
     pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+
+    if (pipelineLayout != VK_NULL_HANDLE) {
+      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+      pipelineLayout = VK_NULL_HANDLE;
+    }
     VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI,
       nullptr, &pipelineLayout));
 
@@ -2736,6 +2770,7 @@ struct Context {
       Setup ray tracing shader groups
     */
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+    shaderGroups.clear();
 
     // Compute program groups
     {
@@ -2782,43 +2817,91 @@ struct Context {
       }
     }
 
-    // Closest hit group
-    {
-      for (auto geomType : geomTypes) {
-        for (uint32_t rayType = 0; rayType < numRayTypes; ++rayType) {
-          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    // Hit groups
 
-          GPRTGeomKind kind = geomType->getKind();
-          if (kind == GPRT_TRIANGLES)
-            shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-          else if (kind == GPRT_AABBS)
-            shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+    // Go over all TLAS
+    for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      Accel *tlas = accels[tlasID];
+      if (!tlas) continue;
+      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+        // Iterate over all BLAS stored in the TLAS
+        InstanceAccel *instanceAccel = (InstanceAccel*) tlas;
+        for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+          Accel *blas = instanceAccel->instances[blasID];
+          // Handle different BLAS types...
+          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+            TriangleAccel *triAccel = (TriangleAccel*) blas;
+            // Add a record for every geometry-raytype permutation
+            for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+              auto &geom = triAccel->geometries[geomID];
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+
+                // init all to unused
+                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                // populate hit group programs using geometry type
+                if (geom->geomType->closestHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->anyHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->intersectionShadersUsed) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+                shaderGroups.push_back(shaderGroup);
+              }
+            }
+          }
+          else if (blas->getType() == GPRT_AABB_ACCEL) {
+            AABBAccel *aabbAccel = (AABBAccel*) blas;
+            // Add a record for every geometry-raytype permutation
+            for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+              auto &geom = aabbAccel->geometries[geomID];
+              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+
+                // init all to unused
+                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                // populate hit group programs using geometry type
+                if (geom->geomType->closestHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->anyHitShadersUsed) {
+                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+
+                if (geom->geomType->intersectionShadersUsed) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                }
+                shaderGroups.push_back(shaderGroup);
+              }
+            }
+          }
           else {
-            GPRT_NOTIMPLEMENTED;
+            throw std::runtime_error("Unaccounted for BLAS type!");
           }
-
-          // init all to unused
-          shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-          if (geomType->closestHitShadersUsed) {
-            shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
-            shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-
-          if (geomType->anyHitShadersUsed) {
-            shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
-            shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-
-          if (geomType->intersectionShadersUsed) {
-            shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
-            shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-          }
-          shaderGroups.push_back(shaderGroup);
         }
       }
     }
@@ -2835,6 +2918,10 @@ struct Context {
     rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1; // WHA!?
     rayTracingPipelineCI.layout = pipelineLayout;
 
+    if (pipeline != VK_NULL_HANDLE) {
+      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      pipeline = VK_NULL_HANDLE;
+    }
     VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice,
       VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCI,
       nullptr, &pipeline
@@ -3358,11 +3445,11 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID)
 
 
 
-GPRT_API void gprtBuildPrograms(GPRTContext _context)
+GPRT_API void gprtBuildPipeline(GPRTContext _context)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
-  context->buildPrograms();
+  context->buildPipeline();
   LOG("programs built...");
 }
 
@@ -3456,8 +3543,9 @@ GPRT_API void gprtAccelBuild(GPRTContext _context, GPRTAccel _accel)
   Accel *accel = (Accel*)_accel;
   Context *context = (Context*)_context;
   accel->build({
-    {"gprtFillInstanceData", context->fillInstanceDataStage}
-  });
+    {"gprtFillInstanceData", context->fillInstanceDataStage}},
+    context->accels, context->numRayTypes
+  );
 }
 
 GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
@@ -3465,7 +3553,7 @@ GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
   GPRT_NOTIMPLEMENTED;
 }
 
-GPRT_API void gprtBuildSBT(GPRTContext _context,
+GPRT_API void gprtBuildShaderBindingTable(GPRTContext _context,
                            GPRTBuildSBTFlags flags)
 {
   LOG_API_CALL();
@@ -3501,6 +3589,11 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  if (context->queryRequested) {
+    vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+  }
 
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
@@ -3586,6 +3679,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
     dims_x,
     dims_y,
     dims_z);
+  
+  if (context->queryRequested)
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err) GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
@@ -3637,6 +3733,11 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
+  if (context->queryRequested) {
+    vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+  }
+  
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
     VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
@@ -3705,6 +3806,9 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
     dims_y,
     dims_z);
 
+  if (context->queryRequested)
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err) GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
 
@@ -3724,6 +3828,31 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err) GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+}
+
+GPRT_API void gprtBeginProfile(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context*)_context;
+  context->queryRequested = true;  
+}
+
+GPRT_API float gprtEndProfile(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context*)_context;
+
+  if (context->queryRequested != true) GPRT_RAISE("Requested profile data without calling gprtBeginProfile");
+  context->queryRequested = false;  
+
+  uint64_t buffer[2];
+  VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2, buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+  if (result != VK_SUCCESS) throw std::runtime_error("Failed to receive query results!");
+  uint64_t timeResults = buffer[1] - buffer[0];
+  float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
+  return time;
 }
 
 std::pair<size_t, void*> gprtGetVariable(
