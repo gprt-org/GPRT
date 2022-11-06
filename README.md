@@ -7,18 +7,20 @@
 
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 
+## Dependencies
+
+  - CMake
+  - Vulkan SDK
+
 ## Documentation
 https://gprt-org.github.io/GPRT/
 
 ## Build Instructions
 
-GPRT currently requires a custom version of the dxc compiler found [here for
-Linux](https://drive.google.com/file/d/1dF6cX5q-3tB3e5zVcZIL_Fa1W8-WRpOq/view?usp=sharing)
-and [here for
-Windows](https://drive.google.com/file/d/1Flwpq7eKv8wVt-1F8jYt_oeSbNGRKFJG/view?usp=sharing).
+Install the [Vulkan SDK[(https://vulkan.lunarg.com/) for your platform (version 1.3.231.1 or greater).
 
-GPRT used CMake for configuration. For a build directory, `bld`, in the top
-directory of this repository it can be configured with
+GPRT useds CMake for configuration. For a build directory, `bld`, in the top
+directory of this repository, the project can be configured with
 
 ```shell
 ./util/download-dxc.sh /path/to/dxc/dir/
@@ -31,9 +33,7 @@ And built with
 make all
 ```
 
-## Linux Build Instructions
-
-### Dependencies
+## Ubuntu Dependencies
 
 The following apt-packages should be installed:
 
