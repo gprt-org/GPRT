@@ -1,0 +1,75 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - master
+      - docs
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Prepare Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r requirements.txt
+
+    - name: Prepare Vulkan SDK
+      uses: humbletim/setup-vulkan-sdk@v1.2.0
+      with:
+        vulkan-query-version: 1.3.204.0
+        vulkan-components: Vulkan-Headers, Vulkan-Loader
+        vulkan-use-cache: true
+
+    - name: Apt dependencies
+      shell: bash
+      run: |
+        sudo apt -y update
+        sudo apt install -y xorg-dev \
+                            libxinerama-dev \
+                            libglu1-mesa-dev \
+                            freeglut3-dev \
+                            mesa-common-dev \
+                            doxygen
+    - name: Setup environment
+      shell: bash
+      run: |
+         echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
+    - name: Pull and unpack dxc compiler
+      shell: bash
+      run: |
+        ./util/download-dxc.sh
+    - name: Build Documentation
+      shell: bash
+      run: |
+        mkdir bld
+        cd bld
+        cmake --version
+        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin -DBUILD_DOC=ON
+        cmake --build . --target sphinx --config Release
+    - name: Setup Pages
+      uses: actions/configure-pages@v2
+#     - name: Setup tmate session
+#       uses: mxschmitt/action-tmate@v3
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v1
+      with:
+        # Upload entire repository
+        path: './build/html'
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v1
