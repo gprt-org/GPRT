@@ -28,12 +28,7 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData
 {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index; // vec3i*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex; // vec3f *  
-  /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
+  alignas(8) int tmp; // unused for now
 };
 
 struct RayGenData

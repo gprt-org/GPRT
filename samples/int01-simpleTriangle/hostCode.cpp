@@ -43,28 +43,18 @@
 
 extern GPRTProgram int01_deviceCode;
 
-const int NUM_VERTICES = 8;
+const int NUM_VERTICES = 3;
 float3 vertices[NUM_VERTICES] =
   {
-    { -1.f,-1.f,-1.f },
-    { +1.f,-1.f,-1.f },
-    { -1.f,+1.f,-1.f },
-    { +1.f,+1.f,-1.f },
-    { -1.f,-1.f,+1.f },
-    { +1.f,-1.f,+1.f },
-    { -1.f,+1.f,+1.f },
-    { +1.f,+1.f,+1.f }
+    { -1.f,-.5f,0.f },
+    { +1.f,-.5f,0.f },
+    {  0.f,+.5f,0.f },
   };
 
-const int NUM_INDICES = 12;
+const int NUM_INDICES = 1;
 int3 indices[NUM_INDICES] =
   {
-    { 0,1,3 }, { 2,3,0 },
-    { 5,7,6 }, { 5,6,4 },
-    { 0,4,5 }, { 0,5,1 },
-    { 2,3,7 }, { 2,7,6 },
-    { 1,5,7 }, { 1,7,3 },
-    { 4,0,2 }, { 4,2,6 }
+    { 0,1,2 }
   };
 
 float transform[3][4] =
@@ -78,7 +68,7 @@ float transform[3][4] =
 const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
-float3 lookFrom = {-4.f,-3.f,-2.f};
+float3 lookFrom = {0.f,0.f,-4.f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,1.f,0.f};
 float cosFovy = 0.66f;
@@ -100,9 +90,6 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
-    { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType trianglesGeomType
@@ -138,10 +125,6 @@ int main(int ac, char **av)
                            NUM_VERTICES,sizeof(float3),0);
   gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
-
-  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
-  gprtGeomSet3f(trianglesGeom,"color",0,1,0);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
@@ -223,7 +206,7 @@ int main(int ac, char **av)
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y,
-    "Int01 Simple Triangles", NULL, NULL);
+    "Int01 Simple Triangle", NULL, NULL);
   if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
   glfwMakeContextCurrent(window);
 
@@ -260,7 +243,7 @@ int main(int ac, char **av)
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleY = -(M_PI / fbSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -325,7 +308,7 @@ int main(int ac, char **av)
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
+    glOrtho(0.f, (float)fbSize.x, 0.0, (float)fbSize.y, -1.f, 1.f);
 
     glBegin(GL_QUADS);
     {

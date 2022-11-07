@@ -75,7 +75,7 @@ float transform[3][4] =
 const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
-float3 lookFrom = {-4.f,-3.f,-2.f};
+float3 lookFrom = {3.5f,3.5f,3.5f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,1.f,0.f};
 float cosFovy = 0.66f;
@@ -250,7 +250,7 @@ int main(int ac, char **av)
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleY = -(M_PI / fbSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -315,7 +315,7 @@ int main(int ac, char **av)
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
+    glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
 
     glBegin(GL_QUADS);
     {

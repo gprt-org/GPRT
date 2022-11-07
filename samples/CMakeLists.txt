@@ -21,12 +21,12 @@
 # SOFTWARE.
 
 add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangles)
+add_subdirectory(cmd01-simpleTriangle)
 add_subdirectory(cmd02-simpleAABBs)
 add_subdirectory(cmd03-computeOnly)
 
 add_subdirectory(int00-rayGenOnly)
-add_subdirectory(int01-simpleTriangles)
+add_subdirectory(int01-simpleTriangle)
 add_subdirectory(int02-simpleAABBs)
 
 add_subdirectory(int04-computeAABBs)

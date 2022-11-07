@@ -4,8 +4,7 @@ GPRT Host API Complete Reference
 This toolkit has two sets of API, one for the "host" (typically referring to 
 the CPU) and another for the "device" (normally the GPU, but really whatever
 is tracing the actual rays). This file contains a complete list of all of the 
-host-side functions provided by the toolkit, but for newcomers we recommend 
-checking out our quick start guide *here*. 
+host-side functions provided by the toolkit.
 
 Core Functions
 ------------------------------

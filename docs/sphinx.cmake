@@ -1,9 +1,15 @@
 cmake_minimum_required(VERSION 2.8.12)
 
 message("Executing command to generate documentation")
+message(${DOC_SOURCE_DIR} "/make html")
+IF (WIN32)
+  set(MAKE_COMMAND make.bat)
+ELSE()
+  set(MAKE_COMMAND make)
+ENDIF()
 execute_process(
-    COMMAND make html
-    WORKING_DIRECTORY ${DOC_SOURCE_DIR}
+    COMMAND ${MAKE_COMMAND} html
+    WORKING_DIRECTORY "${DOC_SOURCE_DIR}"
     RESULT_VARIABLE RESULT
     OUTPUT_VARIABLE OUTPUT
     ERROR_VARIABLE ERROR

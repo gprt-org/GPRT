@@ -64,20 +64,15 @@ struct Attributes {
   float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, 
+  (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
-  // compute normal:
-  uint   primID = PrimitiveIndex();
-  int3   index  = gprt::load<int3>(record.index, primID);
-  float3 A      = gprt::load<float3>(record.vertex, index.x);
-  float3 B      = gprt::load<float3>(record.vertex, index.y);
-  float3 C      = gprt::load<float3>(record.vertex, index.z);
-  float3 Ng     = normalize(cross(B-A,C-A));
-  float3 rayDir = WorldRayDirection();
-  payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * record.color;
+  float2 bc = attributes.bc;
+  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
+GPRT_MISS_PROGRAM(miss, 
+  (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);

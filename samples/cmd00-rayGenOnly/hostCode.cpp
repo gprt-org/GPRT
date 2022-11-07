@@ -45,7 +45,7 @@ extern GPRTProgram cmd00_deviceCode; // wrap this map into some internal type
 // as nothing is actually rendered
 const char *outFileName = "s00-rayGenOnly.png";
 // image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {700,230};
 
 #include <iostream>
 int main(int ac, char **av)
@@ -115,6 +115,7 @@ int main(int ac, char **av)
 
   LOG("done with launch, writing frame buffer to " << outFileName);
   const uint32_t *fb = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
+  stbi_flip_vertically_on_write(1);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,(uint32_t)(fbSize.x)*sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);

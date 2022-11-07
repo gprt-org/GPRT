@@ -71,8 +71,8 @@ float transform[3][4] =
   };
 
 const char *outFileName = "s02-simpleAABB.png";
-const int2 fbSize = {800,600};
-const float3 lookFrom = {-4.f,-3.f,-2.f};
+const int2 fbSize = {700,230};
+const float3 lookFrom = {3.5f,3.5f,3.5f};
 const float3 lookAt = {0.f,0.f,0.f};
 const float3 lookUp = {0.f,1.f,0.f};
 const float cosFovy = 0.66f;
@@ -227,6 +227,7 @@ int main(int ac, char **av)
   const uint32_t *fb
     = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
   assert(fb);
+  stbi_flip_vertically_on_write(true);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,int(fbSize.x) * sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);

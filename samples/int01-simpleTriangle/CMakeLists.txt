@@ -29,8 +29,8 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int01_simpleTriangles hostCode.cpp)
-target_link_libraries(int01_simpleTriangles
+add_executable(int01_simpleTriangle hostCode.cpp)
+target_link_libraries(int01_simpleTriangle
   PRIVATE
     int01_deviceCode
     gprt::gprt
