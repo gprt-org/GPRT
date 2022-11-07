@@ -13,11 +13,10 @@ permissions:
   id-token: write
 
 jobs:
+    runs-on: ubuntu-20.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-      runs-on: ubuntu-20.04
-
     steps:
     - uses: actions/checkout@v3
 
