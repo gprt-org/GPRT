@@ -40,7 +40,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram cmd02_deviceCode;
+extern GPRTProgram cmd03_deviceCode;
 
 const int NUM_VERTICES = 1;
 float3 vertices[NUM_VERTICES] =
@@ -70,7 +70,7 @@ float transform[3][4] =
     0.0f, 0.0f, 1.0f, 0.0f
   };
 
-const char *outFileName = "s02-simpleAABB.png";
+const char *outFileName = "s03-simpleAABB.png";
 const int2 fbSize = {700,230};
 const float3 lookFrom = {3.5f,3.5f,3.5f};
 const float3 lookAt = {0.f,0.f,0.f};
@@ -84,7 +84,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,cmd02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,cmd03_deviceCode);
 
   // -------------------------------------------------------
   // declare geometry type
