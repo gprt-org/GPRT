@@ -22,34 +22,16 @@
 
 #include "gprt.h"
 
-struct AABBPrimitiveData
+struct TrianglesGeomData
 {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
+  alignas(16) gprt::Buffer index;
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *
+  alignas(16) gprt::Buffer vertex;
+  /*! the current time */
   alignas(4) float now;
-};
-
-struct AABBBoundsData
-{
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *  
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
-};
-
-/* variables for the triangle mesh geometry */
-struct AABBGeomData
-{
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *  
-  /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
+  /*! the number of triangles along a row */
+  alignas(4) unsigned int gridSize;
 };
 
 struct RayGenData

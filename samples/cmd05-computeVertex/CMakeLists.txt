@@ -22,16 +22,15 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    int05_deviceCode
+    cmd05_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int05_computePrimitive hostCode.cpp)
-target_link_libraries(int05_computePrimitive
+add_executable(cmd05_computeVertex hostCode.cpp)
+target_link_libraries(cmd05_computeVertex
   PRIVATE
-    int05_deviceCode
+    cmd05_deviceCode
     gprt::gprt
-    glfw
-    ${OPENGL_gl_LIBRARY}
+    stb_image
 )

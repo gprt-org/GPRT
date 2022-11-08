@@ -20,22 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-singleTriangle)
-add_subdirectory(cmd02-instances)
-add_subdirectory(cmd03-singleAABB)
-add_subdirectory(cmd04-computeAABBs)
-add_subdirectory(cmd05-computeVertex)
-add_subdirectory(cmd06-computeTransform)
-add_subdirectory(cmd07-multipleTrees)
-add_subdirectory(cmd08-doublePrecision)
+embed_devicecode(
+  OUTPUT_TARGET
+    int05_deviceCode
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
 
-add_subdirectory(int00-rayGenOnly)
-add_subdirectory(int01-singleTriangle)
-add_subdirectory(int02-instances)
-add_subdirectory(int03-singleAABB)
-add_subdirectory(int04-computeAABBs)
-add_subdirectory(int05-computeVertex)
-add_subdirectory(int06-computeTransforms)
-add_subdirectory(int07-multipleTrees)
-add_subdirectory(int08-doublePrecision)
+add_executable(int05_computeVertex hostCode.cpp)
+target_link_libraries(int05_computeVertex
+  PRIVATE
+    int05_deviceCode
+    gprt::gprt
+    glfw
+    ${OPENGL_gl_LIBRARY}
+)

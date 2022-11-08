@@ -78,6 +78,13 @@ Examples
          :doc:`/editors/index`
             How to use a compute shader to generate AABBs
 
+      .. container:: descr
+
+         .. figure:: ./images/s05-computeVertex.png
+            :target: examples/computeVertex.html
+
+         :doc:`/editors/index`
+            How to use a compute shader to manipulate triangle vertices
 ..       .. container:: descr
 
 ..          .. figure:: /images/index_scene.jpg

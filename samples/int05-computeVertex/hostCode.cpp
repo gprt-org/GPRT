@@ -43,7 +43,7 @@
 
 extern GPRTProgram int05_deviceCode;
 
-const int NUM_VERTICES = 10000;
+const int GRID_SIDE_LENGTH = 100;
 float transform[3][4] = 
   {
     1.0f, 0.0f, 0.0f, 0.0f,
@@ -52,13 +52,13 @@ float transform[3][4] =
   };
 
 // initial image resolution
-const int2 fbSize = {1080,720};
+const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
-float3 lookFrom = {-4.f,-3.f,-2.f};
-float3 lookAt = {0.f,0.f,0.f};
-float3 lookUp = {0.f,1.f,0.f};
-float cosFovy = 0.66f;
+float3 lookFrom = {1.5f,-1.5f,1.f};
+float3 lookAt = {0.5f,0.5f,0.f};
+float3 lookUp = {0.f,0.f,1.f};
+float cosFovy = 0.45f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -70,22 +70,6 @@ int main(int ac, char **av)
   // -------------------------------------------------------
   // Setup programs and geometry types
   // -------------------------------------------------------
-  GPRTVarDecl aabbGeomVars[] = {
-    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,vertex)},
-    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,radius)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTGeomType aabbGeomType
-    = gprtGeomTypeCreate(context,
-                        GPRT_AABBS,
-                        sizeof(AABBGeomData),
-                        aabbGeomVars,-1);
-  gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
-                           module,"AABBClosestHit");
-  gprtGeomTypeSetIntersectionProg(aabbGeomType,0,
-                           module,"AABBIntersection");
-
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
     { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
@@ -97,7 +81,7 @@ int main(int ac, char **av)
     { /* sentinel to mark end of list */ }
   };
   GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"AABBRayGen",
+    = gprtRayGenCreate(context,module,"RayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
 
@@ -111,71 +95,68 @@ int main(int ac, char **av)
     = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missVars,-1);
 
-  GPRTVarDecl primitiveVars[] = {
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(AABBPrimitiveData,vertex)},
-    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(AABBPrimitiveData,radius)},
-    { "now", GPRT_FLOAT, GPRT_OFFSETOF(AABBPrimitiveData,now)},
+  GPRTVarDecl trianglesGeomVars[] = {
+    { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
+    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
+    { "now",  GPRT_FLOAT, GPRT_OFFSETOF(TrianglesGeomData,now)},
+    { "gridSize",  GPRT_UINT, GPRT_OFFSETOF(TrianglesGeomData,gridSize)},
     { /* sentinel to mark end of list */ }
   };
-  GPRTCompute primitiveProgram
-    = gprtComputeCreate(context,module,"AABBPrimitive",
-                      sizeof(AABBPrimitiveData),
-                      primitiveVars,-1);
-
-  GPRTVarDecl boundsVars[] = {
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,vertex)},
-    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,radius)},
-    { "aabbs",  GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTCompute boundsProgram
-    = gprtComputeCreate(context,module,"AABBBounds",
-                      sizeof(AABBBoundsData),
-                      boundsVars,-1);
+  GPRTGeomType trianglesGeomType
+    = gprtGeomTypeCreate(context,
+                        GPRT_TRIANGLES,
+                        sizeof(TrianglesGeomData),
+                        trianglesGeomVars,-1);
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
+                           module,"ClosestHit");
+  
+  GPRTCompute vertexProgram
+    = gprtComputeCreate(context,module,"Vertex",
+                      sizeof(TrianglesGeomData),
+                      trianglesGeomVars,-1);
 
   gprtBuildPipeline(context);
 
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
+  unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
+  unsigned int numVertices = 3 * numTriangles;
   GPRTBuffer vertexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,nullptr);
-  GPRTBuffer radiusBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT,NUM_VERTICES,nullptr);
-  GPRTBuffer aabbPositionsBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES * 2,nullptr);
-
-  GPRTGeom aabbGeom
-    = gprtGeomCreate(context,aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 
-                        NUM_VERTICES, 2 * sizeof(float3), 0);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,numVertices,nullptr);
+  GPRTBuffer indexBuffer
+    = gprtDeviceBufferCreate(context,GPRT_UINT3,numTriangles,nullptr);
   
-  gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
-  gprtGeomSet3f(aabbGeom,"color",0,0,1);
+  GPRTGeom trianglesGeom
+    = gprtGeomCreate(context,trianglesGeomType);
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, 
+                           numVertices, sizeof(float3), 0);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, 
+                           numTriangles, sizeof(uint3), 0);
 
-  gprtComputeSetBuffer(primitiveProgram, "vertex", vertexBuffer);
-  gprtComputeSetBuffer(primitiveProgram, "radius", radiusBuffer);
-  gprtComputeSet1f(primitiveProgram, "now", 0.0f);
+  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+  gprtGeomSet1f(trianglesGeom,"now",0.0f);
+  gprtGeomSet1ui(trianglesGeom,"gridSize",GRID_SIDE_LENGTH);
 
-  gprtComputeSetBuffer(boundsProgram, "vertex", vertexBuffer);
-  gprtComputeSetBuffer(boundsProgram, "radius", radiusBuffer);
-  gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
-  
-  // compute AABBs in parallel with a compute shader
+  gprtComputeSetBuffer(vertexProgram,"vertex",vertexBuffer);
+  gprtComputeSetBuffer(vertexProgram,"index",indexBuffer);
+  gprtComputeSet1f(vertexProgram,"now",0.0f);
+  gprtComputeSet1ui(vertexProgram,"gridSize",GRID_SIDE_LENGTH);
+   
+  // compute triangles in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context,primitiveProgram,NUM_VERTICES);
-  gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
+  gprtComputeLaunch1D(context,vertexProgram,numTriangles);
 
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
-  gprtAccelBuild(context, aabbAccel);
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
+  gprtAccelBuild(context, trianglesAccel);
 
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
-  GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
+  GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
   gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
@@ -252,7 +233,7 @@ int main(int ac, char **av)
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleY = -(M_PI / fbSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -286,11 +267,10 @@ int main(int ac, char **av)
     }
 
     // update time to move primitives. then, rebuild accel.
-    gprtComputeSet1f(primitiveProgram, "now", float(glfwGetTime()));
+    gprtComputeSet1f(vertexProgram, "now", float(glfwGetTime()));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-    gprtComputeLaunch1D(context,primitiveProgram,NUM_VERTICES);
-    gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
-    gprtAccelBuild(context, aabbAccel);
+    gprtComputeLaunch1D(context,vertexProgram,numTriangles);
+    gprtAccelBuild(context, trianglesAccel);
     gprtAccelBuild(context, world);
 
     gprtRayGenSetAccel(rayGen, "world", world);
@@ -327,7 +307,7 @@ int main(int ac, char **av)
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
+    glOrtho(0.f, (float)fbSize.x, 0.0, (float)fbSize.y, -1.f, 1.f);
 
     glBegin(GL_QUADS);
     {
@@ -359,18 +339,16 @@ int main(int ac, char **av)
   glfwTerminate();
 
   gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(radiusBuffer);
-  gprtBufferDestroy(aabbPositionsBuffer);
+  gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtComputeDestroy(primitiveProgram);
-  gprtComputeDestroy(boundsProgram);
-  gprtAccelDestroy(aabbAccel);
+  gprtComputeDestroy(vertexProgram);
+  gprtAccelDestroy(trianglesAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(aabbGeom);
-  gprtGeomTypeDestroy(aabbGeomType);
+  gprtGeomDestroy(trianglesGeom);
+  gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 
