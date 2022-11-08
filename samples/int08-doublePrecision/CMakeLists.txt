@@ -22,15 +22,18 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    cmd02_deviceCode
+    int08_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(cmd02_simpleAABBs hostCode.cpp)
-target_link_libraries(cmd02_simpleAABBs
+add_executable(int08_doublePrecision 
+${PROJECT_SOURCE_DIR}/gprt/gprt_data/double_cube.cpp 
+  hostCode.cpp)
+target_link_libraries(int08_doublePrecision
   PRIVATE
-    cmd02_deviceCode
+    int08_deviceCode
     gprt::gprt
-    stb_image
+    glfw
+    ${OPENGL_gl_LIBRARY}
 )

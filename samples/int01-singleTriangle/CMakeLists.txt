@@ -22,17 +22,16 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    cmd03_deviceCode
+    int01_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-    # For whatever reason, including a .h in the spv causes a VK_INITIALIZATION_FAILED (-3) when creating shader modules
-    # ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.h 
 )
 
-add_executable(cmd03_computeOnly hostCode.cpp)
-target_link_libraries(cmd03_computeOnly
+add_executable(int01_singleTriangle hostCode.cpp)
+target_link_libraries(int01_singleTriangle
   PRIVATE
-    cmd03_deviceCode
+    int01_deviceCode
     gprt::gprt
-    stb_image
+    glfw
+    ${OPENGL_gl_LIBRARY}
 )

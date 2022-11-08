@@ -22,18 +22,15 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    int01_deviceCode
-  ENTRY_POINTS
-    simpleRayGen
+    cmd02_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int01_simpleTriangle hostCode.cpp)
-target_link_libraries(int01_simpleTriangle
+add_executable(cmd01_instances hostCode.cpp)
+target_link_libraries(cmd01_instances
   PRIVATE
-    int01_deviceCode
+    cmd02_deviceCode
     gprt::gprt
-    glfw
-    ${OPENGL_gl_LIBRARY}
+    stb_image
 )

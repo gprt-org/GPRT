@@ -21,16 +21,21 @@
 # SOFTWARE.
 
 add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangle)
-add_subdirectory(cmd02-simpleAABBs)
-add_subdirectory(cmd03-computeOnly)
+add_subdirectory(cmd01-singleTriangle)
+add_subdirectory(cmd02-instances)
+add_subdirectory(cmd03-singleAABB)
+add_subdirectory(cmd04-computeAABBs)
+add_subdirectory(cmd05-computePrimitive)
+add_subdirectory(cmd06-computeTransform)
+add_subdirectory(cmd07-multipleTrees)
+add_subdirectory(cmd08-doublePrecision)
 
 add_subdirectory(int00-rayGenOnly)
-add_subdirectory(int01-simpleTriangle)
-add_subdirectory(int02-simpleAABBs)
-
+add_subdirectory(int01-singleTriangle)
+add_subdirectory(int02-instances)
+add_subdirectory(int03-singleAABB)
 add_subdirectory(int04-computeAABBs)
 add_subdirectory(int05-computePrimitive)
-
-add_subdirectory(int07-doublePrecision)
-add_subdirectory(int08-multipleTLAS)
+add_subdirectory(int06-computeTransforms)
+add_subdirectory(int07-multipleTrees)
+add_subdirectory(int08-doublePrecision)

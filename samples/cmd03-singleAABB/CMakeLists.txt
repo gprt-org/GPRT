@@ -22,18 +22,15 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    int08_deviceCode
-  ENTRY_POINTS
-    simpleRayGen
+    cmd03_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int08_multipleTLAS hostCode.cpp)
-target_link_libraries(int08_multipleTLAS
+add_executable(cmd03_simpleAABBs hostCode.cpp)
+target_link_libraries(cmd03_simpleAABBs
   PRIVATE
-    int08_deviceCode
+    cmd03_deviceCode
     gprt::gprt
-    glfw
-    ${OPENGL_gl_LIBRARY}
+    stb_image
 )
