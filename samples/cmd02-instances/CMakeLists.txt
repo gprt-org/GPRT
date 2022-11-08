@@ -27,8 +27,8 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(cmd01_instances hostCode.cpp)
-target_link_libraries(cmd01_instances
+add_executable(cmd02_instances hostCode.cpp)
+target_link_libraries(cmd02_instances
   PRIVATE
     cmd02_deviceCode
     gprt::gprt

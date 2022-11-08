@@ -63,7 +63,7 @@ float transform[3][4] =
     0.0f, 0.0f, 1.0f, 0.0f
   };
 
-const char *outFileName = "s01-simpleTriangle.png";
+const char *outFileName = "s01-singleTriangle.png";
 int2 fbSize = {700,230};
 float3 lookFrom = {0.f,0.f,-3.f};
 float3 lookAt = {0.f,0.f,0.f};

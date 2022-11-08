@@ -40,35 +40,58 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram cmd01_deviceCode;
+extern GPRTProgram cmd02_deviceCode;
 
-const int NUM_VERTICES = 3;
+const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
   {
-    { -1.f,-.5f,0.f },
-    { +1.f,-.5f,0.f },
-    {  0.f,+.5f,0.f },
+    { -1.f,-1.f,-1.f },
+    { +1.f,-1.f,-1.f },
+    { -1.f,+1.f,-1.f },
+    { +1.f,+1.f,-1.f },
+    { -1.f,-1.f,+1.f },
+    { +1.f,-1.f,+1.f },
+    { -1.f,+1.f,+1.f },
+    { +1.f,+1.f,+1.f }
   };
 
-const int NUM_INDICES = 1;
+const int NUM_INDICES = 12;
 int3 indices[NUM_INDICES] =
   {
-    { 0,1,2 }
+    { 0,1,3 }, { 2,3,0 },
+    { 5,7,6 }, { 5,6,4 },
+    { 0,4,5 }, { 0,5,1 },
+    { 2,3,7 }, { 2,7,6 },
+    { 1,5,7 }, { 1,7,3 },
+    { 4,0,2 }, { 4,2,6 }
   };
 
-float transform[3][4] =
+const int NUM_INSTANCES = 3;
+float transforms[NUM_INSTANCES][12] =
+{
   {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
-  };
+    0.5f, 0.0f, 0.0f, -1.5f,
+    0.0f, 0.5f, 0.0f, 0.0f,
+    0.0f, 0.0f, 0.5f, 0.0f
+  },
+  {
+    0.5f, 0.0f, 0.0f, 0.0f,
+    0.0f, 0.5f, 0.0f, 0.0f,
+    0.0f, 0.0f, 0.5f, 0.0f
+  },
+  {
+    0.5f, 0.0f, 0.0f, 1.5f,
+    0.0f, 0.5f, 0.0f, 0.0f,
+    0.0f, 0.0f, 0.5f, 0.0f
+  }
+};
 
-const char *outFileName = "s01-simpleTriangle.png";
-int2 fbSize = {700,230};
-float3 lookFrom = {0.f,0.f,-3.f};
-float3 lookAt = {0.f,0.f,0.f};
-float3 lookUp = {0.f,1.f,0.f};
-float cosFovy = 0.66f;
+const char *outFileName = "s02-instances.png";
+const int2 fbSize = {700,230};
+const float3 lookFrom = {-0.f,2.f,-3.f};
+const float3 lookAt = {0.f,0.f,0.f};
+const float3 lookUp = {0.f,1.f,0.f};
+const float cosFovy = 0.66f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -77,7 +100,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,cmd01_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,cmd02_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render
@@ -87,6 +110,8 @@ int main(int ac, char **av)
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
+    { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
+    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType trianglesGeomType
@@ -111,7 +136,7 @@ int main(int ac, char **av)
   GPRTBuffer indexBuffer
     = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
   GPRTBuffer transformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,NUM_INSTANCES,transforms);
   GPRTBuffer frameBuffer
     = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
@@ -123,13 +148,22 @@ int main(int ac, char **av)
   gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
                           NUM_INDICES,sizeof(int3),0);
 
+  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+
   // ------------------------------------------------------------------
   // the group/accel for that mesh
   // ------------------------------------------------------------------
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
 
-  GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
+  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {
+    trianglesAccel,
+    trianglesAccel,
+    trianglesAccel
+  };
+
+  GPRTAccel world = gprtInstanceAccelCreate(context,NUM_INSTANCES,triangleAccelRefs);
   gprtInstanceAccelSetTransforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
@@ -220,7 +254,7 @@ int main(int ac, char **av)
   const uint32_t *fb
     = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
   assert(fb);
-  stbi_flip_vertically_on_write(1);
+  stbi_flip_vertically_on_write(true);
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,int(fbSize.x) * sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);

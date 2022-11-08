@@ -64,15 +64,30 @@ struct Attributes {
   float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, 
-  (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
+float3 hsv2rgb(float3 input)
 {
-  float2 bc = attributes.bc;
-  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+  float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
+  return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
 }
 
-GPRT_MISS_PROGRAM(miss, 
-  (MissProgData, record), (Payload, payload))
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
+{
+  // compute normal:
+  uint   primID = PrimitiveIndex();
+  uint   instanceID = InstanceIndex();
+  int3   index  = gprt::load<int3>(record.index, primID);
+  float3 A      = gprt::load<float3>(record.vertex, index.x);
+  float3 B      = gprt::load<float3>(record.vertex, index.y);
+  float3 C      = gprt::load<float3>(record.vertex, index.z);
+  float3 Ng     = normalize(cross(B-A,C-A));
+  float3 rayDir = WorldRayDirection();
+
+  float3 color = hsv2rgb(float3(instanceID / 3.0, 1.0, 1.0));
+  payload.color = (.1f + .9f * abs(dot(rayDir,Ng))) * color;
+}
+
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
