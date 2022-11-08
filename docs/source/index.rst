@@ -48,19 +48,35 @@ Examples
 
       .. container:: descr
 
-         .. figure:: ./images/s01-simpleTriangle.png
-            :target: examples/simpleTriangle.html
+         .. figure:: ./images/s01-singleTriangle.png
+            :target: examples/singleTriangle.html
 
          :doc:`/editors/index`
             An example demonstrating triangle geometry
 
       .. container:: descr
 
-         .. figure:: ./images/s02-simpleAABB.png
+         .. figure:: ./images/s02-instances.png
+            :target: examples/instances.html
+
+         :doc:`/editors/index`
+            Multiple instances of the same triangle geometry
+
+      .. container:: descr
+
+         .. figure:: ./images/s03-simpleAABB.png
             :target: examples/simpleAABB.html
 
          :doc:`/editors/index`
             An example demonstrating AABB geometry
+
+      .. container:: descr
+
+         .. figure:: ./images/s04-computeAABBs.png
+            :target: examples/computeAABBs.html
+
+         :doc:`/editors/index`
+            How to use a compute shader to generate AABBs
 
 ..       .. container:: descr
 
