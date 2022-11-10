@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int08_deviceCode;
+extern GPRTProgram int07_deviceCode;
 
 struct TriangleMesh {
   const int NUM_VERTICES = 4;
@@ -112,7 +112,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int08_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int07_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render

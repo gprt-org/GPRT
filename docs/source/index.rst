@@ -85,6 +85,14 @@ Examples
 
          :doc:`/editors/index`
             How to use a compute shader to manipulate triangle vertices
+      
+      .. container:: descr
+
+         .. figure:: ./images/s06-computeTransform.png
+            :target: examples/computeTransform.html
+
+         :doc:`/editors/index`
+            How to use a compute shader to manipulate instance transforms
 ..       .. container:: descr
 
 ..          .. figure:: /images/index_scene.jpg

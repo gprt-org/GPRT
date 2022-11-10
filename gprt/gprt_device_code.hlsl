@@ -41,17 +41,26 @@ void __compute__gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   instance.instanceShaderBindingTableRecordOffset24Flags8 = 
     int(instanceShaderBindingTableRecordOffset) | 0x00 << 24;
 
-  // this is gross, but AMD has a bug where loading 3x4 transforms causes a random crash when creating shader modules.
-  instance.transforma = 
-    vk::RawBufferLoad<float4>(
-      transformBufferPtr + sizeof(float3x4) * DTid.x);
-  instance.transformb = 
-    vk::RawBufferLoad<float4>(
-      transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4));
-  instance.transformc = 
-    vk::RawBufferLoad<float4>(
-      transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4) + sizeof(float4));
-  
+  // If given transforms, copy them over.
+  if (transformBufferPtr != -1) {
+    // this is gross, but AMD has a bug where loading 3x4 transforms causes a random crash when creating shader modules.
+    instance.transforma = 
+      vk::RawBufferLoad<float4>(
+        transformBufferPtr + sizeof(float3x4) * DTid.x);
+    instance.transformb = 
+      vk::RawBufferLoad<float4>(
+        transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4));
+    instance.transformc = 
+      vk::RawBufferLoad<float4>(
+        transformBufferPtr + sizeof(float3x4) * DTid.x + sizeof(float4) + sizeof(float4));
+  }
+  // otherwise, assume identity.
+  else {
+    instance.transforma = float4(1.0, 0.0, 0.0, 0.0);
+    instance.transformb = float4(0.0, 1.0, 0.0, 0.0);
+    instance.transformc = float4(0.0, 0.0, 1.0, 0.0);
+  }
+
   instance.accelerationStructureReference = vk::RawBufferLoad<uint64_t>(
     accelReferencesPtr + sizeof(uint64_t) * DTid.x
   );
@@ -95,8 +104,3 @@ void __compute__gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
     instance.accelerationStructureReference
   );
 }
-
-// GPRT_COMPUTE_PROGRAM(TEST)(uint3 tid)
-// {
-//   printf("%d\n", tid.x);
-// }
