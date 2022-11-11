@@ -42,7 +42,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int07_deviceCode;
+extern GPRTProgram int08_deviceCode;
 
 
 /* forward declarations to double precision cube. 
@@ -68,7 +68,7 @@ int main(int ac, char **av)
 {
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int07_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int08_deviceCode);
 
   // -------------------------------------------------------
   // Setup programs and geometry types
@@ -177,7 +177,7 @@ int main(int ac, char **av)
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtInstanceAccelSetTransforms(world, transformBuffer, 1, sizeof(float3x4), 0);
   gprtAccelBuild(context, world);
 
   // ----------- set variables  ----------------------------

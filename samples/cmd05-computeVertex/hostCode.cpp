@@ -156,7 +156,7 @@ int main(int ac, char **av)
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtInstanceAccelSetTransforms(world, transformBuffer, 1, sizeof(float3x4), 0);
   gprtAccelBuild(context, world);
 
   // ----------- set variables  ----------------------------

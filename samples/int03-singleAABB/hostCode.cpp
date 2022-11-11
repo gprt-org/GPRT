@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int02_deviceCode;
+extern GPRTProgram int03_deviceCode;
 
 const int NUM_VERTICES = 1;
 float3 vertices[NUM_VERTICES] =
@@ -87,7 +87,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int03_deviceCode);
 
   // -------------------------------------------------------
   // declare geometry type
@@ -140,7 +140,7 @@ int main(int ac, char **av)
   gprtAccelBuild(context, aabbAccel);
 
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtInstanceAccelSetTransforms(world, transformBuffer, 1, sizeof(float3x4), 0);
   gprtAccelBuild(context, world);
 
   // ##################################################################

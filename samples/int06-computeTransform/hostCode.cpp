@@ -189,7 +189,7 @@ int main(int ac, char **av)
   GPRTBuffer transformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,numInstances,nullptr);
   GPRTAccel world = gprtInstanceAccelCreate(context,numInstances,instanceTrees.data());
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtInstanceAccelSetTransforms(world, transformBuffer, numInstances, sizeof(float3x4), 0);
 
   // fill transform buffer in parallel using a compute shader
   gprtComputeSetBuffer(transformProgram, "transforms", transformBuffer);
