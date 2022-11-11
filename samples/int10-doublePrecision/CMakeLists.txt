@@ -22,18 +22,18 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-  cmd07_deviceCode
-  ENTRY_POINTS
-    simpleRayGen
+    int10_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(cmd07_multipleTrees hostCode.cpp)
-target_link_libraries(cmd07_multipleTrees
+add_executable(int10_doublePrecision 
+${PROJECT_SOURCE_DIR}/gprt/gprt_data/double_cube.cpp 
+  hostCode.cpp)
+target_link_libraries(int10_doublePrecision
   PRIVATE
-    cmd07_deviceCode
+    int10_deviceCode
     gprt::gprt
-    stb_image
-    generator
+    glfw
+    ${OPENGL_gl_LIBRARY}
 )

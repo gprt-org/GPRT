@@ -45,7 +45,7 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int07_deviceCode;
+extern GPRTProgram int08_deviceCode;
 
 template <typename T>
 struct Mesh {
@@ -132,7 +132,7 @@ struct TetrahedralMesh {
 } tetrahedralMesh;
 
 // initial image resolution
-const int2 fbSize = {700,230};
+const int2 fbSize = {800,600};
 GLuint fbTexture {0};
 
 float3 lookFrom = {4.f,0.0f,0.2f};
@@ -147,7 +147,7 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int07_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,int08_deviceCode);
 
   // ##################################################################
   // set up all the *GEOMETRY* graph we want to render

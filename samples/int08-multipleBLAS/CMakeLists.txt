@@ -22,17 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    int07_deviceCode
+    int08_deviceCode
   ENTRY_POINTS
     simpleRayGen
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int07_multipleTrees hostCode.cpp)
-target_link_libraries(int07_multipleTrees
+add_executable(int08_multipleBLAS hostCode.cpp)
+target_link_libraries(int08_multipleBLAS
   PRIVATE
-    int07_deviceCode
+    int08_deviceCode
     gprt::gprt
     glfw
     ${OPENGL_gl_LIBRARY}
