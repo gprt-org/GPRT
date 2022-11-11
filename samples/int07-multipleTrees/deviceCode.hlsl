@@ -128,7 +128,7 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, pa
   float3 B      = gprt::load<float3>(record.vertex, index.y);
   float3 C      = gprt::load<float3>(record.vertex, index.z);
   float3 Ng     = normalize(cross(B-A,C-A));
-  float3 rayDir = WorldRayDirection();
+  float3 rayDir = normalize(ObjectRayDirection());
   payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * float4(record.color.x, record.color.y, record.color.z, 1.0);
   payload.tHit = RayTCurrent();
 }

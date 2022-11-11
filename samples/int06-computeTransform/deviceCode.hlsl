@@ -106,8 +106,7 @@ GPRT_CLOSEST_HIT_PROGRAM(ClosestHit,
   float3 B      = gprt::load<float3>(record.vertex, index.y);
   float3 C      = gprt::load<float3>(record.vertex, index.z);
   float3 Ng     = normalize(cross(B-A,C-A));
-  float3 rayDir = WorldRayDirection();
-
+  float3 rayDir = normalize(ObjectRayDirection());
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
   float3 color = hsv2rgb(float3(instanceID / 25.f, 1.0, 1.0));
   payload.color = (.1f + .9f * abs(dot(rayDir,Ng))) * color;
