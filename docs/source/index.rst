@@ -93,6 +93,14 @@ Examples
 
          :doc:`/editors/index`
             How to use a compute shader to manipulate instance transforms
+      
+      .. container:: descr
+
+         .. figure:: ./images/s07-multipleTrees.png
+            :target: examples/multipleTrees.html
+
+         :doc:`/editors/index`
+            Demonstrates how multiple trees can be used in the same program
 ..       .. container:: descr
 
 ..          .. figure:: /images/index_scene.jpg

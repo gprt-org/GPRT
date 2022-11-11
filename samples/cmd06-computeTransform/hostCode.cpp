@@ -232,9 +232,6 @@ int main(int ac, char **av)
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
-  // ##################################################################
-  // create a window we can use to display and interact with the image
-  // ##################################################################
   LOG("launching ...");
 
   gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
