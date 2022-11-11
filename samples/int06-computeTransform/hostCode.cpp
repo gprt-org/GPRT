@@ -57,14 +57,6 @@ float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,0.f,1.f};
 float cosFovy = 0.3f;
 
-
-float transform[3][4] = 
-  {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
-  };
-
 template <typename T>
 struct Mesh {
   std::vector<float3> vertices;

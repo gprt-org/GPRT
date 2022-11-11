@@ -52,14 +52,6 @@ const float3 lookAt = {0.f,0.f,0.f};
 const float3 lookUp = {0.f,0.f,1.f};
 const float cosFovy = 0.3f;
 
-
-float transform[3][4] = 
-  {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
-  };
-
 template <typename T>
 struct Mesh {
   std::vector<float3> vertices;
@@ -246,7 +238,7 @@ int main(int ac, char **av)
   LOG("launching ...");
 
   gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
-  
+
   LOG("done with launch, writing picture ...");
   // for host pinned mem it doesn't matter which device we query...
   const uint32_t *fb

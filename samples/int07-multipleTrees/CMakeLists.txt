@@ -36,4 +36,5 @@ target_link_libraries(int07_multipleTrees
     gprt::gprt
     glfw
     ${OPENGL_gl_LIBRARY}
+    generator
 )

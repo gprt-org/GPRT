@@ -29,6 +29,10 @@
 // our device-side data structures
 #include "deviceCode.h"
 
+// for generating meshes
+#include <generator.hpp>
+using namespace generator;
+
 // library for windowing
 #include <GLFW/glfw3.h>
 
@@ -43,37 +47,68 @@
 
 extern GPRTProgram int07_deviceCode;
 
-struct TriangleMesh {
-  const int NUM_VERTICES = 4;
-  float3 vertices[4] =
-    {
-      { -2.f,-2.f,-1.f },
-      { +2.f,-2.f,-1.f },
-      { -2.f,+2.f,-1.f },
-      { +2.f,+2.f,-1.f }
-    };
+template <typename T>
+struct Mesh {
+  std::vector<float3> vertices;
+  std::vector<uint3> indices;
+  GPRTBuffer vertexBuffer;
+  GPRTBuffer indexBuffer;
+  GPRTGeom geometry;
+  GPRTAccel accel;
+  float4x4 transform;
 
-  const int NUM_INDICES = 2;
-  int3 indices[2] =
-    {
-      { 0,1,3 }, { 2,3,0 }
-    };
+  Mesh() {};
+  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color)
+  {
+    auto vertGenerator = generator.vertices();
+    auto triGenerator = generator.triangles();
+    while (!vertGenerator.done()) {
+      auto vertex = vertGenerator.generate();
+      auto position = vertex.position;
+      vertices.push_back(float3(position[0], position[1], position[2]));
+      vertGenerator.next();
+    }
+    while (!triGenerator.done()) {
+      Triangle triangle = triGenerator.generate();
+      auto vertices = triangle.vertices;
+      indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
+      triGenerator.next();
+    }
 
-  float transform[3][4] =
-    {
-      1.0f, 0.0f, 0.0f, 0.0f,
-      0.0f, 1.0f, 0.0f, 0.0f,
-      0.0f, 0.0f, 1.0f, 0.0f
-    };
-} triangleMesh;
+    vertexBuffer
+      = gprtDeviceBufferCreate(context,GPRT_FLOAT3,vertices.size(),vertices.data());
+    indexBuffer
+      = gprtDeviceBufferCreate(context,GPRT_UINT3,indices.size(),indices.data());
+    geometry
+      = gprtGeomCreate(context,geomType);
+    gprtTrianglesSetVertices(geometry, vertexBuffer, 
+                            vertices.size(), sizeof(float3), 0);
+    gprtTrianglesSetIndices(geometry, indexBuffer, 
+                            indices.size(), sizeof(uint3), 0);
+    gprtGeomSetBuffer(geometry,"vertex",vertexBuffer);
+    gprtGeomSetBuffer(geometry,"index",indexBuffer);
+    gprtGeomSet3f(geometry,"color",color.x, color.y, color.z);
+    accel = gprtTrianglesAccelCreate(context,1,&geometry);
+    gprtAccelBuild(context, accel);
+
+    transform = identity;
+  };
+
+  void cleanupMesh() {
+    gprtAccelDestroy(accel);
+    gprtGeomDestroy(geometry);
+    gprtBufferDestroy(vertexBuffer);
+    gprtBufferDestroy(indexBuffer);
+  };
+};
 
 struct TetrahedralMesh {
   const int NUM_VERTICES = 4;
   float3 vertices[8] =
     {
-      { cosf(2.0944 * 0), sinf(2.0944 * 0),-1.f },
-      { cosf(2.0944 * 1), sinf(2.0944 * 1),-1.f },
-      { cosf(2.0944 * 2), sinf(2.0944 * 2),-1.f },
+      { cosf(2.0944 * 0) * .8f, sinf(2.0944 * 0) * .8f,-0.25f },
+      { cosf(2.0944 * 1) * .8f, sinf(2.0944 * 1) * .8f,-0.25f },
+      { cosf(2.0944 * 2) * .8f, sinf(2.0944 * 2) * .8f,-0.25f },
       { 0.f,0.f,1.f },
     };
 
@@ -97,13 +132,13 @@ struct TetrahedralMesh {
 } tetrahedralMesh;
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {700,230};
 GLuint fbTexture {0};
 
-float3 lookFrom = {0.f,-5.f,1.f};
-float3 lookAt = {0.f,0.f,0.f};
+float3 lookFrom = {4.f,0.0f,0.2f};
+float3 lookAt = {0.f,0.f,0.2f};
 float3 lookUp = {0.f,0.f,1.f};
-float cosFovy = 0.66f;
+float cosFovy = 0.3f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -159,16 +194,15 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  GPRTBuffer triangleVertexBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,
-        triangleMesh.NUM_VERTICES,triangleMesh.vertices);
-  GPRTBuffer triangleIndexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT3,
-        triangleMesh.NUM_INDICES,triangleMesh.indices);
+  Mesh<TeapotMesh> teapotMesh(context, trianglesGeomType, TeapotMesh{16}, float3(1,0,0));
+  teapotMesh.transform = mul(scaling_matrix(float3(.1,.1,.1)), teapotMesh.transform);
+  teapotMesh.transform = mul(rotation_matrix(rotation_quat(float3(0,0,1), 3.14f * .5f)), teapotMesh.transform);
   GPRTBuffer triangleTransformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,
-        1,triangleMesh.transform);
-  
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM_4X4, 1, &teapotMesh.transform);
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&teapotMesh.accel);
+  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer, 1, sizeof(float4x4), 0);
+  gprtAccelBuild(context, trianglesTLAS);
+
   GPRTBuffer tetrahedraVertexBuffer
     = gprtHostBufferCreate(context,GPRT_FLOAT3,
         tetrahedralMesh.NUM_VERTICES,tetrahedralMesh.vertices);
@@ -185,16 +219,6 @@ int main(int ac, char **av)
   GPRTBuffer frameBuffer
     = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
 
-  GPRTGeom trianglesGeom
-    = gprtGeomCreate(context,trianglesGeomType);
-  gprtTrianglesSetVertices(trianglesGeom,triangleVertexBuffer,
-                           triangleMesh.NUM_VERTICES,sizeof(float3),0);
-  gprtTrianglesSetIndices(trianglesGeom,triangleIndexBuffer,
-                          triangleMesh.NUM_INDICES,sizeof(int3),0);
-  gprtGeomSetBuffer(trianglesGeom,"vertex",triangleVertexBuffer);
-  gprtGeomSetBuffer(trianglesGeom,"index",triangleIndexBuffer);
-  gprtGeomSet3f(trianglesGeom,"color",1,1,1);
-
   GPRTGeom tetrahedraGeom
     = gprtGeomCreate(context,tetrahedraGeomType);
   gprtAABBsSetPositions(tetrahedraGeom,tetrahedraAABBBuffer,
@@ -202,22 +226,13 @@ int main(int ac, char **av)
   gprtGeomSetBuffer(tetrahedraGeom,"vertex",tetrahedraVertexBuffer);
   gprtGeomSetBuffer(tetrahedraGeom,"index",tetrahedraIndexBuffer);
 
-  // ------------------------------------------------------------------
-  // the group/accel for that mesh
-  // ------------------------------------------------------------------
   GPRTAccel tetrahedraAccel = gprtAABBAccelCreate(context,1,&tetrahedraGeom);
   gprtAccelBuild(context, tetrahedraAccel);
   GPRTAccel tetrahedraTLAS = gprtInstanceAccelCreate(context,1,&tetrahedraAccel);
-  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer);
+  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer,
+    1, sizeof(float3x4), 0
+  );
   gprtAccelBuild(context, tetrahedraTLAS);
-
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer);
-  gprtAccelBuild(context, trianglesTLAS);
-  
-
 
   // ##################################################################
   // set miss and raygen program required for SBT
@@ -328,7 +343,7 @@ int main(int ac, char **av)
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleY = -(M_PI / fbSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -424,8 +439,7 @@ int main(int ac, char **av)
   glfwDestroyWindow(window);
   glfwTerminate();
 
-  gprtBufferDestroy(triangleVertexBuffer);
-  gprtBufferDestroy(triangleIndexBuffer);
+  teapotMesh.cleanupMesh();
   gprtBufferDestroy(triangleTransformBuffer);
   gprtBufferDestroy(tetrahedraVertexBuffer);
   gprtBufferDestroy(tetrahedraIndexBuffer);
@@ -434,11 +448,9 @@ int main(int ac, char **av)
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
   gprtAccelDestroy(tetrahedraAccel);
   gprtAccelDestroy(trianglesTLAS);
   gprtAccelDestroy(tetrahedraTLAS);
-  gprtGeomDestroy(trianglesGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtGeomDestroy(tetrahedraGeom);
   gprtGeomTypeDestroy(tetrahedraGeomType);

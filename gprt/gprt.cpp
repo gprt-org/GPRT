@@ -1505,11 +1505,12 @@ struct InstanceAccel : public Accel {
 
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
+  Buffer *instanceOffsetsBuffer = nullptr;
 
   struct {
     Buffer* buffer = nullptr;
-    // size_t stride = 0;
-    // size_t offset = 0;
+    size_t stride = 0;
+    size_t offset = 0;
   } transforms;
 
   struct {
@@ -1517,6 +1518,12 @@ struct InstanceAccel : public Accel {
     // size_t stride = 0;
     // size_t offset = 0;
   } references;
+
+  struct {
+    Buffer* buffer = nullptr;
+    // size_t stride = 0;
+    // size_t offset = 0;
+  } offsets;
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
@@ -1566,14 +1573,19 @@ struct InstanceAccel : public Accel {
   ~InstanceAccel() {};
 
   void setTransforms(
-    Buffer* transforms = nullptr//,
-    // size_t count,
-    // size_t stride,
-    // size_t offset
+    Buffer* transforms,
+    size_t count,
+    size_t stride,
+    size_t offset
     ) 
   {
+    if (count != this->numInstances) {
+      throw std::runtime_error("Error, transform count must match number of instances!");
+    }
     // assuming no motion blurred triangles for now, so we assume 1 transform per instance
     this->transforms.buffer = transforms;
+    this->transforms.stride = stride;
+    this->transforms.offset = offset;
   }
 
   void setReferences(
@@ -1584,6 +1596,16 @@ struct InstanceAccel : public Accel {
     ) 
   {
     this->references.buffer = references;
+  }
+
+  void setOffsets(
+    Buffer* offsets = nullptr//,
+    // size_t count,
+    // size_t stride,
+    // size_t offset
+    ) 
+  {
+    this->offsets.buffer = offsets;
   }
 
   void setNumGeometries(
@@ -1661,6 +1683,60 @@ struct InstanceAccel : public Accel {
       referencesAddress = references.buffer->address;
     }
 
+    // No instance offsets provided, so we need to supply our own.
+    uint64_t instanceOffsetsAddress;
+    if (offsets.buffer == nullptr) {
+      // delete if not big enough
+      if (instanceOffsetsBuffer && instanceOffsetsBuffer->size != numInstances * sizeof(uint64_t))
+      {
+        instanceOffsetsBuffer->destroy();
+        delete instanceOffsetsBuffer;
+        instanceOffsetsBuffer = nullptr;
+      }
+      
+      // make buffer if not made yet
+      if (instanceOffsetsBuffer == nullptr) {
+        instanceOffsetsBuffer = new Buffer(
+          physicalDevice, logicalDevice, commandBuffer, queue,
+          // I guess I need this to use these buffers as input to tree builds?
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+          sizeof(uint64_t) * numInstances
+        );
+      }
+
+      // transfer over offsets
+      std::vector<int32_t> blasOffsets(numInstances);
+      int offset = 0;
+      for (uint32_t i = 0; i < numInstances; ++i) {
+        blasOffsets[i] = offset;
+
+        if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) 
+        {
+          TriangleAccel* triAccel = (TriangleAccel*)this->instances[i];
+          offset += triAccel->geometries.size() * numRayTypes;
+        } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
+          AABBAccel* aabbAccel = (AABBAccel*)this->instances[i];
+          offset += aabbAccel->geometries.size() * numRayTypes;
+        } else {
+          throw std::runtime_error("Error, unknown instance type");
+        }
+      }
+      instanceOffsetsBuffer->map();
+      memcpy(instanceOffsetsBuffer->mapped, blasOffsets.data(), sizeof(int32_t) * numInstances);
+      instanceOffsetsBuffer->unmap();
+      instanceOffsetsAddress = instanceOffsetsBuffer->address;
+    }
+    // Instance acceleration structure references provided by the user
+    else {
+      instanceOffsetsAddress = offsets.buffer->address;
+    }
+
     // No instance addressed provided, so we assume identity.
     uint64_t transformBufferAddress;
     if (transforms.buffer == nullptr) {
@@ -1676,13 +1752,19 @@ struct InstanceAccel : public Accel {
       uint64_t transformBufferAddr;
       uint64_t accelReferencesAddr;
       uint64_t instanceShaderBindingTableRecordOffset;
-      uint64_t pad[16-4];
+      uint64_t transformOffset;
+      uint64_t transformStride;
+      uint64_t instanceOffsetsBufferAddr;
+      uint64_t pad[16-7];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
     pushConstants.transformBufferAddr = transformBufferAddress;
     pushConstants.accelReferencesAddr = referencesAddress;
     pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
+    pushConstants.transformOffset = transforms.offset;
+    pushConstants.transformStride = transforms.stride;
+    pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -1893,6 +1975,12 @@ struct InstanceAccel : public Accel {
       accelAddressesBuffer->destroy();
       delete accelAddressesBuffer;
       accelAddressesBuffer = nullptr;
+    }
+
+    if (instanceOffsetsBuffer) {
+      instanceOffsetsBuffer->destroy();
+      delete instanceOffsetsBuffer;
+      instanceOffsetsBuffer = nullptr;
     }
   };
 };
@@ -2744,7 +2832,8 @@ struct Context {
     // Hit records
     if (numHitRecords > 0)
     {
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      // Go over all TLAS by order they were created
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) { 
         Accel *tlas = accels[tlasID];
         if (!tlas) continue;
         if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
@@ -2753,6 +2842,7 @@ struct Context {
           // have a list of instances we can iterate through and copy the SBT data...
           // So, if we have a bunch of instances set by reference on device, 
           // we need to eventually do something smarter here...
+          size_t geomIDOffset = 0;
           for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
             
             Accel *blas = instanceAccel->instances[blasID];
@@ -2767,7 +2857,8 @@ struct Context {
                   size_t handleStride = handleSize;
 
                   // First, copy handle
-                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  // Account for all prior instance's geometries and for prior BLAS's geometry
+                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                   size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
                   size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -2782,6 +2873,7 @@ struct Context {
                   }
                 }
               }
+              geomIDOffset += triAccel->geometries.size();
             }
 
             else if (blas->getType() == GPRT_AABB_ACCEL) {
@@ -2795,7 +2887,8 @@ struct Context {
                   size_t handleStride = handleSize;
 
                   // First, copy handle
-                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  // Account for all prior instance's geometries and for prior BLAS's geometry
+                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                   size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
                   size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -2810,6 +2903,7 @@ struct Context {
                   }
                 }
               }
+              geomIDOffset += aabbAccel->geometries.size();
             }
             
             else {
@@ -2912,7 +3006,7 @@ struct Context {
 
     // Hit groups
 
-    // Go over all TLAS
+    // Go over all TLAS by order they were created
     for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
       Accel *tlas = accels[tlasID];
       if (!tlas) continue;
@@ -3609,15 +3703,16 @@ gprtInstanceAccelCreate(GPRTContext _context,
 
 GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
-                               GPRTBuffer _transforms//,
-                               // size_t offset, // maybe I can support these too?
-                               // size_t stride  // maybe I can support these too?
+                               GPRTBuffer _transforms,
+                               size_t count,
+                               size_t stride,
+                               size_t offset
                                )
 {
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel*)instanceAccel;
   Buffer *transforms = (Buffer*)_transforms;
-  accel->setTransforms(transforms);
+  accel->setTransforms(transforms, count, stride, offset);
   LOG("Setting instance accel transforms...");
 }
 

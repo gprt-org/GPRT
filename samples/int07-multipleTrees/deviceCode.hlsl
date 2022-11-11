@@ -152,7 +152,7 @@ GPRT_INTERSECTION_PROGRAM(TetrahedralMesh, (TetrahedraGeomData, record))
   float3 P2      = gprt::load<float3>(record.vertex, index.z);
   float3 P3      = gprt::load<float3>(record.vertex, index.w);
 
-  float3 P      = WorldRayOrigin();
+  float3 P      = ObjectRayOrigin();
   float vol_all = volume(P0, P1, P3, P2);
   if (vol_all == 0.f) return;
 
