@@ -89,7 +89,7 @@ struct Mesh {
     gprtGeomSet3f(geometry,"color",color.x, color.y, color.z);
   };
 
-  void cleanupMesh() {
+  void cleanup() {
     gprtGeomDestroy(geometry);
     gprtBufferDestroy(vertexBuffer);
     gprtBufferDestroy(indexBuffer);
@@ -147,7 +147,7 @@ int main(int ac, char **av)
   Mesh<TorusKnotMesh> torusMesh1(context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1,0,0), translation_matrix(float3(2*sin(2*M_PI*.33), 2*cos(2*M_PI*.33), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh2(context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0,1,0), translation_matrix(float3(2*sin(2*M_PI*.66), 2*cos(2*M_PI*.66), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh3(context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0,0,1), translation_matrix(float3(2*sin(2*M_PI*1.0), 2*cos(2*M_PI*1.0), 1.5f)));
-  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4}, float3(1,1,1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1,1,1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
   std::vector<GPRTGeom> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry, floorMesh.geometry};
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context,geoms.size(),geoms.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesBLAS);
@@ -360,10 +360,10 @@ int main(int ac, char **av)
   glfwDestroyWindow(window);
   glfwTerminate();
 
-  torusMesh1.cleanupMesh();
-  torusMesh2.cleanupMesh();
-  torusMesh3.cleanupMesh();
-  floorMesh.cleanupMesh();
+  torusMesh1.cleanup();
+  torusMesh2.cleanup();
+  torusMesh3.cleanup();
+  floorMesh.cleanup();
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
