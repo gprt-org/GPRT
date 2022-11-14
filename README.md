@@ -23,13 +23,12 @@ directory of this repository, the project can be configured with
 
 ```shell
 cmake ..
-cmake --build .
 ```
 
-And built with
+and built with
 
 ```shell
-make all
+cmake --build .
 ```
 
 ## Ubuntu Dependencies
