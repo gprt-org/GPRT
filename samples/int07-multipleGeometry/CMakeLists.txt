@@ -29,8 +29,8 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(int07_multipleBLAS hostCode.cpp)
-target_link_libraries(int07_multipleBLAS
+add_executable(int07_multipleGeometry hostCode.cpp)
+target_link_libraries(int07_multipleGeometry
   PRIVATE
     int07_deviceCode
     gprt::gprt
