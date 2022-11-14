@@ -17,9 +17,9 @@ https://gprt-org.github.io/GPRT/
 
 ## Build Instructions
 
-Install the [Vulkan SDK[(https://vulkan.lunarg.com/) for your platform (version 1.3.231.1 or greater).
+Install the [Vulkan SDK](https://vulkan.lunarg.com/) for your platform (version 1.3.231.1 or greater).
 
-GPRT useds CMake for configuration. For a build directory, `bld`, in the top
+GPRT useds CMake for configuration. For a build directory, `build`, in the top
 directory of this repository, the project can be configured with
 
 ```shell
@@ -38,7 +38,7 @@ make all
 The following apt-packages should be installed:
 
 ```shell
-sudo apt install xorg-dev libxinerama-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev
+sudo apt install xorg-dev libxinerama-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev libglfw3
 ```
 
 along with the [Vulkan SDK](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started_ubuntu.html).
