@@ -152,7 +152,7 @@ GLuint fbTexture {0};
 float3 lookFrom = {10.f,10.0f,10.f};
 float3 lookAt = {0.f,0.f,1.f};
 float3 lookUp = {0.f,0.f,1.f};
-float cosFovy = 0.6f;
+float cosFovy = 0.4f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -209,13 +209,26 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  Mesh<TeapotMesh> teapotMesh(context, trianglesGeomType, TeapotMesh{32}, float3(1,0.2,0.2), identity);
-  Mesh<RoundedBoxMesh> floorMesh(context, trianglesGeomType, RoundedBoxMesh{0.25, {4 -.25,4 -.25,4 -.25}}, float3(1,1,1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  Spheres<HelixPath> helixSpheres(context, spheresGeomType, HelixPath{}, 0.2, float3(0.2, 0.2, 1.0), 
-    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(4.0f, 4.0f, 1.0f)) ));
+  #ifndef M_PI
+  #define M_PI 3.14
+  #endif
 
-  std::vector<GPRTGeom> triangleGeoms = {teapotMesh.geometry, floorMesh.geometry};
-  std::vector<GPRTGeom> pointGeoms = {helixSpheres.geometry};
+  Mesh<DodecahedronMesh> dodecahedronMesh(context, trianglesGeomType, DodecahedronMesh{}, float3(1,0.,0.0), 
+    translation_matrix(float3(2*sin(2*M_PI*.33), 2*cos(2*M_PI*.33), 1.5f)));
+  Mesh<IcosahedronMesh> icosahedronMesh(context, trianglesGeomType, IcosahedronMesh{}, float3(0,1.0,0.0), 
+    translation_matrix(float3(2*sin(2*M_PI*.66), 2*cos(2*M_PI*.66), 1.5f)));
+  Mesh<IcoSphereMesh> icosphereMesh(context, trianglesGeomType, IcoSphereMesh{}, float3(0,0.0,1.0), 
+    translation_matrix(float3(2*sin(2*M_PI*1.0), 2*cos(2*M_PI*1.0), 1.5f)));
+  
+  Spheres<HelixPath> helixSpheresA(context, spheresGeomType, HelixPath{1.0, 1.0, 8}, 0.4, float3(1.0, 0.0, 0.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(4.0f, 4.0f, 4.0f)) ));
+  Spheres<HelixPath> helixSpheresB(context, spheresGeomType, HelixPath{1.0, 1.0, 16}, 0.3, float3(0.0, 1.0, 0.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(5.0f, 5.0f, 3.0f)) ));
+  Spheres<HelixPath> helixSpheresC(context, spheresGeomType, HelixPath{1.0, 1.0, 32}, 0.2, float3(0.0, 0.0, 1.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(6.0f, 6.0f, 2.0f)) ));
+
+  std::vector<GPRTGeom> triangleGeoms = {dodecahedronMesh.geometry, icosahedronMesh.geometry, icosphereMesh.geometry};
+  std::vector<GPRTGeom> pointGeoms = {helixSpheresA.geometry, helixSpheresB.geometry, helixSpheresC.geometry};
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context,triangleGeoms.size(),triangleGeoms.data());
   GPRTAccel spheresBLAS = gprtAABBAccelCreate(context,pointGeoms.size(),pointGeoms.data());
   std::vector<GPRTAccel> blas = {trianglesBLAS, spheresBLAS};
@@ -430,9 +443,12 @@ int main(int ac, char **av)
   glfwDestroyWindow(window);
   glfwTerminate();
 
-  teapotMesh.cleanup();
-  floorMesh.cleanup();
-  helixSpheres.cleanup();
+  dodecahedronMesh.cleanup();
+  icosahedronMesh.cleanup();
+  icosphereMesh.cleanup();
+  helixSpheresA.cleanup();
+  helixSpheresB.cleanup();
+  helixSpheresC.cleanup();
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);

@@ -36,13 +36,15 @@ struct TrianglesGeomData
   alignas(16) float3 color;
 };
 
-/* variables for the triangle mesh geometry */
-struct TetrahedraGeomData
+/* variables for the sphere geometry */
+struct SpheresGeomData
 {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index; // vec4i*
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex; // vec3f *  
+  alignas(16) gprt::Buffer vertex; // float3 *
+  /*! array/buffer of sphere radius */
+  alignas(16) gprt::Buffer radius; // float *  
+  /*! base color we use for the sphere */
+  alignas(16) float3 color;
 };
 
 struct RayGenData
@@ -51,11 +53,7 @@ struct RayGenData
 
   alignas(8) int2 fbSize;
 
-  /* Acceleration structure containing only triangle geometry */
-  alignas(16) gprt::Accel meshes;
-
-  /* Acceleration structure containing only tetrahedra */
-  alignas(16) gprt::Accel cells;
+  alignas(16) gprt::Accel world;
 
   struct { 
     alignas(16) float3 pos;   

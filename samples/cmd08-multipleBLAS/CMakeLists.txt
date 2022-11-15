@@ -22,7 +22,7 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-  cmd08_deviceCode
+    cmd08_deviceCode
   ENTRY_POINTS
     simpleRayGen
   SOURCES

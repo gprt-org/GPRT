@@ -103,7 +103,7 @@ GLuint fbTexture {0};
 float3 lookFrom = {10.f,10.0f,10.f};
 float3 lookAt = {0.f,0.f,1.f};
 float3 lookUp = {0.f,0.f,1.f};
-float cosFovy = 0.6f;
+float cosFovy = 0.4f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -144,6 +144,9 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
+  #ifndef M_PI
+  #define M_PI 3.14
+  #endif
   Mesh<TorusKnotMesh> torusMesh1(context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1,0,0), translation_matrix(float3(2*sin(2*M_PI*.33), 2*cos(2*M_PI*.33), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh2(context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0,1,0), translation_matrix(float3(2*sin(2*M_PI*.66), 2*cos(2*M_PI*.66), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh3(context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0,0,1), translation_matrix(float3(2*sin(2*M_PI*1.0), 2*cos(2*M_PI*1.0), 1.5f)));

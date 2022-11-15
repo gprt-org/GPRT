@@ -52,18 +52,17 @@ struct Mesh {
   GPRTBuffer vertexBuffer;
   GPRTBuffer indexBuffer;
   GPRTGeom geometry;
-  GPRTAccel accel;
-  float4x4 transform;
 
   Mesh() {};
-  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color)
+  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color, float4x4 transform)
   {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
     while (!vertGenerator.done()) {
       auto vertex = vertGenerator.generate();
       auto position = vertex.position;
-      vertices.push_back(float3(position[0], position[1], position[2]));
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
+      vertices.push_back(p.xyz());
       vertGenerator.next();
     }
     while (!triGenerator.done()) {
@@ -86,56 +85,71 @@ struct Mesh {
     gprtGeomSetBuffer(geometry,"vertex",vertexBuffer);
     gprtGeomSetBuffer(geometry,"index",indexBuffer);
     gprtGeomSet3f(geometry,"color",color.x, color.y, color.z);
-    accel = gprtTrianglesAccelCreate(context,1,&geometry);
-    gprtAccelBuild(context, accel);
-
-    transform = identity;
   };
 
-  void cleanupMesh() {
-    gprtAccelDestroy(accel);
+  void cleanup() {
     gprtGeomDestroy(geometry);
     gprtBufferDestroy(vertexBuffer);
     gprtBufferDestroy(indexBuffer);
   };
 };
 
-struct TetrahedralMesh {
-  const int NUM_VERTICES = 4;
-  float3 vertices[8] =
-    {
-      { cosf(2.0944 * 0) * .8f, sinf(2.0944 * 0) * .8f,-0.25f },
-      { cosf(2.0944 * 1) * .8f, sinf(2.0944 * 1) * .8f,-0.25f },
-      { cosf(2.0944 * 2) * .8f, sinf(2.0944 * 2) * .8f,-0.25f },
-      { 0.f,0.f,1.f },
-    };
+template <typename T>
+struct Spheres {
+  std::vector<float3> vertices;
+  std::vector<float> radius;
+  std::vector<float3> aabbs;
+  GPRTBuffer vertexBuffer;
+  GPRTBuffer radiusBuffer;
+  GPRTBuffer aabbBuffer;
+  GPRTGeom geometry;
 
-  const int NUM_INDICES = 1;
-  int4 indices[1] =
-    {
-      { 0,1,2,3}
-    };
+  Spheres() {};
+  Spheres(GPRTContext context, GPRTGeomType geomType, T generator, float r, float3 color, float4x4 transform)
+  {
+    auto vertGenerator = generator.vertices();
+    
+    while (!vertGenerator.done()) {
+      auto vertex = vertGenerator.generate();
+      auto position = vertex.position;
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
+      vertices.push_back(p.xyz());
+      radius.push_back(r);
+      aabbs.push_back((p - r).xyz());
+      aabbs.push_back((p + r).xyz());
+      vertGenerator.next();
+    }
 
-  float3 aabbs[2] = 
-    {
-      {-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}
-    };
+    vertexBuffer
+      = gprtDeviceBufferCreate(context,GPRT_FLOAT3,vertices.size(),vertices.data());
+    radiusBuffer
+      = gprtDeviceBufferCreate(context,GPRT_FLOAT,radius.size(),radius.data());
+    aabbBuffer
+      = gprtDeviceBufferCreate(context,GPRT_FLOAT3,aabbs.size(),aabbs.data());
+    geometry
+      = gprtGeomCreate(context,geomType);
+    gprtAABBsSetPositions(geometry, aabbBuffer, aabbs.size() / 2, 6 * sizeof(float), 0);
+    
+    gprtGeomSetBuffer(geometry,"vertex",vertexBuffer);
+    gprtGeomSetBuffer(geometry,"radius",radiusBuffer);
+    gprtGeomSet3f(geometry,"color",color.x, color.y, color.z);
+  };
 
-  float transform[3][4] =
-    {
-      1.0f, 0.0f, 0.0f, 0.0f,
-      0.0f, 1.0f, 0.0f, 0.0f,
-      0.0f, 0.0f, 1.0f, 0.0f
-    };
-} tetrahedralMesh;
+  void cleanup() {
+    gprtGeomDestroy(geometry);
+    gprtBufferDestroy(vertexBuffer);
+    gprtBufferDestroy(radiusBuffer);
+    gprtBufferDestroy(aabbBuffer);
+  };
+};
 
 // initial image resolution
-const char *outFileName = "s07-multipleTrees.png";
+const char *outFileName = "s08-multipleBLAS.png";
 const int2 fbSize = {700,230};
-const float3 lookFrom = {4.f,0.0f,0.2f};
-const float3 lookAt = {0.f,0.f,0.2f};
+const float3 lookFrom = {10.f,10.0f,10.f};
+const float3 lookAt = {0.f,0.f,1.f};
 const float3 lookUp = {0.f,0.f,1.f};
-const float cosFovy = 0.3f;
+const float cosFovy = 0.4f;
 
 #include <iostream>
 int main(int ac, char **av)
@@ -165,22 +179,23 @@ int main(int ac, char **av)
                         sizeof(TrianglesGeomData),
                         trianglesGeomVars,-1);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
-                           module,"TriangleMesh");
+                           module,"trianglesClosestHit");
 
-  GPRTVarDecl tetrahedraGeomVars[] = {
-    { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TetrahedraGeomData,index)},
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(TetrahedraGeomData,vertex)},
+  GPRTVarDecl spheresGeomVars[] = {
+    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(SpheresGeomData,vertex)},
+    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(SpheresGeomData,radius)},
+    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(SpheresGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
-  GPRTGeomType tetrahedraGeomType
+  GPRTGeomType spheresGeomType
     = gprtGeomTypeCreate(context,
                         GPRT_AABBS,
-                        sizeof(TrianglesGeomData),
-                        tetrahedraGeomVars,-1);
-  gprtGeomTypeSetIntersectionProg(tetrahedraGeomType,0,
-                           module,"TetrahedralMesh");
-  gprtGeomTypeSetClosestHitProg(tetrahedraGeomType,0,
-                           module,"TetrahedralMesh");
+                        sizeof(SpheresGeomData),
+                        spheresGeomVars,-1);
+  gprtGeomTypeSetClosestHitProg(spheresGeomType,0,
+                           module,"spheresClosestHit");
+  gprtGeomTypeSetIntersectionProg(spheresGeomType,0,
+                           module,"spheresIntersection");
 
   // ##################################################################
   // set up all the *GEOMS* we want to run that code on
@@ -191,45 +206,36 @@ int main(int ac, char **av)
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  Mesh<TeapotMesh> teapotMesh(context, trianglesGeomType, TeapotMesh{16}, float3(1,0,0));
-  teapotMesh.transform = mul(scaling_matrix(float3(.1,.1,.1)), teapotMesh.transform);
-  teapotMesh.transform = mul(rotation_matrix(rotation_quat(float3(0,0,1), 3.14f * .5f)), teapotMesh.transform);
-  GPRTBuffer triangleTransformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM_4X4, 1, &teapotMesh.transform);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&teapotMesh.accel);
-  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer, 1, sizeof(float4x4), 0);
-  gprtAccelBuild(context, trianglesTLAS);
+  #ifndef M_PI
+  #define M_PI 3.14
+  #endif
 
-  GPRTBuffer tetrahedraVertexBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,
-        tetrahedralMesh.NUM_VERTICES,tetrahedralMesh.vertices);
-  GPRTBuffer tetrahedraIndexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT4,
-        tetrahedralMesh.NUM_INDICES,tetrahedralMesh.indices);
-  GPRTBuffer tetrahedraAABBBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,
-        tetrahedralMesh.NUM_INDICES * 2,tetrahedralMesh.aabbs);
-  GPRTBuffer tetrahedraTransformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,
-        1,tetrahedralMesh.transform);
+  Mesh<DodecahedronMesh> dodecahedronMesh(context, trianglesGeomType, DodecahedronMesh{}, float3(1,0.,0.0), 
+    translation_matrix(float3(2*sin(2*M_PI*.33), 2*cos(2*M_PI*.33), 1.5f)));
+  Mesh<IcosahedronMesh> icosahedronMesh(context, trianglesGeomType, IcosahedronMesh{}, float3(0,1.0,0.0), 
+    translation_matrix(float3(2*sin(2*M_PI*.66), 2*cos(2*M_PI*.66), 1.5f)));
+  Mesh<IcoSphereMesh> icosphereMesh(context, trianglesGeomType, IcoSphereMesh{}, float3(0,0.0,1.0), 
+    translation_matrix(float3(2*sin(2*M_PI*1.0), 2*cos(2*M_PI*1.0), 1.5f)));
+  
+  Spheres<HelixPath> helixSpheresA(context, spheresGeomType, HelixPath{1.0, 1.0, 8}, 0.4, float3(1.0, 0.0, 0.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(4.0f, 4.0f, 4.0f)) ));
+  Spheres<HelixPath> helixSpheresB(context, spheresGeomType, HelixPath{1.0, 1.0, 16}, 0.3, float3(0.0, 1.0, 0.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(5.0f, 5.0f, 3.0f)) ));
+  Spheres<HelixPath> helixSpheresC(context, spheresGeomType, HelixPath{1.0, 1.0, 32}, 0.2, float3(0.0, 0.0, 1.0), 
+    mul(translation_matrix(float3(0.0f, 0.0f, 1.0f)), scaling_matrix(float3(6.0f, 6.0f, 2.0f)) ));
+
+  std::vector<GPRTGeom> triangleGeoms = {dodecahedronMesh.geometry, icosahedronMesh.geometry, icosphereMesh.geometry};
+  std::vector<GPRTGeom> pointGeoms = {helixSpheresA.geometry, helixSpheresB.geometry, helixSpheresC.geometry};
+  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context,triangleGeoms.size(),triangleGeoms.data());
+  GPRTAccel spheresBLAS = gprtAABBAccelCreate(context,pointGeoms.size(),pointGeoms.data());
+  std::vector<GPRTAccel> blas = {trianglesBLAS, spheresBLAS};
+  GPRTAccel TLAS = gprtInstanceAccelCreate(context,blas.size(),blas.data());
+  gprtAccelBuild(context, trianglesBLAS);
+  gprtAccelBuild(context, spheresBLAS);
+  gprtAccelBuild(context, TLAS);
 
   GPRTBuffer frameBuffer
     = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-
-  GPRTGeom tetrahedraGeom
-    = gprtGeomCreate(context,tetrahedraGeomType);
-  gprtAABBsSetPositions(tetrahedraGeom,tetrahedraAABBBuffer,
-                           tetrahedralMesh.NUM_INDICES,sizeof(float3) * 2,0);
-  gprtGeomSetBuffer(tetrahedraGeom,"vertex",tetrahedraVertexBuffer);
-  gprtGeomSetBuffer(tetrahedraGeom,"index",tetrahedraIndexBuffer);
-
-  GPRTAccel tetrahedraAccel = gprtAABBAccelCreate(context,1,&tetrahedraGeom);
-  gprtAccelBuild(context, tetrahedraAccel);
-  GPRTAccel tetrahedraTLAS = gprtInstanceAccelCreate(context,1,&tetrahedraAccel);
-  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer,
-    1, sizeof(float3x4), 0
-  );
-  gprtAccelBuild(context, tetrahedraTLAS);
 
   // ##################################################################
   // set miss and raygen program required for SBT
@@ -259,8 +265,7 @@ int main(int ac, char **av)
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
     { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
-    { "meshes",        GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,meshes)},
-    { "cells",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,cells)},
+    { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
     { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
     { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
     { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
@@ -270,15 +275,14 @@ int main(int ac, char **av)
 
   // ----------- create object  ----------------------------
   GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"simpleRayGen",
+    = gprtRayGenCreate(context,module,"raygen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
 
   // ----------- set variables  ----------------------------
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
-  gprtRayGenSetAccel(rayGen,"meshes", trianglesTLAS);
-  gprtRayGenSetAccel(rayGen,"cells", tetrahedraTLAS);
+  gprtRayGenSetAccel(rayGen,"world", TLAS);
 
   float3 camera_pos = lookFrom;
   float3 camera_d00
@@ -302,7 +306,7 @@ int main(int ac, char **av)
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
-    LOG("launching ...");
+  LOG("launching ...");
 
   gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
 
@@ -315,28 +319,27 @@ int main(int ac, char **av)
   stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
                  fb,int(fbSize.x) * sizeof(uint32_t));
   LOG_OK("written rendered frame buffer to file "<<outFileName);
-
+  
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
   LOG("cleaning up ...");
-
-  teapotMesh.cleanupMesh();
-  gprtBufferDestroy(triangleTransformBuffer);
-  gprtBufferDestroy(tetrahedraVertexBuffer);
-  gprtBufferDestroy(tetrahedraIndexBuffer);
-  gprtBufferDestroy(tetrahedraAABBBuffer);
-  gprtBufferDestroy(tetrahedraTransformBuffer);
+  
+  dodecahedronMesh.cleanup();
+  icosahedronMesh.cleanup();
+  icosphereMesh.cleanup();
+  helixSpheresA.cleanup();
+  helixSpheresB.cleanup();
+  helixSpheresC.cleanup();
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(tetrahedraAccel);
-  gprtAccelDestroy(trianglesTLAS);
-  gprtAccelDestroy(tetrahedraTLAS);
+  gprtAccelDestroy(trianglesBLAS);
+  gprtAccelDestroy(spheresBLAS);
+  gprtAccelDestroy(TLAS);
   gprtGeomTypeDestroy(trianglesGeomType);
-  gprtGeomDestroy(tetrahedraGeom);
-  gprtGeomTypeDestroy(tetrahedraGeomType);
+  gprtGeomTypeDestroy(spheresGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

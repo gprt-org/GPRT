@@ -96,11 +96,27 @@ Examples
       
       .. container:: descr
 
-         .. figure:: ./images/s07-multipleTrees.png
-            :target: examples/multipleTrees.html
+         .. figure:: ./images/s07-multipleGeometry.png
+            :target: examples/multipleGeometry.html
 
          :doc:`/editors/index`
-            Demonstrates how multiple trees can be used in the same program
+            Here we combine multiple geometries into the same bottom level tree
+
+      .. container:: descr
+
+         .. figure:: ./images/s08-multipleBLAS.png
+            :target: examples/multipleBLAS.html
+
+         :doc:`/editors/index`
+            Shows how bottom level trees of different types can be combined
+
+      .. container:: descr
+
+         .. figure:: ./images/s09-multipleTLAS.png
+            :target: examples/multipleTLAS.html
+
+         :doc:`/editors/index`
+            Demonstrates multiple top level trees in the same program
 ..       .. container:: descr
 
 ..          .. figure:: /images/index_scene.jpg
