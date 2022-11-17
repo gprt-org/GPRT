@@ -208,15 +208,14 @@ int main(int ac, char **av)
   GPRTAccel tetrahedraAccel = gprtAABBAccelCreate(context,1,&tetrahedraGeom);
   gprtAccelBuild(context, tetrahedraAccel);
   GPRTAccel tetrahedraTLAS = gprtInstanceAccelCreate(context,1,&tetrahedraAccel);
-  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer);
+  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer, 1, sizeof(float3x4), 0);
   gprtAccelBuild(context, tetrahedraTLAS);
 
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesAccel);
-  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer);
+  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer, 1, sizeof(float3x4), 0);
   gprtAccelBuild(context, trianglesTLAS);
-  
 
 
   // ##################################################################
