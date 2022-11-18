@@ -2134,18 +2134,6 @@ struct Context {
       if (accel->getType() == GPRT_INSTANCE_ACCEL) {
         InstanceAccel* tlas = (InstanceAccel*) accel;
         totalGeometries += tlas->getNumGeometries();
-        // // this is a problem, because instances here is a nullptr, set on device...
-        // for (int blasID = 0; blasID < tlas->instances.size(); ++blasID) {
-        //   Accel *blas = tlas->instances[blasID];
-        //   if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-        //     TriangleAccel *triAccel = (TriangleAccel*) blas;
-        //     totalGeometries += triAccel->geometries.size();
-        //   }
-        //   if (blas->getType() == GPRT_AABB_ACCEL) {
-        //     AABBAccel *aabbAccel = (AABBAccel*) blas;
-        //     totalGeometries += aabbAccel->geometries.size();
-        //   }
-        // }
       }
     }
 
