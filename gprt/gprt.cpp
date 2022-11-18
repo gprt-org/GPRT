@@ -531,7 +531,7 @@ struct Buffer {
         return 0;
       }
       else {
-        throw std::runtime_error("Could not find a matching memory type");
+        GPRT_RAISE("Could not find a matching memory type");
       }
     };
 
@@ -578,7 +578,7 @@ struct Buffer {
 
     // Attach the memory to the buffer object
     VkResult err = vkBindBufferMemory(device, buffer, memory, /* offset */ 0);
-    if (err) throw std::runtime_error("failed to bind buffer memory! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to bind buffer memory! : \n" + errorString(err));
 
     if (!hostVisible) {
       const VkMemoryPropertyFlags memoryPropertyFlags =
@@ -606,7 +606,7 @@ struct Buffer {
 
       // Attach the memory to the buffer object
       VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
-      if (err) throw std::runtime_error("failed to bind staging buffer memory! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
@@ -707,7 +707,7 @@ struct RayGen : public SBTEntry {
 
     VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
       NULL, &shaderModule);
-    if (err) throw std::runtime_error("failed to create shader module! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to create shader module! : \n" + errorString(err));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
@@ -1151,46 +1151,63 @@ struct TriangleAccel : public Accel {
       &accelerationStructureBuildSizesInfo
     );
     
-    accelBuffer = new Buffer(
-      physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-      // means we can use this buffer as a means of storing an acceleration structure
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
-      // means we can get this buffer's address with vkGetBufferDeviceAddress
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-      // means that this memory is stored directly on the device 
-      //  (rather than the host, or in a special host/device section)
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      accelerationStructureBuildSizesInfo.accelerationStructureSize
-    );
+    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize)
+    {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete(accelBuffer);
+      accelBuffer = nullptr;
+    }
 
-    scratchBuffer = new Buffer(
-      physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
-      // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
-      // means we can get this buffer's address with vkGetBufferDeviceAddress
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-      // means that this memory is stored directly on the device 
-      //  (rather than the host, or in a special host/device section)
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      accelerationStructureBuildSizesInfo.buildScratchSize
-    );
+    if (!accelBuffer) {
+      accelBuffer = new Buffer(
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+        // means we can use this buffer as a means of storing an acceleration structure
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        accelerationStructureBuildSizesInfo.accelerationStructureSize
+      );
 
-    VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
-    accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
-    accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-    accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    err = gprt::vkCreateAccelerationStructure(
-      logicalDevice,
-      &accelerationStructureCreateInfo, 
-      nullptr,
-      &accelerationStructure
-    );
-    if (err) GPRT_RAISE("failed to create acceleration structure for triangle accel build! : \n" + errorString(err));
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(
+        logicalDevice,
+        &accelerationStructureCreateInfo, 
+        nullptr,
+        &accelerationStructure
+      );
+      if (err) GPRT_RAISE("failed to create acceleration structure for triangle accel build! : \n" + errorString(err));
+    }
 
+    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize)
+    {
+      scratchBuffer->destroy();
+      delete(scratchBuffer);
+      scratchBuffer = nullptr;
+    }
 
-
-
+    if (!scratchBuffer) {
+      scratchBuffer = new Buffer(
+        physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+        // means that the buffer can be used in a VkDescriptorBufferInfo. // Is this required? If not, remove this...
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+        // means that this memory is stored directly on the device 
+        //  (rather than the host, or in a special host/device section)
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        accelerationStructureBuildSizesInfo.buildScratchSize
+      );
+    }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -1478,40 +1495,65 @@ struct AABBAccel : public Accel {
 };
 
 struct InstanceAccel : public Accel {
+  size_t numInstances;
   std::vector<Accel*> instances; 
+
+  // the total number of geometries referenced by this instance accel's BLASes
+  size_t numGeometries = -1;
 
   size_t instanceOffset = -1;
 
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
+  Buffer *instanceOffsetsBuffer = nullptr;
+
+  struct {
+    Buffer* buffer = nullptr;
+    size_t stride = 0;
+    size_t offset = 0;
+  } transforms;
 
   struct {
     Buffer* buffer = nullptr;
     // size_t stride = 0;
     // size_t offset = 0;
-  } transforms;
-  
+  } references;
+
+  struct {
+    Buffer* buffer = nullptr;
+    // size_t stride = 0;
+    // size_t offset = 0;
+  } offsets;
+
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
   InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
     size_t numInstances, GPRTAccel* instances) : Accel(physicalDevice, logicalDevice, commandBuffer, queue) 
   {
-    this->instances.resize(numInstances);
-    memcpy(this->instances.data(), instances, sizeof(GPRTAccel*) * numInstances);
+    this->numInstances = numInstances;
 
-    accelAddressesBuffer = new Buffer(
-      physicalDevice, logicalDevice, commandBuffer, queue,
-      // I guess I need this to use these buffers as input to tree builds?
-      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
-      // means we can get this buffer's address with vkGetBufferDeviceAddress
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
-      // means that this memory is stored directly on the device 
-      //  (rather than the host, or in a special host/device section)
-      // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
-      sizeof(uint64_t) * numInstances
-    );
+    if (instances) {
+      this->instances.resize(numInstances);
+      memcpy(this->instances.data(), instances, sizeof(GPRTAccel*) * numInstances);
+
+      // count number of geometry referenced.
+      size_t numGeometry = 0;
+      for (uint32_t j = 0; j < this->instances.size(); ++j) {
+        if (this->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
+          TriangleAccel *triangleAccel = (TriangleAccel*) this->instances[j];
+          numGeometry += triangleAccel->geometries.size();
+        }
+        else if (this->instances[j]->getType() == GPRT_AABB_ACCEL) {
+          AABBAccel *aabbAccel = (AABBAccel*) this->instances[j];
+          numGeometry += aabbAccel->geometries.size();
+        }
+        else {
+          GPRT_RAISE("Unaccounted for BLAS type!");
+        }
+      }
+      this->numGeometries = numGeometry;
+    }
 
     instancesBuffer = new Buffer(
       physicalDevice, logicalDevice, commandBuffer, queue,
@@ -1524,21 +1566,56 @@ struct InstanceAccel : public Accel {
       // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
       // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-      sizeof(VkAccelerationStructureInstanceKHR) * this->instances.size()
+      sizeof(VkAccelerationStructureInstanceKHR) * numInstances
     );
   };
   
   ~InstanceAccel() {};
 
   void setTransforms(
-    Buffer* transforms//,
+    Buffer* transforms,
+    size_t stride,
+    size_t offset
+    ) 
+  {
+    // assuming no motion blurred triangles for now, so we assume 1 transform per instance
+    this->transforms.buffer = transforms;
+    this->transforms.stride = stride;
+    this->transforms.offset = offset;
+  }
+
+  void setReferences(
+    Buffer* references = nullptr//,
     // size_t count,
     // size_t stride,
     // size_t offset
     ) 
   {
-    // assuming no motion blurred triangles for now, so we assume 1 transform per instance
-    this->transforms.buffer = transforms;
+    this->references.buffer = references;
+  }
+
+  void setOffsets(
+    Buffer* offsets = nullptr//,
+    // size_t count,
+    // size_t stride,
+    // size_t offset
+    ) 
+  {
+    this->offsets.buffer = offsets;
+  }
+
+  void setNumGeometries(
+    size_t numGeometries
+  )
+  {
+    this->numGeometries = numGeometries;
+  }
+
+  size_t getNumGeometries() {
+    if (this->numGeometries == -1) {
+      GPRT_RAISE("Error, numGeometries for this instance must be set by the user!");
+    }
+    return this->numGeometries;
   }
 
   AccelType getType() {return GPRT_INSTANCE_ACCEL;}
@@ -1546,40 +1623,123 @@ struct InstanceAccel : public Accel {
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel*> accels, uint32_t numRayTypes) {
     VkResult err;
 
-    std::vector<uint64_t> addresses(instances.size());
-    for (uint32_t i = 0; i < instances.size(); ++i) 
-      addresses[i] = this->instances[i]->address;
-    accelAddressesBuffer->map();
-    memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * instances.size());
-
-    // The instance shader binding table record offset is the total number 
-    // of geometries referenced by all instances up until this instance tree
-    // multiplied by the number of ray types.
+    // Compute the instance offset for the SBT record. 
+    //   The instance shader binding table record offset is the total number 
+    //   of geometries referenced by all instances up until this instance tree
+    //   multiplied by the number of ray types.
     uint64_t instanceShaderBindingTableRecordOffset = 0;
     for (uint32_t i = 0; i < accels.size(); ++i) {
       if (accels[i] == this) break;
       if (accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
         InstanceAccel *instanceAccel = (InstanceAccel*) accels[i];
-
-        uint64_t numGeometry = 0;
-        for (uint32_t j = 0; j < instanceAccel->instances.size(); ++j) {
-          if (instanceAccel->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
-            TriangleAccel *triangleAccel = (TriangleAccel*) instanceAccel->instances[j];
-            numGeometry += triangleAccel->geometries.size();
-          }
-          else if (instanceAccel->instances[j]->getType() == GPRT_AABB_ACCEL) {
-            AABBAccel *aabbAccel = (AABBAccel*) instanceAccel->instances[j];
-            numGeometry += aabbAccel->geometries.size();
-          }
-          else {
-            throw std::runtime_error("Unaccounted for tree type in instance SBT offset!");
-          }
-        }
+        size_t numGeometry = instanceAccel->getNumGeometries();
         instanceShaderBindingTableRecordOffset += numGeometry * numRayTypes;
       }
     }
-
     instanceOffset = instanceShaderBindingTableRecordOffset;
+    
+    // No instance addressed provided, so we need to supply our own.
+    uint64_t referencesAddress;
+    if (references.buffer == nullptr) {
+      // delete if not big enough
+      if (accelAddressesBuffer && accelAddressesBuffer->size != numInstances * sizeof(uint64_t))
+      {
+        accelAddressesBuffer->destroy();
+        delete accelAddressesBuffer;
+        accelAddressesBuffer = nullptr;
+      }
+      
+      // make buffer if not made yet
+      if (accelAddressesBuffer == nullptr) {
+        accelAddressesBuffer = new Buffer(
+          physicalDevice, logicalDevice, commandBuffer, queue,
+          // I guess I need this to use these buffers as input to tree builds?
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          //  (rather than the host, or in a special host/device section)
+          // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+          sizeof(uint64_t) * numInstances
+        );
+      }
+
+      // transfer over addresses
+      std::vector<uint64_t> addresses(numInstances);
+      for (uint32_t i = 0; i < numInstances; ++i) 
+        addresses[i] = this->instances[i]->address;
+      accelAddressesBuffer->map();
+      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
+      accelAddressesBuffer->unmap();
+      referencesAddress = accelAddressesBuffer->address;
+    }
+    // Instance acceleration structure references provided by the user
+    else {
+      referencesAddress = references.buffer->address;
+    }
+
+    // No instance offsets provided, so we need to supply our own.
+    uint64_t instanceOffsetsAddress;
+    if (offsets.buffer == nullptr) {
+      // delete if not big enough
+      if (instanceOffsetsBuffer && instanceOffsetsBuffer->size != numInstances * sizeof(uint64_t))
+      {
+        instanceOffsetsBuffer->destroy();
+        delete instanceOffsetsBuffer;
+        instanceOffsetsBuffer = nullptr;
+      }
+      
+      // make buffer if not made yet
+      if (instanceOffsetsBuffer == nullptr) {
+        instanceOffsetsBuffer = new Buffer(
+          physicalDevice, logicalDevice, commandBuffer, queue,
+          // I guess I need this to use these buffers as input to tree builds?
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | 
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
+          // means that this memory is stored directly on the device 
+          // (rather than the host, or in a special host/device section)
+          // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
+          sizeof(uint64_t) * numInstances
+        );
+      }
+
+      // transfer over offsets
+      std::vector<int32_t> blasOffsets(numInstances);
+      int offset = 0;
+      for (uint32_t i = 0; i < numInstances; ++i) {
+        blasOffsets[i] = offset;
+
+        if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) 
+        {
+          TriangleAccel* triAccel = (TriangleAccel*)this->instances[i];
+          offset += triAccel->geometries.size() * numRayTypes;
+        } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
+          AABBAccel* aabbAccel = (AABBAccel*)this->instances[i];
+          offset += aabbAccel->geometries.size() * numRayTypes;
+        } else {
+          GPRT_RAISE("Error, unknown instance type");
+        }
+      }
+      instanceOffsetsBuffer->map();
+      memcpy(instanceOffsetsBuffer->mapped, blasOffsets.data(), sizeof(int32_t) * numInstances);
+      instanceOffsetsBuffer->unmap();
+      instanceOffsetsAddress = instanceOffsetsBuffer->address;
+    }
+    // Instance acceleration structure references provided by the user
+    else {
+      instanceOffsetsAddress = offsets.buffer->address;
+    }
+
+    // No instance addressed provided, so we assume identity.
+    uint64_t transformBufferAddress;
+    if (transforms.buffer == nullptr) {
+      transformBufferAddress = -1;
+    } else {
+      transformBufferAddress = transforms.buffer->address;
+    }
 
     // Use a compute shader to copy transforms into instances buffer
     VkCommandBufferBeginInfo cmdBufInfo{};
@@ -1588,13 +1748,19 @@ struct InstanceAccel : public Accel {
       uint64_t transformBufferAddr;
       uint64_t accelReferencesAddr;
       uint64_t instanceShaderBindingTableRecordOffset;
-      uint64_t pad[16-4];
+      uint64_t transformOffset;
+      uint64_t transformStride;
+      uint64_t instanceOffsetsBufferAddr;
+      uint64_t pad[16-7];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
-    pushConstants.transformBufferAddr = transforms.buffer->address;
-    pushConstants.accelReferencesAddr = accelAddressesBuffer->address;
+    pushConstants.transformBufferAddr = transformBufferAddress;
+    pushConstants.accelReferencesAddr = referencesAddress;
     pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
+    pushConstants.transformOffset = transforms.offset;
+    pushConstants.transformStride = transforms.stride;
+    pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -1603,7 +1769,7 @@ struct InstanceAccel : public Accel {
     );
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["gprtFillInstanceData"].pipeline);
     // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-    vkCmdDispatch(commandBuffer, instances.size(), 1, 1);
+    vkCmdDispatch(commandBuffer, numInstances, 1, 1);
     err = vkEndCommandBuffer(commandBuffer);
 
     VkSubmitInfo submitInfo;
@@ -1644,7 +1810,7 @@ struct InstanceAccel : public Accel {
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
     accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
-    uint32_t primitive_count = instances.size();
+    uint32_t primitive_count = numInstances;
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
     accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
@@ -1656,8 +1822,7 @@ struct InstanceAccel : public Accel {
       &accelerationStructureBuildSizesInfo);
     
 
-    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize)
-    {
+    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       // Destroy old accel handle too
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
       accelerationStructure = VK_NULL_HANDLE;
@@ -1725,7 +1890,7 @@ struct InstanceAccel : public Accel {
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
 
     VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
-    accelerationStructureBuildRangeInfo.primitiveCount = instances.size();
+    accelerationStructureBuildRangeInfo.primitiveCount = numInstances;
     accelerationStructureBuildRangeInfo.primitiveOffset = 0;
     accelerationStructureBuildRangeInfo.firstVertex = 0;
     accelerationStructureBuildRangeInfo.transformOffset = 0;
@@ -1806,6 +1971,12 @@ struct InstanceAccel : public Accel {
       accelAddressesBuffer->destroy();
       delete accelAddressesBuffer;
       accelAddressesBuffer = nullptr;
+    }
+
+    if (instanceOffsetsBuffer) {
+      instanceOffsetsBuffer->destroy();
+      delete instanceOffsetsBuffer;
+      instanceOffsetsBuffer = nullptr;
     }
   };
 };
@@ -1962,17 +2133,7 @@ struct Context {
       if (!accel) continue;
       if (accel->getType() == GPRT_INSTANCE_ACCEL) {
         InstanceAccel* tlas = (InstanceAccel*) accel;
-        for (int blasID = 0; blasID < tlas->instances.size(); ++blasID) {
-          Accel *blas = tlas->instances[blasID];
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-            TriangleAccel *triAccel = (TriangleAccel*) blas;
-            totalGeometries += triAccel->geometries.size();
-          }
-          if (blas->getType() == GPRT_AABB_ACCEL) {
-            AABBAccel *aabbAccel = (AABBAccel*) blas;
-            totalGeometries += aabbAccel->geometries.size();
-          }
-        }
+        totalGeometries += tlas->getNumGeometries();
       }
     }
 
@@ -2091,7 +2252,7 @@ struct Context {
 
     err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
     if (err) {
-      throw std::runtime_error("failed to create instance! : \n" + errorString(err));
+      GPRT_RAISE("failed to create instance! : \n" + errorString(err));
     }
 
     // err = createDebugUtilsMessenger(instance,
@@ -2101,7 +2262,7 @@ struct Context {
     //     &instance.debug_messenger,
     //     info.allocation_callbacks);
     // if (err) {
-    //   throw std::runtime_error("failed to debug messenger callback! : \n" + errorString(err));
+    //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
     // }
 
     /// 2. Select a Physical Device
@@ -2129,13 +2290,13 @@ struct Context {
     // Get number of available physical devices
     VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
     if (gpuCount == 0) {
-      throw std::runtime_error("No device with Vulkan support found : \n" + errorString(err));
+      GPRT_RAISE("No device with Vulkan support found : \n" + errorString(err));
     }
     // Enumerate devices
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
     err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
     if (err) {
-      throw std::runtime_error("Could not enumerate physical devices : \n" + errorString(err));
+      GPRT_RAISE("Could not enumerate physical devices : \n" + errorString(err));
     }
 
     // GPU selection
@@ -2260,7 +2421,7 @@ struct Context {
         for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
           if (queueFamilyProperties[i].queueFlags & queueFlags)
             return i;
-        throw std::runtime_error("Could not find a matching queue family index");
+        GPRT_RAISE("Could not find a matching queue family index");
       };
 
     const float defaultQueuePriority(0.0f);
@@ -2428,7 +2589,7 @@ struct Context {
     // this->enabledFeatures = enabledFeatures;
     err = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
     if (err) {
-      throw std::runtime_error("Could not create logical devices : \n" + errorString(err));
+      GPRT_RAISE("Could not create logical devices : \n" + errorString(err));
     }
 
     // Get the ray tracing and acceleration structure related function pointers required by this sample
@@ -2472,7 +2633,7 @@ struct Context {
     queryPoolCreateInfo.queryCount = 2; // for now, just two queries, a before and an after.
 
     err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
-    if (err) throw std::runtime_error("Failed to create time query pool!");
+    if (err) GPRT_RAISE("Failed to create time query pool!");
 
     /// 5. Allocate command buffers
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
@@ -2482,15 +2643,15 @@ struct Context {
 
     cmdBufAllocateInfo.commandPool = graphicsCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
-    if (err) throw std::runtime_error("Could not create graphics command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create graphics command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = computeCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
-    if (err) throw std::runtime_error("Could not create compute command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create compute command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = transferCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
-    if (err) throw std::runtime_error("Could not create transfer command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create transfer command buffer : \n" + errorString(err));
 
     /// 6. Get queue handles
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
@@ -2553,7 +2714,7 @@ struct Context {
 
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
-    if (err) throw std::runtime_error("failed to get ray tracing shader group handles! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
     const VkBufferUsageFlags bufferUsageFlags = 
       // means we can use this buffer as a SBT
@@ -2655,11 +2816,17 @@ struct Context {
     // Hit records
     if (numHitRecords > 0)
     {
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      // Go over all TLAS by order they were created
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) { 
         Accel *tlas = accels[tlasID];
         if (!tlas) continue;
         if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
           InstanceAccel *instanceAccel = (InstanceAccel*) tlas;
+          // this is an issue, because if instances can be set on device, we don't
+          // have a list of instances we can iterate through and copy the SBT data...
+          // So, if we have a bunch of instances set by reference on device, 
+          // we need to eventually do something smarter here...
+          size_t geomIDOffset = 0;
           for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
             
             Accel *blas = instanceAccel->instances[blasID];
@@ -2674,7 +2841,8 @@ struct Context {
                   size_t handleStride = handleSize;
 
                   // First, copy handle
-                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  // Account for all prior instance's geometries and for prior BLAS's geometry
+                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                   size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
                   size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -2689,6 +2857,7 @@ struct Context {
                   }
                 }
               }
+              geomIDOffset += triAccel->geometries.size();
             }
 
             else if (blas->getType() == GPRT_AABB_ACCEL) {
@@ -2702,7 +2871,8 @@ struct Context {
                   size_t handleStride = handleSize;
 
                   // First, copy handle
-                  size_t instanceOffset = instanceAccel->instanceOffset;
+                  // Account for all prior instance's geometries and for prior BLAS's geometry
+                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                   size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) + recordStride * (numComputes + numRayGens + numMissProgs);
                   size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) + handleStride * (numComputes + numRayGens + numMissProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -2717,10 +2887,11 @@ struct Context {
                   }
                 }
               }
+              geomIDOffset += aabbAccel->geometries.size();
             }
             
             else {
-              throw std::runtime_error("Unaccounted for BLAS type!");
+              GPRT_RAISE("Unaccounted for BLAS type!");
             }
           }
         }
@@ -2819,7 +2990,7 @@ struct Context {
 
     // Hit groups
 
-    // Go over all TLAS
+    // Go over all TLAS by order they were created
     for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
       Accel *tlas = accels[tlasID];
       if (!tlas) continue;
@@ -2900,7 +3071,7 @@ struct Context {
             }
           }
           else {
-            throw std::runtime_error("Unaccounted for BLAS type!");
+            GPRT_RAISE("Unaccounted for BLAS type!");
           }
         }
       }
@@ -2927,7 +3098,7 @@ struct Context {
       nullptr, &pipeline
     );
     if (err) {
-      throw std::runtime_error("failed to create ray tracing pipeline! : \n" + errorString(err));
+      GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
     }
   }
 
@@ -3515,17 +3686,55 @@ gprtInstanceAccelCreate(GPRTContext _context,
 }
 
 GPRT_API void 
+gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float3x4), 0);
+}
+
+GPRT_API void 
+gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float4x4), 0);
+}
+
+GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
-                               GPRTBuffer _transforms//,
+                               GPRTBuffer _transforms,
+                               size_t stride,
+                               size_t offset
+                               )
+{
+  LOG_API_CALL();
+  InstanceAccel *accel = (InstanceAccel*)instanceAccel;
+  Buffer *transforms = (Buffer*)_transforms;
+  accel->setTransforms(transforms, stride, offset);
+  LOG("Setting instance accel transforms...");
+}
+
+GPRT_API void 
+gprtInstanceAccelSetReferences(GPRTAccel instanceAccel,
+                               GPRTBuffer _references//,
                                // size_t offset, // maybe I can support these too?
                                // size_t stride  // maybe I can support these too?
                                )
 {
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel*)instanceAccel;
-  Buffer *transforms = (Buffer*)_transforms;
-  accel->setTransforms(transforms);
-  LOG("Setting instance accel transforms...");
+  Buffer *references = (Buffer*)_references;
+  accel->setReferences(references);
+  LOG("Setting instance accel references...");
+}
+
+GPRT_API void 
+gprtInstanceAccelSetNumGeometries(GPRTAccel instanceAccel, 
+                                  size_t numGeometries)
+{
+  LOG_API_CALL();
+  InstanceAccel *accel = (InstanceAccel*)instanceAccel;
+  accel->setNumGeometries(numGeometries);
+  LOG("Setting instance accel references...");
 }
 
 GPRT_API void
@@ -3551,6 +3760,12 @@ GPRT_API void gprtAccelBuild(GPRTContext _context, GPRTAccel _accel)
 GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
 {
   GPRT_NOTIMPLEMENTED;
+}
+
+GPRT_API uint64_t gprtAccelGetReference(GPRTAccel _accel)
+{
+  Accel *accel = (Accel*)_accel;
+  return uint64_t(accel->address);
 }
 
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext _context,
@@ -3849,7 +4064,7 @@ GPRT_API float gprtEndProfile(GPRTContext _context)
 
   uint64_t buffer[2];
   VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2, buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-  if (result != VK_SUCCESS) throw std::runtime_error("Failed to receive query results!");
+  if (result != VK_SUCCESS) GPRT_RAISE("Failed to receive query results!");
   uint64_t timeResults = buffer[1] - buffer[0];
   float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
   return time;

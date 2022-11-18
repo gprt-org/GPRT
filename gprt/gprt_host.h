@@ -294,6 +294,8 @@ typedef enum
    
    /* A type matching VkTransformMatrixKHR, row major 3x4 */
    GPRT_TRANSFORM=1400,
+   GPRT_TRANSFORM_3X4=GPRT_TRANSFORM,
+   GPRT_TRANSFORM_4X4=1401,
 
    /*! at least for now, use that for buffers with user-defined types:
      type then is "GPRT_USER_TYPE_BEGIN+sizeof(elementtype). Note
@@ -379,6 +381,8 @@ typedef enum
 
     else if (type == GPRT_ACCEL) return 2 * sizeof(uint64_t);
     else if (type == GPRT_TRANSFORM) return sizeof(float) * 3 * 4;
+    else if (type == GPRT_TRANSFORM_3X4) return sizeof(float) * 3 * 4;
+    else if (type == GPRT_TRANSFORM_4X4) return sizeof(float) * 4 * 4;
 
     // User Types have size encoded in their type enum
     else if (type > GPRT_USER_TYPE_BEGIN) return type - GPRT_USER_TYPE_BEGIN;
@@ -595,13 +599,6 @@ gprtTrianglesAccelCreate(GPRTContext context,
                             GPRTGeom   *arrayOfChildGeoms,
                             unsigned int flags GPRT_IF_CPP(=0));
 
-GPRT_API void 
-gprtTrianglesAccelSetTransforms(GPRTAccel trianglesAccel,
-                                GPRTBuffer transforms//,
-                                // size_t offset, // maybe I can support these too?
-                                // size_t stride  // maybe I can support these too?
-                                );
-
 // // ------------------------------------------------------------------
 // /*! create a new acceleration structure for "curves" geometries.
 
@@ -645,10 +642,18 @@ gprtInstanceAccelCreate(GPRTContext context,
 
 GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
-                               GPRTBuffer transforms//,
-                               // size_t offset, // maybe I can support these too?
-                               // size_t stride  // maybe I can support these too?
+                               GPRTBuffer transforms,
+                               size_t stride,
+                               size_t offset
                                );
+
+GPRT_API void 
+gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms);
+
+GPRT_API void 
+gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms);
 
 /*! sets the list of IDs to use for the child instnaces. By default
     the instance ID of child #i is simply i, but optix allows to
@@ -743,6 +748,9 @@ gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 GPRT_API void
 gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
+GPRT_API void
+gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, int dims_x);
 
 /*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */

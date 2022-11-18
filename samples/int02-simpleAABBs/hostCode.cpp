@@ -140,7 +140,7 @@ int main(int ac, char **av)
   gprtAccelBuild(context, aabbAccel);
 
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
-  gprtInstanceAccelSetTransforms(world, transformBuffer);
+  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
   // ##################################################################
