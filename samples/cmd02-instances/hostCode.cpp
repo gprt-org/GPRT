@@ -164,7 +164,7 @@ int main(int ac, char **av)
   };
 
   GPRTAccel world = gprtInstanceAccelCreate(context,NUM_INSTANCES,triangleAccelRefs);
-  gprtInstanceAccelSetTransforms(world, transformBuffer, 1, sizeof(float3x4), 0);
+  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
   // ##################################################################

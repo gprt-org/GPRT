@@ -531,7 +531,7 @@ struct Buffer {
         return 0;
       }
       else {
-        throw std::runtime_error("Could not find a matching memory type");
+        GPRT_RAISE("Could not find a matching memory type");
       }
     };
 
@@ -578,7 +578,7 @@ struct Buffer {
 
     // Attach the memory to the buffer object
     VkResult err = vkBindBufferMemory(device, buffer, memory, /* offset */ 0);
-    if (err) throw std::runtime_error("failed to bind buffer memory! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to bind buffer memory! : \n" + errorString(err));
 
     if (!hostVisible) {
       const VkMemoryPropertyFlags memoryPropertyFlags =
@@ -606,7 +606,7 @@ struct Buffer {
 
       // Attach the memory to the buffer object
       VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
-      if (err) throw std::runtime_error("failed to bind staging buffer memory! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
@@ -707,7 +707,7 @@ struct RayGen : public SBTEntry {
 
     VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo,
       NULL, &shaderModule);
-    if (err) throw std::runtime_error("failed to create shader module! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to create shader module! : \n" + errorString(err));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
@@ -1549,7 +1549,7 @@ struct InstanceAccel : public Accel {
           numGeometry += aabbAccel->geometries.size();
         }
         else {
-          throw std::runtime_error("Unaccounted for BLAS type!");
+          GPRT_RAISE("Unaccounted for BLAS type!");
         }
       }
       this->numGeometries = numGeometry;
@@ -1574,14 +1574,10 @@ struct InstanceAccel : public Accel {
 
   void setTransforms(
     Buffer* transforms,
-    size_t count,
     size_t stride,
     size_t offset
     ) 
   {
-    if (count != this->numInstances) {
-      throw std::runtime_error("Error, transform count must match number of instances!");
-    }
     // assuming no motion blurred triangles for now, so we assume 1 transform per instance
     this->transforms.buffer = transforms;
     this->transforms.stride = stride;
@@ -1617,7 +1613,7 @@ struct InstanceAccel : public Accel {
 
   size_t getNumGeometries() {
     if (this->numGeometries == -1) {
-      throw std::runtime_error("Error, numGeometries for this instance must be set by the user!");
+      GPRT_RAISE("Error, numGeometries for this instance must be set by the user!");
     }
     return this->numGeometries;
   }
@@ -1703,7 +1699,7 @@ struct InstanceAccel : public Accel {
           // means we can get this buffer's address with vkGetBufferDeviceAddress
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
           // means that this memory is stored directly on the device 
-          //  (rather than the host, or in a special host/device section)
+          // (rather than the host, or in a special host/device section)
           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
           sizeof(uint64_t) * numInstances
@@ -1724,7 +1720,7 @@ struct InstanceAccel : public Accel {
           AABBAccel* aabbAccel = (AABBAccel*)this->instances[i];
           offset += aabbAccel->geometries.size() * numRayTypes;
         } else {
-          throw std::runtime_error("Error, unknown instance type");
+          GPRT_RAISE("Error, unknown instance type");
         }
       }
       instanceOffsetsBuffer->map();
@@ -2138,18 +2134,6 @@ struct Context {
       if (accel->getType() == GPRT_INSTANCE_ACCEL) {
         InstanceAccel* tlas = (InstanceAccel*) accel;
         totalGeometries += tlas->getNumGeometries();
-        // // this is a problem, because instances here is a nullptr, set on device...
-        // for (int blasID = 0; blasID < tlas->instances.size(); ++blasID) {
-        //   Accel *blas = tlas->instances[blasID];
-        //   if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-        //     TriangleAccel *triAccel = (TriangleAccel*) blas;
-        //     totalGeometries += triAccel->geometries.size();
-        //   }
-        //   if (blas->getType() == GPRT_AABB_ACCEL) {
-        //     AABBAccel *aabbAccel = (AABBAccel*) blas;
-        //     totalGeometries += aabbAccel->geometries.size();
-        //   }
-        // }
       }
     }
 
@@ -2268,7 +2252,7 @@ struct Context {
 
     err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
     if (err) {
-      throw std::runtime_error("failed to create instance! : \n" + errorString(err));
+      GPRT_RAISE("failed to create instance! : \n" + errorString(err));
     }
 
     // err = createDebugUtilsMessenger(instance,
@@ -2278,7 +2262,7 @@ struct Context {
     //     &instance.debug_messenger,
     //     info.allocation_callbacks);
     // if (err) {
-    //   throw std::runtime_error("failed to debug messenger callback! : \n" + errorString(err));
+    //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
     // }
 
     /// 2. Select a Physical Device
@@ -2306,13 +2290,13 @@ struct Context {
     // Get number of available physical devices
     VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
     if (gpuCount == 0) {
-      throw std::runtime_error("No device with Vulkan support found : \n" + errorString(err));
+      GPRT_RAISE("No device with Vulkan support found : \n" + errorString(err));
     }
     // Enumerate devices
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
     err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
     if (err) {
-      throw std::runtime_error("Could not enumerate physical devices : \n" + errorString(err));
+      GPRT_RAISE("Could not enumerate physical devices : \n" + errorString(err));
     }
 
     // GPU selection
@@ -2437,7 +2421,7 @@ struct Context {
         for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
           if (queueFamilyProperties[i].queueFlags & queueFlags)
             return i;
-        throw std::runtime_error("Could not find a matching queue family index");
+        GPRT_RAISE("Could not find a matching queue family index");
       };
 
     const float defaultQueuePriority(0.0f);
@@ -2605,7 +2589,7 @@ struct Context {
     // this->enabledFeatures = enabledFeatures;
     err = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
     if (err) {
-      throw std::runtime_error("Could not create logical devices : \n" + errorString(err));
+      GPRT_RAISE("Could not create logical devices : \n" + errorString(err));
     }
 
     // Get the ray tracing and acceleration structure related function pointers required by this sample
@@ -2649,7 +2633,7 @@ struct Context {
     queryPoolCreateInfo.queryCount = 2; // for now, just two queries, a before and an after.
 
     err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
-    if (err) throw std::runtime_error("Failed to create time query pool!");
+    if (err) GPRT_RAISE("Failed to create time query pool!");
 
     /// 5. Allocate command buffers
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
@@ -2659,15 +2643,15 @@ struct Context {
 
     cmdBufAllocateInfo.commandPool = graphicsCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
-    if (err) throw std::runtime_error("Could not create graphics command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create graphics command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = computeCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
-    if (err) throw std::runtime_error("Could not create compute command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create compute command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = transferCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
-    if (err) throw std::runtime_error("Could not create transfer command buffer : \n" + errorString(err));
+    if (err) GPRT_RAISE("Could not create transfer command buffer : \n" + errorString(err));
 
     /// 6. Get queue handles
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
@@ -2730,7 +2714,7 @@ struct Context {
 
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize, shaderHandleStorage.data());
-    if (err) throw std::runtime_error("failed to get ray tracing shader group handles! : \n" + errorString(err));
+    if (err) GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
     const VkBufferUsageFlags bufferUsageFlags = 
       // means we can use this buffer as a SBT
@@ -2907,7 +2891,7 @@ struct Context {
             }
             
             else {
-              throw std::runtime_error("Unaccounted for BLAS type!");
+              GPRT_RAISE("Unaccounted for BLAS type!");
             }
           }
         }
@@ -3087,7 +3071,7 @@ struct Context {
             }
           }
           else {
-            throw std::runtime_error("Unaccounted for BLAS type!");
+            GPRT_RAISE("Unaccounted for BLAS type!");
           }
         }
       }
@@ -3114,7 +3098,7 @@ struct Context {
       nullptr, &pipeline
     );
     if (err) {
-      throw std::runtime_error("failed to create ray tracing pipeline! : \n" + errorString(err));
+      GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
     }
   }
 
@@ -3702,9 +3686,22 @@ gprtInstanceAccelCreate(GPRTContext _context,
 }
 
 GPRT_API void 
+gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float3x4), 0);
+}
+
+GPRT_API void 
+gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float4x4), 0);
+}
+
+GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
                                GPRTBuffer _transforms,
-                               size_t count,
                                size_t stride,
                                size_t offset
                                )
@@ -3712,7 +3709,7 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel*)instanceAccel;
   Buffer *transforms = (Buffer*)_transforms;
-  accel->setTransforms(transforms, count, stride, offset);
+  accel->setTransforms(transforms, stride, offset);
   LOG("Setting instance accel transforms...");
 }
 
@@ -4067,7 +4064,7 @@ GPRT_API float gprtEndProfile(GPRTContext _context)
 
   uint64_t buffer[2];
   VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2, buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-  if (result != VK_SUCCESS) throw std::runtime_error("Failed to receive query results!");
+  if (result != VK_SUCCESS) GPRT_RAISE("Failed to receive query results!");
   uint64_t timeResults = buffer[1] - buffer[0];
   float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
   return time;

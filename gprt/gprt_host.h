@@ -599,14 +599,6 @@ gprtTrianglesAccelCreate(GPRTContext context,
                             GPRTGeom   *arrayOfChildGeoms,
                             unsigned int flags GPRT_IF_CPP(=0));
 
-GPRT_API void 
-gprtTrianglesAccelSetTransforms(GPRTAccel trianglesAccel,
-                                GPRTDataType type,
-                                GPRTBuffer transforms//,
-                                // size_t offset, // maybe I can support these too?
-                                // size_t stride  // maybe I can support these too?
-                                );
-
 // // ------------------------------------------------------------------
 // /*! create a new acceleration structure for "curves" geometries.
 
@@ -651,10 +643,17 @@ gprtInstanceAccelCreate(GPRTContext context,
 GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
                                GPRTBuffer transforms,
-                               size_t count,
                                size_t stride,
                                size_t offset
                                );
+
+GPRT_API void 
+gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms);
+
+GPRT_API void 
+gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms);
 
 /*! sets the list of IDs to use for the child instnaces. By default
     the instance ID of child #i is simply i, but optix allows to

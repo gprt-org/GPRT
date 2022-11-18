@@ -197,7 +197,7 @@ int main(int ac, char **av)
   GPRTBuffer triangleTransformBuffer
     = gprtDeviceBufferCreate(context,GPRT_TRANSFORM_4X4, 1, &teapotMesh.transform);
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&teapotMesh.accel);
-  gprtInstanceAccelSetTransforms(trianglesTLAS, triangleTransformBuffer, 1, sizeof(float4x4), 0);
+  gprtInstanceAccelSet3x4Transforms(trianglesTLAS, triangleTransformBuffer);
   gprtAccelBuild(context, trianglesTLAS);
 
   GPRTBuffer tetrahedraVertexBuffer
@@ -226,9 +226,7 @@ int main(int ac, char **av)
   GPRTAccel tetrahedraAccel = gprtAABBAccelCreate(context,1,&tetrahedraGeom);
   gprtAccelBuild(context, tetrahedraAccel);
   GPRTAccel tetrahedraTLAS = gprtInstanceAccelCreate(context,1,&tetrahedraAccel);
-  gprtInstanceAccelSetTransforms(tetrahedraTLAS, tetrahedraTransformBuffer,
-    1, sizeof(float3x4), 0
-  );
+  gprtInstanceAccelSet3x4Transforms(tetrahedraTLAS, tetrahedraTransformBuffer);
   gprtAccelBuild(context, tetrahedraTLAS);
 
   // ##################################################################
