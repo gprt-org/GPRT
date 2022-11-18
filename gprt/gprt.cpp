@@ -1703,7 +1703,7 @@ struct InstanceAccel : public Accel {
           // means we can get this buffer's address with vkGetBufferDeviceAddress
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, 
           // means that this memory is stored directly on the device 
-          //  (rather than the host, or in a special host/device section)
+          // (rather than the host, or in a special host/device section)
           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work on AMD)
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
           sizeof(uint64_t) * numInstances
