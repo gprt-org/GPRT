@@ -1574,14 +1574,10 @@ struct InstanceAccel : public Accel {
 
   void setTransforms(
     Buffer* transforms,
-    size_t count,
     size_t stride,
     size_t offset
     ) 
   {
-    if (count != this->numInstances) {
-      GPRT_RAISE("Error, transform count must match number of instances!");
-    }
     // assuming no motion blurred triangles for now, so we assume 1 transform per instance
     this->transforms.buffer = transforms;
     this->transforms.stride = stride;
@@ -3702,9 +3698,22 @@ gprtInstanceAccelCreate(GPRTContext _context,
 }
 
 GPRT_API void 
+gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float3x4), 0);
+}
+
+GPRT_API void 
+gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
+                                  GPRTBuffer transforms)
+{
+  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float4x4), 0);
+}
+
+GPRT_API void 
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
                                GPRTBuffer _transforms,
-                               size_t count,
                                size_t stride,
                                size_t offset
                                )
@@ -3712,7 +3721,7 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel*)instanceAccel;
   Buffer *transforms = (Buffer*)_transforms;
-  accel->setTransforms(transforms, count, stride, offset);
+  accel->setTransforms(transforms, stride, offset);
   LOG("Setting instance accel transforms...");
 }
 
