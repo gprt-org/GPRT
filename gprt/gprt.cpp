@@ -780,9 +780,9 @@ struct GeomType : public SBTEntry {
   std::vector<std::string> anyHitShaderEntryPoints;
   std::vector<std::string> intersectionShaderEntryPoints;
   
-  bool closestHitShadersUsed = false;
-  bool intersectionShadersUsed = false;
-  bool anyHitShadersUsed = false;
+  std::vector<bool> closestHitShaderUsed;
+  std::vector<bool> intersectionShaderUsed;
+  std::vector<bool> anyHitShaderUsed;
   
   GeomType(VkDevice  _logicalDevice,
             uint32_t numRayTypes,
@@ -797,6 +797,10 @@ struct GeomType : public SBTEntry {
     closestHitShaderEntryPoints.resize(numRayTypes, {});
     anyHitShaderEntryPoints.resize(numRayTypes, {});
     intersectionShaderEntryPoints.resize(numRayTypes, {});
+
+    closestHitShaderUsed.resize(numRayTypes, false);
+    intersectionShaderUsed.resize(numRayTypes, false);
+    anyHitShaderUsed.resize(numRayTypes, false);
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -814,7 +818,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    closestHitShadersUsed = true;
+    closestHitShaderUsed[rayType] = true;
     closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
     auto binary = module->getBinary("CLOSESTHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -837,7 +841,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    anyHitShadersUsed = true;
+    anyHitShaderUsed[rayType] = true;
     anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
     auto binary = module->getBinary("ANYHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -860,7 +864,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    intersectionShadersUsed = true;
+    intersectionShaderUsed[rayType] = true;
     intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
     auto binary = module->getBinary("INTERSECTION");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -3017,17 +3021,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3052,17 +3056,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3173,6 +3177,23 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   context->destroy();
   delete context;
   LOG("context destroyed...");
+}
+
+GPRT_API void
+gprtContextSetRayTypeCount(GPRTContext _context,
+                           size_t numRayTypes)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  context->numRayTypes = numRayTypes;
+}
+
+GPRT_API size_t
+gprtContextGetRayTypeCount(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  return context->numRayTypes;
 }
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
