@@ -666,7 +666,7 @@ gprtInstanceAccelSetIDs(GPRTAccel instanceAccel,
 
 GPRT_API void
 gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel,
-                                    const uint8_t *visibilityMasks);
+                                    GPRTBuffer masks);
 
 GPRT_API void
 gprtAccelDestroy(GPRTAccel accel);
