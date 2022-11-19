@@ -34,3 +34,5 @@ add_subdirectory(int05-computePrimitive)
 
 add_subdirectory(int07-doublePrecision)
 add_subdirectory(int08-multipleTLAS)
+
+add_subdirectory(int11-rayTypes)

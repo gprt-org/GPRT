@@ -3179,6 +3179,15 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   LOG("context destroyed...");
 }
 
+GPRT_API void
+gprtContextSetRayTypeCount(GPRTContext _context,
+                           size_t numRayTypes)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  context->numRayTypes = numRayTypes;
+}
+
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
 {
   LOG_API_CALL();
