@@ -521,6 +521,10 @@ GPRT_API void
 gprtContextSetRayTypeCount(GPRTContext context,
                            size_t numRayTypes);
 
+/*! returns the number of ray types used in this context */
+GPRT_API size_t
+gprtContextGetRayTypeCount(GPRTContext context);
+
 GPRT_API GPRTCompute
 gprtComputeCreate(GPRTContext  context,
                  GPRTModule module,

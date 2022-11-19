@@ -3188,6 +3188,14 @@ gprtContextSetRayTypeCount(GPRTContext _context,
   context->numRayTypes = numRayTypes;
 }
 
+GPRT_API size_t
+gprtContextGetRayTypeCount(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  return context->numRayTypes;
+}
+
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
 {
   LOG_API_CALL();
