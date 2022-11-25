@@ -57,6 +57,9 @@ int main(int ac, char **av)
 
   LOG("building module, programs, and pipeline");
 
+  // Since we'll be using a window, we request support for an image swapchain
+  gprtRequestSwapchain();
+
   // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices requested.
   GPRTContext gprt = gprtContextCreate(nullptr, 1);

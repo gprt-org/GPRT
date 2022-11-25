@@ -492,6 +492,9 @@ GPRT_API void gprtBuildPipeline(GPRTContext context);
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 
+/** Tells the GPRT to request support for a window when creating a context.  */
+GPRT_API void gprtRequestSwapchain();
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
@@ -774,6 +777,7 @@ GPRT_API void gprtBeginProfile(GPRTContext context);
 
 // returned results are in nanoseconds
 GPRT_API float gprtEndProfile(GPRTContext context);
+
 #ifdef __cplusplus
 // ------------------------------------------------------------------
 // setters for variables of type "bool" (bools only on c++)

@@ -26,6 +26,7 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
 
 #include <regex>
 
@@ -1981,6 +1982,14 @@ struct InstanceAccel : public Accel {
   };
 };
 
+/** @brief A collection of features that are requested to support before 
+ * creating a GPRT context. These features might not be available on all
+ * platforms.
+*/
+static struct RequestedFeatures {
+  bool swapChain = false;
+} requestedFeatures;
+
 struct Context {
   VkApplicationInfo appInfo;
 
@@ -2015,6 +2024,9 @@ struct Context {
 
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
+
+  /** @brief if a swapchain is requested, this will be set to true. */
+  bool useSwapChain = false;
 
   /** @brief Set of physical device features to be enabled (must be set in the derived constructor) */
   VkPhysicalDeviceFeatures enabledFeatures{};
@@ -2316,38 +2328,115 @@ struct Context {
       }
     };
 
+    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
+      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
+    };
+
+    /* function that checks if the selected physical device meets requirements */
+    auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, 
+      std::vector<const char*> deviceExtensions) -> bool 
+    {
+      uint32_t extensionCount;
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+      std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+      std::set<std::string> requiredExtensions;
+      for (auto &cstr : deviceExtensions) {
+        requiredExtensions.insert(std::string(cstr));
+      }
+
+      for (const auto& extension : availableExtensions) {
+        requiredExtensions.erase(extension.extensionName);
+      }
+
+      return requiredExtensions.empty();
+    };
+
+    // Ray tracing related extensions required
+    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+
+    // Required by VK_KHR_acceleration_structure
+    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+
+    // Required for VK_KHR_ray_tracing_pipeline
+    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    // Required by VK_KHR_spirv_1_4
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+
+    if (requestedFeatures.swapChain)
+    {
+    	// If the device will be used for presenting to a display via a swapchain 
+      // we need to request the swapchain extension
+    	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
+    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    #endif
+
     // Select physical device to be used
     // Defaults to the first device unless specified by command line
-    uint32_t selectedDevice = 0; // TODO
+    uint32_t selectedDevice = -1; // TODO
+
+    std::vector<uint32_t> usableDevices;
     
-    std::cout << "Available Vulkan devices" << "\n";
+    LOG("Searching for usable Vulkan physical device...");
     for (uint32_t i = 0; i < gpuCount; i++) {
       VkPhysicalDeviceProperties deviceProperties;
       vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-      std::cout << "Device [" << i << "] : " << deviceProperties.deviceName << std::endl;
-      std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
-      std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
-        << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
-        << (deviceProperties.apiVersion & 0xfff) << "\n";
+      LOG("Device [" << i << "] : " << deviceProperties.deviceName);
+      // std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
+      // std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
+      //   << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
+      //   << (deviceProperties.apiVersion & 0xfff) << "\n";
       
-      if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-        selectedDevice = i;
+      if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
+        usableDevices.push_back(i);
+        // break;
+      } else {
+        /* Explain why we aren't using this device */
+        for (const char* enabledExtension : enabledDeviceExtensions)
+        {
+          if (!extensionSupported(enabledExtension, supportedExtensions)) {
+            LOG("Device unusable... Requested device extension \"" << 
+              enabledExtension << "\" is not present.");
+          }
+        }
+      }
 
-      // Get ray tracing pipeline properties
-      VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
-      rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-      VkPhysicalDeviceProperties2 deviceProperties2{};
-      deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      deviceProperties2.pNext = &rayTracingPipelineProperties;
-      vkGetPhysicalDeviceProperties2(physicalDevices[i], &deviceProperties2);
+      // // Get ray tracing pipeline properties
+      // VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
+      // rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+      // VkPhysicalDeviceProperties2 deviceProperties2{};
+      // deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      // deviceProperties2.pNext = &rayTracingPipelineProperties;
+      // vkGetPhysicalDeviceProperties2(physicalDevices[i], &deviceProperties2);
 
-      // Get acceleration structure properties
-      VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-      accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-      VkPhysicalDeviceFeatures2 deviceFeatures2{};
-      deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      deviceFeatures2.pNext = &accelerationStructureFeatures;
-      vkGetPhysicalDeviceFeatures2(physicalDevices[i], &deviceFeatures2);
+      // // Get acceleration structure properties
+      // VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+      // accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+      // VkPhysicalDeviceFeatures2 deviceFeatures2{};
+      // deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      // deviceFeatures2.pNext = &accelerationStructureFeatures;
+      // vkGetPhysicalDeviceFeatures2(physicalDevices[i], &deviceFeatures2);
+    }
+
+    if (usableDevices.size() == 0) {
+      GPRT_RAISE("Unable to find physical device meeting requirements\n");
+    }
+    else {
+      LOG("Selecting first usable device");
+      selectedDevice = usableDevices[0];
     }
 
     physicalDevice = physicalDevices[selectedDevice];
@@ -2485,36 +2574,6 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    // Ray tracing related extensions required
-    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-
-    // Required by VK_KHR_acceleration_structure
-    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-
-    // Required for VK_KHR_ray_tracing_pipeline
-    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-
-    // Required by VK_KHR_spirv_1_4
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
-
-    // if (useSwapChain)
-    // {
-    // 	// If the device will be used for presenting to a display via a swapchain we need to request the swapchain extension
-    // 	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    // }
-
-    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-    #endif
-
-
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
@@ -2543,8 +2602,6 @@ struct Context {
 
 
 
-
-
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());;
@@ -2569,19 +2626,10 @@ struct Context {
     //   enableDebugMarkers = true;
     // }
 
-    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
-      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
-    };
+    
 
     if (enabledDeviceExtensions.size() > 0)
     {
-      for (const char* enabledExtension : enabledDeviceExtensions)
-      {
-        if (!extensionSupported(enabledExtension, supportedExtensions)) {
-          std::cerr << "Enabled device extension \"" << enabledExtension << "\" is not present at device level\n";
-        }
-      }
-
       deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledDeviceExtensions.size();
       deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
     }
@@ -3156,6 +3204,12 @@ struct Context {
   }
 };
 
+
+GPRT_API void gprtRequestSwapchain()
+{
+  LOG_API_CALL();
+  requestedFeatures.swapChain = true;
+}
 
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs,
                                     int      numRequestedDevices)
