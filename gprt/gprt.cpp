@@ -2868,6 +2868,11 @@ struct Context {
       swapchainImages.resize(surfaceImageCount);
       vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
 
+      /* Transition all images to presentable */
+      for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
+        transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+      }
+
       // And acquire the first image to use
       vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
         imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
@@ -3379,6 +3384,96 @@ struct Context {
     err = vkCreateComputePipelines(logicalDevice, 
       cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
     //todo, destroy the above stuff
+  }
+
+  
+  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = pool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    return commandBuffer;
+  }
+
+  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+      vkEndCommandBuffer(commandBuffer);
+
+      VkSubmitInfo submitInfo{};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+
+      vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      vkQueueWaitIdle(queue);
+
+      vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+  }
+
+  void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = oldLayout;
+
+    // The new layout for the image
+    barrier.newLayout = newLayout;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    // } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    //     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    //     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    //     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    //     destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        throw std::invalid_argument("unsupported layout transition!");
+    }
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
   }
 };
 
