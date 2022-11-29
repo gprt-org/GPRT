@@ -26,9 +26,6 @@
 // our device-side data structures
 #include "deviceCode.h"
 
-// library for windowing
-#include <GLFW/glfw3.h>
-
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
@@ -42,7 +39,7 @@ extern GPRTProgram int00_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {800,600};
-GLuint fbTexture {0};
+// GLuint fbTexture {0};
 
 #include <iostream>
 int main(int ac, char **av)
@@ -58,7 +55,7 @@ int main(int ac, char **av)
   LOG("building module, programs, and pipeline");
 
   // Since we'll be using a window, we request support for an image swapchain
-  gprtRequestSwapchain();
+  gprtRequestWindow(fbSize.x, fbSize.y, "Int00 Raygen Only");
 
   // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices requested.
@@ -111,25 +108,6 @@ int main(int ac, char **av)
   // ##################################################################
   // create a window we can use to display and interact with the image
   // ##################################################################
-  if (!glfwInit())
-    // Initialization failed
-    throw std::runtime_error("Can't initialize GLFW");
-
-  auto error_callback = [](int error, const char* description)
-  {
-    fprintf(stderr, "Error: %s\n", description);
-  };
-  glfwSetErrorCallback(error_callback);
-
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, "Int00 Raygen Only",
-    NULL, NULL);
-  if (!window)
-    // Window or OpenGL context creation failed
-    throw std::runtime_error("Can't create window");
-  glfwMakeContextCurrent(window);
 
   void* pixels = gprtBufferGetPointer(frameBuffer);
 
@@ -137,64 +115,67 @@ int main(int ac, char **av)
   // now that everything is ready: launch it ....
   // ##################################################################
   LOG("executing the launch ...");
-  while (!glfwWindowShouldClose(window))
+  // while (!glfwWindowShouldClose(window))
+  while (!gprtWindowShouldClose(gprt))
   {
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
 
-    if (fbTexture == 0)
-      glGenTextures(1, &fbTexture);
+    gprtSwapBuffers(gprt);
 
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    GLenum texFormat = GL_RGBA;
-    GLenum texelType = GL_UNSIGNED_BYTE;
-    glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
-                  texelType, pixels);
+    // if (fbTexture == 0)
+    //   glGenTextures(1, &fbTexture);
 
-    glDisable(GL_LIGHTING);
-    glColor3f(1, 1, 1);
+    // glBindTexture(GL_TEXTURE_2D, fbTexture);
+    // GLenum texFormat = GL_RGBA;
+    // GLenum texelType = GL_UNSIGNED_BYTE;
+    // glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
+    //               texelType, pixels);
 
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    // glDisable(GL_LIGHTING);
+    // glColor3f(1, 1, 1);
 
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // glMatrixMode(GL_MODELVIEW);
+    // glLoadIdentity();
 
-    glDisable(GL_DEPTH_TEST);
+    // glEnable(GL_TEXTURE_2D);
+    // glBindTexture(GL_TEXTURE_2D, fbTexture);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    glViewport(0, 0, fbSize.x, fbSize.y);
+    // glDisable(GL_DEPTH_TEST);
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
+    // glViewport(0, 0, fbSize.x, fbSize.y);
 
-    glBegin(GL_QUADS);
-    {
-      glTexCoord2f(0.f, 0.f);
-      glVertex3f(0.f, 0.f, 0.f);
+    // glMatrixMode(GL_PROJECTION);
+    // glLoadIdentity();
+    // glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
 
-      glTexCoord2f(0.f, 1.f);
-      glVertex3f(0.f, (float)fbSize.y, 0.f);
+    // glBegin(GL_QUADS);
+    // {
+    //   glTexCoord2f(0.f, 0.f);
+    //   glVertex3f(0.f, 0.f, 0.f);
 
-      glTexCoord2f(1.f, 1.f);
-      glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
+    //   glTexCoord2f(0.f, 1.f);
+    //   glVertex3f(0.f, (float)fbSize.y, 0.f);
 
-      glTexCoord2f(1.f, 0.f);
-      glVertex3f((float)fbSize.x, 0.f, 0.f);
-    }
-    glEnd();
+    //   glTexCoord2f(1.f, 1.f);
+    //   glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
 
-    glfwSwapBuffers(window);
-    glfwPollEvents();
+    //   glTexCoord2f(1.f, 0.f);
+    //   glVertex3f((float)fbSize.x, 0.f, 0.f);
+    // }
+    // glEnd();
+
+    // glfwSwapBuffers(window);
+    // glfwPollEvents();
   }
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
-  glfwDestroyWindow(window);
-  glfwTerminate();
+  // glfwDestroyWindow(window);
+  // glfwTerminate();
 
   LOG("cleaning up ...");
   gprtBufferDestroy(frameBuffer);

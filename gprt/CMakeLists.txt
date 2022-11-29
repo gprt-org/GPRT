@@ -64,6 +64,7 @@ target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
     gprtDeviceCode
+    glfw
 )
 
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
@@ -74,5 +75,7 @@ target_include_directories(gprt
     ${PROJECT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}
 )
+
+target_compile_features(gprt PRIVATE cxx_std_17)
 
 add_library(gprt::gprt ALIAS gprt)

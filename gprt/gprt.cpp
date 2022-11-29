@@ -27,6 +27,8 @@
 #include <sstream>
 #include <map>
 #include <set>
+#include <limits>
+#include <algorithm>
 
 #include <regex>
 
@@ -36,7 +38,9 @@
 #include <signal.h>
 #endif
 
+
 #ifdef _WIN32
+#define NOMINMAX
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -49,6 +53,8 @@
 #endif
 #endif
 
+// library for windowing
+#include <GLFW/glfw3.h>
 
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
@@ -1987,7 +1993,13 @@ struct InstanceAccel : public Accel {
  * platforms.
 */
 static struct RequestedFeatures {
-  bool swapChain = false;
+  /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
+  bool window = false;
+  struct Window {
+    uint32_t initialWidth;
+    uint32_t initialHeight;
+    std::string title;
+  } windowProperties;
 } requestedFeatures;
 
 struct Context {
@@ -1996,6 +2008,22 @@ struct Context {
   // Vulkan instance, stores all per-application states
   VkInstance instance;
   std::vector<std::string> supportedInstanceExtensions;
+
+  // optional windowing features
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  GLFWwindow* window = nullptr;
+  VkExtent2D windowExtent;
+  VkPresentModeKHR presentMode;
+  VkSurfaceFormatKHR surfaceFormat;
+  VkSurfaceCapabilitiesKHR surfaceCapabilities;
+  uint32_t surfaceImageCount;
+  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+  std::vector<VkImage> swapchainImages;
+  uint32_t currentImageIndex;
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+  VkFence inFlightFence = VK_NULL_HANDLE;
+
   // Physical device (GPU) that Vulkan will use
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
@@ -2024,9 +2052,6 @@ struct Context {
 
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
-
-  /** @brief if a swapchain is requested, this will be set to true. */
-  bool useSwapChain = false;
 
   /** @brief Set of physical device features to be enabled (must be set in the derived constructor) */
   VkPhysicalDeviceFeatures enabledFeatures{};
@@ -2071,17 +2096,7 @@ struct Context {
   std::vector<VkShaderModule> shaderModules;
   // Pipeline cache object
   VkPipelineCache pipelineCache;
-  // Wraps the swap chain to present images (framebuffers) to the windowing system
-  // VulkanSwapChain swapChain; // I kinda want to avoid using Vulkan's swapchain system...
-  // Synchronization semaphores
-  struct {
-    // Swap chain image presentation
-    VkSemaphore presentComplete;
-    // Command buffer submission and execution
-    VkSemaphore renderComplete;
-  } semaphores;
-  std::vector<VkFence> waitFences;
-
+    
   // ray tracing pipeline and layout
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
@@ -2212,11 +2227,20 @@ struct Context {
     //instanceCreateInfo.pNext = VK_NULL_HANDLE;
     instanceCreateInfo.pNext = &validationFeatures;
 
-    // uint32_t glfwExtensionCount = 0;
-    // const char** glfwExtensions;
-    // glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-    // instanceCreateInfo.enabledExtensionCount = glfwExtensionCount;
-    // instanceCreateInfo.ppEnabledExtensionNames = glfwExtensions;
+    uint32_t glfwExtensionCount = 0;
+    const char** glfwExtensions;
+    if (requestedFeatures.window) {
+      if (!glfwInit())
+        throw std::runtime_error("Can't initialize GLFW");
+
+      if (!glfwVulkanSupported()) {
+        GPRT_RAISE("Window requested but unsupported!");
+      }
+      glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+      for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+        instanceExtensions.push_back(glfwExtensions[i]);
+      }
+    }
 
     // Number of validation layers allowed
     instanceCreateInfo.enabledLayerCount = 0;
@@ -2276,6 +2300,22 @@ struct Context {
     // if (err) {
     //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
     // }
+
+
+    /// 1.5 - create a window and surface if requested
+    if (requestedFeatures.window) {
+      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+      window = glfwCreateWindow(
+        requestedFeatures.windowProperties.initialWidth, 
+        requestedFeatures.windowProperties.initialHeight, 
+        requestedFeatures.windowProperties.title.c_str(), 
+        NULL, NULL);
+
+      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("failed to create window surface! : \n" + errorString(err));
+      }
+    }
 
     /// 2. Select a Physical Device
 
@@ -2373,7 +2413,7 @@ struct Context {
     // Required by VK_KHR_spirv_1_4
     enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
 
-    if (requestedFeatures.swapChain)
+    if (requestedFeatures.window)
     {
     	// If the device will be used for presenting to a display via a swapchain 
       // we need to request the swapchain extension
@@ -2709,9 +2749,147 @@ struct Context {
     // 7. Create a module for internal device entry points
     internalModule = new Module(gprtDeviceCode);
     setupInternalStages(internalModule);
+
+    // Swapchain semaphores and fences
+    if (requestedFeatures.window) {
+      VkSemaphoreCreateInfo semaphoreInfo{};
+      semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+      VkFenceCreateInfo fenceInfo{};
+      fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+      if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+        GPRT_RAISE("Failed to create swapchain semaphores");
+      }
+    }
+
+    // Swapchain setup
+    if (requestedFeatures.window) {
+      VkSurfaceCapabilitiesKHR surfaceCapabilities;
+      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
+
+      // SRGB is a commonly supported surface format. It's also efficient to 
+      // write to, so we assume this format.
+      // Note, we don't use RGBA since NVIDIA doesn't support this...
+      surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+      surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      bool surfaceFormatFound = false;
+      std::vector<VkSurfaceFormatKHR> formats;
+      uint32_t formatCount;
+      vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
+      if (formatCount != 0) {
+          formats.resize(formatCount);
+          vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
+      }
+      for (uint32_t i = 0; i < formatCount; ++i)
+        if (formats[i].format == surfaceFormat.format 
+          && formats[i].colorSpace == surfaceFormat.colorSpace ) surfaceFormatFound = true;
+      if (!surfaceFormatFound) 
+        GPRT_RAISE("Error, unable to find RGBA8 SRGB surface format...");
+
+      // For now, we assume the user wants FIFO, which is similar to vsync.
+      // All vulkan implementations must support FIFO per-spec, so it's 
+      // something we can depend on.
+      presentMode = VK_PRESENT_MODE_FIFO_KHR;
+      bool presentModeFound = false;
+      std::vector<VkPresentModeKHR> presentModes;
+      uint32_t presentModeCount;
+      vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+      if (presentModeCount != 0) {
+          presentModes.resize(presentModeCount);
+          vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+      }
+      for (uint32_t i = 0; i < presentModeCount; ++i)
+        if (presentModes[i] == presentMode) presentModeFound = true;
+      if (!presentModeFound) 
+        GPRT_RAISE("Error, unable to find vsync present mode...");
+
+      // Window extent is the number of pixels truly used by the surface. For 
+      // high dps displays (like on mac) the window extent might be larger
+      // than the screen coordinate size.
+      if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        windowExtent = surfaceCapabilities.currentExtent;
+      } else {
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+        VkExtent2D actualExtent = {
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height)
+        };
+        actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+        actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+        windowExtent = actualExtent;
+      }
+
+      // We request one more than the minimum number of images in the swapchain,
+      // since choosing exactly the minimum can cause stalls. We also make sure
+      // to not request more than the maximum number of images.
+      surfaceImageCount = surfaceCapabilities.minImageCount + 1;
+      if (surfaceCapabilities.maxImageCount > 0 && surfaceImageCount > surfaceCapabilities.maxImageCount) {
+        surfaceImageCount = surfaceCapabilities.maxImageCount;
+      }
+
+      // Now, we have enough information to create our swapchain.
+      VkSwapchainCreateInfoKHR createInfo{};
+      createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+      createInfo.surface = surface;
+      createInfo.minImageCount = surfaceImageCount;
+      createInfo.imageFormat = surfaceFormat.format;
+      createInfo.imageColorSpace = surfaceFormat.colorSpace;
+      createInfo.imageExtent = windowExtent;
+      createInfo.imageArrayLayers = 1; // might be 2 for stereoscopic 3D images like VR
+      createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // might need to change this...
+      // currently assuming graphics and present queue are the same...
+      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; 
+      createInfo.queueFamilyIndexCount = 0; // optional if exclusive
+      createInfo.pQueueFamilyIndices = nullptr; // optional if exclusive
+      // could use this to flip the image vertically if we want
+      createInfo.preTransform = surfaceCapabilities.currentTransform; 
+      // means, we don't composite this window with other OS windows.
+      createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; 
+      createInfo.presentMode = presentMode;
+      // clipped here means we don't care about color of obscured pixels, like 
+      // those covered by other OS windows.
+      createInfo.clipped = VK_TRUE;
+      // Since the swapchain can go out of date, we need to supply the out of 
+      // date swapchain here.
+      createInfo.oldSwapchain = swapchain;
+
+      // Create the swapchain
+      err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("Error, failed to create swap chain : \n" + errorString(err));
+      }
+
+      // Now, receive the swapchain images 
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
+      swapchainImages.resize(surfaceImageCount);
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
+
+      // And acquire the first image to use
+      vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
+        imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
+    }
   };
 
   void destroy() {
+
+    if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+    if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+    if (inFlightFence) vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+
+    if (swapchain) {
+      vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+    }
+    if (window) {
+      glfwDestroyWindow(window);
+      glfwTerminate();
+    }
+    if (surface)
+      vkDestroySurfaceKHR(instance, surface, nullptr);
+    
     if (pipelineLayout)
       vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
     if (pipeline)
@@ -3205,10 +3383,56 @@ struct Context {
 };
 
 
-GPRT_API void gprtRequestSwapchain()
+GPRT_API void gprtRequestWindow(
+  uint32_t initialWidth, 
+  uint32_t initialHeight, 
+  const char *title)
 {
   LOG_API_CALL();
-  requestedFeatures.swapChain = true;
+  requestedFeatures.window = true;
+  requestedFeatures.windowProperties.initialWidth = initialWidth;
+  requestedFeatures.windowProperties.initialHeight = initialHeight;
+  requestedFeatures.windowProperties.title = std::string(title);
+}
+
+GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return true;
+  
+  glfwPollEvents();
+  return glfwWindowShouldClose(context->window);
+}
+
+GPRT_API void gprtSwapBuffers(GPRTContext _context) {
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return;
+  
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+  // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+  // submitInfo.signalSemaphoreCount = 1;
+  // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  presentInfo.waitSemaphoreCount = 0;
+  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+
+  VkSwapchainKHR swapchains[] = {context->swapchain};
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = swapchains;
+  presentInfo.pImageIndices = &context->currentImageIndex;
+
+  presentInfo.pResults = nullptr;
+
+  VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+
+
+  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, 
+        VK_NULL_HANDLE, context->inFlightFence, &context->currentImageIndex);
+  vkWaitForFences(context->logicalDevice,1, &context->inFlightFence, true, UINT_MAX);
+  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs,

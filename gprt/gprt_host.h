@@ -492,8 +492,30 @@ GPRT_API void gprtBuildPipeline(GPRTContext context);
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 
-/** Tells the GPRT to request support for a window when creating a context.  */
-GPRT_API void gprtRequestSwapchain();
+/** Tells the GPRT to create a window when once the context is made. 
+ * @param initialWidth The width of the window in screen coordinates
+ * @param initialHeight The height of the window in screen coordinates
+ * @param title The title to put in the top bar of the window
+*/
+GPRT_API void gprtRequestWindow(
+  uint32_t initialWidth, 
+  uint32_t initialHeight, 
+  const char *title);
+
+/** If a window was requested, @returns true if the window's close button 
+ * was clicked. This function can be called from any thread.
+ * 
+ * If a window was not requested (ie headless), this function always @returns
+ * true.
+*/
+GPRT_API bool gprtWindowShouldClose(GPRTContext context);
+
+/** If a window was requested, presents the currently rendered image to 
+ * the window, potentially waiting for the screen to update before swapping.
+ * 
+ * If a window was not requested (ie headless), this function does nothing. 
+*/
+GPRT_API void gprtSwapBuffers(GPRTContext context);
 
 /** creates a new device context with the gives list of devices.
 
