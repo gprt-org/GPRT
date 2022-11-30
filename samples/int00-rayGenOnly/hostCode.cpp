@@ -120,7 +120,7 @@ int main(int ac, char **av)
   {
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
 
-    gprtSwapBuffers(gprt);
+    gprtPresentBuffer(gprt, frameBuffer);
 
     // if (fbTexture == 0)
     //   glGenTextures(1, &fbTexture);
