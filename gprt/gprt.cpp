@@ -2840,7 +2840,7 @@ struct Context {
       createInfo.imageColorSpace = surfaceFormat.colorSpace;
       createInfo.imageExtent = windowExtent;
       createInfo.imageArrayLayers = 1; // might be 2 for stereoscopic 3D images like VR
-      createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // might need to change this...
+      createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT; // might need to change this...
       // currently assuming graphics and present queue are the same...
       createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; 
       createInfo.queueFamilyIndexCount = 0; // optional if exclusive
@@ -3449,20 +3449,27 @@ struct Context {
     VkPipelineStageFlags destinationStage;
 
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    }
+    else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
-        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    } else {
+        throw std::invalid_argument("unsupported layout transition!");
+    }
+
     // } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
     //     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     //     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     //     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     //     destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else {
-        throw std::invalid_argument("unsupported layout transition!");
-    }
 
     vkCmdPipelineBarrier(
         commandBuffer,
@@ -3499,10 +3506,11 @@ GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
   return glfwWindowShouldClose(context->window);
 }
 
-GPRT_API void gprtSwapBuffers(GPRTContext _context) {
+GPRT_API void gprtPresentBuffer(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
-  Context *context = (Context*)_context;
   if (!requestedFeatures.window) return;
+  Context *context = (Context*)_context;
+  Buffer *buffer = (Buffer*)_buffer;
   
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -3510,6 +3518,121 @@ GPRT_API void gprtSwapBuffers(GPRTContext _context) {
   // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
   // submitInfo.signalSemaphoreCount = 1;
   // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // now do the transfer
+  {
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    // if 0, vulkan assumes buffer memory is tightly packed
+    region.bufferRowLength = 0; 
+    region.bufferImageHeight = 0; 
+
+    region.imageOffset.x = 0;
+    region.imageOffset.y = 0;
+    region.imageOffset.z = 0;
+
+    region.imageExtent.width = context->windowExtent.width;
+    region.imageExtent.height = context->windowExtent.height;
+    region.imageExtent.depth = 1;
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    
+    vkCmdCopyBufferToImage(commandBuffer, buffer->buffer, context->swapchainImages[context->currentImageIndex], 
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+  }
+
+  // now go from TRANSFER_DST back to PRESENT_SRC
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -3521,6 +3644,8 @@ GPRT_API void gprtSwapBuffers(GPRTContext _context) {
 
   presentInfo.pResults = nullptr;
 
+  // currently throwing an error because the images given by the swapchain don't 
+  // have a defined layout...
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
 
 

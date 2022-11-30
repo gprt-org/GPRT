@@ -510,12 +510,13 @@ GPRT_API void gprtRequestWindow(
 */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
-/** If a window was requested, presents the currently rendered image to 
- * the window, potentially waiting for the screen to update before swapping.
+/** If a window was requested, this call interprets the given buffer as 
+ * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents 
+ * to the window, potentially waiting for the screen to update before swapping.
  * 
  * If a window was not requested (ie headless), this function does nothing. 
 */
-GPRT_API void gprtSwapBuffers(GPRTContext context);
+GPRT_API void gprtPresentBuffer(GPRTContext context, GPRTBuffer buffer);
 
 /** creates a new device context with the gives list of devices.
 
