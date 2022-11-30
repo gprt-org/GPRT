@@ -44,6 +44,8 @@ const int2 fbSize = {800,600};
 #include <iostream>
 int main(int ac, char **av)
 {
+  getchar();
+  
   // The output window will show comments for many of the methods called.
   // Walking through the code line by line with a debugger is educational.
   LOG("gprt example '" << av[0] << "' starting up");
@@ -119,55 +121,7 @@ int main(int ac, char **av)
   while (!gprtWindowShouldClose(gprt))
   {
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
-
     gprtPresentBuffer(gprt, frameBuffer);
-
-    // if (fbTexture == 0)
-    //   glGenTextures(1, &fbTexture);
-
-    // glBindTexture(GL_TEXTURE_2D, fbTexture);
-    // GLenum texFormat = GL_RGBA;
-    // GLenum texelType = GL_UNSIGNED_BYTE;
-    // glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
-    //               texelType, pixels);
-
-    // glDisable(GL_LIGHTING);
-    // glColor3f(1, 1, 1);
-
-    // glMatrixMode(GL_MODELVIEW);
-    // glLoadIdentity();
-
-    // glEnable(GL_TEXTURE_2D);
-    // glBindTexture(GL_TEXTURE_2D, fbTexture);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    // glDisable(GL_DEPTH_TEST);
-
-    // glViewport(0, 0, fbSize.x, fbSize.y);
-
-    // glMatrixMode(GL_PROJECTION);
-    // glLoadIdentity();
-    // glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
-
-    // glBegin(GL_QUADS);
-    // {
-    //   glTexCoord2f(0.f, 0.f);
-    //   glVertex3f(0.f, 0.f, 0.f);
-
-    //   glTexCoord2f(0.f, 1.f);
-    //   glVertex3f(0.f, (float)fbSize.y, 0.f);
-
-    //   glTexCoord2f(1.f, 1.f);
-    //   glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-
-    //   glTexCoord2f(1.f, 0.f);
-    //   glVertex3f((float)fbSize.x, 0.f, 0.f);
-    // }
-    // glEnd();
-
-    // glfwSwapBuffers(window);
-    // glfwPollEvents();
   }
 
   // ##################################################################
