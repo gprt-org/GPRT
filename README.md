@@ -9,6 +9,7 @@ GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 ## Dependencies
 
   - CMake
+  - C++17
   - Vulkan SDK (>= 1.3.231.1)
 
 ## Documentation
