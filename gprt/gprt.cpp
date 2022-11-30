@@ -28,6 +28,7 @@
 #include <map>
 #include <set>
 #include <limits>
+#include <climits>
 #include <algorithm>
 
 #include <regex>
@@ -2443,15 +2444,15 @@ struct Context {
     for (uint32_t i = 0; i < gpuCount; i++) {
       VkPhysicalDeviceProperties deviceProperties;
       vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-      LOG("Device [" << i << "] : " << deviceProperties.deviceName);
-      // std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
-      // std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
-      //   << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
-      //   << (deviceProperties.apiVersion & 0xfff) << "\n";
+      std::string message = std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
+      message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
+      message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".")
+               + std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".")
+               + std::to_string(deviceProperties.apiVersion & 0xfff);
+      LOG(message);
       
       if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
         usableDevices.push_back(i);
-        // break;
       } else {
         /* Explain why we aren't using this device */
         for (const char* enabledExtension : enabledDeviceExtensions)
@@ -2462,22 +2463,6 @@ struct Context {
           }
         }
       }
-
-      // // Get ray tracing pipeline properties
-      // VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
-      // rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-      // VkPhysicalDeviceProperties2 deviceProperties2{};
-      // deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      // deviceProperties2.pNext = &rayTracingPipelineProperties;
-      // vkGetPhysicalDeviceProperties2(physicalDevices[i], &deviceProperties2);
-
-      // // Get acceleration structure properties
-      // VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-      // accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-      // VkPhysicalDeviceFeatures2 deviceFeatures2{};
-      // deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      // deviceFeatures2.pNext = &accelerationStructureFeatures;
-      // vkGetPhysicalDeviceFeatures2(physicalDevices[i], &deviceFeatures2);
     }
 
     if (usableDevices.size() == 0) {
