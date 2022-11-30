@@ -2312,6 +2312,8 @@ struct Context {
     /// 1.5 - create a window and surface if requested
     if (requestedFeatures.window) {
       glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+      // todo, allow the window to resize and recreate swapchain
+      glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); 
       window = glfwCreateWindow(
         requestedFeatures.windowProperties.initialWidth, 
         requestedFeatures.windowProperties.initialHeight, 

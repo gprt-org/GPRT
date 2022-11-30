@@ -39,13 +39,10 @@ extern GPRTProgram int00_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {800,600};
-// GLuint fbTexture {0};
 
 #include <iostream>
 int main(int ac, char **av)
 {
-  getchar();
-  
   // The output window will show comments for many of the methods called.
   // Walking through the code line by line with a debugger is educational.
   LOG("gprt example '" << av[0] << "' starting up");
@@ -90,9 +87,7 @@ int main(int ac, char **av)
   // alloc buffers
   // ------------------------------------------------------------------
   LOG("allocating frame buffer");
-  // Create a frame buffer as page-locked, aka "pinned" memory.
-  // GPU writes to CPU memory directly (slow) but no transfers needed
-  GPRTBuffer frameBuffer = gprtHostBufferCreate(gprt,
+  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(gprt,
                                           /*type:*/GPRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
 
@@ -108,16 +103,9 @@ int main(int ac, char **av)
 
 
   // ##################################################################
-  // create a window we can use to display and interact with the image
-  // ##################################################################
-
-  void* pixels = gprtBufferGetPointer(frameBuffer);
-
-  // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
   LOG("executing the launch ...");
-  // while (!glfwWindowShouldClose(window))
   while (!gprtWindowShouldClose(gprt))
   {
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
@@ -127,9 +115,6 @@ int main(int ac, char **av)
   // ##################################################################
   // and finally, clean up
   // ##################################################################
-
-  // glfwDestroyWindow(window);
-  // glfwTerminate();
 
   LOG("cleaning up ...");
   gprtBufferDestroy(frameBuffer);
