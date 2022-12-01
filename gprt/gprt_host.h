@@ -492,6 +492,32 @@ GPRT_API void gprtBuildPipeline(GPRTContext context);
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context,
                          GPRTBuildSBTFlags flags GPRT_IF_CPP(=GPRT_SBT_ALL));
 
+/** Tells the GPRT to create a window when once the context is made. 
+ * @param initialWidth The width of the window in screen coordinates
+ * @param initialHeight The height of the window in screen coordinates
+ * @param title The title to put in the top bar of the window
+*/
+GPRT_API void gprtRequestWindow(
+  uint32_t initialWidth, 
+  uint32_t initialHeight, 
+  const char *title);
+
+/** If a window was requested, @returns true if the window's close button 
+ * was clicked. This function can be called from any thread.
+ * 
+ * If a window was not requested (ie headless), this function always @returns
+ * true.
+*/
+GPRT_API bool gprtWindowShouldClose(GPRTContext context);
+
+/** If a window was requested, this call interprets the given buffer as 
+ * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents 
+ * to the window, potentially waiting for the screen to update before swapping.
+ * 
+ * If a window was not requested (ie headless), this function does nothing. 
+*/
+GPRT_API void gprtPresentBuffer(GPRTContext context, GPRTBuffer buffer);
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
@@ -778,6 +804,7 @@ GPRT_API void gprtBeginProfile(GPRTContext context);
 
 // returned results are in nanoseconds
 GPRT_API float gprtEndProfile(GPRTContext context);
+
 #ifdef __cplusplus
 // ------------------------------------------------------------------
 // setters for variables of type "bool" (bools only on c++)
