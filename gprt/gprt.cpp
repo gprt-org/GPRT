@@ -2262,35 +2262,6 @@ struct Context {
 
     instanceCreateInfo.ppEnabledLayerNames = nullptr;
     instanceCreateInfo.enabledLayerCount = 0;
-    // Nate 11/29/2022 - not sure why, but adding VK_LAYER_KHRONOS_validation causes
-    // nsight graphics to crash, and we are unable to profile...
-
-    // We can instead use the vulkan configurator tool to enable validation.
-
-    // // The VK_LAYER_KHRONOS_validation contains all current validation functionality.
-    // // Note that on Android this layer requires at least NDK r20
-    // const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-    // if (validation())
-    // {
-    //   // Check if this layer is available at instance level
-    //   uint32_t instanceLayerCount;
-    //   vkEnumerateInstanceLayerProperties(&instanceLayerCount, nullptr);
-    //   std::vector<VkLayerProperties> instanceLayerProperties(instanceLayerCount);
-    //   vkEnumerateInstanceLayerProperties(&instanceLayerCount, instanceLayerProperties.data());
-    //   bool validationLayerPresent = false;
-    //   for (VkLayerProperties layer : instanceLayerProperties) {
-    //     if (strcmp(layer.layerName, validationLayerName) == 0) {
-    //       validationLayerPresent = true;
-    //       break;
-    //     }
-    //   }
-    //   if (validationLayerPresent) {
-    //     instanceCreateInfo.ppEnabledLayerNames = &validationLayerName;
-    //     instanceCreateInfo.enabledLayerCount = 1;
-    //   } else {
-    //     std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
-    //   }
-    // }
 
     VkResult err;
 
@@ -2298,17 +2269,6 @@ struct Context {
     if (err) {
       GPRT_RAISE("failed to create instance! : \n" + errorString(err));
     }
-
-    // err = createDebugUtilsMessenger(instance,
-    //     info.debug_callback,
-    //     info.debug_message_severity,
-    //     info.debug_message_type,
-    //     &instance.debug_messenger,
-    //     info.allocation_callbacks);
-    // if (err) {
-    //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
-    // }
-
 
     /// 1.5 - create a window and surface if requested
     if (requestedFeatures.window) {
