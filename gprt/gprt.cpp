@@ -26,6 +26,10 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
+#include <limits>
+#include <climits>
+#include <algorithm>
 
 #include <regex>
 
@@ -35,7 +39,9 @@
 #include <signal.h>
 #endif
 
+
 #ifdef _WIN32
+#define NOMINMAX
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -48,6 +54,8 @@
 #endif
 #endif
 
+// library for windowing
+#include <GLFW/glfw3.h>
 
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
@@ -780,9 +788,9 @@ struct GeomType : public SBTEntry {
   std::vector<std::string> anyHitShaderEntryPoints;
   std::vector<std::string> intersectionShaderEntryPoints;
   
-  bool closestHitShadersUsed = false;
-  bool intersectionShadersUsed = false;
-  bool anyHitShadersUsed = false;
+  std::vector<bool> closestHitShaderUsed;
+  std::vector<bool> intersectionShaderUsed;
+  std::vector<bool> anyHitShaderUsed;
   
   GeomType(VkDevice  _logicalDevice,
             uint32_t numRayTypes,
@@ -797,6 +805,10 @@ struct GeomType : public SBTEntry {
     closestHitShaderEntryPoints.resize(numRayTypes, {});
     anyHitShaderEntryPoints.resize(numRayTypes, {});
     intersectionShaderEntryPoints.resize(numRayTypes, {});
+
+    closestHitShaderUsed.resize(numRayTypes, false);
+    intersectionShaderUsed.resize(numRayTypes, false);
+    anyHitShaderUsed.resize(numRayTypes, false);
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -814,7 +826,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    closestHitShadersUsed = true;
+    closestHitShaderUsed[rayType] = true;
     closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
     auto binary = module->getBinary("CLOSESTHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -837,7 +849,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    anyHitShadersUsed = true;
+    anyHitShaderUsed[rayType] = true;
     anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
     auto binary = module->getBinary("ANYHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -860,7 +872,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    intersectionShadersUsed = true;
+    intersectionShaderUsed[rayType] = true;
     intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
     auto binary = module->getBinary("INTERSECTION");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -1981,12 +1993,42 @@ struct InstanceAccel : public Accel {
   };
 };
 
+/** @brief A collection of features that are requested to support before 
+ * creating a GPRT context. These features might not be available on all
+ * platforms.
+*/
+static struct RequestedFeatures {
+  /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
+  bool window = false;
+  struct Window {
+    uint32_t initialWidth;
+    uint32_t initialHeight;
+    std::string title;
+  } windowProperties;
+} requestedFeatures;
+
 struct Context {
   VkApplicationInfo appInfo;
 
   // Vulkan instance, stores all per-application states
   VkInstance instance;
   std::vector<std::string> supportedInstanceExtensions;
+
+  // optional windowing features
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  GLFWwindow* window = nullptr;
+  VkExtent2D windowExtent;
+  VkPresentModeKHR presentMode;
+  VkSurfaceFormatKHR surfaceFormat;
+  VkSurfaceCapabilitiesKHR surfaceCapabilities;
+  uint32_t surfaceImageCount;
+  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+  std::vector<VkImage> swapchainImages;
+  uint32_t currentImageIndex;
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+  VkFence inFlightFence = VK_NULL_HANDLE;
+
   // Physical device (GPU) that Vulkan will use
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
@@ -2059,17 +2101,7 @@ struct Context {
   std::vector<VkShaderModule> shaderModules;
   // Pipeline cache object
   VkPipelineCache pipelineCache;
-  // Wraps the swap chain to present images (framebuffers) to the windowing system
-  // VulkanSwapChain swapChain; // I kinda want to avoid using Vulkan's swapchain system...
-  // Synchronization semaphores
-  struct {
-    // Swap chain image presentation
-    VkSemaphore presentComplete;
-    // Command buffer submission and execution
-    VkSemaphore renderComplete;
-  } semaphores;
-  std::vector<VkFence> waitFences;
-
+    
   // ray tracing pipeline and layout
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
@@ -2200,11 +2232,20 @@ struct Context {
     //instanceCreateInfo.pNext = VK_NULL_HANDLE;
     instanceCreateInfo.pNext = &validationFeatures;
 
-    // uint32_t glfwExtensionCount = 0;
-    // const char** glfwExtensions;
-    // glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-    // instanceCreateInfo.enabledExtensionCount = glfwExtensionCount;
-    // instanceCreateInfo.ppEnabledExtensionNames = glfwExtensions;
+    uint32_t glfwExtensionCount = 0;
+    const char** glfwExtensions;
+    if (requestedFeatures.window) {
+      if (!glfwInit())
+        throw std::runtime_error("Can't initialize GLFW");
+
+      if (!glfwVulkanSupported()) {
+        GPRT_RAISE("Window requested but unsupported!");
+      }
+      glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+      for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+        instanceExtensions.push_back(glfwExtensions[i]);
+      }
+    }
 
     // Number of validation layers allowed
     instanceCreateInfo.enabledLayerCount = 0;
@@ -2223,30 +2264,8 @@ struct Context {
       instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     }
 
-    // The VK_LAYER_KHRONOS_validation contains all current validation functionality.
-    // Note that on Android this layer requires at least NDK r20
-    const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-    if (validation())
-    {
-      // Check if this layer is available at instance level
-      uint32_t instanceLayerCount;
-      vkEnumerateInstanceLayerProperties(&instanceLayerCount, nullptr);
-      std::vector<VkLayerProperties> instanceLayerProperties(instanceLayerCount);
-      vkEnumerateInstanceLayerProperties(&instanceLayerCount, instanceLayerProperties.data());
-      bool validationLayerPresent = false;
-      for (VkLayerProperties layer : instanceLayerProperties) {
-        if (strcmp(layer.layerName, validationLayerName) == 0) {
-          validationLayerPresent = true;
-          break;
-        }
-      }
-      if (validationLayerPresent) {
-        instanceCreateInfo.ppEnabledLayerNames = &validationLayerName;
-        instanceCreateInfo.enabledLayerCount = 1;
-      } else {
-        std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
-      }
-    }
+    instanceCreateInfo.ppEnabledLayerNames = nullptr;
+    instanceCreateInfo.enabledLayerCount = 0;
 
     VkResult err;
 
@@ -2255,15 +2274,22 @@ struct Context {
       GPRT_RAISE("failed to create instance! : \n" + errorString(err));
     }
 
-    // err = createDebugUtilsMessenger(instance,
-    //     info.debug_callback,
-    //     info.debug_message_severity,
-    //     info.debug_message_type,
-    //     &instance.debug_messenger,
-    //     info.allocation_callbacks);
-    // if (err) {
-    //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
-    // }
+    /// 1.5 - create a window and surface if requested
+    if (requestedFeatures.window) {
+      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+      // todo, allow the window to resize and recreate swapchain
+      glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); 
+      window = glfwCreateWindow(
+        requestedFeatures.windowProperties.initialWidth, 
+        requestedFeatures.windowProperties.initialHeight, 
+        requestedFeatures.windowProperties.title.c_str(), 
+        NULL, NULL);
+
+      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("failed to create window surface! : \n" + errorString(err));
+      }
+    }
 
     /// 2. Select a Physical Device
 
@@ -2316,38 +2342,99 @@ struct Context {
       }
     };
 
+    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
+      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
+    };
+
+    /* function that checks if the selected physical device meets requirements */
+    auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, 
+      std::vector<const char*> deviceExtensions) -> bool 
+    {
+      uint32_t extensionCount;
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+      std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+      std::set<std::string> requiredExtensions;
+      for (auto &cstr : deviceExtensions) {
+        requiredExtensions.insert(std::string(cstr));
+      }
+
+      for (const auto& extension : availableExtensions) {
+        requiredExtensions.erase(extension.extensionName);
+      }
+
+      return requiredExtensions.empty();
+    };
+
+    // Ray tracing related extensions required
+    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+
+    // Required by VK_KHR_acceleration_structure
+    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+
+    // Required for VK_KHR_ray_tracing_pipeline
+    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    // Required by VK_KHR_spirv_1_4
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+
+    if (requestedFeatures.window)
+    {
+    	// If the device will be used for presenting to a display via a swapchain 
+      // we need to request the swapchain extension
+    	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
+    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    #endif
+
     // Select physical device to be used
     // Defaults to the first device unless specified by command line
-    uint32_t selectedDevice = 0; // TODO
+    uint32_t selectedDevice = -1; // TODO
+
+    std::vector<uint32_t> usableDevices;
     
-    std::cout << "Available Vulkan devices" << "\n";
+    LOG("Searching for usable Vulkan physical device...");
     for (uint32_t i = 0; i < gpuCount; i++) {
       VkPhysicalDeviceProperties deviceProperties;
       vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-      std::cout << "Device [" << i << "] : " << deviceProperties.deviceName << std::endl;
-      std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
-      std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
-        << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
-        << (deviceProperties.apiVersion & 0xfff) << "\n";
+      std::string message = std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
+      message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
+      message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".")
+               + std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".")
+               + std::to_string(deviceProperties.apiVersion & 0xfff);
+      LOG(message);
       
-      if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-        selectedDevice = i;
+      if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
+        usableDevices.push_back(i);
+      } else {
+        /* Explain why we aren't using this device */
+        for (const char* enabledExtension : enabledDeviceExtensions)
+        {
+          if (!extensionSupported(enabledExtension, supportedExtensions)) {
+            LOG("Device unusable... Requested device extension \"" << 
+              enabledExtension << "\" is not present.");
+          }
+        }
+      }
+    }
 
-      // Get ray tracing pipeline properties
-      VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
-      rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-      VkPhysicalDeviceProperties2 deviceProperties2{};
-      deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      deviceProperties2.pNext = &rayTracingPipelineProperties;
-      vkGetPhysicalDeviceProperties2(physicalDevices[i], &deviceProperties2);
-
-      // Get acceleration structure properties
-      VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-      accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-      VkPhysicalDeviceFeatures2 deviceFeatures2{};
-      deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      deviceFeatures2.pNext = &accelerationStructureFeatures;
-      vkGetPhysicalDeviceFeatures2(physicalDevices[i], &deviceFeatures2);
+    if (usableDevices.size() == 0) {
+      GPRT_RAISE("Unable to find physical device meeting requirements\n");
+    }
+    else {
+      LOG("Selecting first usable device");
+      selectedDevice = usableDevices[0];
     }
 
     physicalDevice = physicalDevices[selectedDevice];
@@ -2485,36 +2572,6 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    // Ray tracing related extensions required
-    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-
-    // Required by VK_KHR_acceleration_structure
-    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-
-    // Required for VK_KHR_ray_tracing_pipeline
-    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-
-    // Required by VK_KHR_spirv_1_4
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
-
-    // if (useSwapChain)
-    // {
-    // 	// If the device will be used for presenting to a display via a swapchain we need to request the swapchain extension
-    // 	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    // }
-
-    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-    #endif
-
-
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
@@ -2543,8 +2600,6 @@ struct Context {
 
 
 
-
-
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());;
@@ -2569,19 +2624,10 @@ struct Context {
     //   enableDebugMarkers = true;
     // }
 
-    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
-      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
-    };
+    
 
     if (enabledDeviceExtensions.size() > 0)
     {
-      for (const char* enabledExtension : enabledDeviceExtensions)
-      {
-        if (!extensionSupported(enabledExtension, supportedExtensions)) {
-          std::cerr << "Enabled device extension \"" << enabledExtension << "\" is not present at device level\n";
-        }
-      }
-
       deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledDeviceExtensions.size();
       deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
     }
@@ -2661,9 +2707,152 @@ struct Context {
     // 7. Create a module for internal device entry points
     internalModule = new Module(gprtDeviceCode);
     setupInternalStages(internalModule);
+
+    // Swapchain semaphores and fences
+    if (requestedFeatures.window) {
+      VkSemaphoreCreateInfo semaphoreInfo{};
+      semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+      VkFenceCreateInfo fenceInfo{};
+      fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+      if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+        GPRT_RAISE("Failed to create swapchain semaphores");
+      }
+    }
+
+    // Swapchain setup
+    if (requestedFeatures.window) {
+      VkSurfaceCapabilitiesKHR surfaceCapabilities;
+      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
+
+      // SRGB is a commonly supported surface format. It's also efficient to 
+      // write to, so we assume this format.
+      // Note, we don't use RGBA since NVIDIA doesn't support this...
+      surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+      surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      bool surfaceFormatFound = false;
+      std::vector<VkSurfaceFormatKHR> formats;
+      uint32_t formatCount;
+      vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
+      if (formatCount != 0) {
+          formats.resize(formatCount);
+          vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
+      }
+      for (uint32_t i = 0; i < formatCount; ++i)
+        if (formats[i].format == surfaceFormat.format 
+          && formats[i].colorSpace == surfaceFormat.colorSpace ) surfaceFormatFound = true;
+      if (!surfaceFormatFound) 
+        GPRT_RAISE("Error, unable to find RGBA8 SRGB surface format...");
+
+      // For now, we assume the user wants FIFO, which is similar to vsync.
+      // All vulkan implementations must support FIFO per-spec, so it's 
+      // something we can depend on.
+      presentMode = VK_PRESENT_MODE_FIFO_KHR;
+      bool presentModeFound = false;
+      std::vector<VkPresentModeKHR> presentModes;
+      uint32_t presentModeCount;
+      vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+      if (presentModeCount != 0) {
+          presentModes.resize(presentModeCount);
+          vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+      }
+      for (uint32_t i = 0; i < presentModeCount; ++i)
+        if (presentModes[i] == presentMode) presentModeFound = true;
+      if (!presentModeFound) 
+        GPRT_RAISE("Error, unable to find vsync present mode...");
+
+      // Window extent is the number of pixels truly used by the surface. For 
+      // high dps displays (like on mac) the window extent might be larger
+      // than the screen coordinate size.
+      if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        windowExtent = surfaceCapabilities.currentExtent;
+      } else {
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+        VkExtent2D actualExtent = {
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height)
+        };
+        actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+        actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+        windowExtent = actualExtent;
+      }
+
+      // We request one more than the minimum number of images in the swapchain,
+      // since choosing exactly the minimum can cause stalls. We also make sure
+      // to not request more than the maximum number of images.
+      surfaceImageCount = surfaceCapabilities.minImageCount + 1;
+      if (surfaceCapabilities.maxImageCount > 0 && surfaceImageCount > surfaceCapabilities.maxImageCount) {
+        surfaceImageCount = surfaceCapabilities.maxImageCount;
+      }
+
+      // Now, we have enough information to create our swapchain.
+      VkSwapchainCreateInfoKHR createInfo{};
+      createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+      createInfo.surface = surface;
+      createInfo.minImageCount = surfaceImageCount;
+      createInfo.imageFormat = surfaceFormat.format;
+      createInfo.imageColorSpace = surfaceFormat.colorSpace;
+      createInfo.imageExtent = windowExtent;
+      createInfo.imageArrayLayers = 1; // might be 2 for stereoscopic 3D images like VR
+      createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT; // might need to change this...
+      // currently assuming graphics and present queue are the same...
+      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; 
+      createInfo.queueFamilyIndexCount = 0; // optional if exclusive
+      createInfo.pQueueFamilyIndices = nullptr; // optional if exclusive
+      // could use this to flip the image vertically if we want
+      createInfo.preTransform = surfaceCapabilities.currentTransform; 
+      // means, we don't composite this window with other OS windows.
+      createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; 
+      createInfo.presentMode = presentMode;
+      // clipped here means we don't care about color of obscured pixels, like 
+      // those covered by other OS windows.
+      createInfo.clipped = VK_TRUE;
+      // Since the swapchain can go out of date, we need to supply the out of 
+      // date swapchain here.
+      createInfo.oldSwapchain = swapchain;
+
+      // Create the swapchain
+      err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("Error, failed to create swap chain : \n" + errorString(err));
+      }
+
+      // Now, receive the swapchain images 
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
+      swapchainImages.resize(surfaceImageCount);
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
+
+      /* Transition all images to presentable */
+      for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
+        transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+      }
+
+      // And acquire the first image to use
+      vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
+        imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
+    }
   };
 
   void destroy() {
+
+    if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+    if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+    if (inFlightFence) vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+
+    if (swapchain) {
+      vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+    }
+    if (window) {
+      glfwDestroyWindow(window);
+      glfwTerminate();
+    }
+    if (surface)
+      vkDestroySurfaceKHR(instance, surface, nullptr);
+    
     if (pipelineLayout)
       vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
     if (pipeline)
@@ -3017,17 +3206,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3052,17 +3241,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3154,8 +3343,268 @@ struct Context {
       cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
     //todo, destroy the above stuff
   }
+
+  
+  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = pool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    return commandBuffer;
+  }
+
+  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+      vkEndCommandBuffer(commandBuffer);
+
+      VkSubmitInfo submitInfo{};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+
+      vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      vkQueueWaitIdle(queue);
+
+      vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+  }
+
+  void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = oldLayout;
+
+    // The new layout for the image
+    barrier.newLayout = newLayout;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        barrier.srcAccessMask = 0;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    }
+    else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    } else {
+        throw std::invalid_argument("unsupported layout transition!");
+    }
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
+  }
 };
 
+
+GPRT_API void gprtRequestWindow(
+  uint32_t initialWidth, 
+  uint32_t initialHeight, 
+  const char *title)
+{
+  LOG_API_CALL();
+  requestedFeatures.window = true;
+  requestedFeatures.windowProperties.initialWidth = initialWidth;
+  requestedFeatures.windowProperties.initialHeight = initialHeight;
+  requestedFeatures.windowProperties.title = std::string(title);
+}
+
+GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return true;
+  
+  glfwPollEvents();
+  return glfwWindowShouldClose(context->window);
+}
+
+GPRT_API void gprtPresentBuffer(GPRTContext _context, GPRTBuffer _buffer) {
+  LOG_API_CALL();
+  if (!requestedFeatures.window) return;
+  Context *context = (Context*)_context;
+  Buffer *buffer = (Buffer*)_buffer;
+  
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+  // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+  // submitInfo.signalSemaphoreCount = 1;
+  // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // now do the transfer
+  {
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    // if 0, vulkan assumes buffer memory is tightly packed
+    region.bufferRowLength = 0; 
+    region.bufferImageHeight = 0; 
+
+    region.imageOffset.x = 0;
+    region.imageOffset.y = 0;
+    region.imageOffset.z = 0;
+
+    region.imageExtent.width = context->windowExtent.width;
+    region.imageExtent.height = context->windowExtent.height;
+    region.imageExtent.depth = 1;
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    
+    vkCmdCopyBufferToImage(commandBuffer, buffer->buffer, context->swapchainImages[context->currentImageIndex], 
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+  }
+
+  // now go from TRANSFER_DST back to PRESENT_SRC
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+
+  presentInfo.waitSemaphoreCount = 0;
+  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+
+  VkSwapchainKHR swapchains[] = {context->swapchain};
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = swapchains;
+  presentInfo.pImageIndices = &context->currentImageIndex;
+
+  presentInfo.pResults = nullptr;
+
+  // currently throwing an error because the images given by the swapchain don't 
+  // have a defined layout...
+  VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+
+
+  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, 
+        VK_NULL_HANDLE, context->inFlightFence, &context->currentImageIndex);
+  vkWaitForFences(context->logicalDevice,1, &context->inFlightFence, true, UINT_MAX);
+  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+}
 
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs,
                                     int      numRequestedDevices)
@@ -3173,6 +3622,23 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   context->destroy();
   delete context;
   LOG("context destroyed...");
+}
+
+GPRT_API void
+gprtContextSetRayTypeCount(GPRTContext _context,
+                           size_t numRayTypes)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  context->numRayTypes = numRayTypes;
+}
+
+GPRT_API size_t
+gprtContextGetRayTypeCount(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  return context->numRayTypes;
 }
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
