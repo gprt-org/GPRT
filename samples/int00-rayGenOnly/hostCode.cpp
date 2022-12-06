@@ -48,12 +48,13 @@ int main(int ac, char **av)
   LOG("gprt example '" << av[0] << "' starting up");
 
   // ##################################################################
-  // set up all the *CODE* we want to run
+  // set up all the GPU kernels we want to run
   // ##################################################################
 
   LOG("building module, programs, and pipeline");
 
   // Since we'll be using a window, we request support for an image swapchain
+  // If a window can't be made, we can still use GPRT, but a window wont appear. 
   gprtRequestWindow(fbSize.x, fbSize.y, "Int00 Raygen Only");
 
   // Initialize Vulkan, and create a "gprt device," a context to hold the
@@ -66,6 +67,8 @@ int main(int ac, char **av)
   // We store this SPIR-V intermediate code representation in a GPRT module.
   GPRTModule module = gprtModuleCreate(gprt,int00_deviceCode);
 
+  // All ray tracing programs start off with a "Ray Generation" kernel.
+  // All "parameters" we'll pass to that ray generation kernel are defined here.
   GPRTVarDecl rayGenVars[]
     = {
       { "fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr) },
@@ -84,22 +87,27 @@ int main(int ac, char **av)
   gprtBuildPipeline(gprt);
 
   // ------------------------------------------------------------------
-  // alloc buffers
+  // allocating buffers
   // ------------------------------------------------------------------
+  
+  // Our framebuffer here will be used to hold pixel color values
+  // that we'll present to the window / save to an image
   LOG("allocating frame buffer");
   GPRTBuffer frameBuffer = gprtDeviceBufferCreate(gprt,
                                           /*type:*/GPRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
 
   // ------------------------------------------------------------------
-  // build Shader Binding Table (SBT) required to trace the groups
+  // build the shader binding table, used by rays to map geometry, 
+  // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
   gprtRayGenSet3f(rayGen,"color0",0.1f,0.1f,0.1f);
   gprtRayGenSet3f(rayGen,"color1",.0f,.0f,.0f);
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
   gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
+  
   // Build a shader binding table entry for the ray generation record.
-  gprtBuildShaderBindingTable(gprt);
+  gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
 
 
   // ##################################################################
@@ -110,7 +118,7 @@ int main(int ac, char **av)
   {
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
     gprtPresentBuffer(gprt, frameBuffer);
-  }
+  } while (!gprtWindowShouldClose(gprt));
 
   // ##################################################################
   // and finally, clean up
