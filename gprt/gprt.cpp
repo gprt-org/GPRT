@@ -58,6 +58,7 @@
 #include <GLFW/glfw3.h>
 
 // library for image output
+#define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
