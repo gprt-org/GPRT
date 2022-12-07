@@ -48,8 +48,7 @@ using namespace generator;
 extern GPRTProgram int06_deviceCode;
 
 // initial image resolution
-// const int2 fbSize = {700,230};
-const int2 fbSize = {700 * 2,230 * 2};
+const int2 fbSize = {1400, 460};
 GLuint fbTexture {0};
 
 float3 lookFrom = {-2.f,-2.f,0.f};

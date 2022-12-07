@@ -38,7 +38,7 @@
 extern GPRTProgram int00_deviceCode;
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {1400, 460};
 
 // final image output
 const char *outFileName = "s00-rayGenOnly.png";
@@ -121,10 +121,6 @@ int main(int ac, char **av)
   {
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
-<<<<<<< HEAD
-    gprtPresentBuffer(gprt, frameBuffer);
-  } while (!gprtWindowShouldClose(gprt));
-=======
     
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(gprt, frameBuffer); 
@@ -136,7 +132,6 @@ int main(int ac, char **av)
   LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
   LOG_OK("written rendered frame buffer to file "<<outFileName);
->>>>>>> master
 
   // ##################################################################
   // and finally, clean up
