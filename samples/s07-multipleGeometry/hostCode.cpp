@@ -97,7 +97,7 @@ struct Mesh {
 };
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {1400, 460};
 GLuint fbTexture {0};
 
 float3 lookFrom = {10.f,10.0f,10.f};

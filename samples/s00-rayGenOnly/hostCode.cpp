@@ -47,7 +47,7 @@ const char *outFileName = "s00-rayGenOnly.png";
 int main(int ac, char **av)
 {
   // The output window will show comments for many of the methods called.
-  // Walking through the code line by line with a debugger is educational.
+  // We recommend walking through the code line by line with a debugger. 
   LOG("gprt example '" << av[0] << "' starting up");
 
   // ##################################################################
@@ -56,17 +56,20 @@ int main(int ac, char **av)
 
   LOG("building module, programs, and pipeline");
 
-  // Since we'll be using a window, we request support for an image swapchain
+  // Since we'll be using a window, we request support for one here. 
   // If a window can't be made, we can still use GPRT, but a window wont appear. 
+  // And if you know you don't need a window, then this call is optional.
   gprtRequestWindow(fbSize.x, fbSize.y, "S00 Raygen Only");
 
-  // Initialize Vulkan, and create a "gprt device," a context to hold the
-  // ray generation shader and output buffer. The "1" is the number of devices requested.
-  GPRTContext gprt = gprtContextCreate(nullptr, 1);
+  // Initialize GPRT. Under the hood, this identifies all compatible GPUs (ones
+  // that support ray tracing) selects from that compatible list. If a window
+  // was requested, one will appear after this call. 
+  GPRTContext gprt = gprtContextCreate();
 
-  // SPIR-V is the intermediate code that the GPU deviceCode.hlsl shader program is converted into.
+  // Device code is represented through SPIR-V, which is the intermediate code 
+  // that the GPU deviceCode.hlsl shader program is compiled into.
   // You can see the machine-centric SPIR-V code in
-  // build\samples\cmd00-rayGenOnly\deviceCode.spv
+  // build\s00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
   GPRTModule module = gprtModuleCreate(gprt,s00_deviceCode);
 
@@ -86,24 +89,36 @@ int main(int ac, char **av)
       = gprtRayGenCreate(gprt, module, "simpleRayGen",
                       sizeof(RayGenData),rayGenVars,-1);
 
-  // (re-)builds all vulkan programs, with current pipeline settings
+  // (re-)builds all gprt programs, with current pipeline settings
   gprtBuildPipeline(gprt);
 
   // ##################################################################
-  // allocating buffers
+  // allocating GPU buffers
   // ##################################################################
   
-  // Our framebuffer here will be used to hold pixel color values
-  // that we'll present to the window / save to an image
+  // When working with GPUs, we work with two different pools of memory:
+  // traditional CPU memory, and GPU memory. GPU programs can only read
+  // from GPU buffers of memory. The CPU can temporarily read and write
+  // to GPU bufer memory when that buffer is "mapped" to the CPU.
+
+  // Our frame buffer here will be used to hold pixel color values
+  // that we'll present to the window and save to an image
   LOG("allocating frame buffer");
   GPRTBuffer frameBuffer = gprtDeviceBufferCreate(gprt,
-                                          /*type:*/GPRT_INT,
-                                          /*size:*/fbSize.x*fbSize.y);
+                            /*type: */ GPRT_INT,
+                            /*size: (in count, not in bytes)*/ fbSize.x*fbSize.y);
+  // See also gprtHostBufferCreate and gprtSharedBufferCreate.
+  // To get a pointer to this buffer, call gprtBufferMap, then 
+  // gprtBufferGetPointer. When done writing to the pointer, call 
+  // gprtBufferUnmap.
 
   // ##################################################################
-  // build the shader binding table, used by rays to map geometry, 
-  // instances and ray types to GPU kernels
+  // Build the shader binding table
   // ##################################################################
+  
+  // The shader binding table is used by the GPU to map parameters to GPU 
+  // kernels. 
+
   gprtRayGenSet3f(rayGen,"color0",0.1f,0.1f,0.1f);
   gprtRayGenSet3f(rayGen,"color1",.0f,.0f,.0f);
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
@@ -114,15 +129,19 @@ int main(int ac, char **av)
 
 
   // ##################################################################
-  // now that everything is ready: launch it ....
+  // Launching
   // ##################################################################
+
+  // To execute code on the GPU, we use "gprtRayGenLaunch". Only ray generation
+  // and compute programs can be launched. 
+  // ( compute programs will be covered later :) )
   LOG("executing the launch ...");
   do 
   {
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
     
-    // If a window exists, presents the framebuffer here to that window
+    // If a window exists, presents the frame buffer here to that window
     gprtBufferPresent(gprt, frameBuffer); 
   } 
   // returns true if "X" pressed or if in "headless" mode
@@ -141,6 +160,9 @@ int main(int ac, char **av)
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtModuleDestroy(module);
+
+  // If a window was made, this call is the one that will actually destroy 
+  // that window. 
   gprtContextDestroy(gprt);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");

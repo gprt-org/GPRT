@@ -60,7 +60,7 @@ float transform[3][4] =
   };
 
 // initial image resolution
-const int2 fbSize = {1080,720};
+const int2 fbSize = {1400, 460};
 GLuint fbTexture {0};
 
 #include <iostream>

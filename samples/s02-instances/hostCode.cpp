@@ -25,11 +25,9 @@
 
 // public GPRT API
 #include <gprt.h>
+
 // our device-side data structures
 #include "deviceCode.h"
-// external helper stuff for image output
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image_write.h"
 
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
@@ -40,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram cmd02_deviceCode;
+extern GPRTProgram s02_deviceCode;
 
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
@@ -86,24 +84,33 @@ float transforms[NUM_INSTANCES][12] =
   }
 };
 
+// initial image resolution
+const int2 fbSize = {1400, 460};
+
+// final image output
 const char *outFileName = "s02-instances.png";
-const int2 fbSize = {700,230};
-const float3 lookFrom = {-0.f,2.f,-3.f};
-const float3 lookAt = {0.f,0.f,0.f};
-const float3 lookUp = {0.f,1.f,0.f};
-const float cosFovy = 0.66f;
+
+// Initial camera parameters
+float3 lookFrom = {-0.f,2.f,-3.f};
+float3 lookAt = {0.f,0.f,0.f};
+float3 lookUp = {0.f,1.f,0.f};
+float cosFovy = 0.66f;
 
 #include <iostream>
 int main(int ac, char **av)
 {
+  // This example is very similar to the last, but with one key difference. 
+  // Now, we create multiple "instances", or copies, of the same bottom level
+  // acceleration structure in one top level tree. 
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
+  gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,cmd02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,s02_deviceCode);
 
   // ##################################################################
-  // set up all the *GEOMETRY* graph we want to render
+  // set up all the GPU kernels we want to run
   // ##################################################################
 
   // -------------------------------------------------------
@@ -122,55 +129,6 @@ int main(int ac, char **av)
   gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
                            module,"TriangleMesh");
 
-  // ##################################################################
-  // set up all the *GEOMS* we want to run that code on
-  // ##################################################################
-
-  LOG("building geometries ...");
-
-  // ------------------------------------------------------------------
-  // triangle mesh
-  // ------------------------------------------------------------------
-  GPRTBuffer vertexBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
-  GPRTBuffer indexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
-  GPRTBuffer transformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,NUM_INSTANCES,transforms);
-  GPRTBuffer frameBuffer
-    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-
-  GPRTGeom trianglesGeom
-    = gprtGeomCreate(context,trianglesGeomType);
-
-  gprtTrianglesSetVertices(trianglesGeom,vertexBuffer,
-                           NUM_VERTICES,sizeof(float3),0);
-  gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
-                          NUM_INDICES,sizeof(int3),0);
-
-  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
-
-  // ------------------------------------------------------------------
-  // the group/accel for that mesh
-  // ------------------------------------------------------------------
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {
-    trianglesAccel,
-    trianglesAccel,
-    trianglesAccel
-  };
-
-  GPRTAccel world = gprtInstanceAccelCreate(context,NUM_INSTANCES,triangleAccelRefs);
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
-
-  // ##################################################################
-  // set miss and raygen program required for SBT
-  // ##################################################################
-
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
@@ -184,10 +142,6 @@ int main(int ac, char **av)
   GPRTMiss miss
     = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missProgVars,-1);
-
-  // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
-  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -209,34 +163,73 @@ int main(int ac, char **av)
                       sizeof(RayGenData),
                       rayGenVars,-1);
 
-  // ----------- compute variable values  ------------------
-  float3 camera_pos = lookFrom;
-  float3 camera_d00
-    = normalize(lookAt-lookFrom);
-  float aspect = float(fbSize.x) / float(fbSize.y);
-  float3 camera_ddu
-    = cosFovy * aspect * normalize(cross(camera_d00,lookUp));
-  float3 camera_ddv
-    = cosFovy * normalize(cross(camera_ddu,camera_d00));
-  camera_d00 -= 0.5f * camera_ddu;
-  camera_d00 -= 0.5f * camera_ddv;
-
-  // ----------- set variables  ----------------------------
-  gprtRayGenSetBuffer(rayGen,"fbPtr",        frameBuffer);
-  // gprtRayGenSet2i    (rayGen,"fbSize",       (const int2&)fbSize);
-  gprtRayGenSet2i    (rayGen,"fbSize",       fbSize.x, fbSize.y);
-  gprtRayGenSetAccel (rayGen,"world",        world);
-  // gprtRayGenSet3f    (rayGen,"camera.pos",   (const float3&)camera_pos);
-  // gprtRayGenSet3f    (rayGen,"camera.dir_00",(const float3&)camera_d00);
-  // gprtRayGenSet3f    (rayGen,"camera.dir_du",(const float3&)camera_ddu);
-  // gprtRayGenSet3f    (rayGen,"camera.dir_dv",(const float3&)camera_ddv);
-  gprtRayGenSet3f    (rayGen,"camera.pos",   camera_pos.x, camera_pos.y, camera_pos.z);
-  gprtRayGenSet3f    (rayGen,"camera.dir_00",camera_d00.x, camera_d00.y, camera_d00.z);
-  gprtRayGenSet3f    (rayGen,"camera.dir_du",camera_ddu.x, camera_ddu.y, camera_ddu.z);
-  gprtRayGenSet3f    (rayGen,"camera.dir_dv",camera_ddv.x, camera_ddv.y, camera_ddv.z);
-
   // ##################################################################
-  // build *SBT* required to trace the groups
+  // set the parameters for those kernels
+  // ##################################################################
+
+  // Setup pixel frame buffer
+  GPRTBuffer frameBuffer
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+  gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
+  gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
+
+  // Miss program checkerboard background colors
+  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
+
+  LOG("building geometries ...");
+
+  // Create our cube mesh
+  GPRTBuffer vertexBuffer
+    = gprtHostBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+  GPRTBuffer indexBuffer
+    = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);  
+  GPRTGeom trianglesGeom
+    = gprtGeomCreate(context,trianglesGeomType);
+  gprtTrianglesSetVertices(trianglesGeom,vertexBuffer,
+                           NUM_VERTICES,sizeof(float3),0);
+  gprtTrianglesSetIndices(trianglesGeom,indexBuffer,
+                          NUM_INDICES,sizeof(int3),0);
+
+  // Here, we additionally set the vertex and index parameters of our goemetry
+  // so that we can access these buffers when a ray hits the mesh
+  gprtGeomSetBuffer(trianglesGeom,"vertex",vertexBuffer);
+  gprtGeomSetBuffer(trianglesGeom,"index",indexBuffer);
+
+  // Place that single cube mesh in a bottom level acceleration structure
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context,1,&trianglesGeom);
+  gprtAccelBuild(context, trianglesAccel);
+
+  // We will now create three instances of that cube mesh. On the gpu, 
+  // we will use the "instance ID" to determine what color each cube should be.
+
+  // First, we create a list of BLAS objects
+  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {
+    trianglesAccel,
+    trianglesAccel,
+    trianglesAccel
+  };
+
+  // Then, we create a transform buffer, one transform per instance.
+  // These transforms are defined at the top of our program, in the "transforms"
+  // array referenced by the last parameter here.
+  GPRTBuffer transformBuffer
+    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM_3X4,NUM_INSTANCES,transforms);
+
+  // Finally, we create a top level acceleration structure here.
+  GPRTAccel world = gprtInstanceAccelCreate(context,NUM_INSTANCES,triangleAccelRefs);
+  // Similar to how we set the vertex and index buffers on triangle primitives, 
+  // we set the transforms buffer here for instance primitives
+  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
+  gprtAccelBuild(context, world);
+
+  // Here, we place a reference to our TLAS in the ray generation 
+  // kernel's parameters, so that we can access that tree when 
+  // we go to trace our rays.
+  gprtRayGenSetAccel (rayGen,"world",        world);
+  
+  // ##################################################################
+  // build the pipeline and shader binding table
   // ##################################################################
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
@@ -247,16 +240,80 @@ int main(int ac, char **av)
 
   LOG("launching ...");
 
-  gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+  bool firstFrame = true;
+  double xpos = 0.f, ypos = 0.f;
+  double lastxpos, lastypos;
+  do 
+  {
+    float speed = .001f;
+    lastxpos = xpos;
+    lastypos = ypos;
+    gprtGetCursorPos(context, &xpos, &ypos);
+    if (firstFrame) {
+      lastxpos = xpos;
+      lastypos = ypos;
+    }
+    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
-  LOG("done with launch, writing picture ...");
-  // for host pinned mem it doesn't matter which device we query...
-  const uint32_t *fb
-    = (const uint32_t*)gprtBufferGetPointer(frameBuffer,0);
-  assert(fb);
-  stbi_flip_vertically_on_write(true);
-  stbi_write_png(outFileName,fbSize.x,fbSize.y,4,
-                 fb,int(fbSize.x) * sizeof(uint32_t));
+    // If we click the mouse, we should rotate the camera
+    // Here, we implement some simple camera controls
+    if (state == GPRT_PRESS || firstFrame)
+    {
+      firstFrame = false;
+      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
+      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
+      #ifndef M_PI
+      #define M_PI 3.1415926f
+      #endif
+
+      // step 1 : Calculate the amount of rotation given the mouse movement.
+      float deltaAngleX = (2 * M_PI / fbSize.x);
+      float deltaAngleY = (M_PI / fbSize.y);
+      float xAngle = (lastxpos - xpos) * deltaAngleX;
+      float yAngle = (lastypos - ypos) * deltaAngleY;
+
+      // step 2: Rotate the camera around the pivot point on the first axis.
+      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      position = (mul(rotationMatrixX, (position - pivot))) + pivot;
+
+      // step 3: Rotate the camera around the pivot point on the second axis.
+      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
+
+      // ----------- compute variable values  ------------------
+      float3 camera_pos = lookFrom;
+      float3 camera_d00
+        = normalize(lookAt-lookFrom);
+      float aspect = float(fbSize.x) / float(fbSize.y);
+      float3 camera_ddu
+        = cosFovy * aspect * normalize(cross(camera_d00,lookUp));
+      float3 camera_ddv
+        = cosFovy * normalize(cross(camera_ddu,camera_d00));
+      camera_d00 -= 0.5f * camera_ddu;
+      camera_d00 -= 0.5f * camera_ddv;
+
+      // ----------- set variables  ----------------------------
+      gprtRayGenSet3fv    (rayGen,"camera.pos",   (float*)&camera_pos);
+      gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
+      gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
+      gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
+
+      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+    }
+
+    // Calls the GPU raygen kernel function
+    gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
+    
+    // If a window exists, presents the framebuffer here to that window
+    gprtBufferPresent(context, frameBuffer); 
+  }
+  // returns true if "X" pressed or if in "headless" mode
+  while (!gprtWindowShouldClose(context));
+
+  // Save final frame to an image
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
   LOG_OK("written rendered frame buffer to file "<<outFileName);
 
 

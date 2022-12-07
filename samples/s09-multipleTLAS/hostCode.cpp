@@ -132,7 +132,7 @@ struct TetrahedralMesh {
 } tetrahedralMesh;
 
 // initial image resolution
-const int2 fbSize = {800,600};
+const int2 fbSize = {1400, 460};
 GLuint fbTexture {0};
 
 float3 lookFrom = {4.f,0.0f,0.2f};
