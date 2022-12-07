@@ -29,9 +29,6 @@
 // our device-side data structures
 #include "deviceCode.h"
 
-// library for windowing
-#include <GLFW/glfw3.h>
-
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
@@ -41,40 +38,22 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int03_deviceCode;
+extern GPRTProgram s03_deviceCode;
 
-const int NUM_VERTICES = 1;
-float3 vertices[NUM_VERTICES] =
+// The extents of our bounding box
+float3 aabbPositions[2] =
   {
-    { 0.f,0.f,0.f },
-    // { -1.f,-1.f,-1.f },
-    // { +1.f,-1.f,-1.f },
-    // { -1.f,+1.f,-1.f },
-  };
-
-float radii[NUM_VERTICES] =
-  {
-    1.f //.1f, .2f, .3f
-  };
-
-float3 aabbPositions[NUM_VERTICES*2] =
-  {
-    vertices[0] - radii[0], vertices[0] + radii[0],
-    // vertices[1] - radii[0], vertices[1] + radii[0],
-    // vertices[2] - radii[0], vertices[2] + radii[0]
-  };
-
-float transform[3][4] =
-  {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
+    {-1.0f, -1.0f, -1.0f},
+    { 1.0f,  1.0f,  1.0f}
   };
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
-GLuint fbTexture {0};
 
+// final image output
+const char *outFileName = "s03-singleAABB.png";
+
+// Initial camera parameters
 float3 lookFrom = {3.5f,3.5f,3.5f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,1.f,0.f};
@@ -83,69 +62,35 @@ float cosFovy = 0.66f;
 #include <iostream>
 int main(int ac, char **av)
 {
+  // In this example, we will create an axis aligned bounding box (AABB). These
+  // are more general than triangle primitives, and can be used for custom 
+  // primitive types.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int03_deviceCode);
+  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
+  GPRTContext context = gprtContextCreate();
+  GPRTModule module = gprtModuleCreate(context,s03_deviceCode);
+
+  // ##################################################################
+  // set up all the GPU kernels we want to run
+  // ##################################################################
 
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
   GPRTVarDecl aabbGeomVars[] = {
-    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,vertex)},
-    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,radius)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
   GPRTGeomType aabbGeomType
     = gprtGeomTypeCreate(context,
-                        GPRT_AABBS,
+                        GPRT_AABBS, // <- This is new!
                         sizeof(AABBGeomData),
                         aabbGeomVars,-1);
   gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
                            module,"AABBClosestHit");
   gprtGeomTypeSetIntersectionProg(aabbGeomType,0,
                            module,"AABBIntersection");
-
-  LOG("building geometries ...");
-
-  // ------------------------------------------------------------------
-  // aabb mesh
-  // ------------------------------------------------------------------
-  GPRTBuffer vertexBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
-  GPRTBuffer radiusBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT,NUM_VERTICES,radii);
-  GPRTBuffer aabbPositionsBuffer
-    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES * 2,aabbPositions);
-  GPRTBuffer transformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
-  GPRTBuffer frameBuffer
-    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-
-  GPRTGeom aabbGeom
-    = gprtGeomCreate(context,aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
-                        NUM_VERTICES, 2 * sizeof(float3), 0);
-
-  gprtGeomSetBuffer(aabbGeom,"vertex",vertexBuffer);
-  gprtGeomSetBuffer(aabbGeom,"radius",radiusBuffer);
-  gprtGeomSet3f(aabbGeom,"color",0,0,1);
-
-  // ------------------------------------------------------------------
-  // the group/accel for that mesh
-  // ------------------------------------------------------------------
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
-  gprtAccelBuild(context, aabbAccel);
-
-  GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
-
-  // ##################################################################
-  // set miss and raygen program required for SBT
-  // ##################################################################
 
   // -------------------------------------------------------
   // set up miss
@@ -156,14 +101,9 @@ int main(int ac, char **av)
     { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
     { /* sentinel to mark end of list */ }
   };
-  // ----------- create object  ----------------------------
   GPRTMiss miss
     = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missVars,-1);
-
-  // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
-  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -178,44 +118,51 @@ int main(int ac, char **av)
     { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
     { /* sentinel to mark end of list */ }
   };
-
-  // ----------- create object  ----------------------------
   GPRTRayGen rayGen
     = gprtRayGenCreate(context,module,"AABBRayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
+  // ##################################################################
+  // set the parameters for those kernels
+  // ##################################################################
 
-  // ----------- set variables  ----------------------------
+  // Setup pixel frame buffer
+  GPRTBuffer frameBuffer
+    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
+
+  // Miss program checkerboard background colors
+  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
+
+  LOG("building geometries ...");
+
+  // Create our AABB geometry. Every AABB is defined using two float3's. The
+  // first float3 defines the bottom lower left near corner, and the second 
+  // float3 defines the upper far right corner.
+  GPRTBuffer aabbPositionsBuffer
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3, 2,aabbPositions);
+  GPRTGeom aabbGeom
+    = gprtGeomCreate(context,aabbGeomType);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
+                        1 /* just one aabb */, 2 * sizeof(float3), 0);
+
+  // Note, we must create an "AABB" accel rather than a triangles accel.
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
+  gprtAccelBuild(context, aabbAccel);
+
+  // triangle and AABB accels can be combined in a top level tree
+  GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
+  gprtAccelBuild(context, world);
+
   gprtRayGenSetAccel(rayGen,"world", world);
 
   // ##################################################################
-  // build *SBT* required to trace the groups
+  // build the pipeline and shader binding table
   // ##################################################################
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
-
-  // ##################################################################
-  // create a window we can use to display and interact with the image
-  // ##################################################################
-  if (!glfwInit())
-    // Initialization failed
-    throw std::runtime_error("Can't initialize GLFW");
-
-  auto error_callback = [](int error, const char* description)
-  {
-    fprintf(stderr, "Error: %s\n", description);
-  };
-  glfwSetErrorCallback(error_callback);
-
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y,
-    "Int02 Simple AABBs", NULL, NULL);
-  if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
-  glfwMakeContextCurrent(window);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -226,20 +173,21 @@ int main(int ac, char **av)
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  while (!glfwWindowShouldClose(window))
+  do 
   {
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
+    gprtGetCursorPos(context, &xpos, &ypos);
     if (firstFrame) {
       lastxpos = xpos;
       lastypos = ypos;
     }
-    int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
     // If we click the mouse, we should rotate the camera
-    if (state == GLFW_PRESS || firstFrame)
+    // Here, we implement some simple camera controls
+    if (state == GPRT_PRESS || firstFrame)
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -250,7 +198,7 @@ int main(int ac, char **av)
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = -(M_PI / fbSize.y);
+      float deltaAngleY = (M_PI / fbSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -281,76 +229,31 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
 
-      gprtBuildShaderBindingTable(context);
+      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // Now, trace rays
+    // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
-
-    // Render results to screen
-    void* pixels = gprtBufferGetPointer(frameBuffer);
-    if (fbTexture == 0)
-      glGenTextures(1, &fbTexture);
-
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    GLenum texFormat = GL_RGBA;
-    GLenum texelType = GL_UNSIGNED_BYTE;
-    glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
-                  texelType, pixels);
-
-    glDisable(GL_LIGHTING);
-    glColor3f(1, 1, 1);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glDisable(GL_DEPTH_TEST);
-
-    glViewport(0, 0, fbSize.x, fbSize.y);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, 0.f, (float)fbSize.y, -1.f, 1.f);
-
-    glBegin(GL_QUADS);
-    {
-      glTexCoord2f(0.f, 0.f);
-      glVertex3f(0.f, 0.f, 0.f);
-
-      glTexCoord2f(0.f, 1.f);
-      glVertex3f(0.f, (float)fbSize.y, 0.f);
-
-      glTexCoord2f(1.f, 1.f);
-      glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-
-      glTexCoord2f(1.f, 0.f);
-      glVertex3f((float)fbSize.x, 0.f, 0.f);
-    }
-    glEnd();
-
-    glfwSwapBuffers(window);
-    glfwPollEvents();
+    
+    // If a window exists, presents the framebuffer here to that window
+    gprtBufferPresent(context, frameBuffer); 
   }
+  // returns true if "X" pressed or if in "headless" mode
+  while (!gprtWindowShouldClose(context));
+
+  // Save final frame to an image
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
+  LOG_OK("written rendered frame buffer to file "<<outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
-
+  
   LOG("cleaning up ...");
 
-  glfwDestroyWindow(window);
-  glfwTerminate();
-
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(radiusBuffer);
   gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(aabbAccel);

@@ -134,7 +134,7 @@ int main(int ac, char **av)
   
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer
-    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtDeviceBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
 
@@ -147,7 +147,7 @@ int main(int ac, char **av)
   // The vertex and index buffers here define the triangle vertices 
   // and how those vertices are connected together.
   GPRTBuffer vertexBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
   GPRTBuffer indexBuffer
     = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);
   

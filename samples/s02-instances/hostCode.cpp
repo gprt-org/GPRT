@@ -40,6 +40,7 @@
 
 extern GPRTProgram s02_deviceCode;
 
+// Vertices and indices of a cube
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
   {
@@ -64,6 +65,9 @@ int3 indices[NUM_INDICES] =
     { 4,0,2 }, { 4,2,6 }
   };
 
+// Several affine transformation matrices to place instances of our cube in the 
+// world. The first, second, third and third column represent "right", "up", and
+// "forward" basis respectively. The last column represents the position.
 const int NUM_INSTANCES = 3;
 float transforms[NUM_INSTANCES][12] =
 {
@@ -105,8 +109,8 @@ int main(int ac, char **av)
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
-  GPRTContext context = gprtContextCreate(nullptr,1);
+  gprtRequestWindow(fbSize.x, fbSize.y, "S02 Instances");
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context,s02_deviceCode);
 
   // ##################################################################
@@ -138,7 +142,6 @@ int main(int ac, char **av)
     { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
     { /* sentinel to mark end of list */ }
   };
-  // ----------- create object  ----------------------------
   GPRTMiss miss
     = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
                         missProgVars,-1);
@@ -157,7 +160,6 @@ int main(int ac, char **av)
     { /* sentinel to mark end of list */ }
   };
 
-  // ----------- create object  ----------------------------
   GPRTRayGen rayGen
     = gprtRayGenCreate(context,module,"simpleRayGen",
                       sizeof(RayGenData),
@@ -169,7 +171,7 @@ int main(int ac, char **av)
 
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer
-    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
+    = gprtDeviceBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
 
@@ -181,7 +183,7 @@ int main(int ac, char **av)
 
   // Create our cube mesh
   GPRTBuffer vertexBuffer
-    = gprtHostBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
+    = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES,vertices);
   GPRTBuffer indexBuffer
     = gprtDeviceBufferCreate(context,GPRT_INT3,NUM_INDICES,indices);  
   GPRTGeom trianglesGeom

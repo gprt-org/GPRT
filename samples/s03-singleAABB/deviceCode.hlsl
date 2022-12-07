@@ -68,14 +68,11 @@ struct Attribute
 
 GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
-  // printf("TEST\n");
-  payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
+  payload.color = float3(1.f, 1.f, 1.f);
 }
 
 GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 {
-  // prd.color = float3(1.f, 1.f, 1.f);
-  // printf("TEST\n");
   Attribute attr;
   attr.attribs = float2(0.f, 0.f);
   ReportHit(0.1f, /*hitKind*/ 0, attr);
