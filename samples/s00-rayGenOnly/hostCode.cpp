@@ -35,7 +35,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int00_deviceCode;
+extern GPRTProgram s00_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -58,7 +58,7 @@ int main(int ac, char **av)
 
   // Since we'll be using a window, we request support for an image swapchain
   // If a window can't be made, we can still use GPRT, but a window wont appear. 
-  gprtRequestWindow(fbSize.x, fbSize.y, "Int00 Raygen Only");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S00 Raygen Only");
 
   // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices requested.
@@ -68,7 +68,7 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(gprt,int00_deviceCode);
+  GPRTModule module = gprtModuleCreate(gprt,s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // All "parameters" we'll pass to that ray generation kernel are defined here.
@@ -89,9 +89,9 @@ int main(int ac, char **av)
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(gprt);
 
-  // ------------------------------------------------------------------
+  // ##################################################################
   // allocating buffers
-  // ------------------------------------------------------------------
+  // ##################################################################
   
   // Our framebuffer here will be used to hold pixel color values
   // that we'll present to the window / save to an image
@@ -100,10 +100,10 @@ int main(int ac, char **av)
                                           /*type:*/GPRT_INT,
                                           /*size:*/fbSize.x*fbSize.y);
 
-  // ------------------------------------------------------------------
+  // ##################################################################
   // build the shader binding table, used by rays to map geometry, 
   // instances and ray types to GPU kernels
-  // ------------------------------------------------------------------
+  // ##################################################################
   gprtRayGenSet3f(rayGen,"color0",0.1f,0.1f,0.1f);
   gprtRayGenSet3f(rayGen,"color1",.0f,.0f,.0f);
   gprtRayGenSetBuffer(rayGen,"fbPtr",frameBuffer);
