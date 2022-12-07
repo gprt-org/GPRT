@@ -65,6 +65,7 @@ target_link_libraries(gprt
     ${Vulkan_LIBRARY}
     gprtDeviceCode
     glfw
+    stb_image
 )
 
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
