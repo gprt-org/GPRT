@@ -24,7 +24,7 @@
 
 /* variables available to all programs */
 
-struct AABBBoundsData
+struct SphereBoundsData
 {
   /*! array/buffer of vertex indices */
   alignas(8) uint64_t vertex; // vec3f*
@@ -35,7 +35,7 @@ struct AABBBoundsData
 };
 
 /* variables for the triangle mesh geometry */
-struct AABBGeomData
+struct SphereGeomData
 {
   /*! array/buffer of vertex indices */
   alignas(16) gprt::Buffer vertex; // vec3f*

@@ -119,7 +119,7 @@ int main(int ac, char **av)
     { /* sentinel to mark end of list */ }
   };
   GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"AABBRayGen",
+    = gprtRayGenCreate(context,module,"simpleRayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
   // ##################################################################
@@ -249,7 +249,7 @@ int main(int ac, char **av)
   // ##################################################################
   // and finally, clean up
   // ##################################################################
-  
+
   LOG("cleaning up ...");
 
   gprtBufferDestroy(aabbPositionsBuffer);

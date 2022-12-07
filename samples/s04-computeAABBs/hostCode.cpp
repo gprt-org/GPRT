@@ -41,8 +41,9 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int04_deviceCode;
+extern GPRTProgram s04_deviceCode;
 
+// Vertices and radii that will be used to define spheres
 const int NUM_VERTICES = 4;
 float3 vertices[NUM_VERTICES] =
   {
@@ -57,17 +58,13 @@ float radii[NUM_VERTICES] =
     1.f, .5f, .25f, .1f
   };
 
-float transform[3][4] =
-  {
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f
-  };
-
 // initial image resolution
 const int2 fbSize = {1400, 460};
-GLuint fbTexture {0};
 
+// final image output
+const char *outFileName = "s04-computeAABBs.png";
+
+// Initial camera parameters
 float3 lookFrom = {-4.f,-3.f,-2.f};
 float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,1.f,0.f};
@@ -76,29 +73,69 @@ float cosFovy = 0.66f;
 #include <iostream>
 int main(int ac, char **av)
 {
+  // In this example, we'll use a compute shader to generate a set of
+  // procedural axis aligned bounding boxes in parallel on the GPU. Each
+  // AABB will contain a single sphere.
+  LOG("gprt example '" << av[0] << "' starting up");
+
   // create a context on the first device:
+  gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int04_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,s04_deviceCode);
+
+  // ##################################################################
+  // set up all the GPU kernels we want to run
+  // ##################################################################
 
   // -------------------------------------------------------
-  // Setup programs and geometry types
+  // declare geometry type
   // -------------------------------------------------------
-  GPRTVarDecl aabbGeomVars[] = {
-    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,vertex)},
-    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(AABBGeomData,radius)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(AABBGeomData,color)},
+  GPRTVarDecl sphereGeomVars[] = {
+    { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(SphereGeomData,vertex)},
+    { "radius",  GPRT_BUFFER, GPRT_OFFSETOF(SphereGeomData,radius)},
+    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(SphereGeomData,color)},
     { /* sentinel to mark end of list */ }
   };
-  GPRTGeomType aabbGeomType
+  GPRTGeomType sphereGeomType
     = gprtGeomTypeCreate(context,
                         GPRT_AABBS,
-                        sizeof(AABBGeomData),
-                        aabbGeomVars,-1);
-  gprtGeomTypeSetClosestHitProg(aabbGeomType,0,
-                           module,"AABBClosestHit");
-  gprtGeomTypeSetIntersectionProg(aabbGeomType,0,
-                           module,"AABBIntersection");
+                        sizeof(SphereGeomData),
+                        sphereGeomVars,-1);
+  gprtGeomTypeSetClosestHitProg(sphereGeomType,0,
+                           module,"SphereClosestHit");
+  gprtGeomTypeSetIntersectionProg(sphereGeomType,0,
+                           module,"SphereIntersection");
 
+  // -------------------------------------------------------
+  // set up sphere bounding box compute program
+  // -------------------------------------------------------
+  GPRTVarDecl computeVars[] = {
+    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData,vertex)},
+    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData,radius)},
+    { "aabbs",  GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData,aabbs)},
+    { /* sentinel to mark end of list */ }
+  };
+  GPRTCompute boundsProgram
+    = gprtComputeCreate(context,module,"SphereBounds",
+                      sizeof(SphereBoundsData),
+                      computeVars,-1);
+
+  // -------------------------------------------------------
+  // set up miss
+  // -------------------------------------------------------
+  GPRTVarDecl missVars[]
+    = {
+    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
+    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
+    { /* sentinel to mark end of list */ }
+  };
+  GPRTMiss miss
+    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
+                        missVars,-1);
+
+  // -------------------------------------------------------
+  // set up ray gen program
+  // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
     { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
     { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
@@ -110,35 +147,18 @@ int main(int ac, char **av)
     { /* sentinel to mark end of list */ }
   };
   GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"AABBRayGen",
+    = gprtRayGenCreate(context,module,"simpleRayGen",
                       sizeof(RayGenData),
                       rayGenVars,-1);
-
-  GPRTVarDecl missVars[]
-    = {
-    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
-    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTMiss miss
-    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
-                        missVars,-1);
-
-  GPRTVarDecl computeVars[] = {
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,vertex)},
-    { "radius", GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,radius)},
-    { "aabbs",  GPRT_BUFFER, GPRT_OFFSETOF(AABBBoundsData,aabbs)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTCompute boundsProgram
-    = gprtComputeCreate(context,module,"AABBBounds",
-                      sizeof(AABBBoundsData),
-                      computeVars,-1);
 
   // Note, we'll need to call this again after creating our acceleration 
   // structures, as acceleration structures will introduce new shader 
   // binding table records to the pipeline.
   gprtBuildPipeline(context);
+
+  // ##################################################################
+  // set the parameters for our compute kernel
+  // ##################################################################
 
   // ------------------------------------------------------------------
   // aabb mesh
@@ -151,7 +171,7 @@ int main(int ac, char **av)
     = gprtDeviceBufferCreate(context,GPRT_FLOAT3,NUM_VERTICES * 2,nullptr);
 
   GPRTGeom aabbGeom
-    = gprtGeomCreate(context,aabbGeomType);
+    = gprtGeomCreate(context,sphereGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer,
                         NUM_VERTICES, 2 * sizeof(float3), 0);
 
@@ -165,61 +185,42 @@ int main(int ac, char **av)
 
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES);
 
+  // Launch the compute kernel, which will populate our aabbPositionsBuffer
+  gprtComputeLaunch1D(context,boundsProgram,NUM_VERTICES); 
+
+  // Now that the aabbPositionsBuffer is filled, we can compute our AABB 
+  // acceleration structure
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context,1,&aabbGeom);
   gprtAccelBuild(context, aabbAccel);
 
-  // ------------------------------------------------------------------
-  // the group/accel for that mesh
-  // ------------------------------------------------------------------
-  GPRTBuffer transformBuffer
-    = gprtDeviceBufferCreate(context,GPRT_TRANSFORM,1,transform);
   GPRTAccel world = gprtInstanceAccelCreate(context,1,&aabbAccel);
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
   gprtAccelBuild(context, world);
 
-  // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",.1f,0.1f,0.1f);
-  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
+  // ##################################################################
+  // set the parameters for the rest of our kernels
+  // ##################################################################
 
-  // ----------- set raygen variables  ----------------------------
+  // Setup pixel frame buffer
   GPRTBuffer frameBuffer
     = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
   gprtRayGenSetAccel(rayGen,"world", world);
 
+  // Miss program checkerboard background colors
+  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
+
   // ##################################################################
-  // build *SBT* required to trace the groups
+  // build the pipeline and shader binding table
   // ##################################################################
 
   // re-build the pipeline to account for newly introduced geometry
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
-  // ##################################################################
-  // create a window we can use to display and interact with the image
-  // ##################################################################
-  if (!glfwInit())
-    // Initialization failed
-    throw std::runtime_error("Can't initialize GLFW");
-
-  auto error_callback = [](int error, const char* description)
-  {
-    fprintf(stderr, "Error: %s\n", description);
-  };
-  glfwSetErrorCallback(error_callback);
-
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y,
-    "Int02 Simple AABBs", NULL, NULL);
-  if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
-  glfwMakeContextCurrent(window);
-
-  // ##################################################################
+// ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
@@ -228,20 +229,21 @@ int main(int ac, char **av)
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  while (!glfwWindowShouldClose(window))
+  do 
   {
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
+    gprtGetCursorPos(context, &xpos, &ypos);
     if (firstFrame) {
       lastxpos = xpos;
       lastypos = ypos;
     }
-    int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
     // If we click the mouse, we should rotate the camera
-    if (state == GLFW_PRESS || firstFrame)
+    // Here, we implement some simple camera controls
+    if (state == GPRT_PRESS || firstFrame)
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -249,6 +251,7 @@ int main(int ac, char **av)
       #ifndef M_PI
       #define M_PI 3.1415926f
       #endif
+
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
@@ -281,61 +284,23 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
+
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // Now, trace rays
+    // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
-
-    // Render results to screen
-    void* pixels = gprtBufferGetPointer(frameBuffer);
-    if (fbTexture == 0)
-      glGenTextures(1, &fbTexture);
-
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    GLenum texFormat = GL_RGBA;
-    GLenum texelType = GL_UNSIGNED_BYTE;
-    glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
-                  texelType, pixels);
-
-    glDisable(GL_LIGHTING);
-    glColor3f(1, 1, 1);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glDisable(GL_DEPTH_TEST);
-
-    glViewport(0, 0, fbSize.x, fbSize.y);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
-
-    glBegin(GL_QUADS);
-    {
-      glTexCoord2f(0.f, 0.f);
-      glVertex3f(0.f, 0.f, 0.f);
-
-      glTexCoord2f(0.f, 1.f);
-      glVertex3f(0.f, (float)fbSize.y, 0.f);
-
-      glTexCoord2f(1.f, 1.f);
-      glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-
-      glTexCoord2f(1.f, 0.f);
-      glVertex3f((float)fbSize.x, 0.f, 0.f);
-    }
-    glEnd();
-
-    glfwSwapBuffers(window);
-    glfwPollEvents();
+    
+    // If a window exists, presents the framebuffer here to that window
+    gprtBufferPresent(context, frameBuffer); 
   }
+  // returns true if "X" pressed or if in "headless" mode
+  while (!gprtWindowShouldClose(context));
+
+  // Save final frame to an image
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
+  LOG_OK("written rendered frame buffer to file "<<outFileName);
 
   // ##################################################################
   // and finally, clean up
@@ -343,20 +308,16 @@ int main(int ac, char **av)
 
   LOG("cleaning up ...");
 
-  glfwDestroyWindow(window);
-  glfwTerminate();
-
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(radiusBuffer);
   gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(aabbGeom);
-  gprtGeomTypeDestroy(aabbGeomType);
+  gprtGeomTypeDestroy(sphereGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

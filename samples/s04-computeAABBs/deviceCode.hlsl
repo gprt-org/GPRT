@@ -28,16 +28,12 @@ struct Payload
   float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 dims = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + 
                   float2(.5f, .5f)) / float2(record.fbSize);
-  bool showCross = false;
-  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
-    showCross = true;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -64,35 +60,22 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-
 struct Attribute
 {
   float radius;
   float3 position;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
+GPRT_CLOSEST_HIT_PROGRAM(SphereClosestHit, (SphereGeomData, record), (Payload, payload), (Attribute, attribute))
 {
   float3 origin = attribute.position;
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
-
   float3 normal = normalize(hitPos - origin);
-  
-  // printf("TEST\n");
-  payload.color = abs(normal);//float3(1.f, 1.f, 1.f); //geomSBTData.color;
-
-
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 dims = DispatchRaysDimensions().xy;
-  bool debug = false;
-  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
-    debug = true;
-  // if (debug) printf("closesthit primID %d pos %f %f %f radius %f \n", 
-  //   PrimitiveIndex(), attribute.position.x, attribute.position.y, attribute.position.z, attribute.radius);
+  payload.color = abs(normal);
 }
 
 
-GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
+GPRT_COMPUTE_PROGRAM(SphereBounds, (SphereBoundsData, record))
 {
   int primID = DispatchThreadID.x;
   float3 position = gprt::load<float3>(record.vertex, primID);
@@ -103,20 +86,12 @@ GPRT_COMPUTE_PROGRAM(AABBBounds, (AABBBoundsData, record))
   gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
+GPRT_INTERSECTION_PROGRAM(SphereIntersection, (SphereGeomData, record))
 {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 dims = DispatchRaysDimensions().xy;
-  bool debug = false;
-  if (pixelID.x == dims.x / 2 && pixelID.y == dims.y / 2) 
-    debug = true;
-  
   uint primID = PrimitiveIndex();
 
   float3 position = gprt::load<float3>(record.vertex, primID);
   float radius = gprt::load<float>(record.radius, primID);
-
-  // if (debug) printf("intersection primID %d pos %f %f %f radius %f \n", primID, position.x, position.y, position.z, radius);
 
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();

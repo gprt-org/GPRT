@@ -28,7 +28,7 @@ struct Payload
   float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
