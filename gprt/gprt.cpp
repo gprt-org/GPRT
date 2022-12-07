@@ -2290,6 +2290,8 @@ struct Context {
       if (err != VK_SUCCESS) {
         GPRT_RAISE("failed to create window surface! : \n" + errorString(err));
       }
+      // Poll some initial event values
+      glfwPollEvents();
     }
 
     /// 2. Select a Physical Device
@@ -3456,6 +3458,26 @@ GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
   
   glfwPollEvents();
   return glfwWindowShouldClose(context->window);
+}
+
+GPRT_API void gprtGetCursorPos(GPRTContext _context, 
+  double * xpos, double * ypos)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return;
+
+  glfwGetCursorPos(context->window, xpos, ypos);
+}
+
+GPRT_API int gprtGetMouseButton(GPRTContext _context,
+  int button)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return GPRT_RELEASE;
+
+  return glfwGetMouseButton(context->window, button);
 }
 
 GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {

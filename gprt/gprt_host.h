@@ -510,6 +510,42 @@ GPRT_API void gprtRequestWindow(
 */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
+/** If a window was requested, this function returns the position of the cursor
+ * in screen coordinates relative to the upper left corner. 
+ * 
+ * If a window was not requested (ie headless), position arguments will be 
+ * set to NULL.
+ */
+GPRT_API void gprtGetCursorPos(GPRTContext context, 
+  double * xpos, double * ypos);
+
+#define GPRT_RELEASE                0
+#define GPRT_PRESS                  1
+#define GPRT_REPEAT                 2
+
+#define GPRT_MOUSE_BUTTON_1         0
+#define GPRT_MOUSE_BUTTON_2         1
+#define GPRT_MOUSE_BUTTON_3         2
+#define GPRT_MOUSE_BUTTON_4         3
+#define GPRT_MOUSE_BUTTON_5         4
+#define GPRT_MOUSE_BUTTON_6         5
+#define GPRT_MOUSE_BUTTON_7         6
+#define GPRT_MOUSE_BUTTON_8         7
+#define GPRT_MOUSE_BUTTON_LAST      GPRT_MOUSE_BUTTON_8
+#define GPRT_MOUSE_BUTTON_LEFT      GPRT_MOUSE_BUTTON_1
+#define GPRT_MOUSE_BUTTON_RIGHT     GPRT_MOUSE_BUTTON_2
+#define GPRT_MOUSE_BUTTON_MIDDLE    GPRT_MOUSE_BUTTON_3
+
+/** If a window was requested, this function returns thelast state reported 
+ * for the given mouse button. The returned state is one of GPRT_PRESS or 
+ * GPRT_RELEASE.
+ *  
+ * If a window was not requested (ie headless), this function will return 
+ * GPRT_RELEASE.
+ */
+GPRT_API int gprtGetMouseButton(GPRTContext context,
+  int button);
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
