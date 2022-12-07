@@ -57,6 +57,11 @@
 // library for windowing
 #include <GLFW/glfw3.h>
 
+// library for image output
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
+
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
 #  define __PRETTY_FUNCTION__ __FUNCTION__
@@ -3457,7 +3462,7 @@ GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
   return glfwWindowShouldClose(context->window);
 }
 
-GPRT_API void gprtPresentBuffer(GPRTContext _context, GPRTBuffer _buffer) {
+GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   if (!requestedFeatures.window) return;
   Context *context = (Context*)_context;
@@ -4080,7 +4085,29 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID)
   buffer->unmap();
 }
 
+GPRT_API void gprtBufferSaveImage(GPRTBuffer _buffer, 
+  uint32_t width, uint32_t height, const char *imageName)
+{
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer*)_buffer;
 
+  // Keep track of whether the buffer was mapped before this call
+  bool mapped = true;
+  if (buffer->mapped == nullptr) mapped = false;
+
+  // If not mapped currently, map it
+  if (!mapped)
+    buffer->map();
+
+  const uint32_t *fb = (const uint32_t*) buffer->mapped;
+  stbi_flip_vertically_on_write(1);
+  stbi_write_png(imageName,width,height,4,
+                 fb,(uint32_t)(width)*sizeof(uint32_t));
+  
+  // Return mapped to previous state
+  if (!mapped)
+    buffer->unmap();
+}
 
 GPRT_API void gprtBuildPipeline(GPRTContext _context)
 {

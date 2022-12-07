@@ -510,14 +510,6 @@ GPRT_API void gprtRequestWindow(
 */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
-/** If a window was requested, this call interprets the given buffer as 
- * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents 
- * to the window, potentially waiting for the screen to update before swapping.
- * 
- * If a window was not requested (ie headless), this function does nothing. 
-*/
-GPRT_API void gprtPresentBuffer(GPRTContext context, GPRTBuffer buffer);
-
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
@@ -778,6 +770,20 @@ gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 GPRT_API void
 gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
+/** If a window was requested, this call interprets the given buffer as 
+ * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents 
+ * to the window, potentially waiting for the screen to update before swapping.
+ * 
+ * If a window was not requested (ie headless), this function does nothing. 
+*/
+GPRT_API void gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
+
+/** This call interprets the given buffer as a B8G8R8A8 SRGB image sorted in 
+ * row major buffer, and saves the contents to the underlying filesystem.
+*/
+GPRT_API void gprtBufferSaveImage(GPRTBuffer buffer, 
+  uint32_t width, uint32_t height, const char *imageName);
 
 GPRT_API void
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, int dims_x);
