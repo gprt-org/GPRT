@@ -552,7 +552,7 @@ GPRT_API int gprtGetMouseButton(GPRTContext context,
  * At the moment, if a window was not requested (ie headless), this function 
  * will return 0.
  */
-GPRT_API double gprtGetTime(GPRTContext context)
+GPRT_API double gprtGetTime(GPRTContext context);
 
 /** creates a new device context with the gives list of devices.
 
