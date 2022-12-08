@@ -23,6 +23,14 @@
 #include "deviceCode.h"
 #include "gprt.h"
 
+float3 getPos(float px, float py, float k, float width, float depth, float height, float now) {
+  float x = lerp(-1.f, 1.f, px);
+  float y = lerp(-1.f, 1.f, py);
+  float z = sin(now + k * x) * cos(now + k * y);
+  float zoffset = x + y;
+  return float3(x * width, y * depth, z * height + zoffset);
+}
+
 GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record))
 {
   uint gridSize = record.gridSize;
@@ -31,8 +39,8 @@ GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record))
 
   bool even = (TriID % 2) == 0;
 
-  float x = ((TriID / 2) % gridSize) / float(gridSize);
-  float y = ((TriID / 2) / gridSize) / float(gridSize);
+  float gx = ((TriID / 2) % gridSize) / float(gridSize);
+  float gy = ((TriID / 2) / gridSize) / float(gridSize);
 
   float dx = 1.f / float(gridSize);
   float dy = 1.f / float(gridSize);
@@ -40,17 +48,19 @@ GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record))
   uint3 index = uint3(3 * TriID + 0, 3 * TriID + 1, 3 * TriID + 2);
   float3 v0, v1, v2;
 
-  float height = .3f;
-  float k = 10.f;
+  float height = .1;
+  float width = 4.0;
+  float depth = 4.0;
+  float k = 20.f;
 
   if (even) {
-    v0 = float3(x     , y     , height * sin(now + k * (x     )) * height * cos(now + k * (y     )));
-    v1 = float3(x + dx, y     , height * sin(now + k * (x + dx)) * height * cos(now + k * (y     )));
-    v2 = float3(x + dx, y + dy, height * sin(now + k * (x + dx)) * height * cos(now + k * (y + dy)));
+    v0 = getPos(gx     , gy     , k, width, depth, height, now); 
+    v1 = getPos(gx + dx, gy     , k, width, depth, height, now);
+    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, now);
   } else {
-    v0 = float3(x     , y     , height * sin(now + k * (x     )) * height * cos(now + k * (y     )));
-    v1 = float3(x + dx, y + dy, height * sin(now + k * (x + dx)) * height * cos(now + k * (y + dy)));
-    v2 = float3(x     , y + dy, height * sin(now + k * (x     )) * height * cos(now + k * (y + dy)));
+    v0 = getPos(gx     , gy     , k, width, depth, height, now);
+    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, now);
+    v2 = getPos(gx     , gy + dy, k, width, depth, height, now);
   }
 
   gprt::store(record.index, TriID, index);
@@ -92,6 +102,13 @@ struct Attribute
   float2 bc;
 };
 
+float3 hsv2rgb(float3 input)
+{
+  float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
+  return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
+}
+
 GPRT_CLOSEST_HIT_PROGRAM(ClosestHit, 
   (TrianglesGeomData, record), (Payload, payload), (Attribute, attribute))
 {
@@ -105,8 +122,8 @@ GPRT_CLOSEST_HIT_PROGRAM(ClosestHit,
   float3 rayDir = WorldRayDirection();
 
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
-  float3 color = normalize(float3(hitPos.x, hitPos.y, (1.0 - (hitPos.x + hitPos.y))));
-  payload.color = (.1f + .9f * abs(dot(rayDir,Ng))) * color;
+  float3 color = hsv2rgb(float3(primID / 1000000.f, 1.0, 1.0));
+  payload.color = (.5f + .5f * abs(dot(rayDir,Ng))) * color;
 }
 
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))

@@ -29,9 +29,6 @@
 // our device-side data structures
 #include "deviceCode.h"
 
-// library for windowing
-#include <GLFW/glfw3.h>
-
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
@@ -41,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-const int GRID_SIDE_LENGTH = 100;
+const int GRID_SIDE_LENGTH = 1000;
 
 extern GPRTProgram s05_deviceCode;
 
@@ -50,14 +47,19 @@ const int2 fbSize = {1400, 460};
 
 const char *outFileName = "s04-computeAABBs.png";
 
-float3 lookFrom = {1.5f,-1.5f,1.f};
-float3 lookAt = {0.5f,0.5f,0.f};
+float3 lookFrom = {-2.f,-2.f,0.f};
+float3 lookAt = {0.f,0.f,0.f};
 float3 lookUp = {0.f,0.f,-1.f};
-float cosFovy = 0.45f;
+float cosFovy = 0.3f;
 
 #include <iostream>
 int main(int ac, char **av)
 {
+  // In this example, we will use a GPU compute kernel to animate the vertices
+  // of a mesh, like you might do in a traditional rasterization pipeline. 
+  // Every time the vertices move, we must rebuild the underlying acceleration 
+  // structure. Fortunately, GPRT makes these tree builds fast and easy.
+
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S05 Compute Vertex");
   GPRTContext context = gprtContextCreate(nullptr,1);
@@ -68,7 +70,7 @@ int main(int ac, char **av)
   // ##################################################################
 
   // -------------------------------------------------------
-  // Setup programs and geometry types
+  // Setup geometry types
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
     { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
@@ -269,7 +271,7 @@ int main(int ac, char **av)
     }
 
     // update time to move primitives. then, rebuild accel.
-    gprtComputeSet1f(vertexProgram, "now", float(glfwGetTime()));
+    gprtComputeSet1f(vertexProgram, "now", float(gprtGetTime(context)));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context,vertexProgram,numTriangles);
     gprtAccelBuild(context, trianglesAccel);
