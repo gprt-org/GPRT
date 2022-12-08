@@ -536,7 +536,7 @@ GPRT_API void gprtGetCursorPos(GPRTContext context,
 #define GPRT_MOUSE_BUTTON_RIGHT     GPRT_MOUSE_BUTTON_2
 #define GPRT_MOUSE_BUTTON_MIDDLE    GPRT_MOUSE_BUTTON_3
 
-/** If a window was requested, this function returns thelast state reported 
+/** If a window was requested, this function returns the last state reported 
  * for the given mouse button. The returned state is one of GPRT_PRESS or 
  * GPRT_RELEASE.
  *  
@@ -545,6 +545,14 @@ GPRT_API void gprtGetCursorPos(GPRTContext context,
  */
 GPRT_API int gprtGetMouseButton(GPRTContext context,
   int button);
+
+/** If a window was requested, this function returns the time elapsed since 
+ * GPRT was initialized. 
+ *  
+ * At the moment, if a window was not requested (ie headless), this function 
+ * will return 0.
+ */
+GPRT_API double gprtGetTime(GPRTContext context)
 
 /** creates a new device context with the gives list of devices.
 
