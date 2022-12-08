@@ -3484,6 +3484,14 @@ GPRT_API int gprtGetMouseButton(GPRTContext _context,
   return glfwGetMouseButton(context->window, button);
 }
 
+GPRT_API double gprtGetTime(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return 0.0;
+  return glfwGetTime();
+}
+
 GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   if (!requestedFeatures.window) return;
