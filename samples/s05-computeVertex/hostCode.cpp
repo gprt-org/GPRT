@@ -47,7 +47,8 @@ extern GPRTProgram s05_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
-GLuint fbTexture {0};
+
+const char *outFileName = "s04-computeAABBs.png";
 
 float3 lookFrom = {1.5f,-1.5f,1.f};
 float3 lookAt = {0.5f,0.5f,0.f};

@@ -29,9 +29,6 @@
 // our device-side data structures
 #include "deviceCode.h"
 
-// library for windowing
-#include <GLFW/glfw3.h>
-
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
