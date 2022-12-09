@@ -29,10 +29,6 @@
 // our device-side data structures
 #include "deviceCode.h"
 
-// library for windowing
-#define NOMINMAX
-#include <GLFW/glfw3.h>
-
 #define LOG(message)                                            \
   std::cout << GPRT_TERMINAL_BLUE;                               \
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
@@ -42,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;   \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram int10_deviceCode;
+extern GPRTProgram s10_deviceCode;
 
 
 /* forward declarations to double precision cube. 
@@ -61,7 +57,8 @@ float transform[3][4] =
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
-GLuint fbTexture {0};
+
+const char *outFileName = "s10-doublePrecision.png";
 
 #include <iostream>
 int main(int ac, char **av)
@@ -71,10 +68,14 @@ int main(int ac, char **av)
 
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,int10_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,s10_deviceCode);
+
+  // ##################################################################
+  // set up all the GPU kernels we want to run
+  // ##################################################################
 
   // -------------------------------------------------------
-  // Setup programs and geometry types
+  // Setup geometry types
   // -------------------------------------------------------
   GPRTVarDecl DPTriangleVars[] = {
     { "vertex",  GPRT_BUFFER, GPRT_OFFSETOF(DPTriangleData,vertex)},
@@ -213,27 +214,6 @@ int main(int ac, char **av)
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
-  // create a window we can use to display and interact with the image
-  // ##################################################################
-  if (!glfwInit())
-    // Initialization failed
-    throw std::runtime_error("Can't initialize GLFW");
-
-  auto error_callback = [](int error, const char* description)
-  {
-    fprintf(stderr, "Error: %s\n", description);
-  };
-  glfwSetErrorCallback(error_callback);
-
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(fbSize.x, fbSize.y, 
-    "Int02 Simple AABBs", NULL, NULL);
-  if (!window) throw std::runtime_error("Window or OpenGL context creation failed");
-  glfwMakeContextCurrent(window);
-
-  // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
@@ -242,20 +222,21 @@ int main(int ac, char **av)
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  while (!glfwWindowShouldClose(window))
+  do 
   {
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
+    gprtGetCursorPos(context, &xpos, &ypos);
     if (firstFrame) {
       lastxpos = xpos;
       lastypos = ypos;
     }
-    int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
     // If we click the mouse, we should rotate the camera
-    if (state == GLFW_PRESS || firstFrame)
+    // Here, we implement some simple camera controls
+    if (state == GPRT_PRESS || firstFrame)
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -296,74 +277,29 @@ int main(int ac, char **av)
       gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
       gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
       gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
+
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // Now, trace rays
-    gprtBeginProfile(context);
+    // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
-    float ms = gprtEndProfile(context) * 0.000001;
-    std::cout<<"time " << ms << " ms" << std::endl;
-
-    // Render results to screen
-    void* pixels = gprtBufferGetPointer(frameBuffer);
-    if (fbTexture == 0)
-      glGenTextures(1, &fbTexture);
     
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    GLenum texFormat = GL_RGBA;
-    GLenum texelType = GL_UNSIGNED_BYTE;
-    glTexImage2D(GL_TEXTURE_2D, 0, texFormat, fbSize.x, fbSize.y, 0, GL_RGBA,
-                  texelType, pixels);
-
-    glDisable(GL_LIGHTING);
-    glColor3f(1, 1, 1);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, fbTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    
-    glDisable(GL_DEPTH_TEST);
-
-    glViewport(0, 0, fbSize.x, fbSize.y);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.f, (float)fbSize.x, (float)fbSize.y, 0.f, -1.f, 1.f);
-
-    glBegin(GL_QUADS);
-    {
-      glTexCoord2f(0.f, 0.f);
-      glVertex3f(0.f, 0.f, 0.f);
-    
-      glTexCoord2f(0.f, 1.f);
-      glVertex3f(0.f, (float)fbSize.y, 0.f);
-    
-      glTexCoord2f(1.f, 1.f);
-      glVertex3f((float)fbSize.x, (float)fbSize.y, 0.f);
-    
-      glTexCoord2f(1.f, 0.f);
-      glVertex3f((float)fbSize.x, 0.f, 0.f);
-    }
-    glEnd();
-    
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-    
+    // If a window exists, presents the framebuffer here to that window
+    gprtBufferPresent(context, frameBuffer); 
   }
+  // returns true if "X" pressed or if in "headless" mode
+  while (!gprtWindowShouldClose(context));
+
+  // Save final frame to an image
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
+  LOG_OK("written rendered frame buffer to file "<<outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
   LOG("cleaning up ...");
-
-  glfwDestroyWindow(window);
-  glfwTerminate();
 
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(indexBuffer);

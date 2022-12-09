@@ -106,19 +106,21 @@ float cosFovy = 0.4f;
 #include <iostream>
 int main(int ac, char **av)
 {
+  // This example serves to demonstrate that multiple geometry can be placed
+  // in the same bottom level acceleration structure.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S06 Compute Transform");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S07 Multiple Geometry");
   GPRTContext context = gprtContextCreate(nullptr,1);
   GPRTModule module = gprtModuleCreate(context,s07_deviceCode);
 
   // ##################################################################
-  // set up all the *GEOMETRY* graph we want to render
+  // set up all the GPU kernels we want to run
   // ##################################################################
 
   // -------------------------------------------------------
-  // declare geometry type
+  // Setup geometry types
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
     { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
@@ -134,9 +136,36 @@ int main(int ac, char **av)
   gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
                            module,"closesthit");
 
-  // ##################################################################
-  // set up all the *GEOMS* we want to run that code on
-  // ##################################################################
+  // -------------------------------------------------------
+  // set up ray gen program
+  // -------------------------------------------------------
+  GPRTVarDecl rayGenVars[] = {
+    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
+    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
+    { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
+    { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
+    { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
+    { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
+    { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
+    { /* sentinel to mark end of list */ }
+  };
+  GPRTRayGen rayGen
+    = gprtRayGenCreate(context,module,"raygen",
+                      sizeof(RayGenData),
+                      rayGenVars,-1);
+
+  // -------------------------------------------------------
+  // set up miss prog
+  // -------------------------------------------------------
+  GPRTVarDecl missProgVars[]
+    = {
+    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
+    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
+    { /* sentinel to mark end of list */ }
+  };
+  GPRTMiss miss
+    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
+                        missProgVars,-1);
 
   LOG("building geometries ...");
 
@@ -156,55 +185,20 @@ int main(int ac, char **av)
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
 
+  // ##################################################################
+  // set the parameters for our kernels
+  // ##################################################################
+
+  // Setup pixel frame buffer
   GPRTBuffer frameBuffer
-    = gprtHostBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-
-  // ##################################################################
-  // set miss and raygen program required for SBT
-  // ##################################################################
-
-  // -------------------------------------------------------
-  // set up miss prog
-  // -------------------------------------------------------
-  GPRTVarDecl missProgVars[]
-    = {
-    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
-    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
-    { /* sentinel to mark end of list */ }
-  };
-  // ----------- create object  ----------------------------
-  GPRTMiss miss
-    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
-                        missProgVars,-1);
-
-  // ----------- set variables  ----------------------------
-  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
-  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
-
-  // -------------------------------------------------------
-  // set up ray gen program
-  // -------------------------------------------------------
-  GPRTVarDecl rayGenVars[] = {
-    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
-    { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
-    { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
-    { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
-    { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
-    { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
-    { /* sentinel to mark end of list */ }
-  };
-
-  // ----------- create object  ----------------------------
-  GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"raygen",
-                      sizeof(RayGenData),
-                      rayGenVars,-1);
-
-  // ----------- set variables  ----------------------------
+    = gprtDeviceBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
   gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
   gprtRayGenSetAccel(rayGen,"world", trianglesTLAS);
+
+  // Miss program checkerboard background colors
+  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
+  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
 
   // ##################################################################
   // build *SBT* required to trace the groups

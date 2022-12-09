@@ -39,7 +39,7 @@ inline float over(float Ain, float Ax)
   return Ain + (1.f-Ain)*Ax;
 }
 
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
+GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
