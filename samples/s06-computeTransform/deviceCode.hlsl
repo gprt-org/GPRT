@@ -81,7 +81,7 @@ GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record))
     world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload
   );
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(payload.color));
 }
 
 struct Attribute

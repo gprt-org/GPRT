@@ -42,5 +42,5 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 
   // find the frame buffer location (x + width*y) and put the result there
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(color));
 }

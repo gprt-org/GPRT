@@ -62,7 +62,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
     payload // the payload IO
   );
 
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(payload.color));
 }
 
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))

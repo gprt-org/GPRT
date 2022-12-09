@@ -57,7 +57,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
   );
 
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(payload.color));
 }
 
 struct Attributes {
