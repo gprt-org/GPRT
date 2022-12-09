@@ -66,6 +66,9 @@ GLuint fbTexture {0};
 #include <iostream>
 int main(int ac, char **av)
 {
+  // In this example, we show one method for implementing a double-precision
+  // ray triangle intersector. 
+
   // create a context on the first device:
   GPRTContext context = gprtContextCreate(nullptr,1);
   GPRTModule module = gprtModuleCreate(context,int10_deviceCode);

@@ -143,6 +143,9 @@ float cosFovy = 0.3f;
 #include <iostream>
 int main(int ac, char **av)
 {
+  // This example demonstrates how multiple top level trees can be used at the
+  // same time. In this case, we'll use one tree to represent triangular 
+  // geometry, and another tree to represent a volumetric element.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
