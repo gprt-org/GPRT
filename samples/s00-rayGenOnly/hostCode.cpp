@@ -71,7 +71,7 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\s00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(context,s00_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // All "parameters" we'll pass to that ray generation kernel are defined here.
@@ -97,7 +97,7 @@ int main(int ac, char **av)
   // ##################################################################
   
   // When working with GPUs, we work with two different pools of memory:
-  // traditional CPU memory, and GPU memory. GPU programs can only read
+  // traditional CPU memory and GPU memory. GPU programs can only read
   // from GPU buffers of memory. The CPU can temporarily read and write
   // to GPU bufer memory when that buffer is "mapped" to the CPU.
 
