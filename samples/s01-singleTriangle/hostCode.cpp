@@ -173,7 +173,7 @@ int main(int ac, char **av)
   // a top level acceleration structure, or a TLAS. (we'll cover this later.)
   // Rays can only be traced into TLAS, so for now we just make one BLAS 
   // instance.
-  GPRTAccel world = gprtInstanceAccelCreate(context,1,&trianglesAccel);
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
   gprtAccelBuild(context, world);
 
   // Here, we place a reference to our TLAS in the ray generation 
