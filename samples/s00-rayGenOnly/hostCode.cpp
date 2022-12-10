@@ -71,7 +71,7 @@ int main(int ac, char **av)
   // You can see the machine-centric SPIR-V code in
   // build\s00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(gprt,s00_deviceCode);
+  GPRTModule module = gprtModuleCreate(gprt, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // All "parameters" we'll pass to that ray generation kernel are defined here.
