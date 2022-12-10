@@ -64,14 +64,14 @@ int main(int ac, char **av)
   // Initialize GPRT. Under the hood, this identifies all compatible GPUs (ones
   // that support ray tracing) selects from that compatible list. If a window
   // was requested, one will appear after this call. 
-  GPRTContext gprt = gprtContextCreate();
+  GPRTContext context = gprtContextCreate();
 
   // Device code is represented through SPIR-V, which is the intermediate code 
   // that the GPU deviceCode.hlsl shader program is compiled into.
   // You can see the machine-centric SPIR-V code in
   // build\s00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(gprt,s00_deviceCode);
+  GPRTModule module = gprtModuleCreate(context,s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // All "parameters" we'll pass to that ray generation kernel are defined here.
@@ -86,11 +86,11 @@ int main(int ac, char **av)
   // Allocate room for one RayGen shader, create it, and
   // hold on to it with the "gprt" context
   GPRTRayGen rayGen
-      = gprtRayGenCreate(gprt, module, "simpleRayGen",
+      = gprtRayGenCreate(context, module, "simpleRayGen",
                       sizeof(RayGenData),rayGenVars,-1);
 
   // (re-)builds all gprt programs, with current pipeline settings
-  gprtBuildPipeline(gprt);
+  gprtBuildPipeline(context);
 
   // ##################################################################
   // allocating GPU buffers
@@ -104,9 +104,10 @@ int main(int ac, char **av)
   // Our frame buffer here will be used to hold pixel color values
   // that we'll present to the window and save to an image
   LOG("allocating frame buffer");
-  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(gprt,
-                            /*type: */ GPRT_INT,
-                            /*size: (in count, not in bytes)*/ fbSize.x*fbSize.y);
+  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(
+                              context,
+                              GPRT_INT, /* type */ 
+                              fbSize.x*fbSize.y /* size in count */);
   // See also gprtHostBufferCreate and gprtSharedBufferCreate.
   // To get a pointer to this buffer, call gprtBufferMap, then 
   // gprtBufferGetPointer. When done writing to the pointer, call 
@@ -125,7 +126,7 @@ int main(int ac, char **av)
   gprtRayGenSet2i(rayGen,"fbSize",fbSize.x,fbSize.y);
   
   // Build a shader binding table entry for the ray generation record.
-  gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
 
   // ##################################################################
@@ -139,13 +140,13 @@ int main(int ac, char **av)
   do 
   {
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(gprt,rayGen,fbSize.x,fbSize.y);
+    gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
     
     // If a window exists, presents the frame buffer here to that window
-    gprtBufferPresent(gprt, frameBuffer); 
+    gprtBufferPresent(context, frameBuffer); 
   } 
   // returns true if "X" pressed or if in "headless" mode
-  while (!gprtWindowShouldClose(gprt)); 
+  while (!gprtWindowShouldClose(context)); 
 
   // Save final frame to an image
   LOG("done with launch, writing frame buffer to " << outFileName);
@@ -163,7 +164,7 @@ int main(int ac, char **av)
 
   // If a window was made, this call is the one that will actually destroy 
   // that window. 
-  gprtContextDestroy(gprt);
+  gprtContextDestroy(context);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

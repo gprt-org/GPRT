@@ -235,7 +235,7 @@ int main(int ac, char **av)
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
     
-    // If a window exists, presents the framebuffer here to that window
+    // If a window exists, presents the frame buffer here to that window
     gprtBufferPresent(context, frameBuffer); 
   }
   // returns true if "X" pressed or if in "headless" mode
