@@ -97,7 +97,7 @@ int main(int ac, char **av)
   // ##################################################################
   
   // When working with GPUs, we work with two different pools of memory:
-  // traditional CPU memory, and GPU memory. GPU programs can only read
+  // traditional CPU memory and GPU memory. GPU programs can only read
   // from GPU buffers of memory. The CPU can temporarily read and write
   // to GPU bufer memory when that buffer is "mapped" to the CPU.
 
