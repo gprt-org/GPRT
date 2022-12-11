@@ -20,6 +20,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
 
       - name: Prepare Python
         uses: actions/setup-python@v4
