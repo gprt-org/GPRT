@@ -28,7 +28,7 @@ struct Payload
   float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -42,7 +42,7 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
     + screen.x * record.camera.dir_du
     + screen.y * record.camera.dir_dv
   );
-  rayDesc.TMin = 0.0;
+  rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(
@@ -60,28 +60,19 @@ GPRT_RAYGEN_PROGRAM(AABBRayGen, (RayGenData, record))
   gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-
-struct Attribute
-{
-  float2 attribs;
+struct Attributes {
+  float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, 
+  (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
-  // printf("TEST\n");
-  payload.color = float3(1.f, 1.f, 1.f); //geomSBTData.color;
+  float2 bc = attributes.bc;
+  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
-{
-  // prd.color = float3(1.f, 1.f, 1.f);
-  // printf("TEST\n");
-  Attribute attr;
-  attr.attribs = float2(0.f, 0.f);
-  ReportHit(0.1f, /*hitKind*/ 0, attr);
-}
-
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
+GPRT_MISS_PROGRAM(miss, 
+  (MissProgData, record), (Payload, payload))
 {
   uint2 pixelID = DispatchRaysIndex().xy;  
   int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
