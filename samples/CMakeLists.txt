@@ -20,17 +20,5 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(cmd00-rayGenOnly)
-add_subdirectory(cmd01-simpleTriangles)
-add_subdirectory(cmd02-simpleAABBs)
-add_subdirectory(cmd03-computeOnly)
-
-add_subdirectory(int00-rayGenOnly)
-add_subdirectory(int01-simpleTriangles)
-add_subdirectory(int02-simpleAABBs)
-
-add_subdirectory(int04-computeAABBs)
-add_subdirectory(int05-computePrimitive)
-
-add_subdirectory(int07-doublePrecision)
-add_subdirectory(int08-multipleTLAS)
+add_subdirectory(s00-rayGenOnly)
+add_subdirectory(s01-singleTriangle)

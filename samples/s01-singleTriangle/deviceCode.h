@@ -21,26 +21,34 @@
 // SOFTWARE.
 
 #include "gprt.h"
-#include "deviceCode.h"
 
-// The first parameter here is the name of our entry point.
-//
-// The second is the type of the shader record.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
+/* variables available to all programs */
+
+
+/* variables for the triangle mesh geometry */
+struct TrianglesGeomData
 {
-  uint2 pixelID = DispatchRaysIndex().xy;
+  alignas(8) int tmp; // unused for now
+};
 
-  if (pixelID.x == 0 && pixelID.y == 0) {
-    printf("Hello from your first raygen program!\n");
-  }
+struct RayGenData
+{
+  alignas(16) gprt::Buffer fbPtr;
 
-  // Generate a simple checkerboard pattern as a test. 
-  int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  // alternate pattern, showing that pixel (0,0) is in the upper left corner
-  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? record.color1 : record.color0;
+  alignas(8) int2 fbSize;
+  alignas(16) gprt::Accel world;
 
-  // find the frame buffer location (x + width*y) and put the result there
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(color));
-}
+  struct { 
+    alignas(16) float3 pos;   
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
+  } camera;
+};
+
+/* variables for the miss program */
+struct MissProgData
+{
+  alignas(16) float3  color0;
+  alignas(16) float3  color1;
+};

@@ -571,7 +571,7 @@ GPRT_API double gprtGetTime(GPRTContext context);
   from that point on be known as device #0 */
 GPRT_API GPRTContext
 gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=nullptr),
-                 int numDevices GPRT_IF_CPP(=0));
+                 int numDevices GPRT_IF_CPP(=1));
 
 GPRT_API void
 gprtContextDestroy(GPRTContext context);
