@@ -54,179 +54,71 @@ Examples
          :doc:`/editors/index`
             An example demonstrating triangle geometry
 
-      .. container:: descr
+      .. Note, we'll add in the below as more samples are merged into master
 
-         .. figure:: ./images/s02-instances.png
-            :target: examples/instances.html
+      .. .. container:: descr
 
-         :doc:`/editors/index`
-            Multiple instances of the same triangle geometry
+      ..    .. figure:: ./images/s02-instances.png
+      ..       :target: examples/instances.html
 
-      .. container:: descr
+      ..    :doc:`/editors/index`
+      ..       Multiple instances of the same triangle geometry
 
-         .. figure:: ./images/s03-simpleAABB.png
-            :target: examples/simpleAABB.html
+      .. .. container:: descr
 
-         :doc:`/editors/index`
-            An example demonstrating AABB geometry
+      ..    .. figure:: ./images/s03-simpleAABB.png
+      ..       :target: examples/simpleAABB.html
 
-      .. container:: descr
+      ..    :doc:`/editors/index`
+      ..       An example demonstrating AABB geometry
 
-         .. figure:: ./images/s04-computeAABBs.png
-            :target: examples/computeAABBs.html
+      .. .. container:: descr
 
-         :doc:`/editors/index`
-            How to use a compute shader to generate AABBs
+      ..    .. figure:: ./images/s04-computeAABBs.png
+      ..       :target: examples/computeAABBs.html
 
-      .. container:: descr
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to generate AABBs
 
-         .. figure:: ./images/s05-computeVertex.png
-            :target: examples/computeVertex.html
+      .. .. container:: descr
 
-         :doc:`/editors/index`
-            How to use a compute shader to manipulate triangle vertices
+      ..    .. figure:: ./images/s05-computeVertex.png
+      ..       :target: examples/computeVertex.html
+
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to manipulate triangle vertices
       
-      .. container:: descr
+      .. .. container:: descr
 
-         .. figure:: ./images/s06-computeTransform.png
-            :target: examples/computeTransform.html
+      ..    .. figure:: ./images/s06-computeTransform.png
+      ..       :target: examples/computeTransform.html
 
-         :doc:`/editors/index`
-            How to use a compute shader to manipulate instance transforms
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to manipulate instance transforms
       
-      .. container:: descr
+      .. .. container:: descr
 
-         .. figure:: ./images/s07-multipleGeometry.png
-            :target: examples/multipleGeometry.html
+      ..    .. figure:: ./images/s07-multipleGeometry.png
+      ..       :target: examples/multipleGeometry.html
 
-         :doc:`/editors/index`
-            Here we combine multiple geometries into the same bottom level tree
+      ..    :doc:`/editors/index`
+      ..       Here we combine multiple geometries into the same bottom level tree
 
-      .. container:: descr
+      .. .. container:: descr
 
-         .. figure:: ./images/s08-multipleBLAS.png
-            :target: examples/multipleBLAS.html
+      ..    .. figure:: ./images/s08-multipleBLAS.png
+      ..       :target: examples/multipleBLAS.html
 
-         :doc:`/editors/index`
-            Shows how bottom level trees of different types can be combined
+      ..    :doc:`/editors/index`
+      ..       Shows how bottom level trees of different types can be combined
 
-      .. container:: descr
+      .. .. container:: descr
 
-         .. figure:: ./images/s09-multipleTLAS.png
-            :target: examples/multipleTLAS.html
+      ..    .. figure:: ./images/s09-multipleTLAS.png
+      ..       :target: examples/multipleTLAS.html
 
-         :doc:`/editors/index`
-            Demonstrates multiple top level trees in the same program
-..       .. container:: descr
-
-..          .. figure:: /images/index_scene.jpg
-..             :target: scene_layout/index.html
-
-..          :doc:`/scene_layout/index`
-..             Objects and their organization into scenes, view layers and collections.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_modeling.jpg
-..             :target: modeling/index.html
-
-..          :doc:`/modeling/index`
-..             Meshes, curves, metaballs, text, modeling tools, and modifiers.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_painting.jpg
-..             :target: sculpt_paint/index.html
-
-..          :doc:`/sculpt_paint/index`
-..             Sculpting, texture painting and vertex painting.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_grease-pencil.jpg
-..             :target: grease_pencil/index.html
-
-..          :doc:`/grease_pencil/index`
-..             2D drawing and animation with Grease Pencil.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_animation.jpg
-..             :target: animation/index.html
-
-..          :doc:`/animation/index`
-..             Keyframes, drivers, constraints, armatures and shape keys.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_physics.jpg
-..             :target: physics/index.html
-
-..          :doc:`/physics/index`
-..             Physics simulations, particle systems and dynamic paint.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_render.jpg
-..             :target: render/index.html
-
-..          :doc:`/render/index`
-..             Rendering and shading with Eevee, Cycles and Freestyle.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_compositing.jpg
-..             :target: compositing/index.html
-
-..          :doc:`/compositing/index`
-..             Post-processing with the compositing nodes.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_movie-clip.jpg
-..             :target: movie_clip/index.html
-
-..          :doc:`/movie_clip/index`
-..             Video motion tracking & masking.
-
-..       .. container:: descr
-
-..          .. figure:: /images/index_sequencer.jpg
-..             :target: video_editing/index.html
-
-..          :doc:`/video_editing/index`
-..             Video editing with the sequencer.
-
-..       .. container:: descr
-
-..          :doc:`/files/index`
-..             Data-block management and the structure of blend-files.
-
-..       .. container:: descr
-
-..          :doc:`/addons/index`
-..             Additional functionality available as add-ons.
-
-..       .. container:: descr
-
-..          :doc:`/advanced/index`
-..             Python scripting, how to write add-ons and a reference for command-line arguments.
-
-..       .. container:: descr
-
-..          :doc:`/troubleshooting/index`
-..             Solving crashes, graphics issues and Python errors, recovering data and reporting bugs.
-
-..       .. container:: descr
-
-..          :doc:`Glossary </glossary/index>`
-..             A list of terms and definitions used in Blender and this manual.
-
-..       .. container:: descr
-
-..          :ref:`Manual Index <genindex>`
-..             A list of terms linked to the Glossary.
-
+      ..    :doc:`/editors/index`
+      ..       Demonstrates multiple top level trees in the same program
 
 Get Involved
 ============
