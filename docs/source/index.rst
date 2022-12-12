@@ -41,7 +41,7 @@ Examples
       .. container:: descr
 
          .. figure:: ./images/s00-rayGenOnly.png
-            :target: examples/rayGenOnly.html
+            :target: examples/s00-rayGenOnly.html
 
          :doc:`/interface/index`
             A bare minimum GPRT example generating a checkerboard
@@ -49,7 +49,7 @@ Examples
       .. container:: descr
 
          .. figure:: ./images/s01-singleTriangle.png
-            :target: examples/singleTriangle.html
+            :target: examples/s01-singleTriangle.html
 
          :doc:`/editors/index`
             An example demonstrating triangle geometry
@@ -59,7 +59,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s02-instances.png
-      ..       :target: examples/instances.html
+      ..       :target: examples/s02-instances.html
 
       ..    :doc:`/editors/index`
       ..       Multiple instances of the same triangle geometry
@@ -67,7 +67,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s03-simpleAABB.png
-      ..       :target: examples/simpleAABB.html
+      ..       :target: examples/s03-simpleAABB.html
 
       ..    :doc:`/editors/index`
       ..       An example demonstrating AABB geometry
@@ -75,7 +75,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s04-computeAABBs.png
-      ..       :target: examples/computeAABBs.html
+      ..       :target: examples/s04-computeAABBs.html
 
       ..    :doc:`/editors/index`
       ..       How to use a compute shader to generate AABBs
@@ -83,7 +83,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s05-computeVertex.png
-      ..       :target: examples/computeVertex.html
+      ..       :target: examples/s05-computeVertex.html
 
       ..    :doc:`/editors/index`
       ..       How to use a compute shader to manipulate triangle vertices
@@ -91,7 +91,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s06-computeTransform.png
-      ..       :target: examples/computeTransform.html
+      ..       :target: examples/s06-computeTransform.html
 
       ..    :doc:`/editors/index`
       ..       How to use a compute shader to manipulate instance transforms
@@ -99,7 +99,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s07-multipleGeometry.png
-      ..       :target: examples/multipleGeometry.html
+      ..       :target: examples/s07-multipleGeometry.html
 
       ..    :doc:`/editors/index`
       ..       Here we combine multiple geometries into the same bottom level tree
@@ -107,7 +107,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s08-multipleBLAS.png
-      ..       :target: examples/multipleBLAS.html
+      ..       :target: examples/s08-multipleBLAS.html
 
       ..    :doc:`/editors/index`
       ..       Shows how bottom level trees of different types can be combined
@@ -115,7 +115,7 @@ Examples
       .. .. container:: descr
 
       ..    .. figure:: ./images/s09-multipleTLAS.png
-      ..       :target: examples/multipleTLAS.html
+      ..       :target: examples/s09-multipleTLAS.html
 
       ..    :doc:`/editors/index`
       ..       Demonstrates multiple top level trees in the same program
