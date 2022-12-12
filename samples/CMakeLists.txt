@@ -22,12 +22,3 @@
 
 add_subdirectory(s00-rayGenOnly)
 add_subdirectory(s01-singleTriangle)
-add_subdirectory(s02-instances)
-add_subdirectory(s03-singleAABB)
-add_subdirectory(s04-computeAABBs)
-add_subdirectory(s05-computeVertex)
-add_subdirectory(s06-computeTransform)
-add_subdirectory(s07-multipleGeometry)
-add_subdirectory(s08-multipleBLAS)
-add_subdirectory(s09-multipleTLAS)
-add_subdirectory(s10-doublePrecision)
