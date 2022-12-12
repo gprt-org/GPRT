@@ -66,6 +66,8 @@ target_link_libraries(gprt
     gprtDeviceCode
     glfw
     stb_image
+    Threads::Threads
+    ${OPENGL_gl_LIBRARY}
 )
 
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
