@@ -109,3 +109,6 @@ if(GPRT_BUILD_SAMPLES)
     endif()
   endif()
 endif()
+
+# Find mesh generator
+add_subdirectory(generator)
