@@ -111,7 +111,7 @@ int main(int ac, char **av)
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S02 Instances");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context,s02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s02_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
