@@ -87,10 +87,8 @@ template <typename T> struct Mesh {
     indexBuffer = gprtDeviceBufferCreate(context, GPRT_UINT3, indices.size(),
                                          indices.data());
     geometry = gprtGeomCreate(context, geomType);
-    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size(),
-                             sizeof(float3), 0);
-    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size(),
-                            sizeof(uint3), 0);
+    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
+    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     gprtGeomSetBuffer(geometry, "vertex", vertexBuffer);
     gprtGeomSetBuffer(geometry, "index", indexBuffer);
 
