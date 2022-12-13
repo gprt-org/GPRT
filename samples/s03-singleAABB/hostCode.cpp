@@ -128,8 +128,7 @@ int main(int ac, char **av) {
   GPRTBuffer aabbPositionsBuffer =
       gprtDeviceBufferCreate(context, GPRT_FLOAT3, 2, aabbPositions);
   GPRTGeom aabbGeom = gprtGeomCreate(context, aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */,
-                        2 * sizeof(float3), 0);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
   // Note, we must create an "AABB" accel rather than a triangles accel.
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);

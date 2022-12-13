@@ -139,10 +139,8 @@ int main(int ac, char **av) {
   GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES,
-                           sizeof(float3), 0);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES, sizeof(int3),
-                          0);
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
   // Once we have our geometry, we need to place that geometry into an
   // acceleration structure. These acceleration structures allow rays to

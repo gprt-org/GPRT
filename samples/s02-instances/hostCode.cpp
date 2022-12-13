@@ -149,10 +149,8 @@ int main(int ac, char **av) {
   GPRTBuffer indexBuffer =
       gprtDeviceBufferCreate(context, GPRT_INT3, NUM_INDICES, indices);
   GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES,
-                           sizeof(float3), 0);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES, sizeof(int3),
-                          0);
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
   // Here, we additionally set the vertex and index parameters of our goemetry
   // so that we can access these buffers when a ray hits the mesh
