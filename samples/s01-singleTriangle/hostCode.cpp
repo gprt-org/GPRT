@@ -239,6 +239,7 @@ int main(int ac, char **av) {
       gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
       gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
 
+      // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
