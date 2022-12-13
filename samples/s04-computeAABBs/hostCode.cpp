@@ -187,7 +187,7 @@ int main(int ac, char **av) {
 
   // Miss program checkerboard background colors
   gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
+  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
 
   // ##################################################################
   // build the pipeline and shader binding table
