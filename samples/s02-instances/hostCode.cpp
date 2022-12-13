@@ -44,14 +44,14 @@ extern GPRTProgram s02_deviceCode;
 const int NUM_VERTICES = 8;
 float3 vertices[NUM_VERTICES] =
   {
-    { -1.f,-1.f,-1.f },
-    { +1.f,-1.f,-1.f },
-    { -1.f,+1.f,-1.f },
-    { +1.f,+1.f,-1.f },
-    { -1.f,-1.f,+1.f },
-    { +1.f,-1.f,+1.f },
-    { -1.f,+1.f,+1.f },
-    { +1.f,+1.f,+1.f }
+    { -1.f, -1.f, -1.f },
+    { +1.f, -1.f, -1.f },
+    { -1.f, +1.f, -1.f },
+    { +1.f, +1.f, -1.f },
+    { -1.f, -1.f, +1.f },
+    { +1.f, -1.f, +1.f },
+    { -1.f, +1.f, +1.f },
+    { +1.f, +1.f, +1.f }
   };
 
 const int NUM_INDICES = 12;
