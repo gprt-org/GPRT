@@ -137,10 +137,8 @@ int main(int ac, char **av) {
   // It is _okay_ to give our triangles geometry unpopulated buffers here
   // for the vertices and indices, so long as they're filled in before
   // we go to build our acceleration structure.
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, numVertices,
-                           sizeof(float3), 0);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles,
-                          sizeof(uint3), 0);
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, numVertices);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles);
 
   // Parameters for the geometry when a ray hits it.
   gprtGeomSetBuffer(trianglesGeom, "vertex", vertexBuffer);
@@ -182,7 +180,7 @@ int main(int ac, char **av) {
 
   // Miss program checkerboard background colors
   gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
+  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
 
   // ##################################################################
   // build *SBT* required to trace the groups
