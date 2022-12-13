@@ -25,65 +25,64 @@
 
 struct Payload
 {
-  float3 color;
+    float3 color;
 };
 
 GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
 {
-  Payload payload;
-  uint2 pixelID = DispatchRaysIndex().xy;
-  float2 screen = (float2(pixelID) + 
-                  float2(.5f, .5f)) / float2(record.fbSize);
+    Payload payload;
+    uint2 pixelID = DispatchRaysIndex().xy;
+    float2 screen = (float2(pixelID) +
+                     float2(.5f, .5f)) /
+                    float2(record.fbSize);
 
-  // Generate ray
-  RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
-  rayDesc.Direction = 
-    normalize(record.camera.dir_00
-    + screen.x * record.camera.dir_du
-    + screen.y * record.camera.dir_dv
-  );
-  rayDesc.TMin = 0.0;
-  rayDesc.TMax = 1e20f;
-  
-  // Trace ray against surface
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(
-    world, // the tree
-    RAY_FLAG_FORCE_OPAQUE, // ray flags
-    0xff, // instance inclusion mask
-    0, // ray type
-    1, // number of ray types
-    0, // miss type
-    rayDesc, // the ray to trace
-    payload // the payload IO
-  );
+    // Generate ray
+    RayDesc rayDesc;
+    rayDesc.Origin = record.camera.pos;
+    rayDesc.Direction =
+        normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+    rayDesc.TMin = 0.0;
+    rayDesc.TMax = 1e20f;
 
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+    // Trace ray against surface
+    RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+    TraceRay(
+        world,                 // the tree
+        RAY_FLAG_FORCE_OPAQUE, // ray flags
+        0xff,                  // instance inclusion mask
+        0,                     // ray type
+        1,                     // number of ray types
+        0,                     // miss type
+        rayDesc,               // the ray to trace
+        payload                // the payload IO
+    );
+
+    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+    gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-struct TriangleAttributes {
-  float2 bc;
+struct TriangleAttributes
+{
+    float2 bc;
 };
 
 GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payload), (TriangleAttributes, attributes))
 {
-  // compute normal:
-  uint   primID = PrimitiveIndex();
-  int3   index  = gprt::load<int3>(record.index, primID);
-  float3 A      = gprt::load<float3>(record.vertex, index.x);
-  float3 B      = gprt::load<float3>(record.vertex, index.y);
-  float3 C      = gprt::load<float3>(record.vertex, index.z);
-  float3 Ng     = normalize(cross(B-A,C-A));
-  float3 rayDir = normalize(ObjectRayDirection());
-  payload.color = (.2f + .8f * abs(dot(rayDir,Ng))) * record.color;
+    // compute normal:
+    uint primID = PrimitiveIndex();
+    int3 index = gprt::load<int3>(record.index, primID);
+    float3 A = gprt::load<float3>(record.vertex, index.x);
+    float3 B = gprt::load<float3>(record.vertex, index.y);
+    float3 C = gprt::load<float3>(record.vertex, index.z);
+    float3 Ng = normalize(cross(B - A, C - A));
+    float3 rayDir = normalize(ObjectRayDirection());
+    payload.color = (.2f + .8f * abs(dot(rayDir, Ng))) * record.color;
 }
 
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
-  uint2 pixelID = DispatchRaysIndex().xy;  
-  int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
-  float3 color = (pattern & 1) ? record.color1 : record.color0;
-  payload.color = color;
+    uint2 pixelID = DispatchRaysIndex().xy;
+    int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+    float3 color = (pattern & 1) ? record.color1 : record.color0;
+    payload.color = color;
 }
