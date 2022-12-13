@@ -150,8 +150,7 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES * 2, nullptr);
 
   GPRTGeom aabbGeom = gprtGeomCreate(context, sphereGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES,
-                        2 * sizeof(float3), 0);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
   gprtGeomSetBuffer(aabbGeom, "vertex", vertexBuffer);
   gprtGeomSetBuffer(aabbGeom, "radius", radiusBuffer);
@@ -260,6 +259,7 @@ int main(int ac, char **av) {
       gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
       gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
 
+      // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
