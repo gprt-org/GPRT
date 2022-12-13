@@ -25,56 +25,88 @@
 
 struct Payload
 {
-  float3 color;
+    float3 color;
 };
 
+// This ray generation program will kick off the ray tracing process,
+// generating rays and tracing them into the world.
+//
+// The first parameter here is the name of our entry point.
+//
+// The second is the type and name of the shader record. A shader record
+// can be thought of as the parameters passed to this kernel.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
-  Payload payload;
-  uint2 pixelID = DispatchRaysIndex().xy;
-  float2 screen = (float2(pixelID) + 
-                  float2(.5f, .5f)) / float2(record.fbSize);
+    Payload payload;
+    uint2 pixelID = DispatchRaysIndex().xy;
+    float2 screen = (float2(pixelID) +
+                     float2(.5f, .5f)) /
+                    float2(record.fbSize);
 
-  RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
-  rayDesc.Direction = 
-    normalize(record.camera.dir_00
-    + screen.x * record.camera.dir_du
-    + screen.y * record.camera.dir_dv
-  );
-  rayDesc.TMin = 0.001;
-  rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(
-    world, // the tree
-    RAY_FLAG_FORCE_OPAQUE, // ray flags
-    0xff, // instance inclusion mask
-    0, // ray type
-    1, // number of ray types
-    0, // miss type
-    rayDesc, // the ray to trace
-    payload // the payload IO
-  );
+    RayDesc rayDesc;
+    rayDesc.Origin = record.camera.pos;
+    rayDesc.Direction =
+        normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+    rayDesc.TMin = 0.001;
+    rayDesc.TMax = 10000.0;
+    RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+    TraceRay(
+        world,                 // the tree
+        RAY_FLAG_FORCE_OPAQUE, // ray flags
+        0xff,                  // instance inclusion mask
+        0,                     // ray type
+        1,                     // number of ray types
+        0,                     // miss type
+        rayDesc,               // the ray to trace
+        payload                // the payload IO
+    );
 
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+    gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-struct Attributes {
-  float2 bc;
+struct Attributes
+{
+    float2 bc;
 };
 
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, 
-  (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
+// This closest hit program will be called when rays hit triangles.
+// Here, we can fetch per-geometry data, process that data, and send
+// it back to our ray generation program.
+//
+// The first parameter here is the name of our entry point.
+//
+// The second is the type and name of the shader record. A shader record
+// can be thought of as the parameters passed to this kernel.
+//
+// The third is the type of the ray payload structure. We use the ray payload
+// to pass data between this program and our ray generation program.
+//
+// The fourth is the type of the intersection attributes structure.
+// For triangles, this is always a struct containing two floats
+// called "barycentrics", which we use to interpolate per-vertex
+// values.
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh,
+                         (TrianglesGeomData, record),
+                         (Payload, payload),
+                         (Attributes, attributes))
 {
-  float2 bc = attributes.bc;
-  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+    float2 bc = attributes.bc;
+    payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
-GPRT_MISS_PROGRAM(miss, 
-  (MissProgData, record), (Payload, payload))
+// This miss program will be called when rays miss all primitives.
+// We often define some "default" ray payload behavior here,
+// for example, returning a background color.
+//
+// The first parameter here is the name of our entry point.
+//
+// The second is the type and name of the shader record. A shader record
+// can be thought of as the parameters passed to this kernel.
+GPRT_MISS_PROGRAM(miss,
+                  (MissProgData, record), (Payload, payload))
 {
-  uint2 pixelID = DispatchRaysIndex().xy;  
-  int pattern = (pixelID.x / 8) ^ (pixelID.y/8);
-  payload.color = (pattern & 1) ? record.color1 : record.color0;
+    uint2 pixelID = DispatchRaysIndex().xy;
+    int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+    payload.color = (pattern & 1) ? record.color1 : record.color0;
 }
