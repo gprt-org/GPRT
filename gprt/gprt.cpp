@@ -4129,9 +4129,17 @@ GPRT_API void gprtBufferSaveImage(GPRTBuffer _buffer,
   if (!mapped)
     buffer->map();
 
-  const uint32_t *fb = (const uint32_t*) buffer->mapped;
+  const uint8_t *fb = (const uint8_t*) buffer->mapped;
+  std::vector<uint8_t> swizzled(width*height*4);
+  for (uint32_t pid = 0; pid < width * height; ++pid) {
+    swizzled[pid * 4 + 0] = fb[pid*4 + 2];
+    swizzled[pid * 4 + 1] = fb[pid*4 + 1];
+    swizzled[pid * 4 + 2] = fb[pid*4 + 0];
+    swizzled[pid * 4 + 3] = fb[pid*4 + 3];
+  }
+  
   stbi_write_png(imageName,width,height,4,
-                 fb,(uint32_t)(width)*sizeof(uint32_t));
+                 swizzled.data(),(uint32_t)(width)*sizeof(uint32_t));
   
   // Return mapped to previous state
   if (!mapped)
