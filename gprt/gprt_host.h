@@ -454,8 +454,8 @@ gprtGeomDestroy(GPRTGeom geometry);
 GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles,
                                       GPRTBuffer vertices,
                                       size_t count,
-                                      size_t stride,
-                                      size_t offset);
+                                      size_t stride GPRT_IF_CPP(=sizeof(float3)),
+                                      size_t offset GPRT_IF_CPP(=0));
 // GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
 //                                            /*! number of vertex arrays
 //                                                passed here, the first
@@ -472,8 +472,8 @@ GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles,
 GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles,
                                      GPRTBuffer indices,
                                      size_t count,
-                                     size_t stride,
-                                     size_t offset);
+                                     size_t stride GPRT_IF_CPP(=sizeof(uint3)),
+                                     size_t offset GPRT_IF_CPP(=0));
 
 /*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ) 
   for the given AABB geometry. This _has_ to be set before the accel(s) 
@@ -481,8 +481,8 @@ GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles,
 GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, 
                                     GPRTBuffer positions,
                                     size_t count,
-                                    size_t stride,
-                                    size_t offset);
+                                    size_t stride GPRT_IF_CPP(=2*sizeof(float3)),
+                                    size_t offset GPRT_IF_CPP(=0));
 
 /* Builds the ray tracing pipeline over the raytracing programs. 
   This must be called after any acceleration structures are created.
