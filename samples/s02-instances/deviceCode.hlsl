@@ -97,6 +97,6 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, pa
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
-    int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+    int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
     payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

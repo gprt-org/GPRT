@@ -37,7 +37,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
     }
 
     // Generate a simple checkerboard pattern as a test.
-    int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+    int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
     // alternate pattern, showing that pixel (0,0) is in the upper left corner
     // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
     const float3 color = (pattern & 1) ? record.color1 : record.color0;
