@@ -26,25 +26,25 @@
 
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
-  alignas(8) int tmp; // unused for now
+  int tmp; // unused for now
 };
 
 struct RayGenData {
-  alignas(16) gprt::Buffer fbPtr;
+  gprt::Buffer fbPtr;
 
-  alignas(8) int2 fbSize;
-  alignas(16) gprt::Accel world;
+  int2 fbSize;
+  gprt::Accel world;
 
   struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
   } camera;
 };
 
 /* variables for the miss program */
 struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  float3 color0;
+  float3 color1;
 };

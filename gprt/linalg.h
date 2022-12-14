@@ -57,6 +57,24 @@
 #include <type_traits>  // For std::enable_if, std::is_same, std::declval
 #include <functional>   // For std::hash declaration
 
+#include <stdalign.h>
+
+#if defined(__GNUC__) || defined(__clang__)
+#  define ALIGN(x) __attribute__ ((aligned(x)))
+#elif defined(_MSC_VER)
+#  define ALIGN(x) __declspec(align(x))
+#else
+#  error "Unknown compiler; can't define ALIGN"
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#    define ALIGNOF(X) __alignof__(X)
+#elif defined(_MSC_VER)
+#    define ALIGNOF(X) __alignof(X)
+#else
+#  error "Unknown compiler; can't define ALIGNOF"
+#endif
+
 // In Visual Studio 2015, `constexpr` applied to a member function implies `const`, which causes ambiguous overload resolution
 #if _MSC_VER <= 1900
 #define LINALG_CONSTEXPR14
@@ -610,14 +628,27 @@ namespace linalg
         typedef vec<bool,3> bool3; typedef vec<uint8_t,3> byte3; typedef vec<int16_t,3> short3; typedef vec<uint16_t,3> ushort3; 
         typedef vec<bool,4> bool4; typedef vec<uint8_t,4> byte4; typedef vec<int16_t,4> short4; typedef vec<uint16_t,4> ushort4;
 
-        typedef vec<uint64_t,2> uint64_t2;
-        typedef vec<uint64_t,3> uint64_t3;
-        typedef vec<uint64_t,4> uint64_t4;
+        typedef ALIGN(16) vec<uint64_t,2> uint64_t2;
+        typedef ALIGN(16) vec<uint64_t,3> uint64_t3;
+        typedef ALIGN(16) vec<uint64_t,4> uint64_t4;
 
-        typedef vec<int,1> int1; typedef vec<unsigned,1> uint1; typedef vec<float,1> float1; typedef vec<double,1> double1;
-        typedef vec<int,2> int2; typedef vec<unsigned,2> uint2; typedef vec<float,2> float2; typedef vec<double,2> double2;
-        typedef vec<int,3> int3; typedef vec<unsigned,3> uint3; typedef vec<float,3> float3; typedef vec<double,3> double3;
-        typedef vec<int,4> int4; typedef vec<unsigned,4> uint4; typedef vec<float,4> float4; typedef vec<double,4> double4;
+        typedef ALIGN(4) vec<int,1> int1; 
+        typedef ALIGN(4) vec<unsigned,1> uint1; 
+        typedef ALIGN(4) vec<float,1> float1; 
+        typedef ALIGN(8) vec<double,1> double1;
+        typedef ALIGN(8) vec<int,2> int2; 
+        typedef ALIGN(8) vec<unsigned,2> uint2; 
+        typedef ALIGN(8) vec<float,2> float2; 
+        typedef ALIGN(16) vec<double,2> double2;
+        typedef ALIGN(16) vec<int,3> int3; 
+        typedef ALIGN(16) vec<unsigned,3> uint3; 
+        typedef ALIGN(16) vec<float,3> float3; 
+        typedef ALIGN(16) vec<double,3> double3;
+        typedef ALIGN(16) vec<int,4> int4; 
+        typedef ALIGN(16) vec<unsigned,4> uint4; 
+        typedef ALIGN(16) vec<float,4> float4; 
+        typedef ALIGN(16) vec<double,4> double4;
+        
         typedef mat<bool,1,1> bool1x1; typedef mat<int,1,1> int1x1; typedef mat<float,1,1> float1x1; typedef mat<double,1,1> double1x1;
         typedef mat<bool,1,2> bool1x2; typedef mat<int,1,2> int1x2; typedef mat<float,1,2> float1x2; typedef mat<double,1,2> double1x2;
         typedef mat<bool,1,3> bool1x3; typedef mat<int,1,3> int1x3; typedef mat<float,1,3> float1x3; typedef mat<double,1,3> double1x3;
