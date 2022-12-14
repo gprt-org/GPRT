@@ -44,7 +44,7 @@ Examples
             :target: examples/s00-rayGenOnly.html
 
          :doc:`/interface/index`
-            A bare minimum GPRT example generating a checkerboard
+            Create a classic checkerboard!
 
       .. container:: descr
 
@@ -52,25 +52,26 @@ Examples
             :target: examples/s01-singleTriangle.html
 
          :doc:`/editors/index`
-            An example demonstrating triangle geometry
+            Experience the power of one triangle!
+
+      .. container:: descr
+
+         .. figure:: ./images/s02-instances.png
+            :target: examples/s02-instances.html
+
+         :doc:`/editors/index`
+            Duplicate your designs with ease!
+
+      .. container:: descr
+
+         .. figure:: ./images/s03-simpleAABB.png
+            :target: examples/s03-simpleAABB.html
+
+         :doc:`/editors/index`
+            One box to rule them all!
 
       .. Note, we'll add in the below as more samples are merged into master
 
-      .. .. container:: descr
-
-      ..    .. figure:: ./images/s02-instances.png
-      ..       :target: examples/s02-instances.html
-
-      ..    :doc:`/editors/index`
-      ..       Multiple instances of the same triangle geometry
-
-      .. .. container:: descr
-
-      ..    .. figure:: ./images/s03-simpleAABB.png
-      ..       :target: examples/s03-simpleAABB.html
-
-      ..    :doc:`/editors/index`
-      ..       An example demonstrating AABB geometry
 
       .. .. container:: descr
 
