@@ -93,6 +93,11 @@ target as well as the gprt::gprt target to our executable.
 Creating our Checkerboard Test Pattern
 --------------------------------------
 
+.. literalinclude:: ../../../samples/s00-rayGenOnly/deviceCode.hlsl
+   :language: hlsl
+   :emphasize-lines: 3,6-8
+   :linenos:
+
 Shared Structures
 ^^^^^^^^^^^^^^^^^
 
