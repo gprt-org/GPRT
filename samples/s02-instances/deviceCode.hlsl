@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "deviceCode.h"
-#include "gprt.h"
+#include "sharedCode.h"
 
 struct Payload
 {

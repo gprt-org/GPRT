@@ -26,8 +26,8 @@
 // public GPRT API
 #include <gprt.h>
 
-// our device-side data structures
-#include "deviceCode.h"
+// our shared data structures between host and device
+#include "sharedCode.h"
 
 #define LOG(message)                                                           \
   std::cout << GPRT_TERMINAL_BLUE;                                             \
