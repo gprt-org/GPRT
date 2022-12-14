@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,33 +22,12 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-
-/* variables for the triangle mesh geometry */
-struct AABBGeomData
-{
-  alignas(8) int tmp; // unused for now
-};
-
-struct RayGenData
-{
+// note! HLSL aligns to float4 boundaries!
+struct RayGenData {
+  // pointers are represented using uint64_t
   alignas(16) gprt::Buffer fbPtr;
-
   alignas(8) int2 fbSize;
-  alignas(16) gprt::Accel world;
 
-  struct { 
-    alignas(16) float3 pos;   
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
-  } camera;
-};
-
-/* variables for the miss program */
-struct MissProgData
-{
-  alignas(16) float3  color0;
-  alignas(16) float3  color1;
+  alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here
+  alignas(16) float3 color1; // note the 16 byte alignment (not 12 byte) here
 };

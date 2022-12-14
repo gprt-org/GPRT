@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -26,41 +26,41 @@
 // public GPRT API
 #include <gprt.h>
 
-// our device-side data structures
-#include "deviceCode.h"
+// our shared data structures between host and device
+#include "sharedCode.h"
 
 // for generating meshes
 #include <generator.hpp>
 using namespace generator;
 
-#define LOG(message)                                            \
-  std::cout << GPRT_TERMINAL_BLUE;                               \
-  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+#define LOG(message)                                                           \
+  std::cout << GPRT_TERMINAL_BLUE;                                             \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                         \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                         \
-  std::cout << "#gprt.sample(main): " << message << std::endl;   \
+#define LOG_OK(message)                                                        \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s07_deviceCode;
 
-template <typename T>
-struct Mesh {
+template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
   GPRTBuffer vertexBuffer;
   GPRTBuffer indexBuffer;
   GPRTGeom geometry;
 
-  Mesh() {};
-  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color, float4x4 transform)
-  {
+  Mesh(){};
+  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color,
+       float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
     while (!vertGenerator.done()) {
       auto vertex = vertGenerator.generate();
       auto position = vertex.position;
-      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1],
+                                       vertex.position[2], 1.0));
       vertices.push_back(p.xyz());
       vertGenerator.next();
     }
@@ -71,19 +71,16 @@ struct Mesh {
       triGenerator.next();
     }
 
-    vertexBuffer
-      = gprtDeviceBufferCreate(context,GPRT_FLOAT3,vertices.size(),vertices.data());
-    indexBuffer
-      = gprtDeviceBufferCreate(context,GPRT_UINT3,indices.size(),indices.data());
-    geometry
-      = gprtGeomCreate(context,geomType);
-    gprtTrianglesSetVertices(geometry, vertexBuffer, 
-                            vertices.size(), sizeof(float3), 0);
-    gprtTrianglesSetIndices(geometry, indexBuffer, 
-                            indices.size(), sizeof(uint3), 0);
-    gprtGeomSetBuffer(geometry,"vertex",vertexBuffer);
-    gprtGeomSetBuffer(geometry,"index",indexBuffer);
-    gprtGeomSet3f(geometry,"color",color.x, color.y, color.z);
+    vertexBuffer = gprtDeviceBufferCreate(context, GPRT_FLOAT3, vertices.size(),
+                                          vertices.data());
+    indexBuffer = gprtDeviceBufferCreate(context, GPRT_UINT3, indices.size(),
+                                         indices.data());
+    geometry = gprtGeomCreate(context, geomType);
+    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
+    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
+    gprtGeomSetBuffer(geometry, "vertex", vertexBuffer);
+    gprtGeomSetBuffer(geometry, "index", indexBuffer);
+    gprtGeomSet3f(geometry, "color", color.x, color.y, color.z);
   };
 
   void cleanup() {
@@ -98,22 +95,21 @@ const int2 fbSize = {1400, 460};
 
 const char *outFileName = "s07-multipleGeometry.png";
 
-float3 lookFrom = {10.f,10.0f,10.f};
-float3 lookAt = {0.f,0.f,1.f};
-float3 lookUp = {0.f,0.f,-1.f};
+float3 lookFrom = {10.f, 10.0f, 10.f};
+float3 lookAt = {0.f, 0.f, 1.f};
+float3 lookUp = {0.f, 0.f, -1.f};
 float cosFovy = 0.4f;
 
 #include <iostream>
-int main(int ac, char **av)
-{
+int main(int ac, char **av) {
   // This example serves to demonstrate that multiple geometry can be placed
   // in the same bottom level acceleration structure.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Multiple Geometry");
-  GPRTContext context = gprtContextCreate(nullptr,1);
-  GPRTModule module = gprtModuleCreate(context,s07_deviceCode);
+  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTModule module = gprtModuleCreate(context, s07_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -123,65 +119,68 @@ int main(int ac, char **av)
   // Setup geometry types
   // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
-    { "index",  GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,index)},
-    { "vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData,vertex)},
-    { "color",  GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData,color)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTGeomType trianglesGeomType
-    = gprtGeomTypeCreate(context,
-                        GPRT_TRIANGLES,
-                        sizeof(TrianglesGeomData),
-                        trianglesGeomVars,-1);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType,0,
-                           module,"closesthit");
+      {"index", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, index)},
+      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, vertex)},
+      {"color", GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData, color)},
+      {/* sentinel to mark end of list */}};
+  GPRTGeomType trianglesGeomType =
+      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData),
+                         trianglesGeomVars, -1);
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
-    { "fbSize",        GPRT_INT2,   GPRT_OFFSETOF(RayGenData,fbSize)},
-    { "fbPtr",         GPRT_BUFFER, GPRT_OFFSETOF(RayGenData,fbPtr)},
-    { "world",         GPRT_ACCEL,  GPRT_OFFSETOF(RayGenData,world)},
-    { "camera.pos",    GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.pos)},
-    { "camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_00)},
-    { "camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_du)},
-    { "camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData,camera.dir_dv)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTRayGen rayGen
-    = gprtRayGenCreate(context,module,"raygen",
-                      sizeof(RayGenData),
-                      rayGenVars,-1);
+      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
+      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
+      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
+      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
+      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
+      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
+      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
+      {/* sentinel to mark end of list */}};
+  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "raygen",
+                                       sizeof(RayGenData), rayGenVars, -1);
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTVarDecl missProgVars[]
-    = {
-    { "color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color0)},
-    { "color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData,color1)},
-    { /* sentinel to mark end of list */ }
-  };
-  GPRTMiss miss
-    = gprtMissCreate(context,module,"miss",sizeof(MissProgData),
-                        missProgVars,-1);
+  GPRTVarDecl missProgVars[] = {
+      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
+      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
+      {/* sentinel to mark end of list */}};
+  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
+                                 missProgVars, -1);
 
   LOG("building geometries ...");
 
-  // ------------------------------------------------------------------
-  // Meshes
-  // ------------------------------------------------------------------
-  #ifndef M_PI
-  #define M_PI 3.14
-  #endif
-  Mesh<TorusKnotMesh> torusMesh1(context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1,0,0), translation_matrix(float3(2*sin(2*M_PI*.33), 2*cos(2*M_PI*.33), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh2(context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0,1,0), translation_matrix(float3(2*sin(2*M_PI*.66), 2*cos(2*M_PI*.66), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh3(context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0,0,1), translation_matrix(float3(2*sin(2*M_PI*1.0), 2*cos(2*M_PI*1.0), 1.5f)));
-  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1,1,1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeom> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry, floorMesh.geometry};
-  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context,geoms.size(),geoms.data());
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context,1,&trianglesBLAS);
+// ------------------------------------------------------------------
+// Meshes
+// ------------------------------------------------------------------
+#ifndef M_PI
+#define M_PI 3.14
+#endif
+  Mesh<TorusKnotMesh> torusMesh1(
+      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh2(
+      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh3(
+      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
+  Mesh<CappedCylinderMesh> floorMesh(
+      context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
+      float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+  std::vector<GPRTGeom> geoms = {torusMesh1.geometry, torusMesh2.geometry,
+                                 torusMesh3.geometry, floorMesh.geometry};
+  GPRTAccel trianglesBLAS =
+      gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
 
@@ -190,15 +189,15 @@ int main(int ac, char **av)
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer
-    = gprtDeviceBufferCreate(context,GPRT_INT,fbSize.x*fbSize.y);
-  gprtRayGenSetBuffer(rayGen,"fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen,"fbSize", (int32_t*)&fbSize);
-  gprtRayGenSetAccel(rayGen,"world", trianglesTLAS);
+  GPRTBuffer frameBuffer =
+      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
+  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
+  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
+  gprtRayGenSetAccel(rayGen, "world", trianglesTLAS);
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss,"color0",0.1f,0.1f,0.1f);
-  gprtMissSet3f(miss,"color1",.0f,.0f,.0f);
+  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
+  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
 
   // ##################################################################
   // build *SBT* required to trace the groups
@@ -215,8 +214,7 @@ int main(int ac, char **av)
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  do 
-  {
+  do {
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
@@ -229,14 +227,13 @@ int main(int ac, char **av)
 
     // If we click the mouse, we should rotate the camera
     // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame)
-    {
+    if (state == GPRT_PRESS || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
-      #ifndef M_PI
-      #define M_PI 3.1415926f
-      #endif
+#ifndef M_PI
+#define M_PI 3.1415926f
+#endif
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
@@ -250,35 +247,34 @@ int main(int ac, char **av)
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY =
+          rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
-      float3 camera_d00
-        = normalize(lookAt-lookFrom);
+      float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu
-        = cosFovy * aspect * normalize(cross(camera_d00,lookUp));
-      float3 camera_ddv
-        = cosFovy * normalize(cross(camera_ddu,camera_d00));
+      float3 camera_ddu =
+          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv    (rayGen,"camera.pos",   (float*)&camera_pos);
-      gprtRayGenSet3fv    (rayGen,"camera.dir_00",(float*)&camera_d00);
-      gprtRayGenSet3fv    (rayGen,"camera.dir_du",(float*)&camera_ddu);
-      gprtRayGenSet3fv    (rayGen,"camera.dir_dv",(float*)&camera_ddv);
+      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
+      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
+      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
+      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
 
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context,rayGen,fbSize.x,fbSize.y);
-    
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+
     // If a window exists, presents the framebuffer here to that window
-    gprtBufferPresent(context, frameBuffer); 
+    gprtBufferPresent(context, frameBuffer);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
@@ -286,7 +282,7 @@ int main(int ac, char **av)
   // Save final frame to an image
   LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file "<<outFileName);
+  LOG_OK("written rendered frame buffer to file " << outFileName);
 
   // ##################################################################
   // and finally, clean up

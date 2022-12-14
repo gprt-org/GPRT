@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -24,25 +24,33 @@
 
 /* variables available to all programs */
 
-
-/* variables for the triangle mesh geometry */
-struct TrianglesGeomData
-{
+struct SphereBoundsData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index; // vec3i*
+  alignas(8) uint64_t vertex; // vec3f*
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex; // vec3f *  
+  alignas(8) uint64_t radius; // float *
+  /*! array/buffer of AABBs */
+  alignas(8) uint64_t aabbs;
 };
 
-struct RayGenData
-{
+/* variables for the triangle mesh geometry */
+struct SphereGeomData {
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer vertex; // vec3f*
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer radius; // float *
+  /*! base color we use for the entire mesh */
+  alignas(16) float3 color;
+};
+
+struct RayGenData {
   alignas(16) gprt::Buffer fbPtr;
 
   alignas(8) int2 fbSize;
   alignas(16) gprt::Accel world;
 
-  struct { 
-    alignas(16) float3 pos;   
+  struct {
+    alignas(16) float3 pos;
     alignas(16) float3 dir_00;
     alignas(16) float3 dir_du;
     alignas(16) float3 dir_dv;
@@ -50,8 +58,7 @@ struct RayGenData
 };
 
 /* variables for the miss program */
-struct MissProgData
-{
-  alignas(16) float3  color0;
-  alignas(16) float3  color1;
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
 };

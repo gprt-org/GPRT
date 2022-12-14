@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,13 +22,42 @@
 
 #include "gprt.h"
 
-// note! HLSL aligns to float4 boundaries!
-struct RayGenData
-{
-  // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer fbPtr;
-  alignas(8) int2 fbSize;
+struct TransformData {
+  /*! array/buffer of instance transforms */
+  alignas(16) gprt::Buffer transforms;
+  /*! the number of transforms stored in the buffer */
+  alignas(4) int numTransforms;
+  /*! the current time */
+  alignas(4) float now;
+};
 
-  alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here
-  alignas(16) float3 color1; // note the 16 byte alignment (not 12 byte) here
+struct TrianglesGeomData {
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer index;
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer vertex;
+  /*! the current time */
+  alignas(4) float now;
+  /*! the number of triangles along a row */
+  alignas(4) unsigned int gridSize;
+};
+
+struct RayGenData {
+  alignas(16) gprt::Buffer fbPtr;
+
+  alignas(8) int2 fbSize;
+  alignas(16) gprt::Accel world;
+
+  struct {
+    alignas(16) float3 pos;
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
+  } camera;
+};
+
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
 };
