@@ -52,7 +52,7 @@ const char *outFileName = "s03-singleAABB.png";
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
 float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 1.f, 0.f};
+float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
