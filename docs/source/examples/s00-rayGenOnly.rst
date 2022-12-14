@@ -152,6 +152,51 @@ at the given location.
 Host Code
 ^^^^^^^^^
 
+Finally, we'll write the code that we will execute on the host system. We begin 
+by requesting a window that we will use to present our checkerboard pattern. 
+Then, we create our ``GPRTContext``, which under the hood initializes our underlying
+ray tracing framework and selects the ray tracing devices we'll be executing kernels on.
+
+After that, we create a ``GPRTModule``, which acts as a container that will hold our
+compiled GPU program. 
+
+Next, we'll setup our ray tracing pipeline. This process works by providing a list of 
+all the variables referenced in our shared structure--in this case, our ``RayGenData``
+struct. Each declaration includes a *name* for the declaration--which we'll later use 
+to assign values to that parameter--as well as the type of the declaration and the 
+offset of that declaration in the shared structure. We end this list with a "null"
+declaration, similar to how a c-string is null-terminated.
+
+Once this is done, we can create a handle to our ray generation program, using 
+``gprtRayGenCreate`` and providing the module, the name of the ray generation program,
+the size of the shared structure, and our array of declarations. Finally, we can call 
+``gprtBuildPipeline`` to generate all the underlying resources required to envoke 
+ray generation kernels.
+
+
+Next, we can pass data back and forth between the ray tracing device in two ways: through
+constant uniform values, and through buffers. Uniform values are like single global values, 
+like the two ``float3`` color values used by our checkerboard. Buffers on the otherhand are
+allocated regions of memory which can be written to and read from by both the host and
+the device.
+
+To create buffers, we can use either ``gprtDeviceBufferCreate``,  or ``gprtHostBufferCreate``. 
+As their names suggest, creating a buffer using ``gprtDeviceBufferCreate`` will allocate a 
+buffer that resides on our ray tracing device, while using ``gprtHostBufferCreate`` will 
+allocate a buffer that resides on our host system. For our frame buffer, we will use a 
+device buffer.
+
+Once the values to our ray generation shader record are ready, we can assign them to our
+ray generation program using ``gprtRayGetSet`` commands. Once all parameters are set, we 
+upload the values of these parameters to our device by calling ``gprtBuildShaderBindingTable``. 
+
+At this point, we can finally launch our ray generation program. To do this, we call
+``gprtRayGenLaunch2D``, giving our ray generation program to use as well as the number 
+of threads we would like to execute concurrently. Then, to present our framebuffer 
+to the screen, we call ``gprtBufferPresent``. We do this in a loop until the window's 
+"X" button has been clicked, at which point we save the framebuffer to an image using 
+``gprtBufferSaveImage``, after which we destroy all created GPRT objects. 
+
 Conclusion
 ----------
 

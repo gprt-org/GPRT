@@ -80,7 +80,7 @@ int main(int ac, char **av) {
   // Allocate room for one RayGen shader, create it, and
   // hold on to it with the "gprt" context
   GPRTRayGen rayGen = gprtRayGenCreate(gprt, module, "simpleRayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+                                       sizeof(RayGenData), rayGenVars);
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(gprt);
