@@ -43,7 +43,7 @@ Examples
          .. figure:: ./images/s00-rayGenOnly.png
             :target: examples/s00-rayGenOnly.html
 
-         :doc:`/interface/index`
+         :doc:`/examples/s00-rayGenOnly`
             Create a classic checkerboard!
 
       .. container:: descr
@@ -51,7 +51,7 @@ Examples
          .. figure:: ./images/s01-singleTriangle.png
             :target: examples/s01-singleTriangle.html
 
-         :doc:`/editors/index`
+         :doc:`/examples/s01-singleTriangle`
             Experience the power of one triangle!
 
       .. container:: descr
@@ -59,15 +59,15 @@ Examples
          .. figure:: ./images/s02-instances.png
             :target: examples/s02-instances.html
 
-         :doc:`/editors/index`
+         :doc:`/examples/s02-instances`
             Duplicate your designs with ease!
 
       .. container:: descr
 
-         .. figure:: ./images/s03-simpleAABB.png
-            :target: examples/s03-simpleAABB.html
+         .. figure:: ./images/s03-singleAABB.png
+            :target: examples/s03-singleAABB.html
 
-         :doc:`/editors/index`
+         :doc:`/examples/s03-singleAABB`
             One box to rule them all!
 
       .. Note, we'll add in the below as more samples are merged into master
