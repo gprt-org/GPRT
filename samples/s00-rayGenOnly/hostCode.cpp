@@ -23,8 +23,8 @@
 // public GPRT API
 #include <gprt.h>
 
-// our device-side data structures
-#include "deviceCode.h"
+// our shared data structures
+#include "sharedCode.h"
 
 #define LOG(message)                                                           \
   std::cout << GPRT_TERMINAL_BLUE;                                             \
@@ -73,10 +73,9 @@ int main(int ac, char **av) {
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // All "parameters" we'll pass to that ray generation kernel are defined here.
   GPRTVarDecl rayGenVars[] = {
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
       {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color0)},
       {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color1)},
+      {"frameBuffer", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, frameBuffer)},
       {/* sentinel: */ nullptr}};
   // Allocate room for one RayGen shader, create it, and
   // hold on to it with the "gprt" context
@@ -104,8 +103,7 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   gprtRayGenSet3f(rayGen, "color0", 0.1f, 0.1f, 0.1f);
   gprtRayGenSet3f(rayGen, "color1", 0.0f, 0.0f, 0.0f);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2i(rayGen, "fbSize", fbSize.x, fbSize.y);
+  gprtRayGenSetBuffer(rayGen, "frameBuffer", frameBuffer);
 
   // Build a shader binding table entry for the ray generation record.
   gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);

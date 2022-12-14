@@ -50,7 +50,7 @@ and hostCode.cpp.
 The `CMakeLists.txt <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/CMakeLists.txt>`_ 
 file tells our system how to compile our code into an executable or library. 
 
-The `deviceCode.h <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/deviceCode.h>`_ 
+The `sharedCode.h <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/sharedCode.h>`_ 
 file defines common structures shared between our raytracing device and our host 
 system--for example, between our raytracing GPU and our CPU. The code in this 
 file needs to be carefully written to compile with both HLSL *and* C++. 
@@ -92,17 +92,62 @@ target as well as the gprt::gprt target to our executable.
 
 Creating our Checkerboard Test Pattern
 --------------------------------------
+To create our checkerboard test pattern, we'll write a small program that will 
+run in parallel on our ray tracing device, where we'll use individual threads to 
+generate our pixel colors. 
 
-.. literalinclude:: ../../../samples/s00-rayGenOnly/deviceCode.hlsl
-   :language: hlsl
-   :emphasize-lines: 3,6-8
-   :linenos:
+Shared Code
+^^^^^^^^^^^
+To begin, we'll define some structures that will be shared between our host system
+and our ray tracing device, which we'll declare in our *sharedCode.h* file. For 
+this sample, we'll need two colors--given as ``float3`` values--as well as a 
+framebuffer--represented using a gprt::Buffer. 
 
-Shared Structures
-^^^^^^^^^^^^^^^^^
+.. literalinclude:: ../../../samples/s00-rayGenOnly/sharedCode.h
+   :language: c++
+   :lines: 23-33
+
+One thing that might stand out right away is the use of ``alignas(16)``. In HLSL, 
+types align themselves to avoid crossing 16 byte boundaries; however, this isn't
+necessarily the case in C++. Therefore, we use this alignas macro to guarantee
+that the struct follows HLSL alignment rules for both C++ and HLSL so that the
+struct can be shared between the two devices. 
+
+Although it might seem intimidating at first, the rules aren't that bad to follow. 
+If a type is a float3 or int3, use ``alignas(16)`` rather than ``alignas(12)``. 
+Otherwise, alignas should take as input the number of bytes referenced by the 
+following object's type.
 
 Device Code
 ^^^^^^^^^^^
+
+Next, we'll create a *Ray Generation Program* that will run in parallel on the device. 
+As it's name suggests, the purpose of this kernel is to generate rays that we will trace
+into the world. However, just to keep things simple, we won't be tracing any 
+rays in this example. 
+
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/deviceCode.hlsl
+   :language: hlsl
+   :lines: 23-43
+
+In the code above, we declare our ray generation program using the macro 
+``GPRT_RAYGEN_PROGRAM``. This macro takes as input the *name* of our program, followed
+by the type and name of this kernel's "shader record". In GPRT, every program 
+running on the device receives a shader record. These shader records serve as 
+the parameters that are passed to this program when it executes on the device.
+
+This function runs the same code in parallel over many different threads. We
+read the thread ID using ``DispatchRaysIndex``, as well as how many threads 
+were launched using ``DispatchRaysDimensions``. 
+
+Using the first thread, we use printf to print out a message to our console. Note,
+for Vulkan GPRT backends, this requires that validation layers be enabled. This 
+can be done using the Vulkan Configurator tool, by using the "Debug Printf Preset".
+
+Following that, we use the thread ID to determine which checker type are pixel
+lies within. Finally, we use ``gprt::store`` to store our color into our framebuffer
+at the given location.
 
 Host Code
 ^^^^^^^^^

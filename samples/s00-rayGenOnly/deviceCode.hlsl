@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "deviceCode.h"
-#include "gprt.h"
+#include "sharedCode.h"
 
 // The first parameter here is the name of our entry point.
 //
@@ -30,19 +29,16 @@
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
-
+    uint2 fbSize = DispatchRaysDimensions().xy;
+    
     if (pixelID.x == 0 && pixelID.y == 0)
-    {
         printf("Hello from your first raygen program!\n");
-    }
 
     // Generate a simple checkerboard pattern as a test.
     int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-    // alternate pattern, showing that pixel (0,0) is in the upper left corner
-    // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
     const float3 color = (pattern & 1) ? record.color1 : record.color0;
 
     // find the frame buffer location (x + width*y) and put the result there
-    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(color));
+    const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+    gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(color));
 }
