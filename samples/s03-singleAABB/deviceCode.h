@@ -22,12 +22,29 @@
 
 #include "gprt.h"
 
-// note! HLSL aligns to float4 boundaries!
-struct RayGenData {
-  // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer fbPtr;
-  alignas(8) int2 fbSize;
+/* variables available to all programs */
 
-  alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here
-  alignas(16) float3 color1; // note the 16 byte alignment (not 12 byte) here
+/* variables for the triangle mesh geometry */
+struct AABBGeomData {
+  alignas(8) int tmp; // unused for now
+};
+
+struct RayGenData {
+  alignas(16) gprt::Buffer fbPtr;
+
+  alignas(8) int2 fbSize;
+  alignas(16) gprt::Accel world;
+
+  struct {
+    alignas(16) float3 pos;
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
+  } camera;
+};
+
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
 };

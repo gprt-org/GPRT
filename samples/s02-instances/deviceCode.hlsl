@@ -30,11 +30,6 @@ struct Payload
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
     Payload payload;
@@ -62,7 +57,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
     );
 
     const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+    gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(payload.color));
 }
 
 struct Attributes
@@ -70,41 +65,36 @@ struct Attributes
     float2 bc;
 };
 
+float3 hsv2rgb(float3 input)
+{
+    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
+    return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
+}
+
 // This closest hit program will be called when rays hit triangles.
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-//
-// The third is the type of the ray payload structure. We use the ray payload
-// to pass data between this program and our ray generation program.
-//
-// The fourth is the type of the intersection attributes structure.
-// For triangles, this is always a struct containing two floats
-// called "barycentrics", which we use to interpolate per-vertex
-// values.
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh,
-                         (TrianglesGeomData, record),
-                         (Payload, payload),
-                         (Attributes, attributes))
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes))
 {
-    float2 bc = attributes.bc;
-    payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+    // compute normal:
+    uint primID = PrimitiveIndex();
+    uint instanceID = InstanceIndex();
+    int3 index = gprt::load<int3>(record.index, primID);
+    float3 A = gprt::load<float3>(record.vertex, index.x);
+    float3 B = gprt::load<float3>(record.vertex, index.y);
+    float3 C = gprt::load<float3>(record.vertex, index.z);
+    float3 Ng = normalize(cross(B - A, C - A));
+    float3 rayDir = WorldRayDirection();
+
+    float3 color = hsv2rgb(float3(instanceID / 3.0, 1.0, 1.0));
+    payload.color = (.1f + .9f * abs(dot(rayDir, Ng))) * color;
 }
 
 // This miss program will be called when rays miss all primitives.
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_MISS_PROGRAM(miss,
-                  (MissProgData, record), (Payload, payload))
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
     int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);

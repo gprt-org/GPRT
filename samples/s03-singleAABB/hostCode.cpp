@@ -38,58 +38,63 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s01_deviceCode;
+extern GPRTProgram s03_deviceCode;
 
-// Vertices are the points that define our triangles
-const int NUM_VERTICES = 3;
-float3 vertices[NUM_VERTICES] = {
-    {-1.f, -.5f, 0.f},
-    {+1.f, -.5f, 0.f},
-    {0.f, +.5f, 0.f},
-};
-
-// Indices connect those vertices together.
-// Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
-const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+// The extents of our bounding box
+float3 aabbPositions[2] = {{-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s01-singleTriangle.png";
+const char *outFileName = "s03-singleAABB.png";
 
 // Initial camera parameters
-float3 lookFrom = {0.f, 0.f, -4.f};
+float3 lookFrom = {3.5f, 3.5f, 3.5f};
 float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
 int main(int ac, char **av) {
+  // In this example, we will create an axis aligned bounding box (AABB). These
+  // are more general than triangle primitives, and can be used for custom
+  // primitive types.
   LOG("gprt example '" << av[0] << "' starting up");
 
-  LOG("building module, programs, and pipeline");
-
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s01_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s03_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // First, we need to declare our geometry type.
-  // This includes all GPU kernels tied to the geometry, as well as the
-  // parameters passed to the geometry when hit by rays.
-  GPRTVarDecl trianglesGeomVars[] = {
-      {/* For now, no parameters. This sentinel to mark end of list */}};
-  GPRTGeomType trianglesGeomType = gprtGeomTypeCreate(
-      context, GPRT_TRIANGLES, sizeof(TrianglesGeomData), trianglesGeomVars);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
+  // -------------------------------------------------------
+  // declare geometry type
+  // -------------------------------------------------------
+  GPRTVarDecl aabbGeomVars[] = {{/* sentinel to mark end of list */}};
+  GPRTGeomType aabbGeomType =
+      gprtGeomTypeCreate(context,
+                         GPRT_AABBS, // <- This is new!
+                         sizeof(AABBGeomData), aabbGeomVars, -1);
+  gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
+  gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
 
-  // We'll also need a ray generation program.
+  // -------------------------------------------------------
+  // set up miss
+  // -------------------------------------------------------
+  GPRTVarDecl missVars[] = {
+      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
+      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
+      {/* sentinel to mark end of list */}};
+  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
+                                 missVars, -1);
+
+  // -------------------------------------------------------
+  // set up ray gen program
+  // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
       {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
       {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
@@ -101,17 +106,6 @@ int main(int ac, char **av) {
       {/* sentinel to mark end of list */}};
   GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
                                        sizeof(RayGenData), rayGenVars, -1);
-
-  // Finally, we need a "miss" program, which will be called when
-  // a ray misses all triangles. Just like geometry declarations
-  // and ray tracing programs, miss programs have parameters
-  GPRTVarDecl missProgVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missProgVars, -1);
-
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
@@ -124,58 +118,33 @@ int main(int ac, char **av) {
 
   // Miss program checkerboard background colors
   gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
+  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
 
   LOG("building geometries ...");
 
-  // The vertex and index buffers here define the triangle vertices
-  // and how those vertices are connected together.
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES, vertices);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT3, NUM_INDICES, indices);
+  // Create our AABB geometry. Every AABB is defined using two float3's. The
+  // first float3 defines the bottom lower left near corner, and the second
+  // float3 defines the upper far right corner.
+  GPRTBuffer aabbPositionsBuffer =
+      gprtDeviceBufferCreate(context, GPRT_FLOAT3, 2, aabbPositions);
+  GPRTGeom aabbGeom = gprtGeomCreate(context, aabbGeomType);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
-  // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
-  // We use these calls to tell the geometry what buffers store triangle
-  // indices and vertices
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
+  // Note, we must create an "AABB" accel rather than a triangles accel.
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  gprtAccelBuild(context, aabbAccel);
 
-  // Once we have our geometry, we need to place that geometry into an
-  // acceleration structure. These acceleration structures allow rays to
-  // determine which triangle the ray hits in a sub-linear amount of time.
-  // This first acceleration structure level is called a bottom level
-  // acceleration structure, or a BLAS.
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-
-  // We can then make multiple "instances", or copies, of that BLAS in
-  // a top level acceleration structure, or a TLAS. (we'll cover this later.)
-  // Rays can only be traced into TLAS, so for now we just make one BLAS
-  // instance.
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  // triangle and AABB accels can be combined in a top level tree
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
   gprtAccelBuild(context, world);
 
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
   gprtRayGenSetAccel(rayGen, "world", world);
 
   // ##################################################################
   // build the pipeline and shader binding table
   // ##################################################################
-
-  // We must build the pipeline after all geometry instances are created.
-  // The pipeline contains programs for each geometry that might be hit by
-  // a ray.
   gprtBuildPipeline(context);
-
-  // Next, the shader binding table is used to assign parameters to our ray
-  // generation and miss programs. We also use the shader binding table to
-  // map parameters to geometry depending on the ray type and instance.
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -246,7 +215,7 @@ int main(int ac, char **av) {
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
-    // If a window exists, presents the framebuffer here to that window
+    // If a window exists, presents the frame buffer here to that window
     gprtBufferPresent(context, frameBuffer);
   }
   // returns true if "X" pressed or if in "headless" mode
@@ -263,15 +232,14 @@ int main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
+  gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
+  gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
-  gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomDestroy(aabbGeom);
+  gprtGeomTypeDestroy(aabbGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

@@ -20,7 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(s00-rayGenOnly)
-add_subdirectory(s01-singleTriangle)
-add_subdirectory(s02-instances)
-add_subdirectory(s03-singleAABB)
+embed_devicecode(
+  OUTPUT_TARGET
+    s03_deviceCode
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
+
+add_executable(s03_singleAABB hostCode.cpp)
+target_link_libraries(s03_singleAABB
+  PRIVATE
+    s03_deviceCode
+    gprt::gprt
+)

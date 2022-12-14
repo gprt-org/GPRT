@@ -30,11 +30,6 @@ struct Payload
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
     Payload payload;
@@ -47,7 +42,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
     rayDesc.Origin = record.camera.pos;
     rayDesc.Direction =
         normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
-    rayDesc.TMin = 0.001;
+    rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
     RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
     TraceRay(
@@ -65,46 +60,44 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
     gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-struct Attributes
+struct Attribute
 {
-    float2 bc;
+    float3 color;
 };
 
-// This closest hit program will be called when rays hit triangles.
+// This intersection program will be called when rays hit our axis
+// aligned bounding boxes. Here, we can fetch per-geometry data and
+// process that data, but we do not have access to the ray payload
+// structure here.
+//
+// Instead, we pass data through a customizable Attributes structure
+// for further processing by closest hit / any hit programs.
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
+{
+    Attribute attr;
+    attr.color = float3(1.f, 1.f, 1.f);
+    ReportHit(0.1f, /*hitKind*/ 0, attr);
+}
+
+// This closest hit program will be called when our intersection program
+// reports a hit between our ray and our custom primitives.
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
 //
-// The first parameter here is the name of our entry point.
+// Note, since this is a custom AABB primitive, our intersection program
+// above defines what attributes are passed to our closest hit program.
 //
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-//
-// The third is the type of the ray payload structure. We use the ray payload
-// to pass data between this program and our ray generation program.
-//
-// The fourth is the type of the intersection attributes structure.
-// For triangles, this is always a struct containing two floats
-// called "barycentrics", which we use to interpolate per-vertex
-// values.
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh,
-                         (TrianglesGeomData, record),
-                         (Payload, payload),
-                         (Attributes, attributes))
+// Also note, this program is also called after all ReportHit's have been
+// called and we can conclude which reported hit is closest.
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
 {
-    float2 bc = attributes.bc;
-    payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+    payload.color = attribute.color;
 }
 
 // This miss program will be called when rays miss all primitives.
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_MISS_PROGRAM(miss,
-                  (MissProgData, record), (Payload, payload))
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
     int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
