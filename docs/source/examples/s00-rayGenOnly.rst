@@ -157,8 +157,16 @@ by requesting a window that we will use to present our checkerboard pattern.
 Then, we create our ``GPRTContext``, which under the hood initializes our underlying
 ray tracing framework and selects the ray tracing devices we'll be executing kernels on.
 
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 58-65
+
 After that, we create a ``GPRTModule``, which acts as a container that will hold our
 compiled GPU program. 
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 67-71
 
 Next, we'll setup our ray tracing pipeline. This process works by providing a list of 
 all the variables referenced in our shared structure--in this case, our ``RayGenData``
@@ -173,6 +181,9 @@ the size of the shared structure, and our array of declarations. Finally, we can
 ``gprtBuildPipeline`` to generate all the underlying resources required to envoke 
 ray generation kernels.
 
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 73-86
 
 Next, we can pass data back and forth between the ray tracing device in two ways: through
 constant uniform values, and through buffers. Uniform values are like single global values, 
@@ -186,9 +197,17 @@ buffer that resides on our ray tracing device, while using ``gprtHostBufferCreat
 allocate a buffer that resides on our host system. For our frame buffer, we will use a 
 device buffer.
 
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 92-98
+
 Once the values to our ray generation shader record are ready, we can assign them to our
 ray generation program using ``gprtRayGetSet`` commands. Once all parameters are set, we 
 upload the values of these parameters to our device by calling ``gprtBuildShaderBindingTable``. 
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 104-109
 
 At this point, we can finally launch our ray generation program. To do this, we call
 ``gprtRayGenLaunch2D``, giving our ray generation program to use as well as the number 
@@ -196,6 +215,10 @@ of threads we would like to execute concurrently. Then, to present our framebuff
 to the screen, we call ``gprtBufferPresent``. We do this in a loop until the window's 
 "X" button has been clicked, at which point we save the framebuffer to an image using 
 ``gprtBufferSaveImage``, after which we destroy all created GPRT objects. 
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 115-138
 
 Conclusion
 ----------
