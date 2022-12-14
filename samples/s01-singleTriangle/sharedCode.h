@@ -31,7 +31,6 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   gprt::Buffer fbPtr;
-
   int2 fbSize;
   gprt::Accel world;
 
