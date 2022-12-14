@@ -356,11 +356,6 @@ typedef enum
     else if (type == GPRT_UINT64_T3) return sizeof(uint64_t) * 3;
     else if (type == GPRT_UINT64_T4) return sizeof(uint64_t) * 4;
 
-    else if (type == GPRT_INT64_T)  return sizeof(uint64_t);
-    else if (type == GPRT_INT64_T2) return sizeof(uint64_t) * 2;
-    else if (type == GPRT_INT64_T3) return sizeof(uint64_t) * 3;
-    else if (type == GPRT_INT64_T4) return sizeof(uint64_t) * 4;
-
     else if (type == GPRT_BUFFER) return 2 * sizeof(uint64_t);
     else if (type == GPRT_BUFPTR) return sizeof(uint64_t);
 
@@ -387,6 +382,76 @@ typedef enum
     // User Types have size encoded in their type enum
     else if (type > GPRT_USER_TYPE_BEGIN) return type - GPRT_USER_TYPE_BEGIN;
     else assert(false); return -1;// std::runtime_error("Unimplemented!");
+  }
+
+  inline std::string getTypeString(GPRTDataType type)
+  {
+         if (type == GPRT_INT8_T)  return "int8_t";
+    else if (type == GPRT_INT8_T2) return "int8_t2";
+    else if (type == GPRT_INT8_T3) return "int8_t3";
+    else if (type == GPRT_INT8_T4) return "int8_t4";
+
+    else if (type == GPRT_UINT8_T)  return "uint8_t";
+    else if (type == GPRT_UINT8_T2) return "uint8_t2";
+    else if (type == GPRT_UINT8_T3) return "uint8_t3";
+    else if (type == GPRT_UINT8_T4) return "uint8_t4";
+
+    else if (type == GPRT_INT16_T)  return "int16_t";
+    else if (type == GPRT_INT16_T2) return "int16_t2";
+    else if (type == GPRT_INT16_T3) return "int16_t3";
+    else if (type == GPRT_INT16_T4) return "int16_t4";
+
+    else if (type == GPRT_UINT16_T)  return "int16_t";
+    else if (type == GPRT_UINT16_T2) return "int16_t2";
+    else if (type == GPRT_UINT16_T3) return "int16_t3";
+    else if (type == GPRT_UINT16_T4) return "int16_t4";
+
+    else if (type == GPRT_INT32_T)  return "int32_t";
+    else if (type == GPRT_INT32_T2) return "int32_t2";
+    else if (type == GPRT_INT32_T3) return "int32_t3";
+    else if (type == GPRT_INT32_T4) return "int32_t4";
+
+    else if (type == GPRT_UINT32_T)  return "uint32_t";
+    else if (type == GPRT_UINT32_T2) return "uint32_t2";
+    else if (type == GPRT_UINT32_T3) return "uint32_t3";
+    else if (type == GPRT_UINT32_T4) return "uint32_t4";
+
+    else if (type == GPRT_INT64_T)  return "int64_t";
+    else if (type == GPRT_INT64_T2) return "int64_t2";
+    else if (type == GPRT_INT64_T3) return "int64_t3";
+    else if (type == GPRT_INT64_T4) return "int64_t4";
+
+    else if (type == GPRT_UINT64_T)  return "uint64_t";
+    else if (type == GPRT_UINT64_T2) return "uint64_t2";
+    else if (type == GPRT_UINT64_T3) return "uint64_t3";
+    else if (type == GPRT_UINT64_T4) return "uint64_t4";
+
+    else if (type == GPRT_BUFFER) return "gprt::Buffer";
+    else if (type == GPRT_BUFPTR) return "gprt::Buffer*";
+
+    else if (type == GPRT_FLOAT) return "float";
+    else if (type == GPRT_FLOAT2) return "float2";
+    else if (type == GPRT_FLOAT3) return "float3";
+    else if (type == GPRT_FLOAT4) return "float4";
+
+    else if (type == GPRT_DOUBLE) return "double";
+    else if (type == GPRT_DOUBLE2) return "double2";
+    else if (type == GPRT_DOUBLE3) return "double3";
+    else if (type == GPRT_DOUBLE4) return "double4";
+
+    else if (type == GPRT_BOOL) return "bool";
+    else if (type == GPRT_BOOL2) return "bool2"; 
+    else if (type == GPRT_BOOL3) return "bool3"; 
+    else if (type == GPRT_BOOL4) return "bool4"; 
+
+    else if (type == GPRT_ACCEL) return "gprt::Accel";
+    else if (type == GPRT_TRANSFORM) return "float3x4";
+    else if (type == GPRT_TRANSFORM_3X4) return "float3x4";
+    else if (type == GPRT_TRANSFORM_4X4) return "float4x4";
+
+    // User Types have size encoded in their type enum
+    else if (type > GPRT_USER_TYPE_BEGIN) return "userType";
+    else assert(false); return "unknown";// std::runtime_error("Unimplemented!");
   }
 
   #define GPRT_USER_TYPE(userType) ((GPRTDataType)(GPRT_USER_TYPE_BEGIN+sizeof(userType)))

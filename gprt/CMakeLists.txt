@@ -32,7 +32,7 @@ embed_devicecode(
   ENTRY_POINTS
     gprtFillInstanceData
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device_code.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
 )
 
 target_sources(gprt PRIVATE

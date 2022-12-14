@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "deviceCode.h"
-#include "gprt.h"
+#include "sharedCode.h"
 
 struct Payload
 {
@@ -100,6 +99,6 @@ GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, paylo
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
-    int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
+    int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
     payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

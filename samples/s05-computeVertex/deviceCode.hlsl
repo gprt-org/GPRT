@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "deviceCode.h"
-#include "gprt.h"
+#include "sharedCode.h"
 
 float3 getPos(float px, float py, float k, float width, float depth, float height, float now)
 {
