@@ -26,8 +26,8 @@
 // public GPRT API
 #include <gprt.h>
 
-// our device-side data structures
-#include "deviceCode.h"
+// our shared data structures between host and device
+#include "sharedCode.h"
 
 // for generating meshes
 #include <generator.hpp>
@@ -135,7 +135,7 @@ const char *outFileName = "s09-multipleTLAS.png";
 
 float3 lookFrom = {4.f,0.0f,0.2f};
 float3 lookAt = {0.f,0.f,0.2f};
-float3 lookUp = {0.f,0.f,1.f};
+float3 lookUp = {0.f,0.f,-1.f};
 float cosFovy = 0.3f;
 
 #include <iostream>

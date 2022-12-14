@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "deviceCode.h"
-#include "gprt.h"
+#include "sharedCode.h"
 
 struct Payload
 {
@@ -112,7 +111,7 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
   float3 finalColor = over(color, backgroundColor, alpha, 1.0);
 
   const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(finalColor));
+  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(finalColor));
 }
 
 struct TriangleAttributes {
