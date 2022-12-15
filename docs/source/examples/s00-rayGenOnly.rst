@@ -7,29 +7,39 @@ Introduction
 
 Overview of the General Purpose Raytracing Toolkit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The General Purpose Raytracing Toolkit (GPRT) is a powerful and versatile open 
-source raytracing library designed to enable developers to quickly and easily 
-prototype ideas involving all things high-performance ray tracing. The API is 
-written using a combination of C++ and HLSL to support a wide range of features, 
-including ray-object intersection, high performance tree construction, parallel 
-compute kernels, and more. GPRT is also optimized for NVIDIA, AMD and Intel Arc 
-architectures (with support for CPU architectures coming soon), making it 
-suitable for use in a variety of applications. With its comprehensive feature 
-set and flexible architecture, we believe that GPRT is an ideal choice for 
-developers looking to prototype their ray tracing ideas to create stunning 3D 
-graphics and highly efficient simulation codes.
+.. The General Purpose Raytracing Toolkit (GPRT) is a powerful and versatile open 
+.. source raytracing library designed to enable developers to quickly and easily 
+.. prototype ideas involving all things high-performance ray tracing. The API is 
+.. written using a combination of C++ and HLSL to support a wide range of features, 
+.. including ray-object intersection, high performance tree construction, parallel 
+.. compute kernels, and more. GPRT is also optimized for NVIDIA, AMD and Intel Arc 
+.. architectures (with support for CPU architectures coming soon), making it 
+.. suitable for use in a variety of applications. With its comprehensive feature 
+.. set and flexible architecture, we believe that GPRT is an ideal choice for 
+.. developers looking to prototype their ray tracing ideas to create stunning 3D 
+.. graphics and highly efficient simulation codes.
 
+GPRT is an open source raytracing library that uses a combination of C++ and HLSL to 
+allow developers to quickly prototype ideas involving high-performance ray tracing. 
+It is optimized for NVIDIA, AMD and Intel Arc architectures, and support for CPU 
+architectures is coming soon. It offers a comprehensive feature set and is suitable 
+for a variety of applications.
 
 Purpose of Checkerboard Test Pattern
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-In this first example, we will use GPRT to create an image of a simple 
-checkerboard pattern. Traditionally speaking, computer graphics libraries will 
-generate a checkerboard image as a sort-of diagnostic test, to reveal any 
-possible issues with a display's resolution, color accuracy, or contrast. But 
-for our purposes, a checkerboard also just so happens to be a very easy pattern 
-to generate, and allows us to get something up and running before diving into
-more advanced concepts like acceleration structures, geometry, or ray tracing 
-pipelines.
+.. In this first example, we will use GPRT to create an image of a simple 
+.. checkerboard pattern. Traditionally speaking, computer graphics libraries will 
+.. generate a checkerboard image as a sort-of diagnostic test, to reveal any 
+.. possible issues with a display's resolution, color accuracy, or contrast. But 
+.. for our purposes, a checkerboard also just so happens to be a very easy pattern 
+.. to generate, and allows us to get something up and running before diving into
+.. more advanced concepts like acceleration structures, geometry, or ray tracing 
+.. pipelines.
+
+This first example explains how to use GPRT to create a checkerboard pattern.
+Traditionally, checherboards serve as a good diagnostic test to reveal any 
+possible issues with a display. For us, it is an easy pattern to generate 
+and allows users to get something running before moving onto more advanced concepts.
 
 After running this example, you should see an image like this appear on your 
 screen and be saved as s00-rayGenOnly.png in the same directory as the sample's 
@@ -44,25 +54,24 @@ File Structure and Purpose
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 All of the samples in this repo follow a very similar pattern. In the 
 `s00-rayGenOnly <https://github.com/gprt-org/GPRT/tree/master/samples/s00-rayGenOnly>`_
-directory, we have four files: CMakeLists.txt, deviceCode.h, deviceCode.hlsl, 
+directory, we have four files: CMakeLists.txt, sharedCode.h, deviceCode.hlsl, 
 and hostCode.cpp. 
 
-The `CMakeLists.txt <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/CMakeLists.txt>`_ 
-file tells our system how to compile our code into an executable or library. 
+`CMakeLists.txt <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/CMakeLists.txt>`_ 
+tells our system how to compile our code into an executable or library. 
 
-The `sharedCode.h <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/sharedCode.h>`_ 
-file defines common structures shared between our raytracing device and our host 
-system--for example, between our raytracing GPU and our CPU. The code in this 
-file needs to be carefully written to compile with both HLSL *and* C++. 
+`sharedCode.h <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/sharedCode.h>`_ 
+defines common structures shared between our raytracing device and our host 
+system. The code in this file needs to be carefully written to compile with both HLSL *and* C++. 
 
-The `deviceCode.hlsl <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/deviceCode.hlsl>`_ 
-file defines all programs we would like to run in parallel on our raytracing 
-device. You might also here these programs called *shaders* or *kernels*. These 
-kernels are written using the HLSL programming language. 
+`deviceCode.hlsl <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/deviceCode.hlsl>`_ 
+defines all programs we would like to run in parallel on our raytracing 
+device, written using the HLSL programming language. You might also see these 
+programs called *shaders* or *kernels*. 
 
-Then finally, the `hostCode.cpp <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/hostCode.cpp>`_ 
-file defines our main function on the CPU that we will use to orchestrate what 
-kernels to run--or *launch*--on the device and how. This might include what 
+`hostCode.cpp <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/hostCode.cpp>`_ 
+defines our main function on the CPU that we will use to orchestrate what 
+kernels to run on the device and how. This might include what 
 parameters we pass to these kernels, how many threads to launch, and so on.
 
 Configuring the Build System
@@ -71,21 +80,14 @@ Before we can use GPRT, we need to configure how to compile our code together
 into an executable. Our samples do this by using *CMake*. In a typical workflow,
 this CMake file would be configured as follows:
 
-1. use the ``add_subdirectory`` command to add the gprt repository root 
-directory.
+.. literalinclude:: ../../../samples/s00-rayGenOnly/CMakeLists.txt
+   :language: cmake
+   :lines: 23-36
 
-2. call `embed_devicecode`, passing in our *deviceCode.hlsl* as the source file. 
-Behind the scenes, this embed macro will compile our deviceCode.hlsl file into 
-multiple different SPIR-V targets that can use to run our code on the GPU. 
-(Note, this is subject to change as we add support for CPU backends).
-This SPIR-V is then embedded into a .cpp file matching the ``OUTPUT_TARGET`` 
-name---in our case, this will appear as *s00_deviceCode.cpp* in our 
-build/samples/s00-rayGenOnly/ folder. 
 
-3. call `add_executable`, passing in our *hostCode.cpp* file as the source.
-
-4. Then finally, we call `target_link_libraries`, linking our embedded devicecode
-target as well as the gprt::gprt target to our executable.
+The `embed_devicecode` macro compiles our *deviceCode.hlsl* into 
+assembly we can run on our raytracing device. This assembly is then 
+embedded into a .cpp file matching the ``OUTPUT_TARGET`` name. 
 
 `For another minimal example, check out the CMakeLists.txt in this project
 <https://github.com/gprt-org/h5m-reader/blob/main/CMakeLists.txt>`_
@@ -99,32 +101,42 @@ generate our pixel colors.
 Shared Code
 ^^^^^^^^^^^
 To begin, we'll define some structures that will be shared between our host system
-and our ray tracing device, which we'll declare in our *sharedCode.h* file. For 
-this sample, we'll need two colors--given as ``float3`` values--as well as a 
-framebuffer--represented using a gprt::Buffer. 
+and our ray tracing device, which we'll declare in our *sharedCode.h* file. 
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/sharedCode.h
    :language: c++
    :lines: 23-33
 
-One thing that might stand out right away is the use of ``alignas(16)``. In HLSL, 
-types align themselves to avoid crossing 16 byte boundaries; however, this isn't
-necessarily the case in C++. Therefore, we use this alignas macro to guarantee
-that the struct follows HLSL alignment rules for both C++ and HLSL so that the
-struct can be shared between the two devices. 
+.. One thing that might stand out right away is the use of ``alignas(16)``. In HLSL, 
+.. types align themselves to avoid crossing 16 byte boundaries; however, this isn't
+.. necessarily the case in C++. Therefore, we use this alignas macro to guarantee
+.. that the struct follows HLSL alignment rules for both C++ and HLSL so that the
+.. struct can be shared between the two devices. 
+.. Although it might seem intimidating at first, the rules aren't that bad to follow. 
+.. If a type is a float3 or int3, use ``alignas(16)`` rather than ``alignas(12)``. 
+.. Otherwise, alignas should take as input the number of bytes referenced by the 
+.. following object's type.
 
-Although it might seem intimidating at first, the rules aren't that bad to follow. 
-If a type is a float3 or int3, use ``alignas(16)`` rather than ``alignas(12)``. 
-Otherwise, alignas should take as input the number of bytes referenced by the 
-following object's type.
+.. The use of alignas is necessary to ensure that HLSL and C++ structs are aligned 
+.. correctly and can be shared between devices. This is because C++ uses 4/8 byte 
+.. alignment for 32/64bit applications, while HLSL uses 16 byte alignment. HLSL
+.. also prevents variables from crossing 16-byte boundaries, and inserts padding
+.. to structs to make sure this never happens. It may be intimidating, but the rules
+.. for alignas are simple: use alignas(16) for float3, int3, gprt::Buffer and gprt::Accel 
+.. types, and otherwise alignas should take the number of bytes of the corresponding type.
+
+The use of alignas is necessary to ensure that HLSL and C++ structs can be shared between devices. 
+HLSL requires 16 byte alignment, and prevents variables from crossing 16-byte boundaries by 
+inserting padding to structs. To ensure correct alignment, alignas(16) should be used for float3, 
+int3, gprt::Buffer and gprt::Accel types, and otherwise alignas should take the number of bytes 
+of the corresponding type.
 
 Device Code
 ^^^^^^^^^^^
 
 Next, we'll create a *Ray Generation Program* that will run in parallel on the device. 
-As it's name suggests, the purpose of this kernel is to generate rays that we will trace
-into the world. However, just to keep things simple, we won't be tracing any 
-rays in this example. 
+Normally, we use these kernels to generate rays to trace into the world. However, in this 
+example we'll just be creating a checkerboard background. 
 
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/deviceCode.hlsl
@@ -132,30 +144,37 @@ rays in this example.
    :lines: 23-43
 
 In the code above, we declare our ray generation program using the macro 
-``GPRT_RAYGEN_PROGRAM``. This macro takes as input the *name* of our program, followed
-by the type and name of this kernel's "shader record". In GPRT, every program 
-running on the device receives a shader record. These shader records serve as 
-the parameters that are passed to this program when it executes on the device.
+``GPRT_RAYGEN_PROGRAM``. 
+This macro is defined in `gprt_device.h <https://github.com/gprt-org/GPRT/blob/master/gprt/gprt_device.h>`_,
+and it's purpose is to allow us to write multiple kernels all in the same HLSL
+document. 
 
-This function runs the same code in parallel over many different threads. We
+.. This macro takes as input the *name* of our program, followed
+.. by the type and name of this kernel's "shader record".
+This macro takes in the name of the kernel and the type and name of its shader record.
+In GPRT, every kernel receives a shader record, which serve as the parameters 
+to that kernel. 
+
+This kernel runs the same code in parallel over many different threads. We
 read the thread ID using ``DispatchRaysIndex``, as well as how many threads 
 were launched using ``DispatchRaysDimensions``. 
-
-Using the first thread, we use printf to print out a message to our console. Note,
-for Vulkan GPRT backends, this requires that validation layers be enabled. This 
-can be done using the Vulkan Configurator tool, by using the "Debug Printf Preset".
-
-Following that, we use the thread ID to determine which checker type are pixel
-lies within. Finally, we use ``gprt::store`` to store our color into our framebuffer
+We use the thread ID to determine which checker type are pixel
+lies within, and use ``gprt::store`` to store our color into our framebuffer
 at the given location.
+
+Just like on the CPU, we can use printf to print out helpful debug messages. Note,
+for Vulkan GPRT backends, this requires that validation layers be enabled, which 
+can be done using the Vulkan Configurator tool by using the "Debug Printf Preset".
 
 Host Code
 ^^^^^^^^^
 
-Finally, we'll write the code that we will execute on the host system. We begin 
-by requesting a window that we will use to present our checkerboard pattern. 
-Then, we create our ``GPRTContext``, which under the hood initializes our underlying
-ray tracing framework and selects the ray tracing devices we'll be executing kernels on.
+All that's left is to write our host side code. 
+
+We begin by requesting a window and creating a ``GPRTContext``: 
+.. that we will use to show our checkerboard pattern. 
+.. Then, we create our ``GPRTContext``, which under the hood initializes our underlying
+.. ray tracing framework and selects the devices we'll run our kernel on.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
@@ -166,28 +185,41 @@ compiled GPU program.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 67-71
+   :lines: 71
 
-Next, we'll setup our ray tracing pipeline. This process works by providing a list of 
-all the variables referenced in our shared structure--in this case, our ``RayGenData``
-struct. Each declaration includes a *name* for the declaration--which we'll later use 
-to assign values to that parameter--as well as the type of the declaration and the 
-offset of that declaration in the shared structure. We end this list with a "null"
-declaration, similar to how a c-string is null-terminated.
-
-Once this is done, we can create a handle to our ray generation program, using 
-``gprtRayGenCreate`` and providing the module, the name of the ray generation program,
-the size of the shared structure, and our array of declarations. Finally, we can call 
-``gprtBuildPipeline`` to generate all the underlying resources required to envoke 
-ray generation kernels.
+Creating our Raytracing Pipeline
+""""""""""""""""""""""""""""""""
+Next, we'll setup our ray tracing pipeline. First, we provide a list of variables 
+referenced in our shared ``RayGenData`` struct. Each declaration includes a *name*,
+a type, and an offset. When we're done, we end this list with a "null" declaration, 
+similar to a null-terminated string.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 73-86
+   :lines: 73-79
 
+.. for the declaration--which we'll later use 
+.. to assign values to that parameter--as well as the type of the declaration and the 
+.. offset of that declaration in the shared structure. 
+
+With this list, we can create a handle to our ray generation program: 
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 80-84
+
+Finally, we can build our ray tracing pipeline, generating all the underlying resources required to envoke 
+ray generation kernels:
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 85-86
+
+Setting Parameters
+""""""""""""""""""
 Next, we can pass data back and forth between the ray tracing device in two ways: through
 constant uniform values, and through buffers. Uniform values are like single global values, 
-like the two ``float3`` color values used by our checkerboard. Buffers on the otherhand are
+like the two ``float3`` color values used by our checkerboard. Buffers on the other hand are
 allocated regions of memory which can be written to and read from by both the host and
 the device.
 
@@ -209,25 +241,34 @@ upload the values of these parameters to our device by calling ``gprtBuildShader
    :language: c++
    :lines: 104-109
 
-At this point, we can finally launch our ray generation program. To do this, we call
-``gprtRayGenLaunch2D``, giving our ray generation program to use as well as the number 
-of threads we would like to execute concurrently. Then, to present our framebuffer 
-to the screen, we call ``gprtBufferPresent``. We do this in a loop until the window's 
-"X" button has been clicked, at which point we save the framebuffer to an image using 
-``gprtBufferSaveImage``, after which we destroy all created GPRT objects. 
+Launching our Program
+"""""""""""""""""""""
+At this point, we can launch our ray generation program to create our checkerboar image. 
+To do this, we call ``gprtRayGenLaunch2D``, giving our ray generation program to use as 
+well as the number of threads we would like to execute concurrently. Then, to present 
+our framebuffer to the screen, we call ``gprtBufferPresent``. We do this in a loop until 
+the window's  "X" button has been clicked, at which point we save the framebuffer to an 
+image using ``gprtBufferSaveImage``.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 115-138
+   :lines: 115-129
+
+Cleaning Up
+"""""""""""
+When our program completes, we need to destroy all created objects. We destroy 
+our objects the reverse order as they were made. 
+
+.. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
+   :language: c++
+   :lines: 133-138
 
 Conclusion
 ----------
+If you've followed along so far, congrats! Although this example is relatively simple, 
+we've covered a lot of the key concepts you need to know in order to get up and running 
+tracing rays. 
 
-Summary of Process
-^^^^^^^^^^^^^^^^^^
+In the next example, we'll create a single triangle, and trace rays to intersect that triangle.
+We'll be able to manipulate this triangle as well using some very simple camera math.
 
-Benefits of Using Framework
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-What's Next?
-^^^^^^^^^^^^
