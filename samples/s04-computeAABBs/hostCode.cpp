@@ -41,15 +41,16 @@
 extern GPRTProgram s04_deviceCode;
 
 // Vertices and radii that will be used to define spheres
-const int NUM_VERTICES = 4;
+const int NUM_VERTICES = 11;
 float3 vertices[NUM_VERTICES] = {
-    {0.1f, 0.2f, 0.3f},
-    {-1.f, -1.f, -1.f},
-    {+1.f, -1.f, -1.f},
-    {-1.f, +1.f, -1.f},
+    {0.0f, 0.0f, 0.0f}, {0.1f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f},
+    {0.3f, 0.0f, 0.0f}, {0.4f, 0.0f, 0.0f}, {0.5f, 0.0f, 0.0f},
+    {0.6f, 0.0f, 0.0f}, {0.7f, 0.0f, 0.0f}, {0.8f, 0.0f, 0.0f},
+    {0.9f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
 };
 
-float radii[NUM_VERTICES] = {1.f, .5f, .25f, .1f};
+float radii[NUM_VERTICES] = {.015f, .025f, .035f, .045f, .055f, .065f,
+                             .055f, .045f, .035f, .025f, .015f};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -58,9 +59,9 @@ const int2 fbSize = {1400, 460};
 const char *outFileName = "s04-computeAABBs.png";
 
 // Initial camera parameters
-float3 lookFrom = {-4.f, -3.f, -2.f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 1.f, 0.f};
+float3 lookFrom = {0.5f, 0.0f, 0.6f};
+float3 lookAt = {0.5f, 0.f, 0.f};
+float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
