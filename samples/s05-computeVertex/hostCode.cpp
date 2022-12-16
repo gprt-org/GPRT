@@ -38,58 +38,60 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s01_deviceCode;
+const int GRID_SIDE_LENGTH = 1000;
 
-// Vertices are the points that define our triangles
-const int NUM_VERTICES = 3;
-float3 vertices[NUM_VERTICES] = {
-    {-1.f, -.5f, 0.f},
-    {+1.f, -.5f, 0.f},
-    {0.f, +.5f, 0.f},
-};
-
-// Indices connect those vertices together.
-// Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
-const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+extern GPRTProgram s05_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
-// final image output
-const char *outFileName = "s01-singleTriangle.png";
+const char *outFileName = "s04-computeAABBs.png";
 
-// Initial camera parameters
-float3 lookFrom = {0.f, 0.f, -4.f};
+float3 lookFrom = {-2.f, -2.f, 0.f};
 float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, -1.f, 0.f};
-float cosFovy = 0.66f;
+float3 lookUp = {0.f, 0.f, -1.f};
+float cosFovy = 0.3f;
 
 #include <iostream>
 int main(int ac, char **av) {
-  LOG("gprt example '" << av[0] << "' starting up");
-
-  LOG("building module, programs, and pipeline");
+  // In this example, we will use a GPU compute kernel to animate the vertices
+  // of a mesh, like you might do in a traditional rasterization pipeline.
+  // Every time the vertices move, we must rebuild the underlying acceleration
+  // structure. Fortunately, GPRT makes these tree builds fast and easy.
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
-  GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s01_deviceCode);
+  gprtRequestWindow(fbSize.x, fbSize.y, "S05 Compute Vertex");
+  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTModule module = gprtModuleCreate(context, s05_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // First, we need to declare our geometry type.
-  // This includes all GPU kernels tied to the geometry, as well as the
-  // parameters passed to the geometry when hit by rays.
+  // -------------------------------------------------------
+  // Setup geometry types
+  // -------------------------------------------------------
   GPRTVarDecl trianglesGeomVars[] = {
-      {/* For now, no parameters. This sentinel to mark end of list */}};
-  GPRTGeomType trianglesGeomType = gprtGeomTypeCreate(
-      context, GPRT_TRIANGLES, sizeof(TrianglesGeomData), trianglesGeomVars);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
+      {"index", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, index)},
+      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, vertex)},
+      {"now", GPRT_FLOAT, GPRT_OFFSETOF(TrianglesGeomData, now)},
+      {"gridSize", GPRT_UINT, GPRT_OFFSETOF(TrianglesGeomData, gridSize)},
+      {/* sentinel to mark end of list */}};
+  GPRTGeomType trianglesGeomType =
+      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData),
+                         trianglesGeomVars, -1);
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
-  // We'll also need a ray generation program.
+  // -------------------------------------------------------
+  // set up vertex program to animate vertices
+  // -------------------------------------------------------
+  GPRTCompute vertexProgram =
+      gprtComputeCreate(context, module, "Vertex", sizeof(TrianglesGeomData),
+                        trianglesGeomVars, -1);
+
+  // -------------------------------------------------------
+  // set up ray gen program
+  // -------------------------------------------------------
   GPRTVarDecl rayGenVars[] = {
       {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
       {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
@@ -99,21 +101,74 @@ int main(int ac, char **av) {
       {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
       {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
       {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
+  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "RayGen",
                                        sizeof(RayGenData), rayGenVars, -1);
 
-  // Finally, we need a "miss" program, which will be called when
-  // a ray misses all triangles. Just like geometry declarations
-  // and ray tracing programs, miss programs have parameters
-  GPRTVarDecl missProgVars[] = {
+  // -------------------------------------------------------
+  // set up miss
+  // -------------------------------------------------------
+  GPRTVarDecl missVars[] = {
       {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
       {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
       {/* sentinel to mark end of list */}};
   GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missProgVars, -1);
+                                 missVars, -1);
+
+  // Note, we'll need to call this again after creating our acceleration
+  // structures, as acceleration structures will introduce new shader
+  // binding table records to the pipeline.
+  gprtBuildPipeline(context);
 
   // ##################################################################
-  // set the parameters for those kernels
+  // set the parameters for our triangle mesh and compute kernel
+  // ##################################################################
+
+  // Note, the vertex and index buffers are empty here. We will fill
+  // them in on the device by using our vertex program.
+  unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
+  unsigned int numVertices = 3 * numTriangles;
+  GPRTBuffer vertexBuffer =
+      gprtDeviceBufferCreate(context, GPRT_FLOAT3, numVertices, nullptr);
+  GPRTBuffer indexBuffer =
+      gprtDeviceBufferCreate(context, GPRT_UINT3, numTriangles, nullptr);
+
+  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+
+  // It is _okay_ to give our triangles geometry unpopulated buffers here
+  // for the vertices and indices, so long as they're filled in before
+  // we go to build our acceleration structure.
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, numVertices);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles);
+
+  // Parameters for the geometry when a ray hits it.
+  gprtGeomSetBuffer(trianglesGeom, "vertex", vertexBuffer);
+  gprtGeomSetBuffer(trianglesGeom, "index", indexBuffer);
+  gprtGeomSet1f(trianglesGeom, "now", 0.0f);
+  gprtGeomSet1ui(trianglesGeom, "gridSize", GRID_SIDE_LENGTH);
+
+  // Parameters for our vertex program that'll animate our vertices
+  gprtComputeSetBuffer(vertexProgram, "vertex", vertexBuffer);
+  gprtComputeSetBuffer(vertexProgram, "index", indexBuffer);
+  gprtComputeSet1f(vertexProgram, "now", 0.0f);
+  gprtComputeSet1ui(vertexProgram, "gridSize", GRID_SIDE_LENGTH);
+
+  // Build the shader binding table to upload parameters to the device
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+  // Now, compute triangles in parallel with a vertex compute shader
+  gprtComputeLaunch1D(context, vertexProgram, numTriangles);
+
+  // Now that our vertex buffer and index buffer are filled, we can compute
+  // our triangles acceleration structure.
+  GPRTAccel trianglesAccel =
+      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  gprtAccelBuild(context, trianglesAccel);
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  gprtAccelBuild(context, world);
+
+  // ##################################################################
+  // set the parameters for the rest of our kernels
   // ##################################################################
 
   // Setup pixel frame buffer
@@ -121,60 +176,18 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
   gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
   gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
+  gprtRayGenSetAccel(rayGen, "world", world);
 
   // Miss program checkerboard background colors
   gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
   gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
-
-  // The vertex and index buffers here define the triangle vertices
-  // and how those vertices are connected together.
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES, vertices);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT3, NUM_INDICES, indices);
-
-  // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
-  // We use these calls to tell the geometry what buffers store triangle
-  // indices and vertices
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-
-  // Once we have our geometry, we need to place that geometry into an
-  // acceleration structure. These acceleration structures allow rays to
-  // determine which triangle the ray hits in a sub-linear amount of time.
-  // This first acceleration structure level is called a bottom level
-  // acceleration structure, or a BLAS.
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-
-  // We can then make multiple "instances", or copies, of that BLAS in
-  // a top level acceleration structure, or a TLAS. (we'll cover this later.)
-  // Rays can only be traced into TLAS, so for now we just make one BLAS
-  // instance.
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
-  gprtAccelBuild(context, world);
-
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
-  gprtRayGenSetAccel(rayGen, "world", world);
-
   // ##################################################################
-  // build the pipeline and shader binding table
+  // build *SBT* required to trace the groups
   // ##################################################################
 
-  // We must build the pipeline after all geometry instances are created.
-  // The pipeline contains programs for each geometry that might be hit by
-  // a ray.
+  // re-build the pipeline to account for newly introduced geometry
   gprtBuildPipeline(context);
-
-  // Next, the shader binding table is used to assign parameters to our ray
-  // generation and miss programs. We also use the shader binding table to
-  // map parameters to geometry depending on the ray type and instance.
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -198,7 +211,6 @@ int main(int ac, char **av) {
     int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
     // If we click the mouse, we should rotate the camera
-    // Here, we implement some simple camera controls
     if (state == GPRT_PRESS || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -243,6 +255,25 @@ int main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
+    // update time to move primitives. then, rebuild accel.
+    gprtComputeSet1f(vertexProgram, "now", float(gprtGetTime(context)));
+    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+    gprtComputeLaunch1D(context, vertexProgram, numTriangles);
+
+    // Now that the vertices have moved, we need to rebuild our bottom level tree    
+    gprtAccelBuild(context, trianglesAccel);
+
+    // And since the bottom level tree is part of the top level tree, we need 
+    // to rebuild the top level tree as well
+    gprtAccelBuild(context, world);
+
+    // Assign the updated tree handle to our ray generation program's record
+    gprtRayGenSetAccel(rayGen, "world", world);
+    gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
+
+    // Note! we don't need to rebuild the pipeline here, since no geometry was
+    // made or destroyed, only updated.
+
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
@@ -268,6 +299,7 @@ int main(int ac, char **av) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
+  gprtComputeDestroy(vertexProgram);
   gprtAccelDestroy(trianglesAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(trianglesGeom);

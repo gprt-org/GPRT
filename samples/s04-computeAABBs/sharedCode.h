@@ -20,26 +20,45 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "sharedCode.h"
+#include "gprt.h"
 
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
-  uint2 pixelID = DispatchRaysIndex().xy;
+/* variables available to all programs */
 
-  if (pixelID.x == 0 && pixelID.y == 0) {
-    printf("Hello from your first raygen program!\n");
-  }
+struct SphereBoundsData {
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer vertex; // vec3f*
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer radius; // float *
+  /*! array/buffer of AABBs */
+  alignas(16) gprt::Buffer aabbs;
+};
 
-  // Generate a simple checkerboard pattern as a test.
-  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  // alternate pattern, showing that pixel (0,0) is in the upper left corner
-  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? record.color1 : record.color0;
+/* variables for the triangle mesh geometry */
+struct SphereGeomData {
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer vertex; // vec3f*
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer radius; // float *
+  /*! base color we use for the entire mesh */
+  alignas(16) float3 color;
+};
 
-  // find the frame buffer location (x + width*y) and put the result there
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(color));
-}
+struct RayGenData {
+  alignas(16) gprt::Buffer fbPtr;
+
+  alignas(8) int2 fbSize;
+  alignas(16) gprt::Accel world;
+
+  struct {
+    alignas(16) float3 pos;
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
+  } camera;
+};
+
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
+};
