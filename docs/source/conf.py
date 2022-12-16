@@ -58,6 +58,7 @@ if html_theme == "sphinx_rtd_theme":
         "display_version": False,
         "collapse_navigation": False,
         "navigation_depth": -1,
+        'prev_next_buttons_location': "both"
     }
 
     extensions.append('sphinx_rtd_theme')
@@ -90,7 +91,9 @@ html_theme = "sphinx_rtd_theme"
 if html_theme == "sphinx_rtd_theme":
     html_css_files = [
         "css/theme_overrides.css"]
-    html_js_files = []
+    html_js_files = [
+        "js/custom.js"
+    ]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -102,3 +105,13 @@ html_static_path = ['_static']
 # The empty string is equivalent to '%b %d, %Y'
 # (or a locale-dependent equivalent).
 html_last_updated_fmt = '%m/%d/%Y'
+
+html_sidebars = {
+  '**': [
+    "about.html",
+    "navigation.html",
+    "relations.html",
+    "searchbox.html",
+    "donate.html",
+  ]
+}

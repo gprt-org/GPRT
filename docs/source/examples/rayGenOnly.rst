@@ -1,2 +1,0 @@
-Ray Generation Only
-===================

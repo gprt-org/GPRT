@@ -25,14 +25,17 @@ management, and RT pipeline creation. We also provide a collection of examples
 
 .. .. container:: global-index-toc
 
-..    .. toctree::
-..       :caption: Getting Started
-..       :maxdepth: 1
-
-..       hostapi.rst
-..       deviceapi.rst
-
-
+.. toctree::
+   :maxdepth: -1
+   :caption: Table of contents:
+   :glob:
+   :hidden:
+   
+   self
+   examples/*
+   deviceapi
+   hostapi
+   
 
 Examples
 ========
