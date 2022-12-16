@@ -23,11 +23,7 @@
 // public GPRT API
 #include <gprt.h>
 
-<<<<<<< HEAD
-// our shared data structures
-=======
 // our shared data structures between host and device
->>>>>>> master
 #include "sharedCode.h"
 
 #define LOG(message)                                                           \

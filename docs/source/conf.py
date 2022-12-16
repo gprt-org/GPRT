@@ -56,7 +56,7 @@ if html_theme == "sphinx_rtd_theme":
         # "analytics_id": "UA-1418081-1",
         # included in the title
         "display_version": False,
-        "collapse_navigation": True,
+        "collapse_navigation": False,
         "navigation_depth": -1,
     }
 

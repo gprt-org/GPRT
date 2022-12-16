@@ -105,7 +105,7 @@ and our ray tracing device, which we'll declare in our *sharedCode.h* file.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/sharedCode.h
    :language: c++
-   :lines: 23-33
+   :lines: 23-46
 
 .. One thing that might stand out right away is the use of ``alignas(16)``. In HLSL, 
 .. types align themselves to avoid crossing 16 byte boundaries; however, this isn't
@@ -172,6 +172,7 @@ Host Code
 All that's left is to write our host side code. 
 
 We begin by requesting a window and creating a ``GPRTContext``: 
+
 .. that we will use to show our checkerboard pattern. 
 .. Then, we create our ``GPRTContext``, which under the hood initializes our underlying
 .. ray tracing framework and selects the devices we'll run our kernel on.
@@ -256,8 +257,10 @@ image using ``gprtBufferSaveImage``.
 
 Cleaning Up
 """""""""""
-When our program completes, we need to destroy all created objects. We destroy 
-our objects the reverse order as they were made. 
+When our program completes, we need to destroy all the objects we created. The 
+order that these objects are destroyed is important, because some objects depend
+on others. In general, we destroy our objects the reverse order that they were 
+made. 
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
@@ -271,4 +274,3 @@ tracing rays.
 
 In the next example, we'll create a single triangle, and trace rays to intersect that triangle.
 We'll be able to manipulate this triangle as well using some very simple camera math.
-
