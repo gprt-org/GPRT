@@ -2240,15 +2240,18 @@ struct Context {
     uint32_t glfwExtensionCount = 0;
     const char** glfwExtensions;
     if (requestedFeatures.window) {
-      if (!glfwInit())
-        throw std::runtime_error("Can't initialize GLFW");
-
-      if (!glfwVulkanSupported()) {
-        GPRT_RAISE("Window requested but unsupported!");
+      if (!glfwInit()) {
+      	LOG("Warning: Unable to create window. Falling back to headless mode.");
+	requestedFeatures.window = false;
       }
-      glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-      for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
-        instanceExtensions.push_back(glfwExtensions[i]);
+      else {
+        if (!glfwVulkanSupported()) {
+          GPRT_RAISE("Window requested but unsupported!");
+        }
+        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+          instanceExtensions.push_back(glfwExtensions[i]);
+        }
       }
     }
 

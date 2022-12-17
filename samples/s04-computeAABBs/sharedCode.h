@@ -26,11 +26,11 @@
 
 struct SphereBoundsData {
   /*! array/buffer of vertex indices */
-  alignas(8) uint64_t vertex; // vec3f*
+  alignas(16) gprt::Buffer vertex; // vec3f*
   /*! array/buffer of vertex positions */
-  alignas(8) uint64_t radius; // float *
+  alignas(16) gprt::Buffer radius; // float *
   /*! array/buffer of AABBs */
-  alignas(8) uint64_t aabbs;
+  alignas(16) gprt::Buffer aabbs;
 };
 
 /* variables for the triangle mesh geometry */

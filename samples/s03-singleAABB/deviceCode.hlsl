@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,46 +22,41 @@
 
 #include "sharedCode.h"
 
-struct Payload
-{
-    float3 color;
+struct Payload {
+  float3 color;
 };
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
-{
-    Payload payload;
-    uint2 pixelID = DispatchRaysIndex().xy;
-    float2 screen = (float2(pixelID) +
-                     float2(.5f, .5f)) /
-                    float2(record.fbSize);
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+  Payload payload;
+  uint2 pixelID = DispatchRaysIndex().xy;
+  float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(record.fbSize);
 
-    RayDesc rayDesc;
-    rayDesc.Origin = record.camera.pos;
-    rayDesc.Direction =
-        normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
-    rayDesc.TMin = 0.0;
-    rayDesc.TMax = 10000.0;
-    RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-    TraceRay(
-        world,                 // the tree
-        RAY_FLAG_FORCE_OPAQUE, // ray flags
-        0xff,                  // instance inclusion mask
-        0,                     // ray type
-        1,                     // number of ray types
-        0,                     // miss type
-        rayDesc,               // the ray to trace
-        payload                // the payload IO
-    );
+  RayDesc rayDesc;
+  rayDesc.Origin = record.camera.pos;
+  rayDesc.Direction =
+      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du +
+                screen.y * record.camera.dir_dv);
+  rayDesc.TMin = 0.0;
+  rayDesc.TMax = 10000.0;
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+  TraceRay(world,                 // the tree
+           RAY_FLAG_FORCE_OPAQUE, // ray flags
+           0xff,                  // instance inclusion mask
+           0,                     // ray type
+           1,                     // number of ray types
+           0,                     // miss type
+           rayDesc,               // the ray to trace
+           payload                // the payload IO
+  );
 
-    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
 }
 
-struct Attribute
-{
-    float3 color;
+struct Attribute {
+  float3 color;
 };
 
 // This intersection program will be called when rays hit our axis
@@ -71,11 +66,10 @@ struct Attribute
 //
 // Instead, we pass data through a customizable Attributes structure
 // for further processing by closest hit / any hit programs.
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
-{
-    Attribute attr;
-    attr.color = float3(1.f, 1.f, 1.f);
-    ReportHit(0.1f, /*hitKind*/ 0, attr);
+GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record)) {
+  Attribute attr;
+  attr.color = float3(1.f, 1.f, 1.f);
+  ReportHit(0.1f, /*hitKind*/ 0, attr);
 }
 
 // This closest hit program will be called when our intersection program
@@ -88,17 +82,16 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record))
 //
 // Also note, this program is also called after all ReportHit's have been
 // called and we can conclude which reported hit is closest.
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute))
-{
-    payload.color = attribute.color;
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record),
+                         (Payload, payload), (Attribute, attribute)) {
+  payload.color = attribute.color;
 }
 
 // This miss program will be called when rays miss all primitives.
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
-{
-    uint2 pixelID = DispatchRaysIndex().xy;
-    int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-    payload.color = (pattern & 1) ? record.color1 : record.color0;
+GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+  uint2 pixelID = DispatchRaysIndex().xy;
+  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
+  payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

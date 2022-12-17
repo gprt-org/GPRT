@@ -259,8 +259,15 @@ int main(int ac, char **av) {
     gprtComputeSet1f(vertexProgram, "now", float(gprtGetTime(context)));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
+
+    // Now that the vertices have moved, we need to rebuild our bottom level tree    
     gprtAccelBuild(context, trianglesAccel);
+
+    // And since the bottom level tree is part of the top level tree, we need 
+    // to rebuild the top level tree as well
     gprtAccelBuild(context, world);
+
+    // Assign the updated tree handle to our ray generation program's record
     gprtRayGenSetAccel(rayGen, "world", world);
     gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
 
