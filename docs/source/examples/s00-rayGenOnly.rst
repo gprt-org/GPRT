@@ -5,8 +5,8 @@ S00 Ray Gen Only
 Introduction
 ------------
 
-Overview of the General Purpose Raytracing Toolkit
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. Overview of the General Purpose Raytracing Toolkit
+.. ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. The General Purpose Raytracing Toolkit (GPRT) is a powerful and versatile open 
 .. source raytracing library designed to enable developers to quickly and easily 
 .. prototype ideas involving all things high-performance ray tracing. The API is 
@@ -19,11 +19,15 @@ Overview of the General Purpose Raytracing Toolkit
 .. developers looking to prototype their ray tracing ideas to create stunning 3D 
 .. graphics and highly efficient simulation codes.
 
-GPRT is an open source raytracing library that uses a combination of C++ and HLSL to 
-allow developers to quickly prototype ideas involving high-performance ray tracing. 
-It is optimized for NVIDIA, AMD and Intel Arc architectures, and support for CPU 
-architectures is coming soon. It offers a comprehensive feature set and is suitable 
-for a variety of applications.
+Welcome to the GPRT samples course! GPRT is an open source raytracing library 
+that uses a combination of C++ and HLSL to allow developers to quickly prototype 
+ideas involving high-performance ray tracing. It is optimized for NVIDIA, AMD and 
+Intel Arc architectures, and support for CPU architectures is coming soon. By 
+following these examples, you'll be able to leverage GPRT's comprehensive
+feature set and create your own high performance ray tracing applications.
+
+.. It offers a comprehensive feature set and is suitable 
+.. for a variety of applications.
 
 Purpose of Checkerboard Test Pattern
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -36,9 +40,9 @@ Purpose of Checkerboard Test Pattern
 .. more advanced concepts like acceleration structures, geometry, or ray tracing 
 .. pipelines.
 
-This first example explains how to use GPRT to create a checkerboard pattern.
-Traditionally, checherboards serve as a good diagnostic test to reveal any 
-possible issues with a display. For us, it is an easy pattern to generate 
+In this first example, we'll use GPRT to render a classic checkerboard pattern.
+Traditionally, checkerboards serve as a good diagnostic test to reveal any 
+possible issues with a display; but for us, it serves as an easy pattern to generate 
 and allows users to get something running before moving onto more advanced concepts.
 
 After running this example, you should see an image like this appear on your 
@@ -50,22 +54,22 @@ executable:
 Setting up a GPRT Sample
 ------------------------
 
-File Structure and Purpose
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-All of the samples in this repo follow a very similar pattern. In the 
+File Structure
+^^^^^^^^^^^^^^
+All of the samples in this repo follow a very similar file structure. In the 
 `s00-rayGenOnly <https://github.com/gprt-org/GPRT/tree/master/samples/s00-rayGenOnly>`_
 directory, we have four files: CMakeLists.txt, sharedCode.h, deviceCode.hlsl, 
 and hostCode.cpp. 
 
 `CMakeLists.txt <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/CMakeLists.txt>`_ 
-tells our system how to compile our code into an executable or library. 
+tells our CMake build system how to compile our code into an executable or library. 
 
 `sharedCode.h <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/sharedCode.h>`_ 
-defines common structures shared between our raytracing device and our host 
+defines common data structures shared between our ray tracing device and our host 
 system. The code in this file needs to be carefully written to compile with both HLSL *and* C++. 
 
 `deviceCode.hlsl <https://github.com/gprt-org/GPRT/blob/master/samples/s00-rayGenOnly/deviceCode.hlsl>`_ 
-defines all programs we would like to run in parallel on our raytracing 
+defines all programs we would like to run in parallel on our ray tracing 
 device, written using the HLSL programming language. You might also see these 
 programs called *shaders* or *kernels*. 
 
@@ -77,8 +81,8 @@ parameters we pass to these kernels, how many threads to launch, and so on.
 Configuring the Build System
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Before we can use GPRT, we need to configure how to compile our code together
-into an executable. Our samples do this by using *CMake*. In a typical workflow,
-this CMake file would be configured as follows:
+into an executable. Our samples do this by using the *CMakeLists.txt* files. In 
+a typical workflow, this CMake file would be configured as follows:
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/CMakeLists.txt
    :language: cmake
