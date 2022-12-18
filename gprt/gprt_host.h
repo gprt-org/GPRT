@@ -667,9 +667,7 @@ GPRT_API GPRTRayGen
 gprtRayGenCreate(GPRTContext  context,
                  GPRTModule module,
                  const char *programName,
-                 size_t      sizeOfVarStruct,
-                 GPRTVarDecl *vars,
-                 int         numVars GPRT_IF_CPP(=-1));
+                 size_t      sizeOfVarStruct);
 
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen rayGen);
@@ -1173,7 +1171,7 @@ GPRT_API void gprtComputeSet4iv(GPRTCompute compute, const char *name, const int
 
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1i(GPRTRayGen raygen, const char *name, int32_t val);
-GPRT_API void gprtRayGenSet2i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y);
+GPRT_API void gprtRayGenSet2i(GPRTRayGen raygen, size_t offset, int32_t x, int32_t y);
 GPRT_API void gprtRayGenSet3i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z);
 GPRT_API void gprtRayGenSet4i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
 GPRT_API void gprtRayGenSet2iv(GPRTRayGen raygen, const char *name, const int32_t *val);
@@ -1272,7 +1270,7 @@ GPRT_API void gprtComputeSet4fv(GPRTCompute compute, const char *name, const flo
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1f(GPRTRayGen raygen, const char *name, float val);
 GPRT_API void gprtRayGenSet2f(GPRTRayGen raygen, const char *name, float x, float y);
-GPRT_API void gprtRayGenSet3f(GPRTRayGen raygen, const char *name, float x, float y, float z);
+GPRT_API void gprtRayGenSet3f(GPRTRayGen raygen, size_t offset, float x, float y, float z);
 GPRT_API void gprtRayGenSet4f(GPRTRayGen raygen, const char *name, float x, float y, float z, float w);
 GPRT_API void gprtRayGenSet2fv(GPRTRayGen raygen, const char *name, const float *val);
 GPRT_API void gprtRayGenSet3fv(GPRTRayGen raygen, const char *name, const float *val);
@@ -1466,7 +1464,7 @@ GPRT_API void gprtComputeSetRaw(GPRTCompute compute, const char *name, const voi
 // setters for variables on "RayGen"s
 // GPRT_API void gprtRayGenSetTexture(GPRTRayGen raygen, const char *name, GPRTTexture val);
 // GPRT_API void gprtRayGenSetPointer(GPRTRayGen raygen, const char *name, const void *val);
-GPRT_API void gprtRayGenSetBuffer(GPRTRayGen raygen, const char *name, GPRTBuffer val);
+GPRT_API void gprtRayGenSetBuffer(GPRTRayGen raygen, size_t offset, GPRTBuffer val);
 GPRT_API void gprtRayGenSetAccel(GPRTRayGen raygen, const char *name, GPRTAccel val);
 GPRT_API void gprtRayGenSetRaw(GPRTRayGen raygen, const char *name, const void *val);
 

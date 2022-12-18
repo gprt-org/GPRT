@@ -644,6 +644,10 @@ struct Buffer {
 struct SBTEntry {
   // Map of the name of the variable to that variable declaration
   std::unordered_map<std::string, GPRTVarDef> vars;
+
+  // Working towards dropping the unordered map above...
+  size_t SBTRecordSize;
+  uint8_t* SBTRecord;
 };
 
 // At the moment, we actually just use ray generation programs for compute 
@@ -703,8 +707,7 @@ struct RayGen : public SBTEntry {
   RayGen(VkDevice  _logicalDevice,
           Module *module,
           const char* _entryPoint,
-          size_t      sizeOfVarStruct,
-          std::unordered_map<std::string, GPRTVarDef> _vars) : SBTEntry()
+          size_t      SBTRecordSize) : SBTEntry()
   {
     std::cout<<"Ray gen is being made!"<<std::endl;
 
@@ -727,12 +730,15 @@ struct RayGen : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    vars = _vars;
+
+    this->SBTRecordSize = SBTRecordSize;
+    this->SBTRecord = (uint8_t*)malloc(SBTRecordSize);
   }
   ~RayGen() {}
   void destroy() {
     std::cout<<"Ray gen is being destroyed!"<<std::endl;
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    free(this->SBTRecord);
   }
 };
 
@@ -2981,11 +2987,12 @@ struct Context {
         recordOffset = recordOffset + handleSize;
         uint8_t* params = mapped + recordOffset;
         RayGen *raygen = raygenPrograms[idx];
-        for (auto &var : raygen->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          memcpy(params + varOffset, var.second.data, varSize);
-        }
+        memcpy(params, raygen->SBTRecord, raygen->SBTRecordSize);
+        // for (auto &var : raygen->vars) {
+        //   size_t varOffset = var.second.decl.offset;
+        //   size_t varSize = getSize(var.second.decl.type);
+        //   memcpy(params + varOffset, var.second.data, varSize);
+        // }
       }
     }
 
@@ -3783,9 +3790,7 @@ GPRT_API GPRTRayGen
 gprtRayGenCreate(GPRTContext _context,
                  GPRTModule  _module,
                  const char  *programName,
-                 size_t       sizeOfVarStruct,
-                 GPRTVarDecl *vars,
-                 int          numVars)
+                 size_t       sizeOfVarStruct)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
@@ -3793,7 +3798,7 @@ gprtRayGenCreate(GPRTContext _context,
 
   RayGen *raygen = new RayGen(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+    sizeOfVarStruct);
 
   context->raygenPrograms.push_back(raygen);
 
@@ -6152,14 +6157,13 @@ GPRT_API void gprtRayGenSet1i(GPRTRayGen _raygen, const char *name, int32_t x)
   memcpy(var.second, &val, var.first);
 }
 
-GPRT_API void gprtRayGenSet2i(GPRTRayGen _raygen, const char *name, int32_t x, int32_t y) 
+GPRT_API void gprtRayGenSet2i(GPRTRayGen _raygen, size_t offset, int32_t x, int32_t y) 
 {
   LOG_API_CALL();
   RayGen *entry = (RayGen*)_raygen;
   assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
   int32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
+  memcpy(entry->SBTRecord + offset, &val, sizeof(val));
 }
 
 GPRT_API void gprtRayGenSet3i(GPRTRayGen _raygen, const char *name, int32_t x, int32_t y, int32_t z) 
@@ -6738,14 +6742,13 @@ GPRT_API void gprtRayGenSet2f(GPRTRayGen _raygen, const char *name, float x, flo
   memcpy(var.second, &val, var.first);
 }
 
-GPRT_API void gprtRayGenSet3f(GPRTRayGen _raygen, const char *name, float x, float y, float z) 
+GPRT_API void gprtRayGenSet3f(GPRTRayGen _raygen, size_t offset, float x, float y, float z) 
 {
   LOG_API_CALL();
   RayGen *entry = (RayGen*)_raygen;
   assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
   float val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
+  memcpy(entry->SBTRecord + offset, &val, sizeof(val));
 }
 
 GPRT_API void gprtRayGenSet4f(GPRTRayGen _raygen, const char *name, float x, float y, float z, float w) 
@@ -7933,7 +7936,7 @@ GPRT_API void gprtComputeSetRaw(GPRTCompute _compute, const char *name, const vo
 // setters for variables on "RayGen"s
 // GPRT_API void gprtRayGenSetTexture(GPRTRayGen _raygen, const char *name, GPRTTexture val) 
 // GPRT_API void gprtRayGenSetPointer(GPRTRayGen _raygen, const char *name, const void *val) 
-GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _raygen, const char *name, GPRTBuffer _val)
+GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _raygen, size_t offset, GPRTBuffer _val)
 {
   LOG_API_CALL();
   RayGen *raygen = (RayGen*)_raygen;
@@ -7942,35 +7945,11 @@ GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _raygen, const char *name, GPRTBuff
   Buffer *val = (Buffer*)_val;
   assert(val);
 
-  // 1. Figure out if the variable "name" exists
-  auto found = raygen->vars.find(std::string(name));
-  if (found == raygen->vars.end()) {
-    GPRT_RAISE("Unable to find variable declaration " + std::string(name));
-  }
-  
-  // The found variable must be a buffer
-  if (found->second.decl.type != GPRT_BUFFER && found->second.decl.type != GPRT_BUFFER_POINTER) {
-    GPRT_RAISE("Variable " + std::string(name) + " is of type " + getTypeString(found->second.decl.type) + " and does not match given type " + getTypeString(GPRT_BUFFER) + " or " + getTypeString(GPRT_BUFFER_POINTER));
-  }
+  uint64_t2 buffer;
+  buffer.x = val->address;
+  buffer.y = val->size;
 
-  if (raygen->vars[name].decl.type == GPRT_BUFFER_POINTER) {
-    // Buffer pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &addr, size);
-  } else {
-    gprt::Buffer buffer;
-    buffer.x = val->address;
-    buffer.y = val->size;
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &buffer, size);
-  }
+  memcpy(raygen->SBTRecord + offset, &buffer, sizeof(uint64_t2));
 }
 
 GPRT_API void gprtRayGenSetAccel(GPRTRayGen _raygen, const char *name, GPRTAccel _val)
