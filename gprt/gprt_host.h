@@ -835,21 +835,21 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType type,
 /*! Creates a buffer that uses memory located on the host; that memory is 
 accessible to all devices, but is slower to access on device.  */
 GPRT_API GPRTBuffer
-gprtHostBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+gprtHostBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
 /*! Creates a buffer that uses memory located on the device; that memory is 
 accessible only to the device, and requires mapping and unmapping to access 
 on the host. */
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
 /*! Creates a buffer that uses memory located on the device; that memory is 
 accessible to all devices, but is slower to access on the host, and is typically
 limited in size depending on resizable BAR availability. */
 GPRT_API GPRTBuffer
-gprtSharedBufferCreate(GPRTContext context, GPRTDataType type, size_t count, 
+gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any
@@ -1270,7 +1270,14 @@ GPRT_API void gprtComputeSet4fv(GPRTCompute compute, const char *name, const flo
 // setters for variables on "RayGen"s
 GPRT_API void gprtRayGenSet1f(GPRTRayGen raygen, const char *name, float val);
 GPRT_API void gprtRayGenSet2f(GPRTRayGen raygen, const char *name, float x, float y);
-GPRT_API void gprtRayGenSet3f(GPRTRayGen raygen, size_t offset, float x, float y, float z);
+GPRT_API void _gprtRayGenSet3f(GPRTRayGen _raygen, size_t offset, float x, float y, float z);
+
+#define gprtRayGenSet3f(raygen, type, member, x, y, z) { \
+  static_assert(std::is_same<decltype(type::member), float3>::value, "Error, member type must be float3"); \
+  _gprtRayGenSet3f(raygen, offsetof(type, member), x, y, z); \
+}
+
+
 GPRT_API void gprtRayGenSet4f(GPRTRayGen raygen, const char *name, float x, float y, float z, float w);
 GPRT_API void gprtRayGenSet2fv(GPRTRayGen raygen, const char *name, const float *val);
 GPRT_API void gprtRayGenSet3fv(GPRTRayGen raygen, const char *name, const float *val);

@@ -3977,7 +3977,7 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
 }
 
 GPRT_API GPRTBuffer
-gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -3999,7 +3999,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
     context->physicalDevice, context->logicalDevice, 
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
 
   // Pin the buffer to the host
@@ -4007,7 +4007,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
   
   if (init) {
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->flush();
     buffer->invalidate();
   }
@@ -4016,7 +4016,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
 }
 
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -4036,13 +4036,13 @@ gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
     context->physicalDevice, context->logicalDevice,
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
   
   if (init) {    
     buffer->map();
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->unmap();
   }
   LOG("buffer created");
@@ -4050,7 +4050,7 @@ gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
 }
 
 GPRT_API GPRTBuffer
-gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -4073,7 +4073,7 @@ gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
     context->physicalDevice, context->logicalDevice, 
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
 
   // Pin the buffer to the host
@@ -4081,7 +4081,7 @@ gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
   
   if (init) {
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->flush();
     buffer->invalidate();
   }
@@ -6742,7 +6742,7 @@ GPRT_API void gprtRayGenSet2f(GPRTRayGen _raygen, const char *name, float x, flo
   memcpy(var.second, &val, var.first);
 }
 
-GPRT_API void gprtRayGenSet3f(GPRTRayGen _raygen, size_t offset, float x, float y, float z) 
+GPRT_API void _gprtRayGenSet3f(GPRTRayGen _raygen, size_t offset, float x, float y, float z) 
 {
   LOG_API_CALL();
   RayGen *entry = (RayGen*)_raygen;

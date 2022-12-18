@@ -88,15 +88,15 @@ int main(int ac, char **av) {
   LOG("allocating frame buffer");
   GPRTBuffer frameBuffer =
       gprtDeviceBufferCreate(gprt,
-                             /*type:*/ GPRT_INT,
-                             /*size:*/ fbSize.x * fbSize.y);
+                             /*size: */ sizeof(uint32_t),
+                             /*count:*/ fbSize.x * fbSize.y);
 
   // ------------------------------------------------------------------
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  gprtRayGenSet3f(rayGen, offsetof(RayGenData, color0), 0.1f, 0.1f, 0.1f);
-  gprtRayGenSet3f(rayGen, offsetof(RayGenData, color1), 0.0f, 0.0f, 0.0f);
+  gprtRayGenSet3f(rayGen, RayGenData, color0, 0.1f, 0.1f, 0.1f);
+  gprtRayGenSet3f(rayGen, RayGenData, color1, 0.0f, 0.0f, 0.0f);
   gprtRayGenSetBuffer(rayGen, offsetof(RayGenData, fbPtr), frameBuffer);
   gprtRayGenSet2i(rayGen, offsetof(RayGenData, fbSize), fbSize.x, fbSize.y);
 
