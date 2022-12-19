@@ -108,8 +108,15 @@ typedef struct _GPRTCompute    *GPRTCompute;
 typedef std::map<std::string, std::vector<uint8_t>> GPRTProgram;
 
 namespace gprt {
-  typedef uint64_t2 Buffer;
-  typedef uint64_t2 Accel;
+  struct Buffer {
+    uint64_t x;
+    uint64_t y;
+  };
+
+  struct Accel {
+    uint64_t x;
+    uint64_t y;
+  };
 }
 
 /*! launch params (or "globals") are variables that can be put into
@@ -513,6 +520,9 @@ gprtGeomCreate(GPRTContext  context,
 GPRT_API void
 gprtGeomDestroy(GPRTGeom geometry);
 
+GPRT_API void *
+gprtGeomGetPointer(GPRTGeom geometry, int deviceID GPRT_IF_CPP(=0));
+
 // ==================================================================
 // "Triangles" functions
 // ==================================================================
@@ -656,29 +666,31 @@ GPRT_API GPRTCompute
 gprtComputeCreate(GPRTContext  context,
                  GPRTModule module,
                  const char *programName,
-                 size_t      sizeOfVarStruct,
-                 GPRTVarDecl *vars,
-                 int         numVars GPRT_IF_CPP(=-1));
+                 size_t      sizeOfVarStruct);
 
 GPRT_API void
 gprtComputeDestroy(GPRTCompute compute);
+
+GPRT_API void *
+gprtComputeGetPointer(GPRTCompute compute, int deviceID GPRT_IF_CPP(=0));
 
 GPRT_API GPRTRayGen
 gprtRayGenCreate(GPRTContext  context,
                  GPRTModule module,
                  const char *programName,
-                 size_t      sizeOfVarStruct);
+                 size_t      recordSize);
 
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen rayGen);
+
+GPRT_API void *
+gprtRayGenGetPointer(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(=0));
 
 GPRT_API GPRTMiss
 gprtMissCreate(GPRTContext  context,
                    GPRTModule module,
                    const char *programName,
-                   size_t      sizeOfVarStruct,
-                   GPRTVarDecl *vars,
-                   int         numVars GPRT_IF_CPP(=-1));
+                   size_t      recordSize);
 
 /*! sets the given miss program for the given ray type */
 GPRT_API void
@@ -688,6 +700,9 @@ gprtMissSet(GPRTContext  context,
 
 GPRT_API void
 gprtMissDestroy(GPRTMiss missProg);
+
+GPRT_API void *
+gprtMissGetPointer(GPRTMiss missProg, int deviceID GPRT_IF_CPP(=0));
 
 // ------------------------------------------------------------------
 /*! create a new acceleration structure for AABB geometries.
@@ -804,12 +819,13 @@ GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel);
 
 GPRT_API void gprtAccelRefit(GPRTContext context, GPRTAccel accel);
 
+GPRT_API gprt::Accel 
+gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(=0));
+
 GPRT_API GPRTGeomType
 gprtGeomTypeCreate(GPRTContext  context,
                    GPRTGeomKind kind,
-                   size_t       sizeOfVarStruct,
-                   GPRTVarDecl  *vars,
-                   int          numVars GPRT_IF_CPP(=-1));
+                   size_t       sizeOfVarStruct);
 
 GPRT_API void
 gprtGeomTypeDestroy(GPRTGeomType geomType);
@@ -878,6 +894,9 @@ gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 GPRT_API void
 gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
+GPRT_API gprt::Buffer 
+gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
+
 /** If a window was requested, this call interprets the given buffer as 
  * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents 
  * to the window, potentially waiting for the screen to update before swapping.
@@ -917,581 +936,3 @@ GPRT_API void gprtBeginProfile(GPRTContext context);
 
 // returned results are in nanoseconds
 GPRT_API float gprtEndProfile(GPRTContext context);
-
-#ifdef __cplusplus
-// ------------------------------------------------------------------
-// setters for variables of type "bool" (bools only on c++)
-// ------------------------------------------------------------------
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1b(GPRTRayGen raygen, const char *name, bool val);
-GPRT_API void gprtRayGenSet2b(GPRTRayGen raygen, const char *name, bool x, bool y);
-GPRT_API void gprtRayGenSet3b(GPRTRayGen raygen, const char *name, bool x, bool y, bool z);
-GPRT_API void gprtRayGenSet4b(GPRTRayGen raygen, const char *name, bool x, bool y, bool z, bool w);
-GPRT_API void gprtRayGenSet2bv(GPRTRayGen raygen, const char *name, const bool *val);
-GPRT_API void gprtRayGenSet3bv(GPRTRayGen raygen, const char *name, const bool *val);
-GPRT_API void gprtRayGenSet4bv(GPRTRayGen raygen, const char *name, const bool *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1b(GPRTMiss miss, const char *name, bool val);
-GPRT_API void gprtMissSet2b(GPRTMiss miss, const char *name, bool x, bool y);
-GPRT_API void gprtMissSet3b(GPRTMiss miss, const char *name, bool x, bool y, bool z);
-GPRT_API void gprtMissSet4b(GPRTMiss miss, const char *name, bool x, bool y, bool z, bool w);
-GPRT_API void gprtMissSet2bv(GPRTMiss miss, const char *name, const bool *val);
-GPRT_API void gprtMissSet3bv(GPRTMiss miss, const char *name, const bool *val);
-GPRT_API void gprtMissSet4bv(GPRTMiss miss, const char *name, const bool *val);
-
-// setters for variables on "Geom"s
-// GPRT_API void gprtGeomSet1b(GPRTGeom geom, const char *name, bool val);
-// GPRT_API void gprtGeomSet2b(GPRTGeom geom, const char *name, bool x, bool y);
-// GPRT_API void gprtGeomSet3b(GPRTGeom geom, const char *name, bool x, bool y, bool z);
-// GPRT_API void gprtGeomSet4b(GPRTGeom geom, const char *name, bool x, bool y, bool z, bool w);
-// GPRT_API void gprtGeomSet2bv(GPRTGeom geom, const char *name, const bool *val);
-// GPRT_API void gprtGeomSet3bv(GPRTGeom geom, const char *name, const bool *val);
-// GPRT_API void gprtGeomSet4bv(GPRTGeom geom, const char *name, const bool *val);
-
-// // setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1b(OWLParams var, const char *name, bool val);
-// GPRT_API void gprtParamsSet2b(OWLParams var, const char *name, bool x, bool y);
-// GPRT_API void gprtParamsSet3b(OWLParams var, const char *name, bool x, bool y, bool z);
-// GPRT_API void gprtParamsSet4b(OWLParams var, const char *name, bool x, bool y, bool z, bool w);
-// GPRT_API void gprtParamsSet2bv(OWLParams var, const char *name, const bool *val);
-// GPRT_API void gprtParamsSet3bv(OWLParams var, const char *name, const bool *val);
-// GPRT_API void gprtParamsSet4bv(OWLParams var, const char *name, const bool *val);
-#endif
-
-// ------------------------------------------------------------------
-// setters for variables of type "char"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1c(GPRTCompute compute, const char *name, int8_t val);
-GPRT_API void gprtComputeSet2c(GPRTCompute compute, const char *name, int8_t x, int8_t y);
-GPRT_API void gprtComputeSet3c(GPRTCompute compute, const char *name, int8_t x, int8_t y, int8_t z);
-GPRT_API void gprtComputeSet4c(GPRTCompute compute, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-GPRT_API void gprtComputeSet2cv(GPRTCompute compute, const char *name, const int8_t *val);
-GPRT_API void gprtComputeSet3cv(GPRTCompute compute, const char *name, const int8_t *val);
-GPRT_API void gprtComputeSet4cv(GPRTCompute compute, const char *name, const int8_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1c(GPRTRayGen raygen, const char *name, int8_t val);
-GPRT_API void gprtRayGenSet2c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y);
-GPRT_API void gprtRayGenSet3c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z);
-GPRT_API void gprtRayGenSet4c(GPRTRayGen raygen, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-GPRT_API void gprtRayGenSet2cv(GPRTRayGen raygen, const char *name, const int8_t *val);
-GPRT_API void gprtRayGenSet3cv(GPRTRayGen raygen, const char *name, const int8_t *val);
-GPRT_API void gprtRayGenSet4cv(GPRTRayGen raygen, const char *name, const int8_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1c(GPRTMiss miss, const char *name, int8_t val);
-GPRT_API void gprtMissSet2c(GPRTMiss miss, const char *name, int8_t x, int8_t y);
-GPRT_API void gprtMissSet3c(GPRTMiss miss, const char *name, int8_t x, int8_t y, int8_t z);
-GPRT_API void gprtMissSet4c(GPRTMiss miss, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-GPRT_API void gprtMissSet2cv(GPRTMiss miss, const char *name, const int8_t *val);
-GPRT_API void gprtMissSet3cv(GPRTMiss miss, const char *name, const int8_t *val);
-GPRT_API void gprtMissSet4cv(GPRTMiss miss, const char *name, const int8_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1c(GPRTGeom geom, const char *name, int8_t val);
-GPRT_API void gprtGeomSet2c(GPRTGeom geom, const char *name, int8_t x, int8_t y);
-GPRT_API void gprtGeomSet3c(GPRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z);
-GPRT_API void gprtGeomSet4c(GPRTGeom geom, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-GPRT_API void gprtGeomSet2cv(GPRTGeom geom, const char *name, const int8_t *val);
-GPRT_API void gprtGeomSet3cv(GPRTGeom geom, const char *name, const int8_t *val);
-GPRT_API void gprtGeomSet4cv(GPRTGeom geom, const char *name, const int8_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1c(OWLParams obj, const char *name, int8_t val);
-// GPRT_API void gprtParamsSet2c(OWLParams obj, const char *name, int8_t x, int8_t y);
-// GPRT_API void gprtParamsSet3c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z);
-// GPRT_API void gprtParamsSet4c(OWLParams obj, const char *name, int8_t x, int8_t y, int8_t z, int8_t w);
-// GPRT_API void gprtParamsSet2cv(OWLParams obj, const char *name, const int8_t *val);
-// GPRT_API void gprtParamsSet3cv(OWLParams obj, const char *name, const int8_t *val);
-// GPRT_API void gprtParamsSet4cv(OWLParams obj, const char *name, const int8_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint8_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1uc(GPRTCompute compute, const char *name, uint8_t val);
-GPRT_API void gprtComputeSet2uc(GPRTCompute compute, const char *name, uint8_t x, uint8_t y);
-GPRT_API void gprtComputeSet3uc(GPRTCompute compute, const char *name, uint8_t x, uint8_t y, uint8_t z);
-GPRT_API void gprtComputeSet4uc(GPRTCompute compute, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-GPRT_API void gprtComputeSet2ucv(GPRTCompute compute, const char *name, const uint8_t *val);
-GPRT_API void gprtComputeSet3ucv(GPRTCompute compute, const char *name, const uint8_t *val);
-GPRT_API void gprtComputeSet4ucv(GPRTCompute compute, const char *name, const uint8_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1uc(GPRTRayGen raygen, const char *name, uint8_t val);
-GPRT_API void gprtRayGenSet2uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y);
-GPRT_API void gprtRayGenSet3uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z);
-GPRT_API void gprtRayGenSet4uc(GPRTRayGen raygen, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-GPRT_API void gprtRayGenSet2ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
-GPRT_API void gprtRayGenSet3ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
-GPRT_API void gprtRayGenSet4ucv(GPRTRayGen raygen, const char *name, const uint8_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1uc(GPRTMiss miss, const char *name, uint8_t val);
-GPRT_API void gprtMissSet2uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y);
-GPRT_API void gprtMissSet3uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y, uint8_t z);
-GPRT_API void gprtMissSet4uc(GPRTMiss miss, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-GPRT_API void gprtMissSet2ucv(GPRTMiss miss, const char *name, const uint8_t *val);
-GPRT_API void gprtMissSet3ucv(GPRTMiss miss, const char *name, const uint8_t *val);
-GPRT_API void gprtMissSet4ucv(GPRTMiss miss, const char *name, const uint8_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1uc(GPRTGeom geom, const char *name, uint8_t val);
-GPRT_API void gprtGeomSet2uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y);
-GPRT_API void gprtGeomSet3uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z);
-GPRT_API void gprtGeomSet4uc(GPRTGeom geom, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-GPRT_API void gprtGeomSet2ucv(GPRTGeom geom, const char *name, const uint8_t *val);
-GPRT_API void gprtGeomSet3ucv(GPRTGeom geom, const char *name, const uint8_t *val);
-GPRT_API void gprtGeomSet4ucv(GPRTGeom geom, const char *name, const uint8_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
-// GPRT_API void gprtParamsSet2uc(OWLParams obj, const char *name, uint8_t x, uint8_t y);
-// GPRT_API void gprtParamsSet3uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
-// GPRT_API void gprtParamsSet4uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-// GPRT_API void gprtParamsSet2ucv(OWLParams obj, const char *name, const uint8_t *val);
-// GPRT_API void gprtParamsSet3ucv(OWLParams obj, const char *name, const uint8_t *val);
-// GPRT_API void gprtParamsSet4ucv(OWLParams obj, const char *name, const uint8_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int16_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1s(GPRTCompute compute, const char *name, int16_t val);
-GPRT_API void gprtComputeSet2s(GPRTCompute compute, const char *name, int16_t x, int16_t y);
-GPRT_API void gprtComputeSet3s(GPRTCompute compute, const char *name, int16_t x, int16_t y, int16_t z);
-GPRT_API void gprtComputeSet4s(GPRTCompute compute, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-GPRT_API void gprtComputeSet2sv(GPRTCompute compute, const char *name, const int16_t *val);
-GPRT_API void gprtComputeSet3sv(GPRTCompute compute, const char *name, const int16_t *val);
-GPRT_API void gprtComputeSet4sv(GPRTCompute compute, const char *name, const int16_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1s(GPRTRayGen raygen, const char *name, int16_t val);
-GPRT_API void gprtRayGenSet2s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y);
-GPRT_API void gprtRayGenSet3s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z);
-GPRT_API void gprtRayGenSet4s(GPRTRayGen raygen, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-GPRT_API void gprtRayGenSet2sv(GPRTRayGen raygen, const char *name, const int16_t *val);
-GPRT_API void gprtRayGenSet3sv(GPRTRayGen raygen, const char *name, const int16_t *val);
-GPRT_API void gprtRayGenSet4sv(GPRTRayGen raygen, const char *name, const int16_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1s(GPRTMiss miss, const char *name, int16_t val);
-GPRT_API void gprtMissSet2s(GPRTMiss miss, const char *name, int16_t x, int16_t y);
-GPRT_API void gprtMissSet3s(GPRTMiss miss, const char *name, int16_t x, int16_t y, int16_t z);
-GPRT_API void gprtMissSet4s(GPRTMiss miss, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-GPRT_API void gprtMissSet2sv(GPRTMiss miss, const char *name, const int16_t *val);
-GPRT_API void gprtMissSet3sv(GPRTMiss miss, const char *name, const int16_t *val);
-GPRT_API void gprtMissSet4sv(GPRTMiss miss, const char *name, const int16_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1s(GPRTGeom geom, const char *name, int16_t val);
-GPRT_API void gprtGeomSet2s(GPRTGeom geom, const char *name, int16_t x, int16_t y);
-GPRT_API void gprtGeomSet3s(GPRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z);
-GPRT_API void gprtGeomSet4s(GPRTGeom geom, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-GPRT_API void gprtGeomSet2sv(GPRTGeom geom, const char *name, const int16_t *val);
-GPRT_API void gprtGeomSet3sv(GPRTGeom geom, const char *name, const int16_t *val);
-GPRT_API void gprtGeomSet4sv(GPRTGeom geom, const char *name, const int16_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1s(OWLParams obj, const char *name, int16_t val);
-// GPRT_API void gprtParamsSet2s(OWLParams obj, const char *name, int16_t x, int16_t y);
-// GPRT_API void gprtParamsSet3s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z);
-// GPRT_API void gprtParamsSet4s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-// GPRT_API void gprtParamsSet2sv(OWLParams obj, const char *name, const int16_t *val);
-// GPRT_API void gprtParamsSet3sv(OWLParams obj, const char *name, const int16_t *val);
-// GPRT_API void gprtParamsSet4sv(OWLParams obj, const char *name, const int16_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint16_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1us(GPRTCompute compute, const char *name, uint16_t val);
-GPRT_API void gprtComputeSet2us(GPRTCompute compute, const char *name, uint16_t x, uint16_t y);
-GPRT_API void gprtComputeSet3us(GPRTCompute compute, const char *name, uint16_t x, uint16_t y, uint16_t z);
-GPRT_API void gprtComputeSet4us(GPRTCompute compute, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-GPRT_API void gprtComputeSet2usv(GPRTCompute compute, const char *name, const uint16_t *val);
-GPRT_API void gprtComputeSet3usv(GPRTCompute compute, const char *name, const uint16_t *val);
-GPRT_API void gprtComputeSet4usv(GPRTCompute compute, const char *name, const uint16_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1us(GPRTRayGen raygen, const char *name, uint16_t val);
-GPRT_API void gprtRayGenSet2us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y);
-GPRT_API void gprtRayGenSet3us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z);
-GPRT_API void gprtRayGenSet4us(GPRTRayGen raygen, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-GPRT_API void gprtRayGenSet2usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
-GPRT_API void gprtRayGenSet3usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
-GPRT_API void gprtRayGenSet4usv(GPRTRayGen raygen, const char *name, const uint16_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1us(GPRTMiss miss, const char *name, uint16_t val);
-GPRT_API void gprtMissSet2us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y);
-GPRT_API void gprtMissSet3us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y, uint16_t z);
-GPRT_API void gprtMissSet4us(GPRTMiss miss, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-GPRT_API void gprtMissSet2usv(GPRTMiss miss, const char *name, const uint16_t *val);
-GPRT_API void gprtMissSet3usv(GPRTMiss miss, const char *name, const uint16_t *val);
-GPRT_API void gprtMissSet4usv(GPRTMiss miss, const char *name, const uint16_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1us(GPRTGeom geom, const char *name, uint16_t val);
-GPRT_API void gprtGeomSet2us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y);
-GPRT_API void gprtGeomSet3us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z);
-GPRT_API void gprtGeomSet4us(GPRTGeom geom, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-GPRT_API void gprtGeomSet2usv(GPRTGeom geom, const char *name, const uint16_t *val);
-GPRT_API void gprtGeomSet3usv(GPRTGeom geom, const char *name, const uint16_t *val);
-GPRT_API void gprtGeomSet4usv(GPRTGeom geom, const char *name, const uint16_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
-// GPRT_API void gprtParamsSet2us(OWLParams obj, const char *name, uint16_t x, uint16_t y);
-// GPRT_API void gprtParamsSet3us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
-// GPRT_API void gprtParamsSet4us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-// GPRT_API void gprtParamsSet2usv(OWLParams obj, const char *name, const uint16_t *val);
-// GPRT_API void gprtParamsSet3usv(OWLParams obj, const char *name, const uint16_t *val);
-// GPRT_API void gprtParamsSet4usv(OWLParams obj, const char *name, const uint16_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1i(GPRTCompute compute, const char *name, int32_t val);
-GPRT_API void gprtComputeSet2i(GPRTCompute compute, const char *name, int32_t x, int32_t y);
-GPRT_API void gprtComputeSet3i(GPRTCompute compute, const char *name, int32_t x, int32_t y, int32_t z);
-GPRT_API void gprtComputeSet4i(GPRTCompute compute, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-GPRT_API void gprtComputeSet2iv(GPRTCompute compute, const char *name, const int32_t *val);
-GPRT_API void gprtComputeSet3iv(GPRTCompute compute, const char *name, const int32_t *val);
-GPRT_API void gprtComputeSet4iv(GPRTCompute compute, const char *name, const int32_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1i(GPRTRayGen raygen, const char *name, int32_t val);
-GPRT_API void gprtRayGenSet2i(GPRTRayGen raygen, size_t offset, int32_t x, int32_t y);
-GPRT_API void gprtRayGenSet3i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z);
-GPRT_API void gprtRayGenSet4i(GPRTRayGen raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-GPRT_API void gprtRayGenSet2iv(GPRTRayGen raygen, const char *name, const int32_t *val);
-GPRT_API void gprtRayGenSet3iv(GPRTRayGen raygen, const char *name, const int32_t *val);
-GPRT_API void gprtRayGenSet4iv(GPRTRayGen raygen, const char *name, const int32_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1i(GPRTMiss miss, const char *name, int32_t val);
-GPRT_API void gprtMissSet2i(GPRTMiss miss, const char *name, int32_t x, int32_t y);
-GPRT_API void gprtMissSet3i(GPRTMiss miss, const char *name, int32_t x, int32_t y, int32_t z);
-GPRT_API void gprtMissSet4i(GPRTMiss miss, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-GPRT_API void gprtMissSet2iv(GPRTMiss miss, const char *name, const int32_t *val);
-GPRT_API void gprtMissSet3iv(GPRTMiss miss, const char *name, const int32_t *val);
-GPRT_API void gprtMissSet4iv(GPRTMiss miss, const char *name, const int32_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1i(GPRTGeom geom, const char *name, int32_t val);
-GPRT_API void gprtGeomSet2i(GPRTGeom geom, const char *name, int32_t x, int32_t y);
-GPRT_API void gprtGeomSet3i(GPRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z);
-GPRT_API void gprtGeomSet4i(GPRTGeom geom, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-GPRT_API void gprtGeomSet2iv(GPRTGeom geom, const char *name, const int32_t *val);
-GPRT_API void gprtGeomSet3iv(GPRTGeom geom, const char *name, const int32_t *val);
-GPRT_API void gprtGeomSet4iv(GPRTGeom geom, const char *name, const int32_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1i(OWLParams obj, const char *name, int32_t val);
-// GPRT_API void gprtParamsSet2i(OWLParams obj, const char *name, int32_t x, int32_t y);
-// GPRT_API void gprtParamsSet3i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z);
-// GPRT_API void gprtParamsSet4i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-// GPRT_API void gprtParamsSet2iv(OWLParams obj, const char *name, const int32_t *val);
-// GPRT_API void gprtParamsSet3iv(OWLParams obj, const char *name, const int32_t *val);
-// GPRT_API void gprtParamsSet4iv(OWLParams obj, const char *name, const int32_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint32_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1ui(GPRTCompute compute, const char *name, uint32_t val);
-GPRT_API void gprtComputeSet2ui(GPRTCompute compute, const char *name, uint32_t x, uint32_t y);
-GPRT_API void gprtComputeSet3ui(GPRTCompute compute, const char *name, uint32_t x, uint32_t y, uint32_t z);
-GPRT_API void gprtComputeSet4ui(GPRTCompute compute, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-GPRT_API void gprtComputeSet2uiv(GPRTCompute compute, const char *name, const uint32_t *val);
-GPRT_API void gprtComputeSet3uiv(GPRTCompute compute, const char *name, const uint32_t *val);
-GPRT_API void gprtComputeSet4uiv(GPRTCompute compute, const char *name, const uint32_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1ui(GPRTRayGen raygen, const char *name, uint32_t val);
-GPRT_API void gprtRayGenSet2ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y);
-GPRT_API void gprtRayGenSet3ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z);
-GPRT_API void gprtRayGenSet4ui(GPRTRayGen raygen, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-GPRT_API void gprtRayGenSet2uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
-GPRT_API void gprtRayGenSet3uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
-GPRT_API void gprtRayGenSet4uiv(GPRTRayGen raygen, const char *name, const uint32_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1ui(GPRTMiss miss, const char *name, uint32_t val);
-GPRT_API void gprtMissSet2ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y);
-GPRT_API void gprtMissSet3ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y, uint32_t z);
-GPRT_API void gprtMissSet4ui(GPRTMiss miss, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-GPRT_API void gprtMissSet2uiv(GPRTMiss miss, const char *name, const uint32_t *val);
-GPRT_API void gprtMissSet3uiv(GPRTMiss miss, const char *name, const uint32_t *val);
-GPRT_API void gprtMissSet4uiv(GPRTMiss miss, const char *name, const uint32_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1ui(GPRTGeom geom, const char *name, uint32_t val);
-GPRT_API void gprtGeomSet2ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y);
-GPRT_API void gprtGeomSet3ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z);
-GPRT_API void gprtGeomSet4ui(GPRTGeom geom, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-GPRT_API void gprtGeomSet2uiv(GPRTGeom geom, const char *name, const uint32_t *val);
-GPRT_API void gprtGeomSet3uiv(GPRTGeom geom, const char *name, const uint32_t *val);
-GPRT_API void gprtGeomSet4uiv(GPRTGeom geom, const char *name, const uint32_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
-// GPRT_API void gprtParamsSet2ui(OWLParams obj, const char *name, uint32_t x, uint32_t y);
-// GPRT_API void gprtParamsSet3ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
-// GPRT_API void gprtParamsSet4ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-// GPRT_API void gprtParamsSet2uiv(OWLParams obj, const char *name, const uint32_t *val);
-// GPRT_API void gprtParamsSet3uiv(OWLParams obj, const char *name, const uint32_t *val);
-// GPRT_API void gprtParamsSet4uiv(OWLParams obj, const char *name, const uint32_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "float"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1f(GPRTCompute compute, const char *name, float val);
-GPRT_API void gprtComputeSet2f(GPRTCompute compute, const char *name, float x, float y);
-GPRT_API void gprtComputeSet3f(GPRTCompute compute, const char *name, float x, float y, float z);
-GPRT_API void gprtComputeSet4f(GPRTCompute compute, const char *name, float x, float y, float z, float w);
-GPRT_API void gprtComputeSet2fv(GPRTCompute compute, const char *name, const float *val);
-GPRT_API void gprtComputeSet3fv(GPRTCompute compute, const char *name, const float *val);
-GPRT_API void gprtComputeSet4fv(GPRTCompute compute, const char *name, const float *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1f(GPRTRayGen raygen, const char *name, float val);
-GPRT_API void gprtRayGenSet2f(GPRTRayGen raygen, const char *name, float x, float y);
-GPRT_API void _gprtRayGenSet3f(GPRTRayGen _raygen, size_t offset, float x, float y, float z);
-
-#define gprtRayGenSet3f(raygen, type, member, x, y, z) { \
-  static_assert(std::is_same<decltype(type::member), float3>::value, "Error, member type must be float3"); \
-  _gprtRayGenSet3f(raygen, offsetof(type, member), x, y, z); \
-}
-
-
-GPRT_API void gprtRayGenSet4f(GPRTRayGen raygen, const char *name, float x, float y, float z, float w);
-GPRT_API void gprtRayGenSet2fv(GPRTRayGen raygen, const char *name, const float *val);
-GPRT_API void gprtRayGenSet3fv(GPRTRayGen raygen, const char *name, const float *val);
-GPRT_API void gprtRayGenSet4fv(GPRTRayGen raygen, const char *name, const float *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1f(GPRTMiss miss, const char *name, float val);
-GPRT_API void gprtMissSet2f(GPRTMiss miss, const char *name, float x, float y);
-GPRT_API void gprtMissSet3f(GPRTMiss miss, const char *name, float x, float y, float z);
-GPRT_API void gprtMissSet4f(GPRTMiss miss, const char *name, float x, float y, float z, float w);
-GPRT_API void gprtMissSet2fv(GPRTMiss miss, const char *name, const float *val);
-GPRT_API void gprtMissSet3fv(GPRTMiss miss, const char *name, const float *val);
-GPRT_API void gprtMissSet4fv(GPRTMiss miss, const char *name, const float *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1f(GPRTGeom geom, const char *name, float val);
-GPRT_API void gprtGeomSet2f(GPRTGeom geom, const char *name, float x, float y);
-GPRT_API void gprtGeomSet3f(GPRTGeom geom, const char *name, float x, float y, float z);
-GPRT_API void gprtGeomSet4f(GPRTGeom geom, const char *name, float x, float y, float z, float w);
-GPRT_API void gprtGeomSet2fv(GPRTGeom geom, const char *name, const float *val);
-GPRT_API void gprtGeomSet3fv(GPRTGeom geom, const char *name, const float *val);
-GPRT_API void gprtGeomSet4fv(GPRTGeom geom, const char *name, const float *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1f(OWLParams obj, const char *name, float val);
-// GPRT_API void gprtParamsSet2f(OWLParams obj, const char *name, float x, float y);
-// GPRT_API void gprtParamsSet3f(OWLParams obj, const char *name, float x, float y, float z);
-// GPRT_API void gprtParamsSet4f(OWLParams obj, const char *name, float x, float y, float z, float w);
-// GPRT_API void gprtParamsSet2fv(OWLParams obj, const char *name, const float *val);
-// GPRT_API void gprtParamsSet3fv(OWLParams obj, const char *name, const float *val);
-// GPRT_API void gprtParamsSet4fv(OWLParams obj, const char *name, const float *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "double"
-// ------------------------------------------------------------------
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtComputeSet1d(GPRTCompute compute, const char *name, double val);
-GPRT_API void gprtComputeSet2d(GPRTCompute compute, const char *name, double x, double y);
-GPRT_API void gprtComputeSet3d(GPRTCompute compute, const char *name, double x, double y, double z);
-GPRT_API void gprtComputeSet4d(GPRTCompute compute, const char *name, double x, double y, double z, double w);
-GPRT_API void gprtComputeSet2dv(GPRTCompute compute, const char *name, const double *val);
-GPRT_API void gprtComputeSet3dv(GPRTCompute compute, const char *name, const double *val);
-GPRT_API void gprtComputeSet4dv(GPRTCompute compute, const char *name, const double *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1d(GPRTRayGen raygen, const char *name, double val);
-GPRT_API void gprtRayGenSet2d(GPRTRayGen raygen, const char *name, double x, double y);
-GPRT_API void gprtRayGenSet3d(GPRTRayGen raygen, const char *name, double x, double y, double z);
-GPRT_API void gprtRayGenSet4d(GPRTRayGen raygen, const char *name, double x, double y, double z, double w);
-GPRT_API void gprtRayGenSet2dv(GPRTRayGen raygen, const char *name, const double *val);
-GPRT_API void gprtRayGenSet3dv(GPRTRayGen raygen, const char *name, const double *val);
-GPRT_API void gprtRayGenSet4dv(GPRTRayGen raygen, const char *name, const double *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1d(GPRTMiss miss, const char *name, double val);
-GPRT_API void gprtMissSet2d(GPRTMiss miss, const char *name, double x, double y);
-GPRT_API void gprtMissSet3d(GPRTMiss miss, const char *name, double x, double y, double z);
-GPRT_API void gprtMissSet4d(GPRTMiss miss, const char *name, double x, double y, double z, double w);
-GPRT_API void gprtMissSet2dv(GPRTMiss miss, const char *name, const double *val);
-GPRT_API void gprtMissSet3dv(GPRTMiss miss, const char *name, const double *val);
-GPRT_API void gprtMissSet4dv(GPRTMiss miss, const char *name, const double *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1d(GPRTGeom geom, const char *name, double val);
-GPRT_API void gprtGeomSet2d(GPRTGeom geom, const char *name, double x, double y);
-GPRT_API void gprtGeomSet3d(GPRTGeom geom, const char *name, double x, double y, double z);
-GPRT_API void gprtGeomSet4d(GPRTGeom geom, const char *name, double x, double y, double z, double w);
-GPRT_API void gprtGeomSet2dv(GPRTGeom geom, const char *name, const double *val);
-GPRT_API void gprtGeomSet3dv(GPRTGeom geom, const char *name, const double *val);
-GPRT_API void gprtGeomSet4dv(GPRTGeom geom, const char *name, const double *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1d(OWLParams obj, const char *name, double val);
-// GPRT_API void gprtParamsSet2d(OWLParams obj, const char *name, double x, double y);
-// GPRT_API void gprtParamsSet3d(OWLParams obj, const char *name, double x, double y, double z);
-// GPRT_API void gprtParamsSet4d(OWLParams obj, const char *name, double x, double y, double z, double w);
-// GPRT_API void gprtParamsSet2dv(OWLParams obj, const char *name, const double *val);
-// GPRT_API void gprtParamsSet3dv(OWLParams obj, const char *name, const double *val);
-// GPRT_API void gprtParamsSet4dv(OWLParams obj, const char *name, const double *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int64_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1l(GPRTCompute compute, const char *name, int64_t val);
-GPRT_API void gprtComputeSet2l(GPRTCompute compute, const char *name, int64_t x, int64_t y);
-GPRT_API void gprtComputeSet3l(GPRTCompute compute, const char *name, int64_t x, int64_t y, int64_t z);
-GPRT_API void gprtComputeSet4l(GPRTCompute compute, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-GPRT_API void gprtComputeSet2lv(GPRTCompute compute, const char *name, const int64_t *val);
-GPRT_API void gprtComputeSet3lv(GPRTCompute compute, const char *name, const int64_t *val);
-GPRT_API void gprtComputeSet4lv(GPRTCompute compute, const char *name, const int64_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1l(GPRTRayGen raygen, const char *name, int64_t val);
-GPRT_API void gprtRayGenSet2l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y);
-GPRT_API void gprtRayGenSet3l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z);
-GPRT_API void gprtRayGenSet4l(GPRTRayGen raygen, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-GPRT_API void gprtRayGenSet2lv(GPRTRayGen raygen, const char *name, const int64_t *val);
-GPRT_API void gprtRayGenSet3lv(GPRTRayGen raygen, const char *name, const int64_t *val);
-GPRT_API void gprtRayGenSet4lv(GPRTRayGen raygen, const char *name, const int64_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1l(GPRTMiss miss, const char *name, int64_t val);
-GPRT_API void gprtMissSet2l(GPRTMiss miss, const char *name, int64_t x, int64_t y);
-GPRT_API void gprtMissSet3l(GPRTMiss miss, const char *name, int64_t x, int64_t y, int64_t z);
-GPRT_API void gprtMissSet4l(GPRTMiss miss, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-GPRT_API void gprtMissSet2lv(GPRTMiss miss, const char *name, const int64_t *val);
-GPRT_API void gprtMissSet3lv(GPRTMiss miss, const char *name, const int64_t *val);
-GPRT_API void gprtMissSet4lv(GPRTMiss miss, const char *name, const int64_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1l(GPRTGeom geom, const char *name, int64_t val);
-GPRT_API void gprtGeomSet2l(GPRTGeom geom, const char *name, int64_t x, int64_t y);
-GPRT_API void gprtGeomSet3l(GPRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z);
-GPRT_API void gprtGeomSet4l(GPRTGeom geom, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-GPRT_API void gprtGeomSet2lv(GPRTGeom geom, const char *name, const int64_t *val);
-GPRT_API void gprtGeomSet3lv(GPRTGeom geom, const char *name, const int64_t *val);
-GPRT_API void gprtGeomSet4lv(GPRTGeom geom, const char *name, const int64_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1l(OWLParams obj, const char *name, int64_t val);
-// GPRT_API void gprtParamsSet2l(OWLParams obj, const char *name, int64_t x, int64_t y);
-// GPRT_API void gprtParamsSet3l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z);
-// GPRT_API void gprtParamsSet4l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-// GPRT_API void gprtParamsSet2lv(OWLParams obj, const char *name, const int64_t *val);
-// GPRT_API void gprtParamsSet3lv(OWLParams obj, const char *name, const int64_t *val);
-// GPRT_API void gprtParamsSet4lv(OWLParams obj, const char *name, const int64_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint64_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1ul(GPRTCompute compute, const char *name, uint64_t val);
-GPRT_API void gprtComputeSet2ul(GPRTCompute compute, const char *name, uint64_t x, uint64_t y);
-GPRT_API void gprtComputeSet3ul(GPRTCompute compute, const char *name, uint64_t x, uint64_t y, uint64_t z);
-GPRT_API void gprtComputeSet4ul(GPRTCompute compute, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-GPRT_API void gprtComputeSet2ulv(GPRTCompute compute, const char *name, const uint64_t *val);
-GPRT_API void gprtComputeSet3ulv(GPRTCompute compute, const char *name, const uint64_t *val);
-GPRT_API void gprtComputeSet4ulv(GPRTCompute compute, const char *name, const uint64_t *val);
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1ul(GPRTRayGen raygen, const char *name, uint64_t val);
-GPRT_API void gprtRayGenSet2ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y);
-GPRT_API void gprtRayGenSet3ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z);
-GPRT_API void gprtRayGenSet4ul(GPRTRayGen raygen, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-GPRT_API void gprtRayGenSet2ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
-GPRT_API void gprtRayGenSet3ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
-GPRT_API void gprtRayGenSet4ulv(GPRTRayGen raygen, const char *name, const uint64_t *val);
-
-// setters for variables on "Miss"s
-GPRT_API void gprtMissSet1ul(GPRTMiss miss, const char *name, uint64_t val);
-GPRT_API void gprtMissSet2ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y);
-GPRT_API void gprtMissSet3ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y, uint64_t z);
-GPRT_API void gprtMissSet4ul(GPRTMiss miss, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-GPRT_API void gprtMissSet2ulv(GPRTMiss miss, const char *name, const uint64_t *val);
-GPRT_API void gprtMissSet3ulv(GPRTMiss miss, const char *name, const uint64_t *val);
-GPRT_API void gprtMissSet4ulv(GPRTMiss miss, const char *name, const uint64_t *val);
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1ul(GPRTGeom geom, const char *name, uint64_t val);
-GPRT_API void gprtGeomSet2ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y);
-GPRT_API void gprtGeomSet3ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z);
-GPRT_API void gprtGeomSet4ul(GPRTGeom geom, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-GPRT_API void gprtGeomSet2ulv(GPRTGeom geom, const char *name, const uint64_t *val);
-GPRT_API void gprtGeomSet3ulv(GPRTGeom geom, const char *name, const uint64_t *val);
-GPRT_API void gprtGeomSet4ulv(GPRTGeom geom, const char *name, const uint64_t *val);
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
-// GPRT_API void gprtParamsSet2ul(OWLParams obj, const char *name, uint64_t x, uint64_t y);
-// GPRT_API void gprtParamsSet3ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
-// GPRT_API void gprtParamsSet4ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-// GPRT_API void gprtParamsSet2ulv(OWLParams obj, const char *name, const uint64_t *val);
-// GPRT_API void gprtParamsSet3ulv(OWLParams obj, const char *name, const uint64_t *val);
-// GPRT_API void gprtParamsSet4ulv(OWLParams obj, const char *name, const uint64_t *val);
-
-// ------------------------------------------------------------------
-// setters for "meta" types
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-// GPRT_API void gprtComputeSetTexture(GPRTRayGen raygen, const char *name, GPRTTexture val);
-// GPRT_API void gprtComputeSetPointer(GPRTRayGen raygen, const char *name, const void *val);
-GPRT_API void gprtComputeSetBuffer(GPRTCompute compute, const char *name, GPRTBuffer val);
-GPRT_API void gprtComputeSetAccel(GPRTCompute compute, const char *name, GPRTAccel val);
-GPRT_API void gprtComputeSetRaw(GPRTCompute compute, const char *name, const void *val);
-
-// setters for variables on "RayGen"s
-// GPRT_API void gprtRayGenSetTexture(GPRTRayGen raygen, const char *name, GPRTTexture val);
-// GPRT_API void gprtRayGenSetPointer(GPRTRayGen raygen, const char *name, const void *val);
-GPRT_API void gprtRayGenSetBuffer(GPRTRayGen raygen, size_t offset, GPRTBuffer val);
-GPRT_API void gprtRayGenSetAccel(GPRTRayGen raygen, const char *name, GPRTAccel val);
-GPRT_API void gprtRayGenSetRaw(GPRTRayGen raygen, const char *name, const void *val);
-
-// // setters for variables on "Geom"s
-// GPRT_API void gprtGeomSetTexture(GPRTGeom obj, const char *name, GPRTTexture val);
-// GPRT_API void gprtGeomSetPointer(GPRTGeom obj, const char *name, const void *val);
-GPRT_API void gprtGeomSetBuffer(GPRTGeom obj, const char *name, GPRTBuffer val);
-GPRT_API void gprtGeomSetAccel(GPRTGeom obj, const char *name, GPRTAccel val);
-GPRT_API void gprtGeomSetRaw(GPRTGeom obj, const char *name, const void *val);
-
-// // setters for variables on "Params"s
-// GPRT_API void gprtParamsSetTexture(GPRTParams obj, const char *name, GPRTTexture val);
-// GPRT_API void gprtParamsSetPointer(GPRTParams obj, const char *name, const void *val);
-// GPRT_API void gprtParamsSetBuffer(GPRTParams obj, const char *name, GPRTBuffer val);
-// GPRT_API void gprtParamsSetAccel(GPRTParams obj, const char *name, GPRTAccel val);
-// GPRT_API void gprtParamsSetRaw(GPRTParams obj, const char *name, const void *val);
-
-// setters for variables on "Miss"s
-// GPRT_API void gprtMissSetTexture(GPRTMiss miss, const char *name, GPRTTexture val);
-// GPRT_API void gprtMissSetPointer(GPRTMiss miss, const char *name, const void *val);
-GPRT_API void gprtMissSetBuffer(GPRTMiss miss, const char *name, GPRTBuffer val);
-GPRT_API void gprtMissSetAccel(GPRTMiss miss, const char *name, GPRTAccel val);
-GPRT_API void gprtMissSetRaw(GPRTMiss miss, const char *name, const void *val);

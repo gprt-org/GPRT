@@ -95,11 +95,12 @@ int main(int ac, char **av) {
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  gprtRayGenSet3f(rayGen, RayGenData, color0, 0.1f, 0.1f, 0.1f);
-  gprtRayGenSet3f(rayGen, RayGenData, color1, 0.0f, 0.0f, 0.0f);
-  gprtRayGenSetBuffer(rayGen, offsetof(RayGenData, fbPtr), frameBuffer);
-  gprtRayGenSet2i(rayGen, offsetof(RayGenData, fbSize), fbSize.x, fbSize.y);
-
+  RayGenData *data = (RayGenData*)gprtRayGenGetPointer(rayGen);
+  data->color0 = float3(0.1f, 0.1f, 0.1f);
+  data->color1 = float3(0.0f, 0.0f, 0.0f); 
+  data->fbPtr = gprtBufferGetHandle(frameBuffer);
+  data->fbSize = fbSize;
+  
   // Build a shader binding table entry for the ray generation record.
   gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
 

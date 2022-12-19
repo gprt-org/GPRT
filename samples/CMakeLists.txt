@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 add_subdirectory(s00-rayGenOnly)
-# add_subdirectory(s01-singleTriangle)
+add_subdirectory(s01-singleTriangle)
 # add_subdirectory(s02-instances)
 # add_subdirectory(s03-singleAABB)
 # add_subdirectory(s04-computeAABBs)
