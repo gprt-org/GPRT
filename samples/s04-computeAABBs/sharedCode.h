@@ -39,8 +39,6 @@ struct SphereGeomData {
   alignas(16) gprt::Buffer vertex; // vec3f*
   /*! array/buffer of vertex positions */
   alignas(16) gprt::Buffer radius; // float *
-  /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
 };
 
 struct RayGenData {

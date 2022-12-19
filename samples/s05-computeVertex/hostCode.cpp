@@ -71,48 +71,25 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTVarDecl trianglesGeomVars[] = {
-      {"index", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, index)},
-      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, vertex)},
-      {"now", GPRT_FLOAT, GPRT_OFFSETOF(TrianglesGeomData, now)},
-      {"gridSize", GPRT_UINT, GPRT_OFFSETOF(TrianglesGeomData, gridSize)},
-      {/* sentinel to mark end of list */}};
   GPRTGeomType trianglesGeomType =
-      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData),
-                         trianglesGeomVars, -1);
+      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up vertex program to animate vertices
   // -------------------------------------------------------
   GPRTCompute vertexProgram =
-      gprtComputeCreate(context, module, "Vertex", sizeof(TrianglesGeomData),
-                        trianglesGeomVars, -1);
+      gprtComputeCreate(context, module, "Vertex", sizeof(TrianglesGeomData));
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTVarDecl rayGenVars[] = {
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
-      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
-      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
-      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
-      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
-      {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "RayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "RayGen", sizeof(RayGenData));
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTVarDecl missVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missVars, -1);
+  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -128,9 +105,9 @@ int main(int ac, char **av) {
   unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
   unsigned int numVertices = 3 * numTriangles;
   GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, numVertices, nullptr);
+      gprtDeviceBufferCreate(context, sizeof(float3), numVertices, nullptr);
   GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_UINT3, numTriangles, nullptr);
+      gprtDeviceBufferCreate(context, sizeof(uint3), numTriangles, nullptr);
 
   GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
 
@@ -141,17 +118,19 @@ int main(int ac, char **av) {
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles);
 
   // Parameters for the geometry when a ray hits it.
-  gprtGeomSetBuffer(trianglesGeom, "vertex", vertexBuffer);
-  gprtGeomSetBuffer(trianglesGeom, "index", indexBuffer);
-  gprtGeomSet1f(trianglesGeom, "now", 0.0f);
-  gprtGeomSet1ui(trianglesGeom, "gridSize", GRID_SIDE_LENGTH);
-
+  TrianglesGeomData *geomData = (TrianglesGeomData*) gprtGeomGetPointer(trianglesGeom);
+  geomData->vertex = gprtBufferGetHandle(vertexBuffer);
+  geomData->index = gprtBufferGetHandle(indexBuffer);
+  geomData->now = 0.f;
+  geomData->gridSize = GRID_SIDE_LENGTH;
+  
   // Parameters for our vertex program that'll animate our vertices
-  gprtComputeSetBuffer(vertexProgram, "vertex", vertexBuffer);
-  gprtComputeSetBuffer(vertexProgram, "index", indexBuffer);
-  gprtComputeSet1f(vertexProgram, "now", 0.0f);
-  gprtComputeSet1ui(vertexProgram, "gridSize", GRID_SIDE_LENGTH);
-
+  TrianglesGeomData *vertexData = (TrianglesGeomData*) gprtComputeGetPointer(vertexProgram);
+  vertexData->vertex = gprtBufferGetHandle(vertexBuffer);
+  vertexData->index = gprtBufferGetHandle(indexBuffer);
+  vertexData->now = 0.f;
+  vertexData->gridSize = GRID_SIDE_LENGTH;
+  
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
@@ -173,14 +152,17 @@ int main(int ac, char **av) {
 
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
-  gprtRayGenSetAccel(rayGen, "world", world);
+      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
+  rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
+  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   // ##################################################################
   // build *SBT* required to trace the groups
@@ -246,17 +228,18 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
-      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
-      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
-      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
+      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      raygenData->camera.pos = camera_pos;
+      raygenData->camera.dir_00 = camera_d00;
+      raygenData->camera.dir_du = camera_ddu;
+      raygenData->camera.dir_dv = camera_ddv;
 
       // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
     // update time to move primitives. then, rebuild accel.
-    gprtComputeSet1f(vertexProgram, "now", float(gprtGetTime(context)));
+    vertexData->now = float(gprtGetTime(context));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
 
@@ -268,7 +251,7 @@ int main(int ac, char **av) {
     gprtAccelBuild(context, world);
 
     // Assign the updated tree handle to our ray generation program's record
-    gprtRayGenSetAccel(rayGen, "world", world);
+    rayGenData->world = gprtAccelGetHandle(world);
     gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
 
     // Note! we don't need to rebuild the pipeline here, since no geometry was

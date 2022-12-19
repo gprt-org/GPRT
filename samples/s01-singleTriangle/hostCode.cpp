@@ -103,14 +103,16 @@ int main(int ac, char **av) {
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer =
       gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
-  RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
-  raygenData->fbPtr = gprtBufferGetHandle(frameBuffer);
-  raygenData->fbSize = fbSize;
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
+  rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*)gprtMissGetPointer(miss);
+  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  missData->color1 = float3(0.f, 0.f, 0.f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   LOG("building geometries ...");
 

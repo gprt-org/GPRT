@@ -114,6 +114,7 @@ int main(int ac, char **av) {
   GPRTBuffer frameBuffer =
       gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
   
+  // Raygen program frame buffer
   RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;

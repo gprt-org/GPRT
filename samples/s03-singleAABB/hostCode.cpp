@@ -74,51 +74,39 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTVarDecl aabbGeomVars[] = {{/* sentinel to mark end of list */}};
   GPRTGeomType aabbGeomType =
       gprtGeomTypeCreate(context,
                          GPRT_AABBS, // <- This is new!
-                         sizeof(AABBGeomData), aabbGeomVars, -1);
+                         sizeof(AABBGeomData));
   gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
   gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTVarDecl missVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missVars, -1);
+  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTVarDecl rayGenVars[] = {
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
-      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
-      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
-      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
-      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
-      {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen", sizeof(RayGenData));
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
+      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
+  rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
+  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   LOG("building geometries ...");
 
@@ -126,7 +114,7 @@ int main(int ac, char **av) {
   // first float3 defines the bottom lower left near corner, and the second
   // float3 defines the upper far right corner.
   GPRTBuffer aabbPositionsBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, 2, aabbPositions);
+      gprtDeviceBufferCreate(context, sizeof(float3), 2, aabbPositions);
   GPRTGeom aabbGeom = gprtGeomCreate(context, aabbGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
@@ -138,7 +126,7 @@ int main(int ac, char **av) {
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
   gprtAccelBuild(context, world);
 
-  gprtRayGenSetAccel(rayGen, "world", world);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
   // build the pipeline and shader binding table
@@ -203,10 +191,11 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
-      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
-      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
-      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
+      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      raygenData->camera.pos = camera_pos;
+      raygenData->camera.dir_00 = camera_d00;
+      raygenData->camera.dir_du = camera_ddu;
+      raygenData->camera.dir_dv = camera_ddv;
 
       // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
