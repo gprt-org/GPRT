@@ -642,12 +642,8 @@ struct Buffer {
 };
 
 struct SBTEntry {
-  // Map of the name of the variable to that variable declaration
-  std::unordered_map<std::string, GPRTVarDef> vars;
-
-  // Working towards dropping the unordered map above...
-  size_t recordSize;
-  uint8_t* SBTRecord;
+  size_t recordSize = 0;
+  uint8_t* SBTRecord = nullptr;
 };
 
 // At the moment, we actually just use ray generation programs for compute 
@@ -962,7 +958,8 @@ struct TriangleGeom : public Geom {
     geomType = (GeomType*)_geomType;
 
     // Allocate the variables for this geometry
-    this->SBTRecord = (uint8_t*)malloc(recordSize);
+    this->SBTRecord = (uint8_t*)malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
   };
   ~TriangleGeom() {free(this->SBTRecord);};
 
@@ -1022,7 +1019,8 @@ struct AABBGeom : public Geom {
     geomType = (GeomType*)_geomType;
 
     // Allocate the variables for this geometry
-    this->SBTRecord = (uint8_t*)malloc(recordSize);
+    this->SBTRecord = (uint8_t*)malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
   };
   ~AABBGeom() {free(this->SBTRecord);};
 
