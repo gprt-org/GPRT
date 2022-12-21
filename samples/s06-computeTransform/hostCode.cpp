@@ -58,13 +58,13 @@ float cosFovy = 0.3f;
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
-  GPRTBufferT<float3> vertexBuffer;
-  GPRTBufferT<uint3> indexBuffer;
-  GPRTGeomT<TrianglesGeomData> geometry;
+  GPRTBufferOf<float3> vertexBuffer;
+  GPRTBufferOf<uint3> indexBuffer;
+  GPRTGeomOf<TrianglesGeomData> geometry;
   GPRTAccel accel;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeT<TrianglesGeomData> geomType, T generator) {
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator) {
     // Use the generator to generate vertices and indices
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -127,25 +127,25 @@ int main(int ac, char **av) {
   // Setup geometry types
   // -------------------------------------------------------
 
-  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType = 
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = 
     gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up instance transform program to animate instances
   // -------------------------------------------------------
-  GPRTComputeT<TransformData> transformProgram = 
+  GPRTComputeOf<TransformData> transformProgram = 
     gprtComputeCreate<TransformData>(context, module, "Transform");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss =
+  GPRTMissOf<MissProgData> miss =
       gprtMissCreate<MissProgData>(context, module, "miss");
 
   // Note, we'll need to call this again after creating our acceleration
@@ -180,7 +180,7 @@ int main(int ac, char **av) {
   // acceleration structure an unpopulated buffer of transforms, so long as
   // those transforms are filled in before we go to build our acceleration
   // structure.
-  GPRTBufferT<float3x4> transformBuffer =
+  GPRTBufferOf<float3x4> transformBuffer =
       gprtDeviceBufferCreate<float3x4>(context, numInstances, nullptr);
   GPRTAccel world =
       gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());

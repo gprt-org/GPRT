@@ -83,7 +83,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeT<SphereGeomData> sphereGeomType = 
+  GPRTGeomTypeOf<SphereGeomData> sphereGeomType = 
       gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
   gprtGeomTypeSetClosestHitProg(sphereGeomType, 0, module, "SphereClosestHit");
   gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module,
@@ -92,18 +92,18 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up sphere bounding box compute program
   // -------------------------------------------------------
-  GPRTComputeT<SphereBoundsData> boundsProgram =
+  GPRTComputeOf<SphereBoundsData> boundsProgram =
       gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -117,14 +117,14 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
-  GPRTBufferT<float3> vertexBuffer =
+  GPRTBufferOf<float3> vertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferT<float> radiusBuffer =
+  GPRTBufferOf<float> radiusBuffer =
       gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
-  GPRTBufferT<float3> aabbPositionsBuffer =
+  GPRTBufferOf<float3> aabbPositionsBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
 
-  GPRTGeomT<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
+  GPRTGeomOf<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
   SphereGeomData* geomData = gprtGeomGetPointer(aabbGeom); 

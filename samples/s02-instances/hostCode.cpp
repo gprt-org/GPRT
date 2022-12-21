@@ -92,26 +92,26 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferT<uint32_t> frameBuffer =
+  GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
@@ -127,11 +127,11 @@ int main(int ac, char **av) {
   LOG("building geometries ...");
 
   // Create our cube mesh
-  GPRTBufferT<float3> vertexBuffer =
+  GPRTBufferOf<float3> vertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferT<int3> indexBuffer =
+  GPRTBufferOf<int3> indexBuffer =
       gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-  GPRTGeomT<TrianglesGeomData> trianglesGeom = 
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
       gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
@@ -157,7 +157,7 @@ int main(int ac, char **av) {
   // Then, we create a transform buffer, one transform per instance.
   // These transforms are defined at the top of our program, in the "transforms"
   // array referenced by the last parameter here.
-  GPRTBufferT<float3x4> transformBuffer = 
+  GPRTBufferOf<float3x4> transformBuffer = 
     gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
 
   // Finally, we create a top level acceleration structure here.

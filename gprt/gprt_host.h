@@ -104,18 +104,18 @@ using GPRTRayGen   = struct _GPRTRayGen*;
 using GPRTMiss     = struct _GPRTMiss*;
 using GPRTCompute  = struct _GPRTCompute*;
 
-template <typename T> struct _GPRTBufferT;
-template <typename T> struct _GPRTRayGenT;
-template <typename T> struct _GPRTMissT;
-template <typename T> struct _GPRTComputeT;
-template <typename T> struct _GPRTGeomT;
-template <typename T> struct _GPRTGeomTypeT;
-template <typename T> using GPRTRayGenT   = struct _GPRTRayGenT<T>*;
-template <typename T> using GPRTBufferT   = struct _GPRTBufferT<T>*;
-template <typename T> using GPRTMissT   = struct _GPRTMissT<T>*;
-template <typename T> using GPRTComputeT   = struct _GPRTComputeT<T>*;
-template <typename T> using GPRTGeomT   = struct _GPRTGeomT<T>*;
-template <typename T> using GPRTGeomTypeT   = struct _GPRTGeomTypeT<T>*;
+template <typename T> struct _GPRTBufferOf;
+template <typename T> struct _GPRTRayGenOf;
+template <typename T> struct _GPRTMissOf;
+template <typename T> struct _GPRTComputeOf;
+template <typename T> struct _GPRTGeomOf;
+template <typename T> struct _GPRTGeomTypeOf;
+template <typename T> using GPRTRayGenOf   = struct _GPRTRayGenOf<T>*;
+template <typename T> using GPRTBufferOf   = struct _GPRTBufferOf<T>*;
+template <typename T> using GPRTMissOf   = struct _GPRTMissOf<T>*;
+template <typename T> using GPRTComputeOf   = struct _GPRTComputeOf<T>*;
+template <typename T> using GPRTGeomOf   = struct _GPRTGeomOf<T>*;
+template <typename T> using GPRTGeomTypeOf   = struct _GPRTGeomTypeOf<T>*;
 
 using GPRTProgram = std::map<std::string, std::vector<uint8_t>>;
 
@@ -177,16 +177,16 @@ GPRT_API GPRTGeom
 gprtGeomCreate(GPRTContext  context,
               GPRTGeomType type);
 
-template <typename T> GPRTGeomT<T>
-gprtGeomCreate(GPRTContext context, GPRTGeomTypeT<T> type) {
-  return (GPRTGeomT<T>) gprtGeomCreate(context, (GPRTGeomType)type);
+template <typename T> GPRTGeomOf<T>
+gprtGeomCreate(GPRTContext context, GPRTGeomTypeOf<T> type) {
+  return (GPRTGeomOf<T>) gprtGeomCreate(context, (GPRTGeomType)type);
 }
 
 GPRT_API void
 gprtGeomDestroy(GPRTGeom geometry);
 
 template <typename T> void
-gprtGeomDestroy(GPRTGeomT<T> geometry) {
+gprtGeomDestroy(GPRTGeomOf<T> geometry) {
   gprtGeomDestroy((GPRTGeom)geometry);
 }
 
@@ -194,7 +194,7 @@ GPRT_API void *
 gprtGeomGetPointer(GPRTGeom geometry, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T> T*
-gprtGeomGetPointer(GPRTGeomT<T> geometry, int deviceID GPRT_IF_CPP(=0)) {
+gprtGeomGetPointer(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(=0)) {
   return (T*)gprtGeomGetPointer((GPRTGeom)geometry, deviceID);
 }
 
@@ -208,8 +208,8 @@ GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles,
                                       size_t offset GPRT_IF_CPP(=0));
 
 template <typename T1, typename T2> void 
-gprtTrianglesSetVertices(GPRTGeomT<T1> triangles,
-                         GPRTBufferT<T2> vertices,
+gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles,
+                         GPRTBufferOf<T2> vertices,
                          size_t count,
                          size_t stride GPRT_IF_CPP(=sizeof(float3)),
                          size_t offset GPRT_IF_CPP(=0)) {
@@ -236,8 +236,8 @@ GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles,
                                      size_t offset GPRT_IF_CPP(=0));
 
 template <typename T1, typename T2> void 
-gprtTrianglesSetIndices(GPRTGeomT<T1> triangles,
-                        GPRTBufferT<T2> indices,
+gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles,
+                        GPRTBufferOf<T2> indices,
                         size_t count,
                         size_t stride GPRT_IF_CPP(=sizeof(float3)),
                         size_t offset GPRT_IF_CPP(=0)) {
@@ -254,8 +254,8 @@ GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs,
                                     size_t offset GPRT_IF_CPP(=0));
 
 template <typename T1, typename T2> void 
-gprtAABBsSetPositions(GPRTGeomT<T1> aabbs,
-                      GPRTBufferT<T2> positions,
+gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs,
+                      GPRTBufferOf<T2> positions,
                       size_t count,
                       size_t stride GPRT_IF_CPP(=2*sizeof(float3)),
                       size_t offset GPRT_IF_CPP(=0)) {
@@ -371,18 +371,18 @@ gprtComputeCreate(GPRTContext  context,
                  const char *programName,
                  size_t      recordSize);
 
-template<typename T> GPRTComputeT<T>
+template<typename T> GPRTComputeOf<T>
 gprtComputeCreate(GPRTContext context,
                   GPRTModule module, 
                   const char* programName) {
-  return (GPRTComputeT<T>) gprtComputeCreate(context, module, programName, sizeof(T));
+  return (GPRTComputeOf<T>) gprtComputeCreate(context, module, programName, sizeof(T));
 }
 
 GPRT_API void
 gprtComputeDestroy(GPRTCompute compute);
 
 template<typename T> void
-gprtComputeDestroy(GPRTComputeT<T> compute) {
+gprtComputeDestroy(GPRTComputeOf<T> compute) {
   gprtComputeDestroy((GPRTCompute)compute); 
 }
 
@@ -390,7 +390,7 @@ GPRT_API void *
 gprtComputeGetPointer(GPRTCompute compute, int deviceID GPRT_IF_CPP(=0));
 
 template<typename T> T*
-gprtComputeGetPointer(GPRTComputeT<T> compute) {
+gprtComputeGetPointer(GPRTComputeOf<T> compute) {
   return (T*)gprtComputeGetPointer((GPRTCompute)compute); 
 }
 
@@ -401,17 +401,17 @@ gprtRayGenCreate(GPRTContext  context,
                  size_t      recordSize);
 
 template<typename T>
-GPRTRayGenT<T> gprtRayGenCreate(GPRTContext  context,
+GPRTRayGenOf<T> gprtRayGenCreate(GPRTContext  context,
                  GPRTModule module,
                  const char *programName) {
-  return (GPRTRayGenT<T>)gprtRayGenCreate(context, module, programName, sizeof(T));
+  return (GPRTRayGenOf<T>)gprtRayGenCreate(context, module, programName, sizeof(T));
 }
 
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen rayGen);
 
 template<typename T>
-void gprtRayGenDestroy(GPRTRayGenT<T> rayGen) {
+void gprtRayGenDestroy(GPRTRayGenOf<T> rayGen) {
   gprtRayGenDestroy((GPRTRayGen)rayGen);
 }
 
@@ -419,7 +419,7 @@ GPRT_API void *
 gprtRayGenGetPointer(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T>
-T* gprtRayGenGetPointer(GPRTRayGenT<T> rayGen, int deviceID GPRT_IF_CPP(=0)) {
+T* gprtRayGenGetPointer(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(=0)) {
   return (T*)gprtRayGenGetPointer((GPRTRayGen)rayGen, deviceID);
 }
 
@@ -430,10 +430,10 @@ gprtMissCreate(GPRTContext  context,
                    size_t      recordSize);
 
 template<typename T>
-GPRTMissT<T> gprtMissCreate(GPRTContext  context,
+GPRTMissOf<T> gprtMissCreate(GPRTContext  context,
                  GPRTModule module,
                  const char *programName) {
-  return (GPRTMissT<T>)gprtMissCreate(context, module, programName, sizeof(T));
+  return (GPRTMissOf<T>)gprtMissCreate(context, module, programName, sizeof(T));
 }
 
 /*! sets the given miss program for the given ray type */
@@ -445,7 +445,7 @@ gprtMissSet(GPRTContext  context,
 template<typename T> void
 gprtMissSet(GPRTContext  context,
                int rayType,
-               GPRTMissT<T> missProgToUse) {
+               GPRTMissOf<T> missProgToUse) {
   gprtMissSet(context, rayType, (GPRTMiss)missProgToUse);
 }
 
@@ -453,7 +453,7 @@ GPRT_API void
 gprtMissDestroy(GPRTMiss missProg);
 
 template<typename T>
-void gprtMissDestroy(GPRTMissT<T> missProg) {
+void gprtMissDestroy(GPRTMissOf<T> missProg) {
   gprtMissDestroy((GPRTMiss)missProg);
 }
 
@@ -461,7 +461,7 @@ GPRT_API void *
 gprtMissGetPointer(GPRTMiss missProg, int deviceID GPRT_IF_CPP(=0));
 
 template<typename T> T*
-gprtMissGetPointer(GPRTMissT<T> missProg, int deviceID GPRT_IF_CPP(=0)) {
+gprtMissGetPointer(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(=0)) {
   return (T*)gprtMissGetPointer((GPRTMiss)missProg, deviceID);
 }
 
@@ -487,7 +487,7 @@ gprtAABBAccelCreate(GPRTContext context,
 template<typename T> GPRTAccel
 gprtAABBAccelCreate(GPRTContext  context,
                     size_t       numGeometries,
-                    GPRTGeomT<T> *arrayOfChildGeoms,
+                    GPRTGeomOf<T> *arrayOfChildGeoms,
                     unsigned int flags GPRT_IF_CPP(=0)) {
   return gprtAABBAccelCreate(context, numGeometries, (GPRTGeom*) arrayOfChildGeoms, flags);
 }
@@ -515,7 +515,7 @@ gprtTrianglesAccelCreate(GPRTContext context,
 template <typename T> GPRTAccel
 gprtTrianglesAccelCreate(GPRTContext context,
                             size_t     numGeometries,
-                            GPRTGeomT<T>   *arrayOfChildGeoms,
+                            GPRTGeomOf<T>   *arrayOfChildGeoms,
                             unsigned int flags GPRT_IF_CPP(=0)) {
   return gprtTrianglesAccelCreate(context, numGeometries, (GPRTGeom*)arrayOfChildGeoms, flags);
 }
@@ -570,7 +570,7 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
 
 template <typename T> void
 gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
-                               GPRTBufferT<T> transforms,
+                               GPRTBufferOf<T> transforms,
                                size_t stride,
                                size_t offset) {
   gprtInstanceAccelSetTransforms(instanceAccel, (GPRTBuffer)transforms, stride, offset);
@@ -582,7 +582,7 @@ gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
 
 template <typename T> void
 gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel,
-                                  GPRTBufferT<T> transforms) {
+                                  GPRTBufferOf<T> transforms) {
   gprtInstanceAccelSet3x4Transforms((GPRTAccel)instanceAccel, (GPRTBuffer)transforms);
 }
 
@@ -592,7 +592,7 @@ gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
 
 template <typename T> void
 gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel,
-                                  GPRTBufferT<T> transforms) {
+                                  GPRTBufferOf<T> transforms) {
   gprtInstanceAccelSet4x4Transforms(instanceAccel, (GPRTBuffer)transforms);
 }
 
@@ -624,17 +624,17 @@ gprtGeomTypeCreate(GPRTContext  context,
                    GPRTGeomKind kind,
                    size_t       recordSize);
 
-template <typename T> GPRTGeomTypeT<T>
+template <typename T> GPRTGeomTypeOf<T>
 gprtGeomTypeCreate(GPRTContext  context,
                    GPRTGeomKind kind) {
-  return (GPRTGeomTypeT<T>)gprtGeomTypeCreate(context, kind, sizeof(T));
+  return (GPRTGeomTypeOf<T>)gprtGeomTypeCreate(context, kind, sizeof(T));
 }
 
 GPRT_API void
 gprtGeomTypeDestroy(GPRTGeomType geomType);
 
 template <typename T> void
-gprtGeomTypeDestroy(GPRTGeomTypeT<T> geomType) {
+gprtGeomTypeDestroy(GPRTGeomTypeOf<T> geomType) {
   gprtGeomTypeDestroy((GPRTGeomType) geomType);
 }
 
@@ -645,7 +645,7 @@ gprtGeomTypeSetClosestHitProg(GPRTGeomType type,
                           const char *progName);
 
 template <typename T> void
-gprtGeomTypeSetClosestHitProg(GPRTGeomTypeT<T> type, 
+gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, 
                           int rayType,
                           GPRTModule module,
                           const char *progName) {
@@ -659,7 +659,7 @@ gprtGeomTypeSetAnyHitProg(GPRTGeomType type,
                       const char *progName);
 
 template <typename T> void
-gprtGeomTypeSetAnyHitProg(GPRTGeomTypeT<T> type, 
+gprtGeomTypeSetAnyHitProg(GPRTGeomTypeOf<T> type, 
                           int rayType,
                           GPRTModule module,
                           const char *progName) {
@@ -673,7 +673,7 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType type,
                              const char *progName);
 
 template <typename T> void
-gprtGeomTypeSetIntersectionProg(GPRTGeomTypeT<T> type, 
+gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, 
                           int rayType,
                           GPRTModule module,
                           const char *progName) {
@@ -686,10 +686,10 @@ GPRT_API GPRTBuffer
 gprtHostBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
-template <typename T> GPRTBufferT<T>
+template <typename T> GPRTBufferOf<T>
 gprtHostBufferCreate(GPRTContext context, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTBufferT<T>)gprtHostBufferCreate(context, sizeof(T), count, init); 
+ return (GPRTBufferOf<T>)gprtHostBufferCreate(context, sizeof(T), count, init); 
 }
 
 /*! Creates a buffer that uses memory located on the device; that memory is 
@@ -699,10 +699,10 @@ GPRT_API GPRTBuffer
 gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
-template <typename T> GPRTBufferT<T>
+template <typename T> GPRTBufferOf<T>
 gprtDeviceBufferCreate(GPRTContext context, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTBufferT<T>)gprtDeviceBufferCreate(context, sizeof(T), count, init); 
+ return (GPRTBufferOf<T>)gprtDeviceBufferCreate(context, sizeof(T), count, init); 
 }
 
 /*! Creates a buffer that uses memory located on the device; that memory is 
@@ -712,10 +712,10 @@ GPRT_API GPRTBuffer
 gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr));
 
-template <typename T> GPRTBufferT<T>
+template <typename T> GPRTBufferOf<T>
 gprtSharedBufferCreate(GPRTContext context, size_t count, 
   const void* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTBufferT<T>)gprtSharedBufferCreate(context, sizeof(T), count, init); 
+ return (GPRTBufferOf<T>)gprtSharedBufferCreate(context, sizeof(T), count, init); 
 }
 
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any
@@ -724,7 +724,7 @@ GPRT_API void
 gprtBufferDestroy(GPRTBuffer buffer);
 
 template <typename T> void
-gprtBufferDestroy( GPRTBufferT<T> buffer) {
+gprtBufferDestroy( GPRTBufferOf<T> buffer) {
  gprtBufferDestroy((GPRTBuffer)buffer);
 }
 
@@ -743,7 +743,7 @@ GPRT_API void *
 gprtBufferGetPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T> T*
-gprtBufferGetPointer( GPRTBufferT<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
+gprtBufferGetPointer( GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
  return (T*)gprtBufferGetPointer((GPRTBuffer)buffer, deviceID);
 }
 
@@ -751,7 +751,7 @@ GPRT_API void
 gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T> void
-gprtBufferMap( GPRTBufferT<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
+gprtBufferMap( GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
  gprtBufferMap((GPRTBuffer)buffer, deviceID);
 }
 
@@ -759,7 +759,7 @@ GPRT_API void
 gprtBufferUnmap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T> void
-gprtBufferUnmap( GPRTBufferT<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
+gprtBufferUnmap( GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
  gprtBufferUnmap((GPRTBuffer)buffer, deviceID);
 }
 
@@ -767,7 +767,7 @@ GPRT_API gprt::Buffer
 gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(=0));
 
 template <typename T> gprt::Buffer
-gprtBufferGetHandle( GPRTBufferT<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
+gprtBufferGetHandle( GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
  return gprtBufferGetHandle((GPRTBuffer)buffer, deviceID);
 }
 
@@ -780,7 +780,7 @@ gprtBufferGetHandle( GPRTBufferT<T> buffer, int deviceID GPRT_IF_CPP(=0)) {
 GPRT_API void gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 
 template <typename T> void
-gprtBufferPresent( GPRTContext context, GPRTBufferT<T> buffer) {
+gprtBufferPresent( GPRTContext context, GPRTBufferOf<T> buffer) {
  gprtBufferPresent(context, (GPRTBuffer)buffer);
 }
 
@@ -791,7 +791,7 @@ GPRT_API void gprtBufferSaveImage(GPRTBuffer buffer,
   uint32_t width, uint32_t height, const char *imageName);
 
 template <typename T> void
-gprtBufferSaveImage( GPRTBufferT<T> buffer,
+gprtBufferSaveImage( GPRTBufferOf<T> buffer,
   uint32_t width, uint32_t height, const char *imageName) {
  gprtBufferSaveImage((GPRTBuffer)buffer, width, height, imageName);
 }
@@ -800,7 +800,7 @@ GPRT_API void
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, int dims_x);
 
 template<typename T> void
-gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenT<T> rayGen, int dims_x) {
+gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x) {
   gprtRayGenLaunch1D(context, (GPRTRayGen)rayGen, dims_x);
 }
 
@@ -810,7 +810,7 @@ GPRT_API void
 gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y);
 
 template<typename T> void
-gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenT<T> rayGen, int dims_x, int dims_y) {
+gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x, int dims_y) {
   gprtRayGenLaunch2D(context, (GPRTRayGen)rayGen, dims_x, dims_y);
 }
 
@@ -819,7 +819,7 @@ GPRT_API void
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y, int dims_z);
 
 template<typename T> void
-gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenT<T> rayGen, int dims_x, int dims_y, int dims_z) {
+gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x, int dims_y, int dims_z) {
   gprtRayGenLaunch3D(context, (GPRTRayGen)rayGen, dims_x, dims_y, dims_z);
 }
 
@@ -827,7 +827,7 @@ GPRT_API void
 gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, int dims_x);
 
 template<typename T> void
-gprtComputeLaunch1D(GPRTContext context, GPRTComputeT<T> compute, int dims_x) {
+gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x) {
   gprtComputeLaunch1D(context, (GPRTCompute)compute, dims_x);
 }
 
@@ -835,7 +835,7 @@ GPRT_API void
 gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, int dims_x, int dims_y);
 
 template<typename T> void
-gprtComputeLaunch2D(GPRTContext context, GPRTComputeT<T> compute, int dims_x, int dims_y) {
+gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x, int dims_y) {
   gprtComputeLaunch2D(context, (GPRTCompute)compute, dims_x, dims_y);
 }
 
@@ -843,7 +843,7 @@ GPRT_API void
 gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, int dims_x, int dims_y, int dims_z);
 
 template<typename T> void
-gprtComputeLaunch3D(GPRTContext context, GPRTComputeT<T> compute, int dims_x, int dims_y, int dims_z) {
+gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x, int dims_y, int dims_z) {
   gprtComputeLaunch3D(context, (GPRTCompute)compute, dims_x, dims_y, dims_z);
 }
 

@@ -74,7 +74,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeT<AABBGeomData> aabbGeomType =
+  GPRTGeomTypeOf<AABBGeomData> aabbGeomType =
       gprtGeomTypeCreate<AABBGeomData>(context,
                                        GPRT_AABBS /* <- This is new! */);
   gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
@@ -83,18 +83,18 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferT<uint32_t> frameBuffer =
+  GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
@@ -112,9 +112,9 @@ int main(int ac, char **av) {
   // Create our AABB geometry. Every AABB is defined using two float3's. The
   // first float3 defines the bottom lower left near corner, and the second
   // float3 defines the upper far right corner.
-  GPRTBufferT<float3> aabbPositionsBuffer =
+  GPRTBufferOf<float3> aabbPositionsBuffer =
       gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
-  GPRTGeomT<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
+  GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
   // Note, we must create an "AABB" accel rather than a triangles accel.

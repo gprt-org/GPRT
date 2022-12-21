@@ -71,25 +71,25 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up vertex program to animate vertices
   // -------------------------------------------------------
-  GPRTComputeT<TrianglesGeomData> vertexProgram =
+  GPRTComputeOf<TrianglesGeomData> vertexProgram =
       gprtComputeCreate<TrianglesGeomData>(context, module, "Vertex");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -104,12 +104,12 @@ int main(int ac, char **av) {
   // them in on the device by using our vertex program.
   unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
   unsigned int numVertices = 3 * numTriangles;
-  GPRTBufferT<float3> vertexBuffer =
+  GPRTBufferOf<float3> vertexBuffer =
       gprtDeviceBufferCreate<float3>(context, numVertices, nullptr);
-  GPRTBufferT<uint3> indexBuffer =
+  GPRTBufferOf<uint3> indexBuffer =
       gprtDeviceBufferCreate<uint3>(context, numTriangles, nullptr);
 
-  GPRTGeomT<TrianglesGeomData> trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
 
   // It is _okay_ to give our triangles geometry unpopulated buffers here
   // for the vertices and indices, so long as they're filled in before
@@ -151,7 +151,7 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferT<uint32_t> frameBuffer =
+  GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer

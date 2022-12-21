@@ -47,12 +47,12 @@ extern GPRTProgram s07_deviceCode;
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
-  GPRTBufferT<float3> vertexBuffer;
-  GPRTBufferT<uint3> indexBuffer;
-  GPRTGeomT<TrianglesGeomData> geometry;
+  GPRTBufferOf<float3> vertexBuffer;
+  GPRTBufferOf<uint3> indexBuffer;
+  GPRTGeomOf<TrianglesGeomData> geometry;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeT<TrianglesGeomData> geomType, T generator, float3 color,
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color,
        float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -119,19 +119,19 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   LOG("building geometries ...");
 
@@ -156,7 +156,7 @@ int main(int ac, char **av) {
   Mesh<CappedCylinderMesh> floorMesh(
       context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
       float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeomT<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
+  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
                                  torusMesh3.geometry, floorMesh.geometry};
   GPRTAccel trianglesBLAS =
       gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
@@ -169,7 +169,7 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferT<uint32_t> frameBuffer =
+  GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer

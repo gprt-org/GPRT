@@ -83,25 +83,25 @@ int main(int ac, char **av) {
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.
-  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType = 
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = 
     gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // We'll also need a ray generation program.
-  GPRTRayGenT<RayGenData> rayGen = 
+  GPRTRayGenOf<RayGenData> rayGen = 
     gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Finally, we need a "miss" program, which will be called when
   // a ray misses all triangles. Just like geometry declarations
   // and ray tracing programs, miss programs have parameters
-  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferT<uint32_t> frameBuffer =
+  GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
@@ -118,13 +118,13 @@ int main(int ac, char **av) {
 
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
-  GPRTBufferT<float3> vertexBuffer =
+  GPRTBufferOf<float3> vertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferT<int3> indexBuffer =
+  GPRTBufferOf<int3> indexBuffer =
       gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeomT<TrianglesGeomData> trianglesGeom = 
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
     gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
