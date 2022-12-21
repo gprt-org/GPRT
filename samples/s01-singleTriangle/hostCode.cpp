@@ -149,7 +149,7 @@ int main(int ac, char **av) {
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when
   // we go to trace our rays.
-  raygenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
   // build the pipeline and shader binding table
