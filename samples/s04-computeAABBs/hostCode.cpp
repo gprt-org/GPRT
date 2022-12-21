@@ -83,8 +83,8 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomType sphereGeomType = gprtGeomTypeCreate(
-      context, GPRT_AABBS, sizeof(SphereGeomData));
+  GPRTGeomTypeT<SphereGeomData> sphereGeomType = 
+      gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
   gprtGeomTypeSetClosestHitProg(sphereGeomType, 0, module, "SphereClosestHit");
   gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module,
                                   "SphereIntersection");
@@ -92,20 +92,18 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up sphere bounding box compute program
   // -------------------------------------------------------
-  GPRTCompute boundsProgram =
-      gprtComputeCreate(context, module, "SphereBounds",
-                        sizeof(SphereBoundsData));
+  GPRTComputeT<SphereBoundsData> boundsProgram =
+      gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
-                                       sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -119,21 +117,21 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), NUM_VERTICES, vertices);
-  GPRTBuffer radiusBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float), NUM_VERTICES, radii);
-  GPRTBuffer aabbPositionsBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), NUM_VERTICES * 2, nullptr);
+  GPRTBufferT<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferT<float> radiusBuffer =
+      gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
+  GPRTBufferT<float3> aabbPositionsBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
 
-  GPRTGeom aabbGeom = gprtGeomCreate(context, sphereGeomType);
+  GPRTGeomT<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
-  SphereGeomData* geomData = (SphereGeomData*) gprtGeomGetPointer(aabbGeom); 
+  SphereGeomData* geomData = gprtGeomGetPointer(aabbGeom); 
   geomData->vertex = gprtBufferGetHandle(vertexBuffer);
   geomData->radius = gprtBufferGetHandle(radiusBuffer);
 
-  SphereBoundsData *boundsData = (SphereBoundsData*) gprtComputeGetPointer(boundsProgram);
+  SphereBoundsData *boundsData = gprtComputeGetPointer(boundsProgram);
   boundsData->vertex = gprtBufferGetHandle(vertexBuffer);
   boundsData->radius = gprtBufferGetHandle(radiusBuffer);
   boundsData->aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
@@ -161,13 +159,13 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
   rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -236,7 +234,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

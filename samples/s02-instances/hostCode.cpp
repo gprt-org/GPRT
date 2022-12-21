@@ -92,52 +92,53 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomType trianglesGeomType =
-      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
+  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   LOG("building geometries ...");
 
   // Create our cube mesh
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), NUM_VERTICES, vertices);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(int3), NUM_INDICES, indices);
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+  GPRTBufferT<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferT<int3> indexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTGeomT<TrianglesGeomData> trianglesGeom = 
+      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
   // Here, we additionally set the vertex and index parameters of our goemetry
   // so that we can access these buffers when a ray hits the mesh
-  TrianglesGeomData *triangleData = (TrianglesGeomData*) gprtGeomGetPointer(trianglesGeom);
+  TrianglesGeomData *triangleData = gprtGeomGetPointer(trianglesGeom);
   triangleData->vertex = gprtBufferGetHandle(vertexBuffer);
   triangleData->index = gprtBufferGetHandle(indexBuffer);
 
@@ -156,8 +157,8 @@ int main(int ac, char **av) {
   // Then, we create a transform buffer, one transform per instance.
   // These transforms are defined at the top of our program, in the "transforms"
   // array referenced by the last parameter here.
-  GPRTBuffer transformBuffer = gprtDeviceBufferCreate(
-      context, sizeof(float3x4), NUM_INSTANCES, transforms);
+  GPRTBufferT<float3x4> transformBuffer = 
+    gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
 
   // Finally, we create a top level acceleration structure here.
   GPRTAccel world =
@@ -235,7 +236,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

@@ -71,25 +71,25 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomType trianglesGeomType =
-      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
+  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up vertex program to animate vertices
   // -------------------------------------------------------
-  GPRTCompute vertexProgram =
-      gprtComputeCreate(context, module, "Vertex", sizeof(TrianglesGeomData));
+  GPRTComputeT<TrianglesGeomData> vertexProgram =
+      gprtComputeCreate<TrianglesGeomData>(context, module, "Vertex");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "RayGen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -104,12 +104,12 @@ int main(int ac, char **av) {
   // them in on the device by using our vertex program.
   unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
   unsigned int numVertices = 3 * numTriangles;
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), numVertices, nullptr);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint3), numTriangles, nullptr);
+  GPRTBufferT<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, numVertices, nullptr);
+  GPRTBufferT<uint3> indexBuffer =
+      gprtDeviceBufferCreate<uint3>(context, numTriangles, nullptr);
 
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+  GPRTGeomT<TrianglesGeomData> trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
 
   // It is _okay_ to give our triangles geometry unpopulated buffers here
   // for the vertices and indices, so long as they're filled in before
@@ -118,14 +118,14 @@ int main(int ac, char **av) {
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles);
 
   // Parameters for the geometry when a ray hits it.
-  TrianglesGeomData *geomData = (TrianglesGeomData*) gprtGeomGetPointer(trianglesGeom);
+  TrianglesGeomData *geomData = gprtGeomGetPointer(trianglesGeom);
   geomData->vertex = gprtBufferGetHandle(vertexBuffer);
   geomData->index = gprtBufferGetHandle(indexBuffer);
   geomData->now = 0.f;
   geomData->gridSize = GRID_SIDE_LENGTH;
   
   // Parameters for our vertex program that'll animate our vertices
-  TrianglesGeomData *vertexData = (TrianglesGeomData*) gprtComputeGetPointer(vertexProgram);
+  TrianglesGeomData *vertexData = gprtComputeGetPointer(vertexProgram);
   vertexData->vertex = gprtBufferGetHandle(vertexBuffer);
   vertexData->index = gprtBufferGetHandle(indexBuffer);
   vertexData->now = 0.f;
@@ -151,16 +151,16 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 

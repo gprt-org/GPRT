@@ -47,12 +47,12 @@ extern GPRTProgram s07_deviceCode;
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
-  GPRTBuffer vertexBuffer;
-  GPRTBuffer indexBuffer;
-  GPRTGeom geometry;
+  GPRTBufferT<float3> vertexBuffer;
+  GPRTBufferT<uint3> indexBuffer;
+  GPRTGeomT<TrianglesGeomData> geometry;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color,
+  Mesh(GPRTContext context, GPRTGeomTypeT<TrianglesGeomData> geomType, T generator, float3 color,
        float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -71,12 +71,12 @@ template <typename T> struct Mesh {
       triGenerator.next();
     }
 
-    vertexBuffer = gprtDeviceBufferCreate(context, sizeof(float3), vertices.size(),
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
                                           vertices.data());
-    indexBuffer = gprtDeviceBufferCreate(context, sizeof(uint3), indices.size(),
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
                                          indices.data());
     geometry = gprtGeomCreate(context, geomType);
-    TrianglesGeomData *geomData = (TrianglesGeomData*)gprtGeomGetPointer(geometry);
+    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
@@ -119,19 +119,19 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomType trianglesGeomType =
-      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
+  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType =
+      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "raygen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   LOG("building geometries ...");
 
@@ -156,7 +156,7 @@ int main(int ac, char **av) {
   Mesh<CappedCylinderMesh> floorMesh(
       context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
       float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeom> geoms = {torusMesh1.geometry, torusMesh2.geometry,
+  std::vector<GPRTGeomT<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
                                  torusMesh3.geometry, floorMesh.geometry};
   GPRTAccel trianglesBLAS =
       gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
@@ -169,17 +169,17 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData =gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
   rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -246,7 +246,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

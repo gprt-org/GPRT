@@ -58,13 +58,13 @@ float cosFovy = 0.3f;
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
-  GPRTBuffer vertexBuffer;
-  GPRTBuffer indexBuffer;
-  GPRTGeom geometry;
+  GPRTBufferT<float3> vertexBuffer;
+  GPRTBufferT<uint3> indexBuffer;
+  GPRTGeomT<TrianglesGeomData> geometry;
   GPRTAccel accel;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomType geomType, T generator) {
+  Mesh(GPRTContext context, GPRTGeomTypeT<TrianglesGeomData> geomType, T generator) {
     // Use the generator to generate vertices and indices
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -82,15 +82,15 @@ template <typename T> struct Mesh {
     }
 
     // Upload those to the device, create the geometry
-    vertexBuffer = gprtDeviceBufferCreate(context, sizeof(float3), vertices.size(),
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
                                           vertices.data());
-    indexBuffer = gprtDeviceBufferCreate(context, sizeof(uint3), indices.size(),
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
                                          indices.data());
     geometry = gprtGeomCreate(context, geomType);
 
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
-    TrianglesGeomData *geomData = (TrianglesGeomData*) gprtGeomGetPointer(geometry);
+    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
     geomData->index = gprtBufferGetHandle(indexBuffer);
     
@@ -127,27 +127,26 @@ int main(int ac, char **av) {
   // Setup geometry types
   // -------------------------------------------------------
 
-  GPRTGeomType trianglesGeomType = gprtGeomTypeCreate(
-      context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
+  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType = 
+    gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up instance transform program to animate instances
   // -------------------------------------------------------
-  GPRTCompute transformProgram = gprtComputeCreate(
-      context, module, "Transform", sizeof(TransformData));
+  GPRTComputeT<TransformData> transformProgram = 
+    gprtComputeCreate<TransformData>(context, module, "Transform");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "RayGen",
-                                       sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMiss miss =
-      gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss =
+      gprtMissCreate<MissProgData>(context, module, "miss");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -181,14 +180,14 @@ int main(int ac, char **av) {
   // acceleration structure an unpopulated buffer of transforms, so long as
   // those transforms are filled in before we go to build our acceleration
   // structure.
-  GPRTBuffer transformBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3x4), numInstances, nullptr);
+  GPRTBufferT<float3x4> transformBuffer =
+      gprtDeviceBufferCreate<float3x4>(context, numInstances, nullptr);
   GPRTAccel world =
       gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
 
   // Parameters for our transform program that'll animate our transforms
-  TransformData* transformData = (TransformData*)gprtComputeGetPointer(transformProgram);
+  TransformData* transformData = gprtComputeGetPointer(transformProgram);
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = numInstances;
   transformData->now = 0.f;
@@ -212,12 +211,12 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -285,7 +284,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

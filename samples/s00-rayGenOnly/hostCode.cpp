@@ -73,8 +73,8 @@ int main(int ac, char **av) {
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // Allocate room for one RayGen shader, create it, and hold on to it with
   // the "gprt" context
-  GPRTRayGen rayGen =
-      gprtRayGenCreate(gprt, module, "simpleRayGen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen =
+      gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(gprt);
@@ -86,16 +86,14 @@ int main(int ac, char **av) {
   // Our framebuffer here will be used to hold pixel color values
   // that we'll present to the window / save to an image
   LOG("allocating frame buffer");
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(gprt,
-                             /*size: */ sizeof(uint32_t),
-                             /*count:*/ fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(gprt, fbSize.x * fbSize.y);
 
   // ------------------------------------------------------------------
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  RayGenData *data = (RayGenData*)gprtRayGenGetPointer(rayGen);
+  RayGenData *data = gprtRayGenGetPointer(rayGen);
   data->color0 = float3(0.1f, 0.1f, 0.1f);
   data->color1 = float3(0.0f, 0.0f, 0.0f); 
   data->fbPtr = gprtBufferGetHandle(frameBuffer);

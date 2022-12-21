@@ -74,37 +74,36 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomType aabbGeomType =
-      gprtGeomTypeCreate(context,
-                         GPRT_AABBS, // <- This is new!
-                         sizeof(AABBGeomData));
+  GPRTGeomTypeT<AABBGeomData> aabbGeomType =
+      gprtGeomTypeCreate<AABBGeomData>(context,
+                                       GPRT_AABBS /* <- This is new! */);
   gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
   gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -113,9 +112,9 @@ int main(int ac, char **av) {
   // Create our AABB geometry. Every AABB is defined using two float3's. The
   // first float3 defines the bottom lower left near corner, and the second
   // float3 defines the upper far right corner.
-  GPRTBuffer aabbPositionsBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), 2, aabbPositions);
-  GPRTGeom aabbGeom = gprtGeomCreate(context, aabbGeomType);
+  GPRTBufferT<float3> aabbPositionsBuffer =
+      gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
+  GPRTGeomT<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
   // Note, we must create an "AABB" accel rather than a triangles accel.
@@ -191,7 +190,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

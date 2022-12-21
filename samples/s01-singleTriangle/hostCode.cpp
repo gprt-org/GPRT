@@ -83,34 +83,34 @@ int main(int ac, char **av) {
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.
-  GPRTGeomType trianglesGeomType = 
-    gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData));
+  GPRTGeomTypeT<TrianglesGeomData> trianglesGeomType = 
+    gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // We'll also need a ray generation program.
-  GPRTRayGen rayGen = 
-    gprtRayGenCreate(context, module, "simpleRayGen", sizeof(RayGenData));
+  GPRTRayGenT<RayGenData> rayGen = 
+    gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Finally, we need a "miss" program, which will be called when
   // a ray misses all triangles. Just like geometry declarations
   // and ray tracing programs, miss programs have parameters
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData));
+  GPRTMissT<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferT<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = (RayGenData*) gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = (MissProgData*) gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -118,13 +118,14 @@ int main(int ac, char **av) {
 
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(float3), NUM_VERTICES, vertices);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, sizeof(int3), NUM_INDICES, indices);
+  GPRTBufferT<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferT<int3> indexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+  GPRTGeomT<TrianglesGeomData> trianglesGeom = 
+    gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
@@ -222,7 +223,7 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
