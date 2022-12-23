@@ -31,7 +31,8 @@ struct Payload {
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
-  float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(record.fbSize);
+  uint2 fbSize = DispatchRaysDimensions().xy;
+  float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -51,8 +52,8 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
            payload                // the payload IO
   );
 
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
 }
 
 struct Attribute {
