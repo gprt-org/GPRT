@@ -22,23 +22,24 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-struct SphereBoundsData {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
+struct TransformData {
+  /*! array/buffer of instance transforms */
+  alignas(16) gprt::Buffer transforms;
+  /*! the number of transforms stored in the buffer */
+  alignas(4) int numTransforms;
+  /*! the current time */
+  alignas(4) float now;
 };
 
-/* variables for the triangle mesh geometry */
-struct SphereGeomData {
+struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
+  alignas(16) gprt::Buffer index;
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *
+  alignas(16) gprt::Buffer vertex;
+  /*! the current time */
+  alignas(4) float now;
+  /*! the number of triangles along a row */
+  alignas(4) unsigned int gridSize;
 };
 
 struct RayGenData {

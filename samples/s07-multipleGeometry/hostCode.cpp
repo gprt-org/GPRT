@@ -29,6 +29,10 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
+// for generating meshes
+#include <generator.hpp>
+using namespace generator;
+
 #define LOG(message)                                                           \
   std::cout << GPRT_TERMINAL_BLUE;                                             \
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
@@ -38,76 +42,130 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s02_deviceCode;
+extern GPRTProgram s07_deviceCode;
 
-// Vertices and indices of a cube
-const int NUM_VERTICES = 8;
-float3 vertices[NUM_VERTICES] = {{-1.f, -1.f, -1.f}, {+1.f, -1.f, -1.f},
-                                 {-1.f, +1.f, -1.f}, {+1.f, +1.f, -1.f},
-                                 {-1.f, -1.f, +1.f}, {+1.f, -1.f, +1.f},
-                                 {-1.f, +1.f, +1.f}, {+1.f, +1.f, +1.f}};
+template <typename T> struct Mesh {
+  std::vector<float3> vertices;
+  std::vector<uint3> indices;
+  GPRTBufferOf<float3> vertexBuffer;
+  GPRTBufferOf<uint3> indexBuffer;
+  GPRTGeomOf<TrianglesGeomData> geometry;
 
-const int NUM_INDICES = 12;
-int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4},
-                             {0, 4, 5}, {0, 5, 1}, {2, 3, 7}, {2, 7, 6},
-                             {1, 5, 7}, {1, 7, 3}, {4, 0, 2}, {4, 2, 6}};
+  Mesh(){};
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color,
+       float4x4 transform) {
+    auto vertGenerator = generator.vertices();
+    auto triGenerator = generator.triangles();
+    while (!vertGenerator.done()) {
+      auto vertex = vertGenerator.generate();
+      auto position = vertex.position;
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1],
+                                       vertex.position[2], 1.0));
+      vertices.push_back(p.xyz());
+      vertGenerator.next();
+    }
+    while (!triGenerator.done()) {
+      Triangle triangle = triGenerator.generate();
+      auto vertices = triangle.vertices;
+      indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
+      triGenerator.next();
+    }
 
-// Several affine transformation matrices to place instances of our cube in the
-// world. The first, second, third and third column represent "right", "up", and
-// "forward" basis respectively. The last column represents the position.
-const int NUM_INSTANCES = 3;
-float transforms[NUM_INSTANCES][12] = {
-    {0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-    {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-    {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
+                                          vertices.data());
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
+                                         indices.data());
+    geometry = gprtGeomCreate(context, geomType);
+    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
+    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
+    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
+    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
+    geomData->index = gprtBufferGetHandle(indexBuffer);
+    geomData->color = color;
+  };
+
+  void cleanup() {
+    gprtGeomDestroy(geometry);
+    gprtBufferDestroy(vertexBuffer);
+    gprtBufferDestroy(indexBuffer);
+  };
+};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
-// final image output
-const char *outFileName = "s02-instances.png";
+const char *outFileName = "s07-multipleGeometry.png";
 
-// Initial camera parameters
-float3 lookFrom = {-0.f, 2.f, -3.f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 1.f, 0.f};
-float cosFovy = 0.66f;
+float3 lookFrom = {10.f, 10.0f, 10.f};
+float3 lookAt = {0.f, 0.f, 1.f};
+float3 lookUp = {0.f, 0.f, -1.f};
+float cosFovy = 0.4f;
 
 #include <iostream>
 int main(int ac, char **av) {
-  // This example is very similar to the last, but with one key difference.
-  // Now, we create multiple "instances", or copies, of the same bottom level
-  // acceleration structure in one top level tree.
+  // This example serves to demonstrate that multiple geometry can be placed
+  // in the same bottom level acceleration structure.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S02 Instances");
-  GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s02_deviceCode);
+  gprtRequestWindow(fbSize.x, fbSize.y, "S07 Multiple Geometry");
+  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTModule module = gprtModuleCreate(context, s07_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
 
   // -------------------------------------------------------
-  // declare geometry type
+  // Setup geometry types
   // -------------------------------------------------------
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
+
+  // -------------------------------------------------------
+  // set up ray gen program
+  // -------------------------------------------------------
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // -------------------------------------------------------
-  // set up ray gen program
-  // -------------------------------------------------------
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  LOG("building geometries ...");
+
+// ------------------------------------------------------------------
+// Meshes
+// ------------------------------------------------------------------
+#ifndef M_PI
+#define M_PI 3.14
+#endif
+  Mesh<TorusKnotMesh> torusMesh1(
+      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh2(
+      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh3(
+      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
+      translation_matrix(
+          float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
+  Mesh<CappedCylinderMesh> floorMesh(
+      context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
+      float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
+                                 torusMesh3.geometry, floorMesh.geometry};
+  GPRTAccel trianglesBLAS =
+      gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
+  gprtAccelBuild(context, trianglesBLAS);
+  gprtAccelBuild(context, trianglesTLAS);
 
   // ##################################################################
-  // set the parameters for those kernels
+  // set the parameters for our kernels
   // ##################################################################
 
   // Setup pixel frame buffer
@@ -115,66 +173,18 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData =gprtRayGenGetPointer(rayGen);
   rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
   rayGenData->fbSize = fbSize;
+  rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
-
-  // Create our cube mesh
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
-      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-
-  // Here, we additionally set the vertex and index parameters of our goemetry
-  // so that we can access these buffers when a ray hits the mesh
-  TrianglesGeomData *triangleData = gprtGeomGetPointer(trianglesGeom);
-  triangleData->vertex = gprtBufferGetHandle(vertexBuffer);
-  triangleData->index = gprtBufferGetHandle(indexBuffer);
-
-  // Place that single cube mesh in a bottom level acceleration structure
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-
-  // We will now create three instances of that cube mesh. On the gpu,
-  // we will use the "instance ID" to determine what color each cube should be.
-
-  // First, we create a list of BLAS objects
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel,
-                                                trianglesAccel};
-
-  // Then, we create a transform buffer, one transform per instance.
-  // These transforms are defined at the top of our program, in the "transforms"
-  // array referenced by the last parameter here.
-  GPRTBufferOf<float3x4> transformBuffer = 
-    gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
-
-  // Finally, we create a top level acceleration structure here.
-  GPRTAccel world =
-      gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
-  // Similar to how we set the vertex and index buffers on triangle primitives,
-  // we set the transforms buffer here for instance primitives
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
-
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
-  rayGenData->world = gprtAccelGetHandle(world);
-  
   // ##################################################################
-  // build the pipeline and shader binding table
+  // build *SBT* required to trace the groups
   // ##################################################################
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
@@ -242,7 +252,6 @@ int main(int ac, char **av) {
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
 
-      // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
@@ -266,15 +275,15 @@ int main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
+  torusMesh1.cleanup();
+  torusMesh2.cleanup();
+  torusMesh3.cleanup();
+  floorMesh.cleanup();
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
-  gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
+  gprtAccelDestroy(trianglesBLAS);
+  gprtAccelDestroy(trianglesTLAS);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);

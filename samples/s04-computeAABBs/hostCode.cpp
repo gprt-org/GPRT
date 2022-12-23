@@ -83,13 +83,8 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTVarDecl sphereGeomVars[] = {
-      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(SphereGeomData, vertex)},
-      {"radius", GPRT_BUFFER, GPRT_OFFSETOF(SphereGeomData, radius)},
-      {"color", GPRT_FLOAT3, GPRT_OFFSETOF(SphereGeomData, color)},
-      {/* sentinel to mark end of list */}};
-  GPRTGeomType sphereGeomType = gprtGeomTypeCreate(
-      context, GPRT_AABBS, sizeof(SphereGeomData), sphereGeomVars, -1);
+  GPRTGeomTypeOf<SphereGeomData> sphereGeomType = 
+      gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
   gprtGeomTypeSetClosestHitProg(sphereGeomType, 0, module, "SphereClosestHit");
   gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module,
                                   "SphereIntersection");
@@ -97,39 +92,18 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up sphere bounding box compute program
   // -------------------------------------------------------
-  GPRTVarDecl computeVars[] = {
-      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData, vertex)},
-      {"radius", GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData, radius)},
-      {"aabbs", GPRT_BUFFER, GPRT_OFFSETOF(SphereBoundsData, aabbs)},
-      {/* sentinel to mark end of list */}};
-  GPRTCompute boundsProgram =
-      gprtComputeCreate(context, module, "SphereBounds",
-                        sizeof(SphereBoundsData), computeVars, -1);
+  GPRTComputeOf<SphereBoundsData> boundsProgram =
+      gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
 
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTVarDecl missVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missVars, -1);
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTVarDecl rayGenVars[] = {
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
-      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
-      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
-      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
-      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
-      {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -143,24 +117,25 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES, vertices);
-  GPRTBuffer radiusBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT, NUM_VERTICES, radii);
-  GPRTBuffer aabbPositionsBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES * 2, nullptr);
+  GPRTBufferOf<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float> radiusBuffer =
+      gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
+  GPRTBufferOf<float3> aabbPositionsBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
 
-  GPRTGeom aabbGeom = gprtGeomCreate(context, sphereGeomType);
+  GPRTGeomOf<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
-  gprtGeomSetBuffer(aabbGeom, "vertex", vertexBuffer);
-  gprtGeomSetBuffer(aabbGeom, "radius", radiusBuffer);
-  gprtGeomSet3f(aabbGeom, "color", 0, 0, 1);
+  SphereGeomData* geomData = gprtGeomGetPointer(aabbGeom); 
+  geomData->vertex = gprtBufferGetHandle(vertexBuffer);
+  geomData->radius = gprtBufferGetHandle(radiusBuffer);
 
-  gprtComputeSetBuffer(boundsProgram, "vertex", vertexBuffer);
-  gprtComputeSetBuffer(boundsProgram, "radius", radiusBuffer);
-  gprtComputeSetBuffer(boundsProgram, "aabbs", aabbPositionsBuffer);
-
+  SphereBoundsData *boundsData = gprtComputeGetPointer(boundsProgram);
+  boundsData->vertex = gprtBufferGetHandle(vertexBuffer);
+  boundsData->radius = gprtBufferGetHandle(radiusBuffer);
+  boundsData->aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
+  
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
@@ -181,14 +156,18 @@ int main(int ac, char **av) {
 
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
-  gprtRayGenSetAccel(rayGen, "world", world);
+      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
+  rayGenData->fbSize = fbSize;
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
+  MissProgData *missData = gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   // ##################################################################
   // build the pipeline and shader binding table
@@ -255,10 +234,11 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
-      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
-      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
-      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      raygenData->camera.pos = camera_pos;
+      raygenData->camera.dir_00 = camera_d00;
+      raygenData->camera.dir_du = camera_ddu;
+      raygenData->camera.dir_dv = camera_ddv;
 
       // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);

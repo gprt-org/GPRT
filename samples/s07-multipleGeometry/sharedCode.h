@@ -24,27 +24,21 @@
 
 /* variables available to all programs */
 
-struct SphereBoundsData {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
-};
-
 /* variables for the triangle mesh geometry */
-struct SphereGeomData {
+struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex; // vec3f*
+  alignas(16) gprt::Buffer index; // vec3i*
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius; // float *
+  alignas(16) gprt::Buffer vertex; // vec3f *
+  /*! base color we use for the entire mesh */
+  alignas(16) float3 color;
 };
 
 struct RayGenData {
   alignas(16) gprt::Buffer fbPtr;
 
   alignas(8) int2 fbSize;
+
   alignas(16) gprt::Accel world;
 
   struct {
