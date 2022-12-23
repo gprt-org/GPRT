@@ -25,9 +25,8 @@
 // note! HLSL aligns to float4 boundaries!
 struct RayGenData {
   // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer fbPtr;
-  alignas(8) int2 fbSize;
-
+  alignas(16) gprt::Buffer frameBuffer;
+  
   alignas(16) float3 color0; // note the 16 byte alignment (not 12 byte) here
   alignas(16) float3 color1; // note the 16 byte alignment (not 12 byte) here
 };
