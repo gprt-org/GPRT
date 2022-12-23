@@ -83,60 +83,49 @@ int main(int ac, char **av) {
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.
-  GPRTVarDecl trianglesGeomVars[] = {
-      {/* For now, no parameters. This sentinel to mark end of list */}};
-  GPRTGeomType trianglesGeomType = gprtGeomTypeCreate(
-      context, GPRT_TRIANGLES, sizeof(TrianglesGeomData), trianglesGeomVars);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = 
+    gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // We'll also need a ray generation program.
-  GPRTVarDecl rayGenVars[] = {
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
-      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
-      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
-      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
-      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
-      {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "simpleRayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  GPRTRayGenOf<RayGenData> rayGen = 
+    gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Finally, we need a "miss" program, which will be called when
   // a ray misses all triangles. Just like geometry declarations
   // and ray tracing programs, miss programs have parameters
-  GPRTVarDecl missProgVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missProgVars, -1);
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
+  GPRTBufferOf<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
+  rayGenData->fbSize = fbSize;
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", 0.0f, 0.0f, 0.0f);
+  MissProgData *missData = gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   LOG("building geometries ...");
 
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
-  GPRTBuffer vertexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_FLOAT3, NUM_VERTICES, vertices);
-  GPRTBuffer indexBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT3, NUM_INDICES, indices);
+  GPRTBufferOf<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<int3> indexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeom trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
+    gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
@@ -161,7 +150,7 @@ int main(int ac, char **av) {
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when
   // we go to trace our rays.
-  gprtRayGenSetAccel(rayGen, "world", world);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
   // build the pipeline and shader binding table
@@ -234,11 +223,12 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
-      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
-      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
-      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
-
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      raygenData->camera.pos = camera_pos;
+      raygenData->camera.dir_00 = camera_d00;
+      raygenData->camera.dir_du = camera_ddu;
+      raygenData->camera.dir_dv = camera_ddv;
+      
       // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
