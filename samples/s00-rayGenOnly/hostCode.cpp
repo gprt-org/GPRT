@@ -71,9 +71,6 @@ int main(int ac, char **av) {
   GPRTModule module = gprtModuleCreate(gprt, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
-
-  // Allocate room for one RayGen shader, create it, and hold on to it with
-  // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen =
       gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
 
