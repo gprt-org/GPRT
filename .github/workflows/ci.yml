@@ -17,6 +17,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      with:
+        submodules: recursive
 
     - name: Prepare Vulkan SDK
       uses: humbletim/setup-vulkan-sdk@v1.2.0
@@ -29,7 +31,8 @@ jobs:
       shell: bash
       run: |
         sudo apt -y update
-        sudo apt install -y xorg-dev \
+        sudo apt install -y libx11-xcb-dev \
+                            xorg-dev \
                             libxinerama-dev \
                             libglu1-mesa-dev \
                             freeglut3-dev \
@@ -70,6 +73,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      with:
+        submodules: recursive
 
     - name: Prepare Vulkan SDK
       uses: humbletim/setup-vulkan-sdk@v1.2.0

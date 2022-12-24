@@ -50,6 +50,15 @@ namespace gprt {
       (0xffU << 24);
   }
 
+  inline uint32_t make_bgra(const float3 color)
+  {
+    return
+      (make_8bit(color.z) << 0) +
+      (make_8bit(color.y) << 8) +
+      (make_8bit(color.x) << 16) +
+      (0xffU << 24);
+  }
+
     // struct Buffer {
   //   uint64_t x;
   //   uint64_t y;

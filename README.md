@@ -9,10 +9,25 @@ GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 ## Dependencies
 
   - CMake
+  - C++17
   - Vulkan SDK (>= 1.3.231.1)
 
 ## Documentation
 GPRT's documentation can be found [here](https://gprt-org.github.io/GPRT/).
+
+## Cloning
+This repository contains submodules for external dependencies, so when doing a fresh clone you need to clone recursively:
+
+```
+git clone --recursive git@github.com:gprt-org/GPRT.git
+```
+
+Existing repositories can be updated manually:
+
+```
+git submodule init
+git submodule update
+```
 
 ## Build Instructions
 

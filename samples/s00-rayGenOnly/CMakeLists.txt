@@ -20,11 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(s00-rayGenOnly)
-add_subdirectory(s01-singleTriangle)
-add_subdirectory(s02-instances)
-add_subdirectory(s03-singleAABB)
-add_subdirectory(s04-computeAABBs)
-add_subdirectory(s05-computeVertex)
-add_subdirectory(s06-computeTransform)
-add_subdirectory(s07-multipleGeometry)
+embed_devicecode(
+  OUTPUT_TARGET
+    s00_deviceCode
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+    # For whatever reason, including a .h in the spv causes a VK_INITIALIZATION_FAILED (-3) when creating shader modules
+    # ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.h
+)
+
+add_executable(s00_rayGenOnly hostCode.cpp)
+target_link_libraries(s00_rayGenOnly
+  PRIVATE
+    s00_deviceCode
+    gprt::gprt
+)

@@ -26,6 +26,10 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
+#include <limits>
+#include <climits>
+#include <algorithm>
 
 #include <regex>
 
@@ -35,7 +39,9 @@
 #include <signal.h>
 #endif
 
+
 #ifdef _WIN32
+#define NOMINMAX
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -48,6 +54,13 @@
 #endif
 #endif
 
+// library for windowing
+#include <GLFW/glfw3.h>
+
+// library for image output
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
 
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
@@ -629,8 +642,8 @@ struct Buffer {
 };
 
 struct SBTEntry {
-  // Map of the name of the variable to that variable declaration
-  std::unordered_map<std::string, GPRTVarDef> vars;
+  size_t recordSize = 0;
+  uint8_t* SBTRecord = nullptr;
 };
 
 // At the moment, we actually just use ray generation programs for compute 
@@ -647,8 +660,7 @@ struct Compute : public SBTEntry {
   Compute(VkDevice  _logicalDevice,
             Module *module,
             const char* _entryPoint,
-            size_t      sizeOfVarStruct,
-            std::unordered_map<std::string, GPRTVarDef> _vars) : SBTEntry()
+            size_t      recordSize) : SBTEntry()
   {
     std::cout<<"Compute program is being made!"<<std::endl;
 
@@ -671,7 +683,9 @@ struct Compute : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    vars = _vars;
+    
+    this->recordSize = recordSize;
+    this->SBTRecord = (uint8_t*)malloc(recordSize);
   }
   ~Compute() {}
   void destroy() {
@@ -690,8 +704,7 @@ struct RayGen : public SBTEntry {
   RayGen(VkDevice  _logicalDevice,
           Module *module,
           const char* _entryPoint,
-          size_t      sizeOfVarStruct,
-          std::unordered_map<std::string, GPRTVarDef> _vars) : SBTEntry()
+          size_t      recordSize) : SBTEntry()
   {
     std::cout<<"Ray gen is being made!"<<std::endl;
 
@@ -714,12 +727,15 @@ struct RayGen : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    vars = _vars;
+
+    this->recordSize = recordSize;
+    this->SBTRecord = (uint8_t*)malloc(recordSize);
   }
   ~RayGen() {}
   void destroy() {
     std::cout<<"Ray gen is being destroyed!"<<std::endl;
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    free(this->SBTRecord);
   }
 };
 
@@ -733,8 +749,7 @@ struct Miss : public SBTEntry {
   Miss(VkDevice  _logicalDevice,
             Module *module,
             const char* _entryPoint,
-            size_t      sizeOfVarStruct,
-            std::unordered_map<std::string, GPRTVarDef> _vars) : SBTEntry()
+            size_t      recordSize) : SBTEntry()
   {
     std::cout<<"Miss program is being made!"<<std::endl;
 
@@ -756,12 +771,15 @@ struct Miss : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    vars = _vars;
+    
+    this->recordSize = recordSize;
+    this->SBTRecord = (uint8_t*)malloc(recordSize);
   }
   ~Miss() {}
   void destroy() {
     std::cout<<"Miss program is being destroyed!"<<std::endl;
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    free(this->SBTRecord);
   }
 };
 
@@ -780,14 +798,13 @@ struct GeomType : public SBTEntry {
   std::vector<std::string> anyHitShaderEntryPoints;
   std::vector<std::string> intersectionShaderEntryPoints;
   
-  bool closestHitShadersUsed = false;
-  bool intersectionShadersUsed = false;
-  bool anyHitShadersUsed = false;
+  std::vector<bool> closestHitShaderUsed;
+  std::vector<bool> intersectionShaderUsed;
+  std::vector<bool> anyHitShaderUsed;
   
   GeomType(VkDevice  _logicalDevice,
             uint32_t numRayTypes,
-            size_t      sizeOfVarStruct,
-            std::unordered_map<std::string, GPRTVarDef> _vars) : SBTEntry()
+            size_t      recordSize) : SBTEntry()
   {
     std::cout<<"Geom type is being made!"<<std::endl;
     closestHitShaderStages.resize(numRayTypes, {});
@@ -798,9 +815,15 @@ struct GeomType : public SBTEntry {
     anyHitShaderEntryPoints.resize(numRayTypes, {});
     intersectionShaderEntryPoints.resize(numRayTypes, {});
 
+    closestHitShaderUsed.resize(numRayTypes, false);
+    intersectionShaderUsed.resize(numRayTypes, false);
+    anyHitShaderUsed.resize(numRayTypes, false);
+
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
-    vars = _vars;
+    
+    // store size, but don't allocate. Will be done by geom instances.
+    this->recordSize = recordSize;
   }
   ~GeomType() 
   {
@@ -814,7 +837,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    closestHitShadersUsed = true;
+    closestHitShaderUsed[rayType] = true;
     closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
     auto binary = module->getBinary("CLOSESTHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -837,7 +860,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    anyHitShadersUsed = true;
+    anyHitShaderUsed[rayType] = true;
     anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
     auto binary = module->getBinary("ANYHIT");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -860,7 +883,7 @@ struct GeomType : public SBTEntry {
                       Module *module,
                       const char* entryPoint) 
   {
-    intersectionShadersUsed = true;
+    intersectionShaderUsed[rayType] = true;
     intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
     auto binary = module->getBinary("INTERSECTION");
     VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -934,12 +957,11 @@ struct TriangleGeom : public Geom {
   TriangleGeom(TriangleGeomType* _geomType) : Geom() {
     geomType = (GeomType*)_geomType;
 
-    // Allocate the variables for this geometry, using our geomType vars as 
-    // the template.
-    std::vector<GPRTVarDecl> varDecls = getDecls(geomType->vars);
-    vars = checkAndPackVariables(varDecls.data(), varDecls.size());
+    // Allocate the variables for this geometry
+    this->SBTRecord = (uint8_t*)malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
   };
-  ~TriangleGeom() {};
+  ~TriangleGeom() {free(this->SBTRecord);};
 
   void setVertices(
     Buffer* vertices,
@@ -972,9 +994,8 @@ struct TriangleGeomType : public GeomType {
   TriangleGeomType(
     VkDevice logicalDevice,
     uint32_t numRayTypes,
-    size_t   sizeOfVarStruct,
-    std::unordered_map<std::string, GPRTVarDef> vars) : 
-    GeomType(logicalDevice, numRayTypes, sizeOfVarStruct, vars)
+    size_t   recordSize) : 
+    GeomType(logicalDevice, numRayTypes, recordSize)
   {}
   ~TriangleGeomType() {}
 
@@ -997,12 +1018,11 @@ struct AABBGeom : public Geom {
   AABBGeom(AABBGeomType* _geomType) : Geom() {
     geomType = (GeomType*)_geomType;
 
-    // Allocate the variables for this geometry, using our geomType vars as 
-    // the template.
-    std::vector<GPRTVarDecl> varDecls = getDecls(geomType->vars);
-    vars = checkAndPackVariables(varDecls.data(), varDecls.size());
+    // Allocate the variables for this geometry
+    this->SBTRecord = (uint8_t*)malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
   };
-  ~AABBGeom() {};
+  ~AABBGeom() {free(this->SBTRecord);};
 
   void setAABBs(
     Buffer* aabbs,
@@ -1022,9 +1042,8 @@ struct AABBGeom : public Geom {
 struct AABBGeomType : public GeomType {
   AABBGeomType(VkDevice  _logicalDevice,
             uint32_t numRayTypes,
-            size_t      sizeOfVarStruct,
-            std::unordered_map<std::string, GPRTVarDef> _vars) : 
-            GeomType(_logicalDevice, numRayTypes, sizeOfVarStruct, _vars)
+            size_t      recordSize) : 
+            GeomType(_logicalDevice, numRayTypes, recordSize)
   {}
   ~AABBGeomType() {}
   Geom* createGeom() 
@@ -2005,12 +2024,42 @@ struct InstanceAccel : public Accel {
   };
 };
 
+/** @brief A collection of features that are requested to support before 
+ * creating a GPRT context. These features might not be available on all
+ * platforms.
+*/
+static struct RequestedFeatures {
+  /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
+  bool window = false;
+  struct Window {
+    uint32_t initialWidth;
+    uint32_t initialHeight;
+    std::string title;
+  } windowProperties;
+} requestedFeatures;
+
 struct Context {
   VkApplicationInfo appInfo;
 
   // Vulkan instance, stores all per-application states
   VkInstance instance;
   std::vector<std::string> supportedInstanceExtensions;
+
+  // optional windowing features
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  GLFWwindow* window = nullptr;
+  VkExtent2D windowExtent;
+  VkPresentModeKHR presentMode;
+  VkSurfaceFormatKHR surfaceFormat;
+  VkSurfaceCapabilitiesKHR surfaceCapabilities;
+  uint32_t surfaceImageCount;
+  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+  std::vector<VkImage> swapchainImages;
+  uint32_t currentImageIndex;
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+  VkFence inFlightFence = VK_NULL_HANDLE;
+
   // Physical device (GPU) that Vulkan will use
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
@@ -2083,17 +2132,7 @@ struct Context {
   std::vector<VkShaderModule> shaderModules;
   // Pipeline cache object
   VkPipelineCache pipelineCache;
-  // Wraps the swap chain to present images (framebuffers) to the windowing system
-  // VulkanSwapChain swapChain; // I kinda want to avoid using Vulkan's swapchain system...
-  // Synchronization semaphores
-  struct {
-    // Swap chain image presentation
-    VkSemaphore presentComplete;
-    // Command buffer submission and execution
-    VkSemaphore renderComplete;
-  } semaphores;
-  std::vector<VkFence> waitFences;
-
+    
   // ray tracing pipeline and layout
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
@@ -2224,11 +2263,23 @@ struct Context {
     //instanceCreateInfo.pNext = VK_NULL_HANDLE;
     instanceCreateInfo.pNext = &validationFeatures;
 
-    // uint32_t glfwExtensionCount = 0;
-    // const char** glfwExtensions;
-    // glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-    // instanceCreateInfo.enabledExtensionCount = glfwExtensionCount;
-    // instanceCreateInfo.ppEnabledExtensionNames = glfwExtensions;
+    uint32_t glfwExtensionCount = 0;
+    const char** glfwExtensions;
+    if (requestedFeatures.window) {
+      if (!glfwInit()) {
+      	LOG("Warning: Unable to create window. Falling back to headless mode.");
+	requestedFeatures.window = false;
+      }
+      else {
+        if (!glfwVulkanSupported()) {
+          GPRT_RAISE("Window requested but unsupported!");
+        }
+        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+          instanceExtensions.push_back(glfwExtensions[i]);
+        }
+      }
+    }
 
     // Number of validation layers allowed
     instanceCreateInfo.enabledLayerCount = 0;
@@ -2247,30 +2298,8 @@ struct Context {
       instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     }
 
-    // The VK_LAYER_KHRONOS_validation contains all current validation functionality.
-    // Note that on Android this layer requires at least NDK r20
-    const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-    if (validation())
-    {
-      // Check if this layer is available at instance level
-      uint32_t instanceLayerCount;
-      vkEnumerateInstanceLayerProperties(&instanceLayerCount, nullptr);
-      std::vector<VkLayerProperties> instanceLayerProperties(instanceLayerCount);
-      vkEnumerateInstanceLayerProperties(&instanceLayerCount, instanceLayerProperties.data());
-      bool validationLayerPresent = false;
-      for (VkLayerProperties layer : instanceLayerProperties) {
-        if (strcmp(layer.layerName, validationLayerName) == 0) {
-          validationLayerPresent = true;
-          break;
-        }
-      }
-      if (validationLayerPresent) {
-        instanceCreateInfo.ppEnabledLayerNames = &validationLayerName;
-        instanceCreateInfo.enabledLayerCount = 1;
-      } else {
-        std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
-      }
-    }
+    instanceCreateInfo.ppEnabledLayerNames = nullptr;
+    instanceCreateInfo.enabledLayerCount = 0;
 
     VkResult err;
 
@@ -2279,15 +2308,24 @@ struct Context {
       GPRT_RAISE("failed to create instance! : \n" + errorString(err));
     }
 
-    // err = createDebugUtilsMessenger(instance,
-    //     info.debug_callback,
-    //     info.debug_message_severity,
-    //     info.debug_message_type,
-    //     &instance.debug_messenger,
-    //     info.allocation_callbacks);
-    // if (err) {
-    //   GPRT_RAISE("failed to debug messenger callback! : \n" + errorString(err));
-    // }
+    /// 1.5 - create a window and surface if requested
+    if (requestedFeatures.window) {
+      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+      // todo, allow the window to resize and recreate swapchain
+      glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); 
+      window = glfwCreateWindow(
+        requestedFeatures.windowProperties.initialWidth, 
+        requestedFeatures.windowProperties.initialHeight, 
+        requestedFeatures.windowProperties.title.c_str(), 
+        NULL, NULL);
+
+      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("failed to create window surface! : \n" + errorString(err));
+      }
+      // Poll some initial event values
+      glfwPollEvents();
+    }
 
     /// 2. Select a Physical Device
 
@@ -2340,38 +2378,99 @@ struct Context {
       }
     };
 
+    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
+      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
+    };
+
+    /* function that checks if the selected physical device meets requirements */
+    auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, 
+      std::vector<const char*> deviceExtensions) -> bool 
+    {
+      uint32_t extensionCount;
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+      std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+      std::set<std::string> requiredExtensions;
+      for (auto &cstr : deviceExtensions) {
+        requiredExtensions.insert(std::string(cstr));
+      }
+
+      for (const auto& extension : availableExtensions) {
+        requiredExtensions.erase(extension.extensionName);
+      }
+
+      return requiredExtensions.empty();
+    };
+
+    // Ray tracing related extensions required
+    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+
+    // Required by VK_KHR_acceleration_structure
+    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+
+    // Required for VK_KHR_ray_tracing_pipeline
+    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    // Required by VK_KHR_spirv_1_4
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+
+    if (requestedFeatures.window)
+    {
+    	// If the device will be used for presenting to a display via a swapchain 
+      // we need to request the swapchain extension
+    	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
+    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    #endif
+
     // Select physical device to be used
     // Defaults to the first device unless specified by command line
-    uint32_t selectedDevice = 0; // TODO
+    uint32_t selectedDevice = -1; // TODO
+
+    std::vector<uint32_t> usableDevices;
     
-    std::cout << "Available Vulkan devices" << "\n";
+    LOG("Searching for usable Vulkan physical device...");
     for (uint32_t i = 0; i < gpuCount; i++) {
       VkPhysicalDeviceProperties deviceProperties;
       vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-      std::cout << "Device [" << i << "] : " << deviceProperties.deviceName << std::endl;
-      std::cout << " Type: " << physicalDeviceTypeString(deviceProperties.deviceType) << "\n";
-      std::cout << " API: " << (deviceProperties.apiVersion >> 22) << "."
-        << ((deviceProperties.apiVersion >> 12) & 0x3ff) << "."
-        << (deviceProperties.apiVersion & 0xfff) << "\n";
+      std::string message = std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
+      message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
+      message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".")
+               + std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".")
+               + std::to_string(deviceProperties.apiVersion & 0xfff);
+      LOG(message);
       
-      if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-        selectedDevice = i;
+      if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
+        usableDevices.push_back(i);
+      } else {
+        /* Explain why we aren't using this device */
+        for (const char* enabledExtension : enabledDeviceExtensions)
+        {
+          if (!extensionSupported(enabledExtension, supportedExtensions)) {
+            LOG("Device unusable... Requested device extension \"" << 
+              enabledExtension << "\" is not present.");
+          }
+        }
+      }
+    }
 
-      // Get ray tracing pipeline properties
-      VkPhysicalDeviceRayTracingPipelinePropertiesKHR  rayTracingPipelineProperties{};
-      rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-      VkPhysicalDeviceProperties2 deviceProperties2{};
-      deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      deviceProperties2.pNext = &rayTracingPipelineProperties;
-      vkGetPhysicalDeviceProperties2(physicalDevices[i], &deviceProperties2);
-
-      // Get acceleration structure properties
-      VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-      accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-      VkPhysicalDeviceFeatures2 deviceFeatures2{};
-      deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      deviceFeatures2.pNext = &accelerationStructureFeatures;
-      vkGetPhysicalDeviceFeatures2(physicalDevices[i], &deviceFeatures2);
+    if (usableDevices.size() == 0) {
+      GPRT_RAISE("Unable to find physical device meeting requirements\n");
+    }
+    else {
+      LOG("Selecting first usable device");
+      selectedDevice = usableDevices[0];
     }
 
     physicalDevice = physicalDevices[selectedDevice];
@@ -2509,36 +2608,6 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    // Ray tracing related extensions required
-    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-
-    // Required by VK_KHR_acceleration_structure
-    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-
-    // Required for VK_KHR_ray_tracing_pipeline
-    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-
-    // Required by VK_KHR_spirv_1_4
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
-
-    // if (useSwapChain)
-    // {
-    // 	// If the device will be used for presenting to a display via a swapchain we need to request the swapchain extension
-    // 	enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    // }
-
-    #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-      enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-    #endif
-
-
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
@@ -2567,8 +2636,6 @@ struct Context {
 
 
 
-
-
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());;
@@ -2593,19 +2660,10 @@ struct Context {
     //   enableDebugMarkers = true;
     // }
 
-    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
-      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
-    };
+    
 
     if (enabledDeviceExtensions.size() > 0)
     {
-      for (const char* enabledExtension : enabledDeviceExtensions)
-      {
-        if (!extensionSupported(enabledExtension, supportedExtensions)) {
-          std::cerr << "Enabled device extension \"" << enabledExtension << "\" is not present at device level\n";
-        }
-      }
-
       deviceCreateInfo.enabledExtensionCount = (uint32_t)enabledDeviceExtensions.size();
       deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
     }
@@ -2685,9 +2743,152 @@ struct Context {
     // 7. Create a module for internal device entry points
     internalModule = new Module(gprtDeviceCode);
     setupInternalStages(internalModule);
+
+    // Swapchain semaphores and fences
+    if (requestedFeatures.window) {
+      VkSemaphoreCreateInfo semaphoreInfo{};
+      semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+      VkFenceCreateInfo fenceInfo{};
+      fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+      if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+        GPRT_RAISE("Failed to create swapchain semaphores");
+      }
+    }
+
+    // Swapchain setup
+    if (requestedFeatures.window) {
+      VkSurfaceCapabilitiesKHR surfaceCapabilities;
+      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
+
+      // SRGB is a commonly supported surface format. It's also efficient to 
+      // write to, so we assume this format.
+      // Note, we don't use RGBA since NVIDIA doesn't support this...
+      surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+      surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      bool surfaceFormatFound = false;
+      std::vector<VkSurfaceFormatKHR> formats;
+      uint32_t formatCount;
+      vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
+      if (formatCount != 0) {
+          formats.resize(formatCount);
+          vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
+      }
+      for (uint32_t i = 0; i < formatCount; ++i)
+        if (formats[i].format == surfaceFormat.format 
+          && formats[i].colorSpace == surfaceFormat.colorSpace ) surfaceFormatFound = true;
+      if (!surfaceFormatFound) 
+        GPRT_RAISE("Error, unable to find RGBA8 SRGB surface format...");
+
+      // For now, we assume the user wants FIFO, which is similar to vsync.
+      // All vulkan implementations must support FIFO per-spec, so it's 
+      // something we can depend on.
+      presentMode = VK_PRESENT_MODE_FIFO_KHR;
+      bool presentModeFound = false;
+      std::vector<VkPresentModeKHR> presentModes;
+      uint32_t presentModeCount;
+      vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+      if (presentModeCount != 0) {
+          presentModes.resize(presentModeCount);
+          vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+      }
+      for (uint32_t i = 0; i < presentModeCount; ++i)
+        if (presentModes[i] == presentMode) presentModeFound = true;
+      if (!presentModeFound) 
+        GPRT_RAISE("Error, unable to find vsync present mode...");
+
+      // Window extent is the number of pixels truly used by the surface. For 
+      // high dps displays (like on mac) the window extent might be larger
+      // than the screen coordinate size.
+      if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        windowExtent = surfaceCapabilities.currentExtent;
+      } else {
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+        VkExtent2D actualExtent = {
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height)
+        };
+        actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+        actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+        windowExtent = actualExtent;
+      }
+
+      // We request one more than the minimum number of images in the swapchain,
+      // since choosing exactly the minimum can cause stalls. We also make sure
+      // to not request more than the maximum number of images.
+      surfaceImageCount = surfaceCapabilities.minImageCount + 1;
+      if (surfaceCapabilities.maxImageCount > 0 && surfaceImageCount > surfaceCapabilities.maxImageCount) {
+        surfaceImageCount = surfaceCapabilities.maxImageCount;
+      }
+
+      // Now, we have enough information to create our swapchain.
+      VkSwapchainCreateInfoKHR createInfo{};
+      createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+      createInfo.surface = surface;
+      createInfo.minImageCount = surfaceImageCount;
+      createInfo.imageFormat = surfaceFormat.format;
+      createInfo.imageColorSpace = surfaceFormat.colorSpace;
+      createInfo.imageExtent = windowExtent;
+      createInfo.imageArrayLayers = 1; // might be 2 for stereoscopic 3D images like VR
+      createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT; // might need to change this...
+      // currently assuming graphics and present queue are the same...
+      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; 
+      createInfo.queueFamilyIndexCount = 0; // optional if exclusive
+      createInfo.pQueueFamilyIndices = nullptr; // optional if exclusive
+      // could use this to flip the image vertically if we want
+      createInfo.preTransform = surfaceCapabilities.currentTransform; 
+      // means, we don't composite this window with other OS windows.
+      createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; 
+      createInfo.presentMode = presentMode;
+      // clipped here means we don't care about color of obscured pixels, like 
+      // those covered by other OS windows.
+      createInfo.clipped = VK_TRUE;
+      // Since the swapchain can go out of date, we need to supply the out of 
+      // date swapchain here.
+      createInfo.oldSwapchain = swapchain;
+
+      // Create the swapchain
+      err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
+      if (err != VK_SUCCESS) {
+        GPRT_RAISE("Error, failed to create swap chain : \n" + errorString(err));
+      }
+
+      // Now, receive the swapchain images 
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
+      swapchainImages.resize(surfaceImageCount);
+      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
+
+      /* Transition all images to presentable */
+      for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
+        transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+      }
+
+      // And acquire the first image to use
+      vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
+        imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
+    }
   };
 
   void destroy() {
+
+    if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+    if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+    if (inFlightFence) vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+
+    if (swapchain) {
+      vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+    }
+    if (window) {
+      glfwDestroyWindow(window);
+      glfwTerminate();
+    }
+    if (surface)
+      vkDestroySurfaceKHR(instance, surface, nullptr);
+    
     if (pipelineLayout)
       vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
     if (pipeline)
@@ -2783,11 +2984,7 @@ struct Context {
         recordOffset = recordOffset + handleSize;
         uint8_t* params = mapped + recordOffset;
         Compute *compute = computePrograms[idx];
-        for (auto &var : compute->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          memcpy(params + varOffset, var.second.data, varSize);
-        }
+        memcpy(params, compute->SBTRecord, compute->recordSize);
       }
     }
 
@@ -2806,11 +3003,7 @@ struct Context {
         recordOffset = recordOffset + handleSize;
         uint8_t* params = mapped + recordOffset;
         RayGen *raygen = raygenPrograms[idx];
-        for (auto &var : raygen->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          memcpy(params + varOffset, var.second.data, varSize);
-        }
+        memcpy(params, raygen->SBTRecord, raygen->recordSize);
       }
     }
 
@@ -2829,11 +3022,7 @@ struct Context {
         recordOffset = recordOffset + handleSize;
         uint8_t* params = mapped + recordOffset;
         Miss *miss = missPrograms[idx];
-        for (auto &var : miss->vars) {
-          size_t varOffset = var.second.decl.offset;
-          size_t varSize = getSize(var.second.decl.type);
-          memcpy(params + varOffset, var.second.data, varSize);
-        }
+        memcpy(params, miss->SBTRecord, miss->recordSize);
       }
     }
 
@@ -2874,11 +3063,7 @@ struct Context {
                   // Then, copy params following handle
                   recordOffset = recordOffset + handleSize;
                   uint8_t* params = mapped + recordOffset;
-                  for (auto &var : geom->vars) {
-                    size_t varOffset = var.second.decl.offset;
-                    size_t varSize = getSize(var.second.decl.type);
-                    memcpy(params + varOffset, var.second.data, varSize);
-                  }
+                  memcpy(params, geom->SBTRecord, geom->recordSize);
                 }
               }
               geomIDOffset += triAccel->geometries.size();
@@ -2904,11 +3089,7 @@ struct Context {
                   // Then, copy params following handle
                   recordOffset = recordOffset + handleSize;
                   uint8_t* params = mapped + recordOffset;
-                  for (auto &var : geom->vars) {
-                    size_t varOffset = var.second.decl.offset;
-                    size_t varSize = getSize(var.second.decl.type);
-                    memcpy(params + varOffset, var.second.data, varSize);
-                  }
+                  memcpy(params, geom->SBTRecord, geom->recordSize);
                 }
               }
               geomIDOffset += aabbAccel->geometries.size();
@@ -3041,17 +3222,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3076,17 +3257,17 @@ struct Context {
                 shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
                 // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShadersUsed) {
+                if (geom->geomType->closestHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
                   shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->anyHitShadersUsed) {
+                if (geom->geomType->anyHitShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
                   shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
 
-                if (geom->geomType->intersectionShadersUsed) {
+                if (geom->geomType->intersectionShaderUsed[rayType]) {
                   shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
                   shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
                 }
@@ -3178,8 +3359,296 @@ struct Context {
       cache, 1, &computePipelineCreateInfo, nullptr, &fillInstanceDataStage.pipeline);
     //todo, destroy the above stuff
   }
+
+  
+  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = pool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    return commandBuffer;
+  }
+
+  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+      vkEndCommandBuffer(commandBuffer);
+
+      VkSubmitInfo submitInfo{};
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+
+      vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      vkQueueWaitIdle(queue);
+
+      vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+  }
+
+  void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+    VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = oldLayout;
+
+    // The new layout for the image
+    barrier.newLayout = newLayout;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        barrier.srcAccessMask = 0;
+        destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    }
+    else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    } else {
+        throw std::invalid_argument("unsupported layout transition!");
+    }
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+
+    endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
+  }
 };
 
+
+GPRT_API void gprtRequestWindow(
+  uint32_t initialWidth, 
+  uint32_t initialHeight, 
+  const char *title)
+{
+  LOG_API_CALL();
+  requestedFeatures.window = true;
+  requestedFeatures.windowProperties.initialWidth = initialWidth;
+  requestedFeatures.windowProperties.initialHeight = initialHeight;
+  requestedFeatures.windowProperties.title = std::string(title);
+}
+
+GPRT_API bool gprtWindowShouldClose(GPRTContext _context) {
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return true;
+  
+  glfwPollEvents();
+  return glfwWindowShouldClose(context->window);
+}
+
+GPRT_API void gprtGetCursorPos(GPRTContext _context, 
+  double * xpos, double * ypos)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return;
+
+  glfwGetCursorPos(context->window, xpos, ypos);
+}
+
+GPRT_API int gprtGetMouseButton(GPRTContext _context,
+  int button)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return GPRT_RELEASE;
+
+  return glfwGetMouseButton(context->window, button);
+}
+
+GPRT_API double gprtGetTime(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  if (!requestedFeatures.window) return 0.0;
+  return glfwGetTime();
+}
+
+GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
+  LOG_API_CALL();
+  if (!requestedFeatures.window) return;
+  Context *context = (Context*)_context;
+  Buffer *buffer = (Buffer*)_buffer;
+  
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+  // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+  // submitInfo.signalSemaphoreCount = 1;
+  // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // now do the transfer
+  {
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    // if 0, vulkan assumes buffer memory is tightly packed
+    region.bufferRowLength = 0; 
+    region.bufferImageHeight = 0; 
+
+    region.imageOffset.x = 0;
+    region.imageOffset.y = 0;
+    region.imageOffset.z = 0;
+
+    region.imageExtent.width = context->windowExtent.width;
+    region.imageExtent.height = context->windowExtent.height;
+    region.imageExtent.depth = 1;
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    
+    vkCmdCopyBufferToImage(commandBuffer, buffer->buffer, context->swapchainImages[context->currentImageIndex], 
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+  }
+
+  // now go from TRANSFER_DST back to PRESENT_SRC
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+
+  presentInfo.waitSemaphoreCount = 0;
+  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+
+  VkSwapchainKHR swapchains[] = {context->swapchain};
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = swapchains;
+  presentInfo.pImageIndices = &context->currentImageIndex;
+
+  presentInfo.pResults = nullptr;
+
+  // currently throwing an error because the images given by the swapchain don't 
+  // have a defined layout...
+  VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+
+
+  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, 
+        VK_NULL_HANDLE, context->inFlightFence, &context->currentImageIndex);
+  vkWaitForFences(context->logicalDevice,1, &context->inFlightFence, true, UINT_MAX);
+  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+}
 
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs,
                                     int      numRequestedDevices)
@@ -3197,6 +3666,23 @@ GPRT_API void gprtContextDestroy(GPRTContext _context)
   context->destroy();
   delete context;
   LOG("context destroyed...");
+}
+
+GPRT_API void
+gprtContextSetRayTypeCount(GPRTContext _context,
+                           size_t numRayTypes)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  context->numRayTypes = numRayTypes;
+}
+
+GPRT_API size_t
+gprtContextGetRayTypeCount(GPRTContext _context)
+{
+  LOG_API_CALL();
+  Context *context = (Context*)_context;
+  return context->numRayTypes;
 }
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode)
@@ -3239,6 +3725,14 @@ gprtGeomDestroy(GPRTGeom _geometry)
   geometry->destroy();
   delete geometry;
   LOG("geometry destroyed...");
+}
+
+GPRT_API void *
+gprtGeomGetPointer(GPRTGeom _geometry, int deviceID)
+{
+  LOG_API_CALL();
+  Geom *geometry = (Geom*)_geometry;
+  return geometry->SBTRecord;
 }
 
 // ==================================================================
@@ -3303,9 +3797,7 @@ GPRT_API GPRTRayGen
 gprtRayGenCreate(GPRTContext _context,
                  GPRTModule  _module,
                  const char  *programName,
-                 size_t       sizeOfVarStruct,
-                 GPRTVarDecl *vars,
-                 int          numVars)
+                 size_t       recordSize)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
@@ -3313,7 +3805,7 @@ gprtRayGenCreate(GPRTContext _context,
 
   RayGen *raygen = new RayGen(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+    recordSize);
 
   context->raygenPrograms.push_back(raygen);
 
@@ -3331,13 +3823,19 @@ gprtRayGenDestroy(GPRTRayGen _rayGen)
   LOG("raygen destroyed...");
 }
 
+GPRT_API void *
+gprtRayGenGetPointer(GPRTRayGen _rayGen, int deviceID)
+{
+  LOG_API_CALL();
+  RayGen *rayGen = (RayGen*)_rayGen;
+  return rayGen->SBTRecord;
+}
+
 GPRT_API GPRTCompute
 gprtComputeCreate(GPRTContext _context,
                  GPRTModule  _module,
                  const char  *programName,
-                 size_t       sizeOfVarStruct,
-                 GPRTVarDecl *vars,
-                 int          numVars)
+                 size_t       recordSize)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
@@ -3345,7 +3843,7 @@ gprtComputeCreate(GPRTContext _context,
 
   Compute *compute = new Compute(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+    recordSize);
 
   context->computePrograms.push_back(compute);
 
@@ -3363,13 +3861,19 @@ gprtComputeDestroy(GPRTCompute _compute)
   LOG("compute destroyed...");
 }
 
+GPRT_API void *
+gprtComputeGetPointer(GPRTCompute _compute, int deviceID)
+{
+  LOG_API_CALL();
+  Compute *compute = (Compute*)_compute;
+  return compute->SBTRecord;
+}
+
 GPRT_API GPRTMiss
 gprtMissCreate(GPRTContext _context,
                    GPRTModule  _module,
                    const char  *programName,
-                   size_t       sizeOfVarStruct,
-                   GPRTVarDecl *vars,
-                   int          numVars)
+                   size_t       recordSize)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
@@ -3377,7 +3881,7 @@ gprtMissCreate(GPRTContext _context,
 
   Miss *missProg = new Miss(
     context->logicalDevice, module, programName,
-    sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+    recordSize);
 
   context->missPrograms.push_back(missProg);
 
@@ -3405,12 +3909,18 @@ gprtMissDestroy(GPRTMiss _miss)
   LOG("miss program destroyed...");
 }
 
+GPRT_API void *
+gprtMissGetPointer(GPRTMiss _miss, int deviceID)
+{
+  LOG_API_CALL();
+  Miss *miss = (Miss*)_miss;
+  return miss->SBTRecord;
+}
+
 GPRT_API GPRTGeomType
 gprtGeomTypeCreate(GPRTContext  _context,
                    GPRTGeomKind kind,
-                   size_t       sizeOfVarStruct,
-                   GPRTVarDecl  *vars,
-                   int          numVars)
+                   size_t       recordSize)
 {
   LOG_API_CALL();
   Context *context = (Context*)_context;
@@ -3421,12 +3931,12 @@ gprtGeomTypeCreate(GPRTContext  _context,
     case GPRT_TRIANGLES:
       geomType = new TriangleGeomType(
         context->logicalDevice, context->numRayTypes,
-        sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+        recordSize);
         break;
     case GPRT_AABBS:
       geomType = new AABBGeomType(
         context->logicalDevice, context->numRayTypes,
-        sizeOfVarStruct, checkAndPackVariables(vars, numVars));
+        recordSize);
         break;
     default:
       GPRT_NOTIMPLEMENTED;
@@ -3492,7 +4002,7 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
 }
 
 GPRT_API GPRTBuffer
-gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -3514,7 +4024,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
     context->physicalDevice, context->logicalDevice, 
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
 
   // Pin the buffer to the host
@@ -3522,7 +4032,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
   
   if (init) {
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->flush();
     buffer->invalidate();
   }
@@ -3531,7 +4041,7 @@ gprtHostBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, cons
 }
 
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -3551,13 +4061,13 @@ gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
     context->physicalDevice, context->logicalDevice,
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
   
   if (init) {    
     buffer->map();
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->unmap();
   }
   LOG("buffer created");
@@ -3565,7 +4075,7 @@ gprtDeviceBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
 }
 
 GPRT_API GPRTBuffer
-gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, const void* init)
+gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
@@ -3588,7 +4098,7 @@ gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
     context->physicalDevice, context->logicalDevice, 
     context->graphicsCommandBuffer, context->graphicsQueue,
     bufferUsageFlags, memoryUsageFlags,
-    getSize(type) * count
+    size * count
   );
 
   // Pin the buffer to the host
@@ -3596,7 +4106,7 @@ gprtSharedBufferCreate(GPRTContext _context, GPRTDataType type, size_t count, co
   
   if (init) {
     void* mapped = buffer->mapped;
-    memcpy(mapped, init, getSize(type) * count);
+    memcpy(mapped, init, size * count);
     buffer->flush();
     buffer->invalidate();
   }
@@ -3638,7 +4148,44 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID)
   buffer->unmap();
 }
 
+GPRT_API gprt::Buffer 
+gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID)
+{
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer*)_buffer;
+  return gprt::Buffer{buffer->address, buffer->size};
+}
 
+GPRT_API void gprtBufferSaveImage(GPRTBuffer _buffer, 
+  uint32_t width, uint32_t height, const char *imageName)
+{
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer*)_buffer;
+
+  // Keep track of whether the buffer was mapped before this call
+  bool mapped = true;
+  if (buffer->mapped == nullptr) mapped = false;
+
+  // If not mapped currently, map it
+  if (!mapped)
+    buffer->map();
+
+  const uint8_t *fb = (const uint8_t*) buffer->mapped;
+  std::vector<uint8_t> swizzled(width*height*4);
+  for (uint32_t pid = 0; pid < width * height; ++pid) {
+    swizzled[pid * 4 + 0] = fb[pid*4 + 2];
+    swizzled[pid * 4 + 1] = fb[pid*4 + 1];
+    swizzled[pid * 4 + 2] = fb[pid*4 + 0];
+    swizzled[pid * 4 + 3] = fb[pid*4 + 3];
+  }
+  
+  stbi_write_png(imageName,width,height,4,
+                 swizzled.data(),(uint32_t)(width)*sizeof(uint32_t));
+  
+  // Return mapped to previous state
+  if (!mapped)
+    buffer->unmap();
+}
 
 GPRT_API void gprtBuildPipeline(GPRTContext _context)
 {
@@ -3797,10 +4344,10 @@ GPRT_API void gprtAccelRefit(GPRTContext _context, GPRTAccel accel)
   GPRT_NOTIMPLEMENTED;
 }
 
-GPRT_API uint64_t gprtAccelGetReference(GPRTAccel _accel)
+GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel _accel, int deviceID)
 {
   Accel *accel = (Accel*)_accel;
-  return uint64_t(accel->address);
+  return {accel->address, /* unused */ 0};
 }
 
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext _context,
@@ -4103,3571 +4650,4 @@ GPRT_API float gprtEndProfile(GPRTContext _context)
   uint64_t timeResults = buffer[1] - buffer[0];
   float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
   return time;
-}
-
-std::pair<size_t, void*> gprtGetVariable(
-  SBTEntry *entry, std::string name, GPRTDataType type
-) {
-  auto found = entry->vars.find(std::string(name));
-
-  // 1. Figure out if the variable "name" exists 
-  assert(found != entry->vars.end());
-  
-  // 2. Assert the types match 
-  assert(found->second.decl.type == type);
-
-  std::pair<size_t, void*> variable;
-
-  // 3. Get the expected size for this variable. 
-  variable.first = getSize(found->second.decl.type);
-
-  // 4. Get the pointer to the SBT. 
-  variable.second = found->second.data;
-
-  return variable;
-}
-
-#ifdef __cplusplus
-// ------------------------------------------------------------------
-// setters for variables of type "bool" (bools only on c++)
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1b(GPRTCompute _compute, const char *name, bool x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL);
-  bool val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2b(GPRTCompute _compute, const char *name, bool x, bool y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  bool val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3b(GPRTCompute _compute, const char *name, bool x, bool y, bool z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  bool val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4b(GPRTCompute _compute, const char *name, bool x, bool y, bool z, bool w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  bool val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2bv(GPRTCompute _compute, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3bv(GPRTCompute _compute, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4bv(GPRTCompute _compute, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1b(GPRTRayGen _raygen, const char *name, bool x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL);
-  bool val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2b(GPRTRayGen _raygen, const char *name, bool x, bool y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  bool val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3b(GPRTRayGen _raygen, const char *name, bool x, bool y, bool z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  bool val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4b(GPRTRayGen _raygen, const char *name, bool x, bool y, bool z, bool w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  bool val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2bv(GPRTRayGen _raygen, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3bv(GPRTRayGen _raygen, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4bv(GPRTRayGen _raygen, const char *name, const bool *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1b(GPRTMiss _miss, const char *name, bool x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL);
-  bool val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2b(GPRTMiss _miss, const char *name, bool x, bool y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  bool val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3b(GPRTMiss _miss, const char *name, bool x, bool y, bool z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  bool val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4b(GPRTMiss _miss, const char *name, bool x, bool y, bool z, bool w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  bool val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2bv(GPRTMiss _miss, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3bv(GPRTMiss _miss, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4bv(GPRTMiss _miss, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1b(GPRTGeom _geom, const char *name, bool x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL);
-  bool val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2b(GPRTGeom _geom, const char *name, bool x, bool y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  bool val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3b(GPRTGeom _geom, const char *name, bool x, bool y, bool z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  bool val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4b(GPRTGeom _geom, const char *name, bool x, bool y, bool z, bool w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  bool val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2bv(GPRTGeom _geom, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3bv(GPRTGeom _geom, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4bv(GPRTGeom _geom, const char *name, const bool *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_BOOL4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// // setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1b(OWLParams var, const char *name, bool val);
-// GPRT_API void gprtParamsSet2b(OWLParams var, const char *name, bool x, bool y);
-// GPRT_API void gprtParamsSet3b(OWLParams var, const char *name, bool x, bool y, bool z);
-// GPRT_API void gprtParamsSet4b(OWLParams var, const char *name, bool x, bool y, bool z, bool w);
-// GPRT_API void gprtParamsSet2bv(OWLParams var, const char *name, const bool *val);
-// GPRT_API void gprtParamsSet3bv(OWLParams var, const char *name, const bool *val);
-// GPRT_API void gprtParamsSet4bv(OWLParams var, const char *name, const bool *val);
-#endif
-
-// ------------------------------------------------------------------
-// setters for variables of type "char"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1c(GPRTCompute _compute, const char *name, int8_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
-  int8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2c(GPRTCompute _compute, const char *name, int8_t x, int8_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  int8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3c(GPRTCompute _compute, const char *name, int8_t x, int8_t y, int8_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  int8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4c(GPRTCompute _compute, const char *name, int8_t x, int8_t y, int8_t z, int8_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  int8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2cv(GPRTCompute _compute, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3cv(GPRTCompute _compute, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4cv(GPRTCompute _compute, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1c(GPRTRayGen _raygen, const char *name, int8_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
-  int8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2c(GPRTRayGen _raygen, const char *name, int8_t x, int8_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  int8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3c(GPRTRayGen _raygen, const char *name, int8_t x, int8_t y, int8_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  int8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4c(GPRTRayGen _raygen, const char *name, int8_t x, int8_t y, int8_t z, int8_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  int8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2cv(GPRTRayGen _raygen, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3cv(GPRTRayGen _raygen, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4cv(GPRTRayGen _raygen, const char *name, const int8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1c(GPRTMiss _miss, const char *name, int8_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
-  int8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2c(GPRTMiss _miss, const char *name, int8_t x, int8_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  int8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3c(GPRTMiss _miss, const char *name, int8_t x, int8_t y, int8_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  int8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4c(GPRTMiss _miss, const char *name, int8_t x, int8_t y, int8_t z, int8_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  int8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2cv(GPRTMiss _miss, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3cv(GPRTMiss _miss, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4cv(GPRTMiss _miss, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1c(GPRTGeom _geom, const char *name, int8_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T);
-  int8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2c(GPRTGeom _geom, const char *name, int8_t x, int8_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  int8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3c(GPRTGeom _geom, const char *name, int8_t x, int8_t y, int8_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  int8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4c(GPRTGeom _geom, const char *name, int8_t x, int8_t y, int8_t z, int8_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  int8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2cv(GPRTGeom _geom, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3cv(GPRTGeom _geom, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4cv(GPRTGeom _geom, const char *name, const int8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1c(OWLParams obj, const char *name, char val);
-// GPRT_API void gprtParamsSet2c(OWLParams obj, const char *name, char x, char y);
-// GPRT_API void gprtParamsSet3c(OWLParams obj, const char *name, char x, char y, char z);
-// GPRT_API void gprtParamsSet4c(OWLParams obj, const char *name, char x, char y, char z, char w);
-// GPRT_API void gprtParamsSet2cv(OWLParams obj, const char *name, const char *val);
-// GPRT_API void gprtParamsSet3cv(OWLParams obj, const char *name, const char *val);
-// GPRT_API void gprtParamsSet4cv(OWLParams obj, const char *name, const char *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint8_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1uc(GPRTCompute _compute, const char *name, uint8_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
-  uint8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  uint8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y, uint8_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  uint8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4uc(GPRTCompute _compute, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  uint8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4ucv(GPRTCompute _compute, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1uc(GPRTRayGen _raygen, const char *name, uint8_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
-  uint8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2uc(GPRTRayGen _raygen, const char *name, uint8_t x, uint8_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  uint8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3uc(GPRTRayGen _raygen, const char *name, uint8_t x, uint8_t y, uint8_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  uint8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4uc(GPRTRayGen _raygen, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  uint8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2ucv(GPRTRayGen _raygen, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3ucv(GPRTRayGen _raygen, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4ucv(GPRTRayGen _raygen, const char *name, const uint8_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1uc(GPRTMiss _miss, const char *name, uint8_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
-  uint8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  uint8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y, uint8_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  uint8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4uc(GPRTMiss _miss, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  uint8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4ucv(GPRTMiss _miss, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1uc(GPRTGeom _geom, const char *name, uint8_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T);
-  uint8_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2uc(GPRTGeom _geom, const char *name, uint8_t x, uint8_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  uint8_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3uc(GPRTGeom _geom, const char *name, uint8_t x, uint8_t y, uint8_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  uint8_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4uc(GPRTGeom _geom, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  uint8_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2ucv(GPRTGeom _geom, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3ucv(GPRTGeom _geom, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4ucv(GPRTGeom _geom, const char *name, const uint8_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT8_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1uc(OWLParams obj, const char *name, uint8_t val);
-// GPRT_API void gprtParamsSet2uc(OWLParams obj, const char *name, uint8_t x, uint8_t y);
-// GPRT_API void gprtParamsSet3uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z);
-// GPRT_API void gprtParamsSet4uc(OWLParams obj, const char *name, uint8_t x, uint8_t y, uint8_t z, uint8_t w);
-// GPRT_API void gprtParamsSet2ucv(OWLParams obj, const char *name, const uint8_t *val);
-// GPRT_API void gprtParamsSet3ucv(OWLParams obj, const char *name, const uint8_t *val);
-// GPRT_API void gprtParamsSet4ucv(OWLParams obj, const char *name, const uint8_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int16_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1s(GPRTCompute _compute, const char *name, int16_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  int16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2s(GPRTCompute _compute, const char *name, int16_t x, int16_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  int16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3s(GPRTCompute _compute, const char *name, int16_t x, int16_t y, int16_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  int16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4s(GPRTCompute _compute, const char *name, int16_t x, int16_t y, int16_t z, int16_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  int16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2sv(GPRTCompute _compute, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3sv(GPRTCompute _compute, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4sv(GPRTCompute _compute, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1s(GPRTRayGen _raygen, const char *name, int16_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  int16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2s(GPRTRayGen _raygen, const char *name, int16_t x, int16_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  int16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3s(GPRTRayGen _raygen, const char *name, int16_t x, int16_t y, int16_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  int16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4s(GPRTRayGen _raygen, const char *name, int16_t x, int16_t y, int16_t z, int16_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  int16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2sv(GPRTRayGen _raygen, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3sv(GPRTRayGen _raygen, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4sv(GPRTRayGen _raygen, const char *name, const int16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1s(GPRTMiss _miss, const char *name, int16_t val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  memcpy(var.second, (void*)&val, var.first);
-}
-
-GPRT_API void gprtMissSet2s(GPRTMiss _miss, const char *name, int16_t x, int16_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  int16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3s(GPRTMiss _miss, const char *name, int16_t x, int16_t y, int16_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  int16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4s(GPRTMiss _miss, const char *name, int16_t x, int16_t y, int16_t z, int16_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  int16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2sv(GPRTMiss _miss, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3sv(GPRTMiss _miss, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4sv(GPRTMiss _miss, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1s(GPRTGeom _geom, const char *name, int16_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T);
-  int16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2s(GPRTGeom _geom, const char *name, int16_t x, int16_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  int16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3s(GPRTGeom _geom, const char *name, int16_t x, int16_t y, int16_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  int16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4s(GPRTGeom _geom, const char *name, int16_t x, int16_t y, int16_t z, int16_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  int16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2sv(GPRTGeom _geom, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3sv(GPRTGeom _geom, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4sv(GPRTGeom _geom, const char *name, const int16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1s(OWLParams obj, const char *name, int16_t val);
-// GPRT_API void gprtParamsSet2s(OWLParams obj, const char *name, int16_t x, int16_t y);
-// GPRT_API void gprtParamsSet3s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z);
-// GPRT_API void gprtParamsSet4s(OWLParams obj, const char *name, int16_t x, int16_t y, int16_t z, int16_t w);
-// GPRT_API void gprtParamsSet2sv(OWLParams obj, const char *name, const int16_t *val);
-// GPRT_API void gprtParamsSet3sv(OWLParams obj, const char *name, const int16_t *val);
-// GPRT_API void gprtParamsSet4sv(OWLParams obj, const char *name, const int16_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint16_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1us(GPRTCompute _compute, const char *name, uint16_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
-  uint16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  uint16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y, uint16_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  uint16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4us(GPRTCompute _compute, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  uint16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4usv(GPRTCompute _compute, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1us(GPRTRayGen _raygen, const char *name, uint16_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
-  uint16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2us(GPRTRayGen _raygen, const char *name, uint16_t x, uint16_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  uint16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3us(GPRTRayGen _raygen, const char *name, uint16_t x, uint16_t y, uint16_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  uint16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4us(GPRTRayGen _raygen, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  uint16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2usv(GPRTRayGen _raygen, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3usv(GPRTRayGen _raygen, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4usv(GPRTRayGen _raygen, const char *name, const uint16_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1us(GPRTMiss _miss, const char *name, uint16_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
-  uint16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  uint16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y, uint16_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  uint16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4us(GPRTMiss _miss, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  uint16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2usv(GPRTMiss _miss, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3usv(GPRTMiss _miss, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4usv(GPRTMiss _miss, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1us(GPRTGeom _geom, const char *name, uint16_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T);
-  uint16_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2us(GPRTGeom _geom, const char *name, uint16_t x, uint16_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  uint16_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3us(GPRTGeom _geom, const char *name, uint16_t x, uint16_t y, uint16_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  uint16_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4us(GPRTGeom _geom, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  uint16_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2usv(GPRTGeom _geom, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3usv(GPRTGeom _geom, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4usv(GPRTGeom _geom, const char *name, const uint16_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT16_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1us(OWLParams obj, const char *name, uint16_t val);
-// GPRT_API void gprtParamsSet2us(OWLParams obj, const char *name, uint16_t x, uint16_t y);
-// GPRT_API void gprtParamsSet3us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z);
-// GPRT_API void gprtParamsSet4us(OWLParams obj, const char *name, uint16_t x, uint16_t y, uint16_t z, uint16_t w);
-// GPRT_API void gprtParamsSet2usv(OWLParams obj, const char *name, const uint16_t *val);
-// GPRT_API void gprtParamsSet3usv(OWLParams obj, const char *name, const uint16_t *val);
-// GPRT_API void gprtParamsSet4usv(OWLParams obj, const char *name, const uint16_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1i(GPRTCompute _compute, const char *name, int32_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
-  int32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2i(GPRTCompute _compute, const char *name, int32_t x, int32_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  int32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3i(GPRTCompute _compute, const char *name, int32_t x, int32_t y, int32_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  int32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4i(GPRTCompute _compute, const char *name, int32_t x, int32_t y, int32_t z, int32_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  int32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2iv(GPRTCompute _compute, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3iv(GPRTCompute _compute, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4iv(GPRTCompute _compute, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1i(GPRTRayGen _raygen, const char *name, int32_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
-  int32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2i(GPRTRayGen _raygen, const char *name, int32_t x, int32_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  int32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3i(GPRTRayGen _raygen, const char *name, int32_t x, int32_t y, int32_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  int32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4i(GPRTRayGen _raygen, const char *name, int32_t x, int32_t y, int32_t z, int32_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  int32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2iv(GPRTRayGen _raygen, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3iv(GPRTRayGen _raygen, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4iv(GPRTRayGen _raygen, const char *name, const int32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1i(GPRTMiss _miss, const char *name, int32_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
-  int32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2i(GPRTMiss _miss, const char *name, int32_t x, int32_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  int32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3i(GPRTMiss _miss, const char *name, int32_t x, int32_t y, int32_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  int32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4i(GPRTMiss _miss, const char *name, int32_t x, int32_t y, int32_t z, int32_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  int32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2iv(GPRTMiss _miss, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3iv(GPRTMiss _miss, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4iv(GPRTMiss _miss, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1i(GPRTGeom _geom, const char *name, int32_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T);
-  int32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2i(GPRTGeom _geom, const char *name, int32_t x, int32_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  int32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3i(GPRTGeom _geom, const char *name, int32_t x, int32_t y, int32_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  int32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4i(GPRTGeom _geom, const char *name, int32_t x, int32_t y, int32_t z, int32_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  int32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2iv(GPRTGeom _geom, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3iv(GPRTGeom _geom, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4iv(GPRTGeom _geom, const char *name, const int32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1i(OWLParams obj, const char *name, int32_t val);
-// GPRT_API void gprtParamsSet2i(OWLParams obj, const char *name, int32_t x, int32_t y);
-// GPRT_API void gprtParamsSet3i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z);
-// GPRT_API void gprtParamsSet4i(OWLParams obj, const char *name, int32_t x, int32_t y, int32_t z, int32_t w);
-// GPRT_API void gprtParamsSet2iv(OWLParams obj, const char *name, const int32_t *val);
-// GPRT_API void gprtParamsSet3iv(OWLParams obj, const char *name, const int32_t *val);
-// GPRT_API void gprtParamsSet4iv(OWLParams obj, const char *name, const int32_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint32_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1ui(GPRTCompute _compute, const char *name, uint32_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
-  uint32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  uint32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y, uint32_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  uint32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4ui(GPRTCompute _compute, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  uint32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4uiv(GPRTCompute _compute, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1ui(GPRTRayGen _raygen, const char *name, uint32_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
-  uint32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2ui(GPRTRayGen _raygen, const char *name, uint32_t x, uint32_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  uint32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3ui(GPRTRayGen _raygen, const char *name, uint32_t x, uint32_t y, uint32_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  uint32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4ui(GPRTRayGen _raygen, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  uint32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2uiv(GPRTRayGen _raygen, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3uiv(GPRTRayGen _raygen, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4uiv(GPRTRayGen _raygen, const char *name, const uint32_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1ui(GPRTMiss _miss, const char *name, uint32_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
-  uint32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  uint32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y, uint32_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  uint32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4ui(GPRTMiss _miss, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  uint32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4uiv(GPRTMiss _miss, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1ui(GPRTGeom _geom, const char *name, uint32_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T);
-  uint32_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2ui(GPRTGeom _geom, const char *name, uint32_t x, uint32_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  uint32_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3ui(GPRTGeom _geom, const char *name, uint32_t x, uint32_t y, uint32_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  uint32_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4ui(GPRTGeom _geom, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  uint32_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2uiv(GPRTGeom _geom, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3uiv(GPRTGeom _geom, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4uiv(GPRTGeom _geom, const char *name, const uint32_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT32_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1ui(OWLParams obj, const char *name, uint32_t val);
-// GPRT_API void gprtParamsSet2ui(OWLParams obj, const char *name, uint32_t x, uint32_t y);
-// GPRT_API void gprtParamsSet3ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z);
-// GPRT_API void gprtParamsSet4ui(OWLParams obj, const char *name, uint32_t x, uint32_t y, uint32_t z, uint32_t w);
-// GPRT_API void gprtParamsSet2uiv(OWLParams obj, const char *name, const uint32_t *val);
-// GPRT_API void gprtParamsSet3uiv(OWLParams obj, const char *name, const uint32_t *val);
-// GPRT_API void gprtParamsSet4uiv(OWLParams obj, const char *name, const uint32_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "float"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1f(GPRTCompute _compute, const char *name, float x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
-  float val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2f(GPRTCompute _compute, const char *name, float x, float y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  float val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3f(GPRTCompute _compute, const char *name, float x, float y, float z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  float val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4f(GPRTCompute _compute, const char *name, float x, float y, float z, float w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  float val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2fv(GPRTCompute _compute, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3fv(GPRTCompute _compute, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4fv(GPRTCompute _compute, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1f(GPRTRayGen _raygen, const char *name, float x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
-  float val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2f(GPRTRayGen _raygen, const char *name, float x, float y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  float val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3f(GPRTRayGen _raygen, const char *name, float x, float y, float z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  float val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4f(GPRTRayGen _raygen, const char *name, float x, float y, float z, float w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  float val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2fv(GPRTRayGen _raygen, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3fv(GPRTRayGen _raygen, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4fv(GPRTRayGen _raygen, const char *name, const float *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1f(GPRTMiss _miss, const char *name, float x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
-  float val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2f(GPRTMiss _miss, const char *name, float x, float y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  float val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3f(GPRTMiss _miss, const char *name, float x, float y, float z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  float val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4f(GPRTMiss _miss, const char *name, float x, float y, float z, float w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  float val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2fv(GPRTMiss _miss, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3fv(GPRTMiss _miss, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4fv(GPRTMiss _miss, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1f(GPRTGeom _geom, const char *name, float x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT);
-  float val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2f(GPRTGeom _geom, const char *name, float x, float y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  float val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3f(GPRTGeom _geom, const char *name, float x, float y, float z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  float val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4f(GPRTGeom _geom, const char *name, float x, float y, float z, float w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  float val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2fv(GPRTGeom _geom, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3fv(GPRTGeom _geom, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4fv(GPRTGeom _geom, const char *name, const float *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_FLOAT4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1f(OWLParams obj, const char *name, float val);
-// GPRT_API void gprtParamsSet2f(OWLParams obj, const char *name, float x, float y);
-// GPRT_API void gprtParamsSet3f(OWLParams obj, const char *name, float x, float y, float z);
-// GPRT_API void gprtParamsSet4f(OWLParams obj, const char *name, float x, float y, float z, float w);
-// GPRT_API void gprtParamsSet2fv(OWLParams obj, const char *name, const float *val);
-// GPRT_API void gprtParamsSet3fv(OWLParams obj, const char *name, const float *val);
-// GPRT_API void gprtParamsSet4fv(OWLParams obj, const char *name, const float *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "double"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1d(GPRTCompute _compute, const char *name, double x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
-  double val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2d(GPRTCompute _compute, const char *name, double x, double y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  double val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3d(GPRTCompute _compute, const char *name, double x, double y, double z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  double val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4d(GPRTCompute _compute, const char *name, double x, double y, double z, double w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  double val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2dv(GPRTCompute _compute, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3dv(GPRTCompute _compute, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4dv(GPRTCompute _compute, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1d(GPRTRayGen _raygen, const char *name, double x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
-  double val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2d(GPRTRayGen _raygen, const char *name, double x, double y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  double val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3d(GPRTRayGen _raygen, const char *name, double x, double y, double z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  double val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4d(GPRTRayGen _raygen, const char *name, double x, double y, double z, double w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  double val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2dv(GPRTRayGen _raygen, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3dv(GPRTRayGen _raygen, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4dv(GPRTRayGen _raygen, const char *name, const double *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1d(GPRTMiss _miss, const char *name, double x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
-  double val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2d(GPRTMiss _miss, const char *name, double x, double y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  double val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3d(GPRTMiss _miss, const char *name, double x, double y, double z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  double val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4d(GPRTMiss _miss, const char *name, double x, double y, double z, double w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  double val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2dv(GPRTMiss _miss, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3dv(GPRTMiss _miss, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4dv(GPRTMiss _miss, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1d(GPRTGeom _geom, const char *name, double x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE);
-  double val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2d(GPRTGeom _geom, const char *name, double x, double y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  double val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3d(GPRTGeom _geom, const char *name, double x, double y, double z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  double val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4d(GPRTGeom _geom, const char *name, double x, double y, double z, double w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  double val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2dv(GPRTGeom _geom, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3dv(GPRTGeom _geom, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4dv(GPRTGeom _geom, const char *name, const double *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_DOUBLE4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1d(OWLParams obj, const char *name, double val);
-// GPRT_API void gprtParamsSet2d(OWLParams obj, const char *name, double x, double y);
-// GPRT_API void gprtParamsSet3d(OWLParams obj, const char *name, double x, double y, double z);
-// GPRT_API void gprtParamsSet4d(OWLParams obj, const char *name, double x, double y, double z, double w);
-// GPRT_API void gprtParamsSet2dv(OWLParams obj, const char *name, const double *val);
-// GPRT_API void gprtParamsSet3dv(OWLParams obj, const char *name, const double *val);
-// GPRT_API void gprtParamsSet4dv(OWLParams obj, const char *name, const double *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "int64_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1l(GPRTCompute _compute, const char *name, int64_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
-  int64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2l(GPRTCompute _compute, const char *name, int64_t x, int64_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  int64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3l(GPRTCompute _compute, const char *name, int64_t x, int64_t y, int64_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  int64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4l(GPRTCompute _compute, const char *name, int64_t x, int64_t y, int64_t z, int64_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  int64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2lv(GPRTCompute _compute, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3lv(GPRTCompute _compute, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4lv(GPRTCompute _compute, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1l(GPRTRayGen _raygen, const char *name, int64_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
-  int64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2l(GPRTRayGen _raygen, const char *name, int64_t x, int64_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  int64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3l(GPRTRayGen _raygen, const char *name, int64_t x, int64_t y, int64_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  int64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4l(GPRTRayGen _raygen, const char *name, int64_t x, int64_t y, int64_t z, int64_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  int64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2lv(GPRTRayGen _raygen, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3lv(GPRTRayGen _raygen, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4lv(GPRTRayGen _raygen, const char *name, const int64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1l(GPRTMiss _miss, const char *name, int64_t x)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
-  int64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2l(GPRTMiss _miss, const char *name, int64_t x, int64_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  int64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3l(GPRTMiss _miss, const char *name, int64_t x, int64_t y, int64_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  int64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4l(GPRTMiss _miss, const char *name, int64_t x, int64_t y, int64_t z, int64_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  int64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2lv(GPRTMiss _miss, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3lv(GPRTMiss _miss, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4lv(GPRTMiss _miss, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1l(GPRTGeom _geom, const char *name, int64_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T);
-  int64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2l(GPRTGeom _geom, const char *name, int64_t x, int64_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  int64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3l(GPRTGeom _geom, const char *name, int64_t x, int64_t y, int64_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  int64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4l(GPRTGeom _geom, const char *name, int64_t x, int64_t y, int64_t z, int64_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  int64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2lv(GPRTGeom _geom, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3lv(GPRTGeom _geom, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4lv(GPRTGeom _geom, const char *name, const int64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_INT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1l(OWLParams obj, const char *name, int64_t val);
-// GPRT_API void gprtParamsSet2l(OWLParams obj, const char *name, int64_t x, int64_t y);
-// GPRT_API void gprtParamsSet3l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z);
-// GPRT_API void gprtParamsSet4l(OWLParams obj, const char *name, int64_t x, int64_t y, int64_t z, int64_t w);
-// GPRT_API void gprtParamsSet2lv(OWLParams obj, const char *name, const int64_t *val);
-// GPRT_API void gprtParamsSet3lv(OWLParams obj, const char *name, const int64_t *val);
-// GPRT_API void gprtParamsSet4lv(OWLParams obj, const char *name, const int64_t *val);
-
-// ------------------------------------------------------------------
-// setters for variables of type "uint64_t"
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-GPRT_API void gprtComputeSet1ul(GPRTCompute _compute, const char *name, uint64_t x) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
-  uint64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  uint64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet3ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y, uint64_t z) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  uint64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet4ul(GPRTCompute _compute, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  uint64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtComputeSet2ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet3ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtComputeSet4ulv(GPRTCompute _compute, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  Compute *entry = (Compute*)_compute;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "RayGen"s
-GPRT_API void gprtRayGenSet1ul(GPRTRayGen _raygen, const char *name, uint64_t x) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
-  uint64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2ul(GPRTRayGen _raygen, const char *name, uint64_t x, uint64_t y) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  uint64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3ul(GPRTRayGen _raygen, const char *name, uint64_t x, uint64_t y, uint64_t z) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  uint64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4ul(GPRTRayGen _raygen, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  uint64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtRayGenSet2ulv(GPRTRayGen _raygen, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet3ulv(GPRTRayGen _raygen, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtRayGenSet4ulv(GPRTRayGen _raygen, const char *name, const uint64_t *val) 
-{
-  LOG_API_CALL();
-  RayGen *entry = (RayGen*)_raygen;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-// setters for variables on "MissProg"s
-GPRT_API void gprtMissSet1ul(GPRTMiss _miss, const char *name, uint64_t val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet2ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  uint64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet3ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y, uint64_t z)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  uint64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet4ul(GPRTMiss _miss, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  uint64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtMissSet2ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet3ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtMissSet4ulv(GPRTMiss _miss, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Miss *entry = (Miss*)_miss;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Geom"s
-GPRT_API void gprtGeomSet1ul(GPRTGeom _geom, const char *name, uint64_t x)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T);
-  uint64_t val[] = {x};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2ul(GPRTGeom _geom, const char *name, uint64_t x, uint64_t y)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  uint64_t val[] = {x, y};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet3ul(GPRTGeom _geom, const char *name, uint64_t x, uint64_t y, uint64_t z)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  uint64_t val[] = {x, y, z};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet4ul(GPRTGeom _geom, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  uint64_t val[] = {x, y, z, w};
-  memcpy(var.second, &val, var.first);
-}
-
-GPRT_API void gprtGeomSet2ulv(GPRTGeom _geom, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T2);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet3ulv(GPRTGeom _geom, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T3);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-GPRT_API void gprtGeomSet4ulv(GPRTGeom _geom, const char *name, const uint64_t *val)
-{
-  LOG_API_CALL();
-  Geom *entry = (Geom*)_geom;
-  assert(entry);
-  auto var = gprtGetVariable(entry, name, GPRT_UINT64_T4);
-  memcpy(var.second, (void*)val, var.first);
-}
-
-
-// setters for variables on "Params"s
-// GPRT_API void gprtParamsSet1ul(OWLParams obj, const char *name, uint64_t val);
-// GPRT_API void gprtParamsSet2ul(OWLParams obj, const char *name, uint64_t x, uint64_t y);
-// GPRT_API void gprtParamsSet3ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z);
-// GPRT_API void gprtParamsSet4ul(OWLParams obj, const char *name, uint64_t x, uint64_t y, uint64_t z, uint64_t w);
-// GPRT_API void gprtParamsSet2ulv(OWLParams obj, const char *name, const uint64_t *val);
-// GPRT_API void gprtParamsSet3ulv(OWLParams obj, const char *name, const uint64_t *val);
-// GPRT_API void gprtParamsSet4ulv(OWLParams obj, const char *name, const uint64_t *val);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ------------------------------------------------------------------
-// setters for "meta" types
-// ------------------------------------------------------------------
-
-// setters for variables on "Compute"s
-// GPRT_API void gprtComputeSetTexture(GPRTCompute _compute, const char *name, GPRTTexture val) 
-// GPRT_API void gprtComputeSetPointer(GPRTCompute _compute, const char *name, const void *val) 
-GPRT_API void gprtComputeSetBuffer(GPRTCompute _rayGen, const char *name, GPRTBuffer _val)
-{
-  LOG_API_CALL();
-  Compute *raygen = (Compute*)_rayGen;
-  assert(raygen);
-
-  Buffer *val = (Buffer*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // The found variable must be a buffer
-  assert(raygen->vars[name].decl.type == GPRT_BUFFER || 
-         raygen->vars[name].decl.type == GPRT_BUFPTR);
-
-  // Buffer pointers are 64 bits
-  size_t size = sizeof(uint64_t);
-
-  // 3. Assign the value to that variable
-  VkDeviceAddress addr = val->address;
-  memcpy(raygen->vars[name].data, &addr, size);
-}
-
-GPRT_API void gprtComputeSetAccel(GPRTCompute _compute, const char *name, GPRTAccel _val)
-{
-  LOG_API_CALL();
-  Compute *raygen = (Compute*)_compute;
-  assert(raygen);
-
-  Accel *val = (Accel*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // The found variable must be an acceleration structure
-  assert(raygen->vars[name].decl.type == GPRT_ACCEL);
-
-  // Acceleration structure pointers are 64 bits
-  size_t size = sizeof(uint64_t);
-
-  // 3. Assign the value to that variable
-  VkDeviceAddress addr = val->address;
-  memcpy(raygen->vars[name].data, &addr, size);
-}
-
-GPRT_API void gprtComputeSetRaw(GPRTCompute _compute, const char *name, const void *val)
-{
-  LOG_API_CALL();
-  Compute *raygen = (Compute*)_compute;
-  assert(raygen);
-
-  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // 2. Get the expected size for this variable
-  size_t size = getSize(raygen->vars[name].decl.type);
-
-  // 3. Assign the value to that variable
-  memcpy(raygen->vars[name].data, val, size);
-}
-
-// setters for variables on "RayGen"s
-// GPRT_API void gprtRayGenSetTexture(GPRTRayGen _raygen, const char *name, GPRTTexture val) 
-// GPRT_API void gprtRayGenSetPointer(GPRTRayGen _raygen, const char *name, const void *val) 
-GPRT_API void gprtRayGenSetBuffer(GPRTRayGen _raygen, const char *name, GPRTBuffer _val)
-{
-  LOG_API_CALL();
-  RayGen *raygen = (RayGen*)_raygen;
-  assert(raygen);
-
-  Buffer *val = (Buffer*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // The found variable must be a buffer
-  assert(raygen->vars[name].decl.type == GPRT_BUFFER || 
-         raygen->vars[name].decl.type == GPRT_BUFFER_POINTER);
-
-  if (raygen->vars[name].decl.type == GPRT_BUFFER_POINTER) {
-    // Buffer pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &addr, size);
-  } else {
-    gprt::Buffer buffer;
-    buffer.x = val->address;
-    buffer.y = val->size;
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &buffer, size);
-  }
-}
-
-GPRT_API void gprtRayGenSetAccel(GPRTRayGen _raygen, const char *name, GPRTAccel _val)
-{
-  LOG_API_CALL();
-  RayGen *raygen = (RayGen*)_raygen;
-  assert(raygen);
-
-  Accel *val = (Accel*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // The found variable must be an acceleration structure
-  assert(raygen->vars[name].decl.type == GPRT_ACCEL ||
-         raygen->vars[name].decl.type == GPRT_ACCEL_POINTER);
-
-  if (raygen->vars[name].decl.type == GPRT_ACCEL_POINTER) {
-    // Acceleration structure pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &addr, size);
-  } else {
-    gprt::Accel accel;
-    accel.x = val->address;
-    accel.y = 0; // todo
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(raygen->vars[name].data, &accel, size);
-  }
-}
-
-GPRT_API void gprtRayGenSetRaw(GPRTRayGen _rayGen, const char *name, const void *val)
-{
-  LOG_API_CALL();
-  RayGen *raygen = (RayGen*)_rayGen;
-  assert(raygen);
-
-  // 1. Figure out if the variable "name" exists (Maybe through a dictionary?)
-  assert(raygen->vars.find(std::string(name)) != raygen->vars.end());
-
-  // 2. Get the expected size for this variable
-  size_t size = getSize(raygen->vars[name].decl.type);
-
-  // 3. Assign the value to that variable
-  memcpy(raygen->vars[name].data, val, size);
-}
-
-// // setters for variables on "Geom"s
-// GPRT_API void gprtGeomSetTexture(GPRTGeom _geom, const char *name, GPRTTexture val);
-// GPRT_API void gprtGeomSetPointer(GPRTGeom _geom, const char *name, const void *val);
-GPRT_API void gprtGeomSetBuffer(GPRTGeom _geom, const char *name, GPRTBuffer _val) 
-{
-  LOG_API_CALL();
-  Geom *geom = (Geom*)_geom;
-  assert(geom);
-
-  Buffer *val = (Buffer*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(geom->vars.find(std::string(name)) != geom->vars.end());
-
-  // The found variable must be a buffer
-  assert(geom->vars[name].decl.type == GPRT_BUFFER || 
-         geom->vars[name].decl.type == GPRT_BUFFER_POINTER);
-
-  if (geom->vars[name].decl.type == GPRT_BUFFER_POINTER) {
-    // Buffer pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(geom->vars[name].data, &addr, size);
-  } else {
-    gprt::Buffer buffer;
-    buffer.x = val->address;
-    buffer.y = val->size;
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(geom->vars[name].data, &buffer, size);
-  }
-}
-
-GPRT_API void gprtGeomSetAccel(GPRTGeom _geom, const char *name, GPRTAccel _val)
-{
-  LOG_API_CALL();
-  Geom *geom = (Geom*)_geom;
-  assert(geom);
-
-  Accel *val = (Accel*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(geom->vars.find(std::string(name)) != geom->vars.end());
-
-  // The found variable must be an acceleration structure
-  assert(geom->vars[name].decl.type == GPRT_ACCEL ||
-         geom->vars[name].decl.type == GPRT_ACCEL_POINTER);
-
-  if (geom->vars[name].decl.type == GPRT_ACCEL_POINTER) {
-    // Acceleration structure pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(geom->vars[name].data, &addr, size);
-  } else {
-    gprt::Accel accel;
-    accel.x = val->address;
-    accel.y = 0; // todo
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(geom->vars[name].data, &accel, size);
-  }
-}
-
-GPRT_API void gprtGeomSetRaw(GPRTGeom _geom, const char *name, const void *val)
-{
-  LOG_API_CALL();
-  Geom *geom = (Geom*)_geom;
-  assert(geom);
-
-  // 1. Figure out if the variable "name" exists
-  assert(geom->vars.find(std::string(name)) != geom->vars.end());
-
-  // 2. Get the expected size for this variable
-  size_t size = getSize(geom->vars[name].decl.type);
-
-  // 3. Assign the value to that variable
-  memcpy(geom->vars[name].data, val, size);
-}
-
-// // setters for variables on "Params"s
-// GPRT_API void gprtParamsSetTexture(GPRTParams obj, const char *name, GPRTTexture val);
-// GPRT_API void gprtParamsSetPointer(GPRTParams obj, const char *name, const void *val);
-// GPRT_API void gprtParamsSetBuffer(GPRTParams obj, const char *name, GPRTBuffer val);
-// GPRT_API void gprtParamsSetAccel(GPRTParams obj, const char *name, GPRTAccel val);
-// GPRT_API void gprtParamsSetRaw(GPRTParams obj, const char *name, const void *val);
-
-// setters for variables on "MissProg"s
-// GPRT_API void gprtMissSetTexture(GPRTMiss _miss, const char *name, GPRTTexture val)
-
-// GPRT_API void gprtMissSetPointer(GPRTMiss _miss, const char *name, const void *val);
-GPRT_API void gprtMissSetBuffer(GPRTMiss _miss, const char *name, GPRTBuffer _val)
-{
-  LOG_API_CALL();
-  Miss *miss = (Miss*)_miss;
-  assert(miss);
-
-  Buffer *val = (Buffer*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(miss->vars.find(std::string(name)) != miss->vars.end());
-
-  // The found variable must be a buffer
-  assert(miss->vars[name].decl.type == GPRT_BUFFER || 
-         miss->vars[name].decl.type == GPRT_BUFFER_POINTER);
-
-  if (miss->vars[name].decl.type == GPRT_BUFFER_POINTER) {
-    // Buffer pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(miss->vars[name].data, &addr, size);
-  } else {
-    gprt::Buffer buffer;
-    buffer.x = val->address;
-    buffer.y = val->size;
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(miss->vars[name].data, &buffer, size);
-  }
-}
-
-GPRT_API void gprtMissSetAccel(GPRTMiss _miss, const char *name, GPRTAccel _val)
-{
-  LOG_API_CALL();
-  Miss *miss = (Miss*)_miss;
-  assert(miss);
-
-  Accel *val = (Accel*)_val;
-  assert(val);
-
-  // 1. Figure out if the variable "name" exists
-  assert(miss->vars.find(std::string(name)) != miss->vars.end());
-
-  assert(miss->vars[name].decl.type == GPRT_ACCEL ||
-         miss->vars[name].decl.type == GPRT_ACCEL_POINTER);
-
-  if (miss->vars[name].decl.type == GPRT_ACCEL_POINTER) {
-    // Acceleration structure pointers are 64 bits
-    size_t size = sizeof(uint64_t);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(miss->vars[name].data, &addr, size);
-  } else {
-    gprt::Accel accel;
-    accel.x = val->address;
-    accel.y = 0; // todo
-
-    size_t size = sizeof(uint64_t2);
-
-    // 3. Assign the value to that variable
-    VkDeviceAddress addr = val->address;
-    memcpy(miss->vars[name].data, &accel, size);
-  }
-}
-
-GPRT_API void gprtMissSetRaw(GPRTMiss _miss, const char *name, const void *val)
-{
-  LOG_API_CALL();
-  Miss *missProg = (Miss*)_miss;
-  assert(missProg);
-
-  // 1. Figure out if the variable "name" exists
-  assert(missProg->vars.find(std::string(name)) != missProg->vars.end());
-
-  // 2. Get the expected size for this variable
-  size_t size = getSize(missProg->vars[name].decl.type);
-
-  // 3. Assign the value to that variable
-  memcpy(missProg->vars[name].data, val, size);
 }

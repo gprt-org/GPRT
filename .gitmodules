@@ -1,0 +1,6 @@
+[submodule "3rdParty/glfw"]
+	path = 3rdParty/glfw
+	url = git@github.com:glfw/glfw.git
+[submodule "3rdParty/generator"]
+	path = 3rdParty/generator
+	url = git@github.com:natevm/generator.git
