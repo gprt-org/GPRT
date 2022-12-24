@@ -31,9 +31,10 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
 {
     Payload payload;
     uint2 pixelID = DispatchRaysIndex().xy;
+    uint2 fbSize = DispatchRaysDimensions().xy;
     float2 screen = (float2(pixelID) +
                      float2(.5f, .5f)) /
-                    float2(record.fbSize);
+                    float2(fbSize);
 
     // Generate ray
     RayDesc rayDesc;
@@ -56,8 +57,8 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
         payload                // the payload IO
     );
 
-    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    gprt::store(record.fbPtr, fbOfs, gprt::make_rgba(payload.color));
+    const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+    gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
 }
 
 struct TriangleAttributes

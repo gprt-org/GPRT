@@ -47,12 +47,12 @@ extern GPRTProgram s07_deviceCode;
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
-  GPRTBuffer vertexBuffer;
-  GPRTBuffer indexBuffer;
-  GPRTGeom geometry;
+  GPRTBufferOf<float3> vertexBuffer;
+  GPRTBufferOf<uint3> indexBuffer;
+  GPRTGeomOf<TrianglesGeomData> geometry;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomType geomType, T generator, float3 color,
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color,
        float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -71,16 +71,17 @@ template <typename T> struct Mesh {
       triGenerator.next();
     }
 
-    vertexBuffer = gprtDeviceBufferCreate(context, GPRT_FLOAT3, vertices.size(),
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
                                           vertices.data());
-    indexBuffer = gprtDeviceBufferCreate(context, GPRT_UINT3, indices.size(),
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
                                          indices.data());
     geometry = gprtGeomCreate(context, geomType);
+    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
-    gprtGeomSetBuffer(geometry, "vertex", vertexBuffer);
-    gprtGeomSetBuffer(geometry, "index", indexBuffer);
-    gprtGeomSet3f(geometry, "color", color.x, color.y, color.z);
+    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
+    geomData->index = gprtBufferGetHandle(indexBuffer);
+    geomData->color = color;
   };
 
   void cleanup() {
@@ -118,40 +119,19 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTVarDecl trianglesGeomVars[] = {
-      {"index", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, index)},
-      {"vertex", GPRT_BUFFER, GPRT_OFFSETOF(TrianglesGeomData, vertex)},
-      {"color", GPRT_FLOAT3, GPRT_OFFSETOF(TrianglesGeomData, color)},
-      {/* sentinel to mark end of list */}};
-  GPRTGeomType trianglesGeomType =
-      gprtGeomTypeCreate(context, GPRT_TRIANGLES, sizeof(TrianglesGeomData),
-                         trianglesGeomVars, -1);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
+      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTVarDecl rayGenVars[] = {
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"world", GPRT_ACCEL, GPRT_OFFSETOF(RayGenData, world)},
-      {"camera.pos", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.pos)},
-      {"camera.dir_00", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_00)},
-      {"camera.dir_du", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_du)},
-      {"camera.dir_dv", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, camera.dir_dv)},
-      {/* sentinel to mark end of list */}};
-  GPRTRayGen rayGen = gprtRayGenCreate(context, module, "raygen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   // -------------------------------------------------------
   // set up miss prog
   // -------------------------------------------------------
-  GPRTVarDecl missProgVars[] = {
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(MissProgData, color1)},
-      {/* sentinel to mark end of list */}};
-  GPRTMiss miss = gprtMissCreate(context, module, "miss", sizeof(MissProgData),
-                                 missProgVars, -1);
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   LOG("building geometries ...");
 
@@ -176,7 +156,7 @@ int main(int ac, char **av) {
   Mesh<CappedCylinderMesh> floorMesh(
       context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
       float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeom> geoms = {torusMesh1.geometry, torusMesh2.geometry,
+  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
                                  torusMesh3.geometry, floorMesh.geometry};
   GPRTAccel trianglesBLAS =
       gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
@@ -189,15 +169,18 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, GPRT_INT, fbSize.x * fbSize.y);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2iv(rayGen, "fbSize", (int32_t *)&fbSize);
-  gprtRayGenSetAccel(rayGen, "world", trianglesTLAS);
+  GPRTBufferOf<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  
+  // Raygen program frame buffer
+  RayGenData *rayGenData =gprtRayGenGetPointer(rayGen);
+  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
-  gprtMissSet3f(miss, "color0", 0.1f, 0.1f, 0.1f);
-  gprtMissSet3f(miss, "color1", .0f, .0f, .0f);
+  MissProgData *missData = gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   // ##################################################################
   // build *SBT* required to trace the groups
@@ -262,10 +245,11 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      gprtRayGenSet3fv(rayGen, "camera.pos", (float *)&camera_pos);
-      gprtRayGenSet3fv(rayGen, "camera.dir_00", (float *)&camera_d00);
-      gprtRayGenSet3fv(rayGen, "camera.dir_du", (float *)&camera_ddu);
-      gprtRayGenSet3fv(rayGen, "camera.dir_dv", (float *)&camera_ddv);
+      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      raygenData->camera.pos = camera_pos;
+      raygenData->camera.dir_00 = camera_d00;
+      raygenData->camera.dir_du = camera_ddu;
+      raygenData->camera.dir_dv = camera_ddv;
 
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
