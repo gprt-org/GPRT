@@ -71,17 +71,10 @@ int main(int ac, char **av) {
   GPRTModule module = gprtModuleCreate(gprt, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
-  // All "parameters" we'll pass to that ray generation kernel are defined here.
-  GPRTVarDecl rayGenVars[] = {
-      {"fbPtr", GPRT_BUFFER, GPRT_OFFSETOF(RayGenData, fbPtr)},
-      {"fbSize", GPRT_INT2, GPRT_OFFSETOF(RayGenData, fbSize)},
-      {"color0", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color0)},
-      {"color1", GPRT_FLOAT3, GPRT_OFFSETOF(RayGenData, color1)},
-      {/* sentinel: */ nullptr}};
-  // Allocate room for one RayGen shader, create it, and
-  // hold on to it with the "gprt" context
-  GPRTRayGen rayGen = gprtRayGenCreate(gprt, module, "simpleRayGen",
-                                       sizeof(RayGenData), rayGenVars, -1);
+  // Allocate room for one RayGen shader, create it, and hold on to it with
+  // the "gprt" context
+  GPRTRayGenOf<RayGenData> rayGen =
+      gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(gprt);
@@ -93,20 +86,18 @@ int main(int ac, char **av) {
   // Our framebuffer here will be used to hold pixel color values
   // that we'll present to the window / save to an image
   LOG("allocating frame buffer");
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(gprt,
-                             /*type:*/ GPRT_INT,
-                             /*size:*/ fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(gprt, fbSize.x * fbSize.y);
 
   // ------------------------------------------------------------------
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  gprtRayGenSet3f(rayGen, "color0", 0.1f, 0.1f, 0.1f);
-  gprtRayGenSet3f(rayGen, "color1", 0.0f, 0.0f, 0.0f);
-  gprtRayGenSetBuffer(rayGen, "fbPtr", frameBuffer);
-  gprtRayGenSet2i(rayGen, "fbSize", fbSize.x, fbSize.y);
-
+  RayGenData *data = gprtRayGenGetPointer(rayGen);
+  data->color0 = float3(0.1f, 0.1f, 0.1f);
+  data->color1 = float3(0.0f, 0.0f, 0.0f); 
+  data->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  
   // Build a shader binding table entry for the ray generation record.
   gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
 

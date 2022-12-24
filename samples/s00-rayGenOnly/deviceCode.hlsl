@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -26,22 +26,21 @@
 //
 // The second is the type and name of the shader record. A shader record
 // can be thought of as the parameters passed to this kernel.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
-{
-    uint2 pixelID = DispatchRaysIndex().xy;
+GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 fbSize = DispatchRaysDimensions().xy;
 
-    if (pixelID.x == 0 && pixelID.y == 0)
-    {
-        printf("Hello from your first raygen program!\n");
-    }
+  if (pixelID.x == 0 && pixelID.y == 0) {
+    printf("Hello from your first raygen program!\n");
+  }
 
-    // Generate a simple checkerboard pattern as a test.
-    int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-    // alternate pattern, showing that pixel (0,0) is in the upper left corner
-    // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-    const float3 color = (pattern & 1) ? record.color1 : record.color0;
+  // Generate a simple checkerboard pattern as a test.
+  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
+  // alternate pattern, showing that pixel (0,0) is in the upper left corner
+  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
+  const float3 color = (pattern & 1) ? record.color1 : record.color0;
 
-    // find the frame buffer location (x + width*y) and put the result there
-    const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-    gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(color));
+  // find the frame buffer location (x + width*y) and put the result there
+  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(color));
 }
