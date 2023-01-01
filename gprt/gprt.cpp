@@ -4170,6 +4170,170 @@ GPRT_API double gprtGetTime(GPRTContext _context)
   return glfwGetTime();
 }
 
+GPRT_API void gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
+  LOG_API_CALL();
+  if (!requestedFeatures.window) return;
+  Context *context = (Context*)_context;
+  Texture *texture = (Texture*)_texture;
+  
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+  // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+  // submitInfo.signalSemaphoreCount = 1;
+  // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // transfer the texture to a transfer source
+  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+
+  // now do the transfer
+  {
+    VkImageBlit region{};
+
+    region.srcOffsets[0].x = 0;
+    region.srcOffsets[0].y = 0;
+    region.srcOffsets[0].z = 0;
+    region.srcOffsets[1].x = context->windowExtent.width;
+    region.srcOffsets[1].y = context->windowExtent.height;
+    region.srcOffsets[1].z = 1;
+
+    region.dstOffsets[0].x = 0;
+    region.dstOffsets[0].y = 0;
+    region.dstOffsets[0].z = 0;
+    region.dstOffsets[1].x = texture->width;
+    region.dstOffsets[1].y = texture->height;
+    region.dstOffsets[1].z = 1;
+
+    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.srcSubresource.baseArrayLayer = 0;
+    region.srcSubresource.layerCount = 1;
+    region.srcSubresource.mipLevel = 0;
+
+    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.dstSubresource.baseArrayLayer = 0;
+    region.dstSubresource.layerCount = 1;
+    region.dstSubresource.mipLevel = 0;
+
+    vkCmdBlitImage(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 
+      context->swapchainImages[context->currentImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1, &region, VK_FILTER_LINEAR
+    );
+  }
+
+  // now go from TRANSFER_DST back to PRESENT_SRC
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // and revert the texture format back to its previous layout
+  texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+
+  presentInfo.waitSemaphoreCount = 0;
+  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+
+  VkSwapchainKHR swapchains[] = {context->swapchain};
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = swapchains;
+  presentInfo.pImageIndices = &context->currentImageIndex;
+
+  presentInfo.pResults = nullptr;
+
+  // currently throwing an error because the images given by the swapchain don't 
+  // have a defined layout...
+  VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+
+
+  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, 
+        VK_NULL_HANDLE, context->inFlightFence, &context->currentImageIndex);
+  vkWaitForFences(context->logicalDevice,1, &context->inFlightFence, true, UINT_MAX);
+  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+}
+
 GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   if (!requestedFeatures.window) return;

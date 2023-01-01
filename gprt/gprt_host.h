@@ -787,6 +787,18 @@ GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture texture);
 // Note, this might be larger than the width*height*bytes of the image.
 GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture texture);
 
+/** If a window was requested, this call presents the contents of the texture
+ * to the window, potentially waiting for the screen to update before swapping.
+ * 
+ * If a window was not requested (ie headless), this function does nothing. 
+*/
+GPRT_API void gprtTexturePresent(GPRTContext context, GPRTTexture texture);
+
+template <typename T> void
+gprtTexturePresent( GPRTContext context, GPRTTextureOf<T> texture) {
+ gprtTexturePresent(context, (GPRTTexture)texture);
+}
+
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
   underlying memory*/
 GPRT_API void
