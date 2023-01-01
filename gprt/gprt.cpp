@@ -319,7 +319,6 @@ struct Buffer {
   struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDeviceAddress address = 0;
   } stagingBuffer;
 
   VkDeviceSize size = 0;
@@ -572,9 +571,9 @@ struct Buffer {
 
     // Create the memory backing up the buffer handle
     VkMemoryRequirements memReqs;
+    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
     VkMemoryAllocateInfo memAllocInfo {};
     memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
     memAllocInfo.allocationSize = memReqs.size;
     // Find a memory type index that fits the properties of the buffer
     memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
@@ -600,22 +599,14 @@ struct Buffer {
 
       // Create the memory backing up the staging buffer handle
       VkMemoryRequirements memReqs;
+      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
       VkMemoryAllocateInfo memAllocInfo {};
       memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
       memAllocInfo.allocationSize = memReqs.size;
       // Find a memory type index that fits the properties of the buffer
       memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-      // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
-      // need to enable the appropriate flag during allocation
-      VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
-      if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
-        allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
-        memAllocInfo.pNext = &allocFlagsInfo;
-      }
+
       VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
-      alignment = memReqs.alignment;
 
       // Attach the memory to the buffer object
       VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
@@ -638,6 +629,603 @@ struct Buffer {
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
       address = getDeviceAddress();
+  }
+};
+
+inline size_t gprtTextureFormatGetSize(GPRTTextureFormat format) {
+  switch(format) {
+    case GPRT_FORMAT_R8_UINT: return 1;
+    case GPRT_FORMAT_R8G8B8A8_UNORM: return 4;
+    case GPRT_FORMAT_R8G8B8A8_SRGB: return 4;
+    case GPRT_FORMAT_R32_SFLOAT: return 4;
+    case GPRT_FORMAT_R32G32B32A32_SFLOAT: return 16;
+    default: 
+    throw std::runtime_error("Error, unhandled image format");
+    return -1;
+  }
+}
+
+struct Texture {
+  VkDevice device;
+  VkPhysicalDeviceMemoryProperties memoryProperties;
+  VkCommandBuffer commandBuffer;
+  VkQueue queue;
+
+  /** @brief Usage flags to be filled by external source at image creation */
+  VkImageUsageFlags usageFlags;
+
+  /** @brief Memory property flags to be filled by external source at image creation */
+  VkMemoryPropertyFlags memoryPropertyFlags;
+
+  bool hostVisible;
+
+  VkImage image = VK_NULL_HANDLE;
+  VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  VkDeviceAddress address = -1;
+
+  VkImageView imageView = VK_NULL_HANDLE;
+  VkSampler sampler = VK_NULL_HANDLE;
+
+  uint32_t width;
+  uint32_t height;
+  uint32_t depth;
+  VkDeviceSize size = 0;
+  VkDeviceSize alignment = 0;
+  void* mapped = nullptr;
+
+  VkSubresourceLayout subresourceLayout{};
+
+  struct StagingBuffer {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+  } stagingBuffer;
+
+  /* Default Constructor */
+  Texture() {};
+  
+  ~Texture() {};
+
+  void setImageLayout(
+    VkCommandBuffer cmdbuffer,
+    VkImage image,
+    VkImageLayout oldImageLayout,
+    VkImageLayout newImageLayout,
+    VkImageSubresourceRange subresourceRange,
+    VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 
+    VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
+  {
+    // Create an image barrier object
+    VkImageMemoryBarrier imageMemoryBarrier{};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    imageMemoryBarrier.oldLayout = oldImageLayout;
+    imageMemoryBarrier.newLayout = newImageLayout;
+    imageMemoryBarrier.image = image;
+    imageMemoryBarrier.subresourceRange = subresourceRange;
+
+    // Source layouts (old)
+    // Source access mask controls actions that have to be finished on the old layout
+    // before it will be transitioned to the new layout
+    switch (oldImageLayout)
+    {
+    case VK_IMAGE_LAYOUT_UNDEFINED:
+      // Image layout is undefined (or does not matter)
+      // Only valid as initial layout
+      // No flags required, listed only for completeness
+      imageMemoryBarrier.srcAccessMask = 0;
+      break;
+
+    case VK_IMAGE_LAYOUT_PREINITIALIZED:
+      // Image is preinitialized
+      // Only valid as initial layout for linear images, preserves memory contents
+      // Make sure host writes have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      // Image is a color attachment
+      // Make sure any writes to the color buffer have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+      // Image is a depth/stencil attachment
+      // Make sure any writes to the depth/stencil buffer have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+      // Image is a transfer source
+      // Make sure any reads from the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+      // Image is a transfer destination
+      // Make sure any writes to the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+      // Image is read by a shader
+      // Make sure any shader reads from the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      break;
+    default:
+      // Other source layouts aren't handled (yet)
+      break;
+    }
+
+    // Target layouts (new)
+    // Destination access mask controls the dependency for the new image layout
+    switch (newImageLayout)
+    {
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+      // Image will be used as a transfer destination
+      // Make sure any writes to the image have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+      // Image will be used as a transfer source
+      // Make sure any reads from the image have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      // Image will be used as a color attachment
+      // Make sure any writes to the color buffer have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+      // Image layout will be used as a depth/stencil attachment
+      // Make sure any writes to depth/stencil buffer have been finished
+      imageMemoryBarrier.dstAccessMask = imageMemoryBarrier.dstAccessMask | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+      // Image will be read in a shader (sampler, input attachment)
+      // Make sure any writes to the image have been finished
+      if (imageMemoryBarrier.srcAccessMask == 0)
+      {
+        imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+      }
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      break;
+    default:
+      // Other source layouts aren't handled (yet)
+      break;
+    }
+
+    // Put barrier inside setup command buffer
+    vkCmdPipelineBarrier(
+      cmdbuffer,
+      srcStageMask,
+      dstStageMask,
+      0,
+      0, nullptr,
+      0, nullptr,
+      1, &imageMemoryBarrier);
+  }
+  
+  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+  {
+    if (hostVisible) {
+      // Assuming layout is general
+      if (mapped) return VK_SUCCESS;
+      else return vkMapMemory(device, memory, offset, size, 0, &mapped);
+    }
+    else {
+      VkResult err;
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+      // transition device to a transfer source format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      
+      // VkImageCopy region;
+      // region.srcOffset.x = 0;
+      // region.srcOffset.y = 0;
+      // region.srcOffset.z = 0;
+      // region.dstOffset.x = 0;
+      // region.dstOffset.y = 0;
+      // region.dstOffset.z = 0;
+      // region.extent.width = width;
+      // region.extent.height = height;
+      // region.extent.depth = depth;
+      // region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      // region.srcSubresource.baseArrayLayer = 0;
+      // region.srcSubresource.layerCount = 1;
+      // region.srcSubresource.mipLevel = 0;
+
+      // // staging image is the same as the final
+      // region.dstSubresource = region.srcSubresource;
+      // vkCmdCopyImage(commandBuffer, image, layout, stagingImage.image, stagingImage.layout, 1, &region);
+
+      VkBufferImageCopy copyRegion;
+      copyRegion.imageOffset.x = 0;
+      copyRegion.imageOffset.y = 0;
+      copyRegion.imageOffset.z = 0;
+      copyRegion.imageExtent.width = width;
+      copyRegion.imageExtent.height = height;
+      copyRegion.imageExtent.depth = depth;
+      copyRegion.bufferOffset = 0;
+      copyRegion.bufferRowLength = 0;
+      copyRegion.bufferImageHeight = 0;
+      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      copyRegion.imageSubresource.baseArrayLayer = 0;
+      copyRegion.imageSubresource.layerCount = 1;
+      copyRegion.imageSubresource.mipLevel = 0;
+      vkCmdCopyImageToBuffer(commandBuffer, image, layout, stagingBuffer.buffer, 1, &copyRegion);
+
+      // transition device to previous format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      layout = VK_IMAGE_LAYOUT_GENERAL;
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+
+      // todo, transfer device data to host
+      if (mapped) return VK_SUCCESS;
+      // else return vkMapMemory(device, stagingImage.memory, offset, mapSize, 0, &mapped);
+      else return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
+    }
+  }
+
+  void unmap()
+  {
+    if (hostVisible) {
+      // assuming layout is general
+      if (mapped) {
+        vkUnmapMemory(device, memory);
+        mapped = nullptr;
+      }
+    }
+    else {
+      VkResult err;
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+      // transition device to a transfer destination format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+      // copy data
+      VkBufferImageCopy copyRegion;
+      copyRegion.imageOffset.x = 0;
+      copyRegion.imageOffset.y = 0;
+      copyRegion.imageOffset.z = 0;
+      copyRegion.imageExtent.width = width;
+      copyRegion.imageExtent.height = height;
+      copyRegion.imageExtent.depth = depth;
+      copyRegion.bufferOffset = 0;
+      copyRegion.bufferRowLength = 0;
+      copyRegion.bufferImageHeight = 0;
+      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      copyRegion.imageSubresource.baseArrayLayer = 0;
+      copyRegion.imageSubresource.layerCount = 1;
+      copyRegion.imageSubresource.mipLevel = 0;
+      vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
+
+      // transition device to an optimal device format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      layout = VK_IMAGE_LAYOUT_GENERAL;
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+      
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      
+      // todo, transfer device data to device
+      if (mapped) {
+        // vkUnmapMemory(device, stagingImage.memory);
+        vkUnmapMemory(device, stagingBuffer.memory);
+        mapped = nullptr;
+      }
+    }
+  }
+
+  Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
+    VkCommandBuffer _commandBuffer, VkQueue _queue,
+    VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags,
+    VkImageType type, VkFormat format, uint32_t _width, uint32_t _height, uint32_t _depth, 
+    const void *data = nullptr
+    ) {
+    device = logicalDevice;
+    memoryPropertyFlags = _memoryPropertyFlags;
+    usageFlags = _usageFlags;
+    commandBuffer = _commandBuffer;
+    queue = _queue;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    size = width * height * depth * gprtTextureFormatGetSize((GPRTTextureFormat)format);
+
+    // Check if the image can be mapped to a host pointer. 
+    // If the image isn't host visible, this is image and requires 
+    // an additional staging image...
+    if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0) 
+      hostVisible = true;
+    else 
+      hostVisible = false;
+
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+    auto getMemoryType = [this](
+      uint32_t typeBits, VkMemoryPropertyFlags properties,
+      VkBool32 *memTypeFound = nullptr) -> uint32_t {
+
+      // memory type bits is a bitmask and contains one bit set for every supported memory type.
+      // Bit i is set if and only if the memory type i in the memory properties is supported.
+      for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+        if ((typeBits & 1) == 1) {
+          if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            if (memTypeFound) {
+              *memTypeFound = true;
+            }
+            return i;
+          }
+        }
+        typeBits >>= 1;
+      }
+
+      if (memTypeFound) {
+        *memTypeFound = false;
+        return 0;
+      }
+      else {
+        GPRT_RAISE("Could not find a matching memory type");
+      }
+    };
+    
+    // Create the image handle
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = type;
+    imageInfo.extent.width = width;
+    imageInfo.extent.height = height;
+    imageInfo.extent.depth = depth;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+
+    // can be VK_IMAGE_TILING_LINEAR or VK_IMAGE_TILING_OPTIMAL.
+    // VK_IMAGE_TILING_LINEAR means texels are laid out in a row-major order
+    // VK_IMAGE_TILING_OPTIMAL means texels are laid out in an order that is implementation defined for optimal access
+    // LINEAR is required for reading texels directly. 
+    // This tiling cannot be changed.
+    if (hostVisible) 
+      imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
+    else 
+      imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+
+    // Can be either VK_IMAGE_LAYOUT_UNDEFINED or VK_IMAGE_LAYOUT_PREINITIALIZED.
+    // Preinitialized is required if we're uploading straight to texture as if it were
+    //   a staging image. If we instead use a staging buffer, then this should be undefined
+    if (hostVisible)
+      imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    else 
+      imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    imageInfo.usage = usageFlags;
+
+    // Since this image is oonly going to be used by graphics queues, we have this set to exclusive.
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    // If this image were to be used with MSAA as an attachment, we'd set this to something 
+    // other than
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.flags = 0; // Optional, but some options here for sparse images, like volumes with large sections of just air values.
+
+    VK_CHECK_RESULT(vkCreateImage(logicalDevice, &imageInfo, nullptr, &image));
+
+    if (!hostVisible) {
+      const VkBufferUsageFlags bufferUsageFlags =
+        // means we can use this buffer to transfer into another
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        // means we can use this buffer to receive data transferred from another
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT
+      ;
+
+      VkBufferCreateInfo bufferCreateInfo {};
+      bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      bufferCreateInfo.usage = bufferUsageFlags;
+      bufferCreateInfo.size = size;
+      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
+    }
+
+
+    // Create the memory backing up the image handle
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(logicalDevice, image, &memReqs);
+    VkMemoryAllocateInfo memAllocInfo{};
+    memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memAllocInfo.allocationSize = memReqs.size;
+    // Find a memory type index that firts the properties of the image
+    memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+
+    VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
+    alignment = memReqs.alignment;
+
+    // Attach the memory to the image object
+    VK_CHECK_RESULT(vkBindImageMemory(logicalDevice, image, memory, 0));
+
+    if (!hostVisible) {
+      const VkMemoryPropertyFlags memoryPropertyFlags =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+      // Create the memory backing up the staging buffer handle
+      VkMemoryRequirements memReqs;
+      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
+      VkMemoryAllocateInfo memAllocInfo {};
+      memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+      memAllocInfo.allocationSize = memReqs.size;
+      // Find a memory type index that fits the properties of the buffer
+      memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+
+      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
+
+      // Attach the memory to the buffer object
+      VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
+      if (err) GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
+    }
+
+    // We need to transition the image into a known layout
+    {
+      VkResult err;
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      layout = VK_IMAGE_LAYOUT_GENERAL;
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+      
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+    }
+
+    // Now we need an image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = image;
+    // note, image type and image view type share common enum values up to a point...
+    // todo, how to handle cube maps? 1d/2d arrays? cube map arrays? 
+    viewInfo.viewType = (VkImageViewType) type; 
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    VK_CHECK_RESULT(vkCreateImageView(logicalDevice, &viewInfo, nullptr, &imageView));
+
+    // Then, we need a sampler
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+
+    VK_CHECK_RESULT(vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &sampler));
+
+    if (hostVisible) {
+      VkImageSubresource subRes = {};
+      subRes.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      subRes.mipLevel = 0;
+      subRes.arrayLayer = 0;
+      vkGetImageSubresourceLayout(logicalDevice, image, &subRes, &subresourceLayout);
+    }
+
+    if (data != nullptr) {
+      GPRT_RAISE("NOT IMPLEMENTED!");
+    }
+  }
+
+  /*! Calls vkDestroy on the buffer, and frees underlying memory */
+  void destroy()
+  {
+    if (sampler) {
+      vkDestroySampler(device, sampler, nullptr);
+      sampler = VK_NULL_HANDLE;
+    }
+    if (imageView) {
+      vkDestroyImageView(device, imageView, nullptr);
+      imageView = VK_NULL_HANDLE;
+    }
+    if (image) {
+      vkDestroyImage(device, image, nullptr);
+      image = VK_NULL_HANDLE;
+    }
+    if (memory) {
+      vkFreeMemory(device, memory, nullptr);
+      memory = VK_NULL_HANDLE;
+    }
+    if (stagingBuffer.buffer) {
+      vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      stagingBuffer.buffer = VK_NULL_HANDLE;
+    }
+    if (stagingBuffer.memory) {
+      vkFreeMemory(device, stagingBuffer.memory, nullptr);
+      stagingBuffer.memory = VK_NULL_HANDLE;
+    }
   }
 };
 
@@ -2120,10 +2708,16 @@ struct Context {
 
   std::vector<Accel*> accels;
 
+  uint32_t previousNumTextures = 0;
+  std::vector<Texture*> textures;
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
 
   uint32_t numRayTypes = 1;
+  
 
   // struct InternalStages {
   //   // for copying transforms into the instance buffer
@@ -2244,7 +2838,7 @@ struct Context {
     if (requestedFeatures.window) {
       if (!glfwInit()) {
       	LOG("Warning: Unable to create window. Falling back to headless mode.");
-	requestedFeatures.window = false;
+	      requestedFeatures.window = false;
       }
       else {
         if (!glfwVulkanSupported()) {
@@ -2584,12 +3178,19 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
+    descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
+    descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
     bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
     bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
-    bufferDeviceAddressFeatures.pNext = nullptr;
+    bufferDeviceAddressFeatures.pNext = &descriptorIndexingFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -2851,6 +3452,10 @@ struct Context {
 
   void destroy() {
 
+    if (descriptorSet) vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
+    if (descriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+    if (descriptorPool) vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+
     if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
     if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
     if (inFlightFence) vkDestroyFence(logicalDevice, inFlightFence, nullptr);
@@ -3087,6 +3692,101 @@ struct Context {
 
   void buildPipeline()
   {
+    // If the number of textures has changed, we need to make a new 
+    // descriptor pool             
+    if (descriptorPool && previousNumTextures != textures.size()) {
+      vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+      descriptorPool = VK_NULL_HANDLE;
+    }
+    if (!descriptorPool && textures.size() > 0) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      poolSize.descriptorCount = textures.size();
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      binding.descriptorCount = textures.size();
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(textures.size())};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &descriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(textures.size());
+      for (size_t i = 0; i < textures.size(); i++) {
+        textureDescriptors[i].imageLayout = textures[i]->layout;
+        textureDescriptors[i].sampler = textures[i]->sampler;
+        textureDescriptors[i].imageView = textures[i]->imageView;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(textures.size());
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = descriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTextures = textures.size();
+    }
 
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.size = 128;
@@ -3097,17 +3797,10 @@ struct Context {
                                   | VK_SHADER_STAGE_MISS_BIT_KHR 
                                   | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
-    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
-
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    // pipelineLayoutCI.setLayoutCount = 1;
-    // pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
-    pipelineLayoutCI.setLayoutCount = 0;
-    pipelineLayoutCI.pSetLayouts = nullptr;
+    pipelineLayoutCI.setLayoutCount = (descriptorSet == VK_NULL_HANDLE) ? 0 : 1;
+    pipelineLayoutCI.pSetLayouts = (descriptorSet == VK_NULL_HANDLE) ? nullptr : &descriptorSetLayout;
     pipelineLayoutCI.pushConstantRangeCount = 1;
     pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 
@@ -3977,6 +4670,148 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
   LOG("assigning intersect program to geom type...");
 }
 
+GPRT_API GPRTTexture
+gprtHostTextureCreate(GPRTContext _context, 
+  GPRTTextureType type, GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth
+  );
+
+  // Pin the texture to the host
+  texture->map();
+  if (init) {
+    size_t size = gprtTextureFormatGetSize(format);
+    size_t count = width * height * depth;
+    void* mapped = texture->mapped;
+    memcpy(mapped, init, size * count);
+  }
+
+  context->textures.push_back(texture);
+  return (GPRTTexture)texture;
+}
+
+GPRT_API GPRTTexture
+gprtDeviceTextureCreate(GPRTContext _context, 
+  GPRTTextureType type, GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth
+  );
+
+  if (init) {
+    texture->map();
+    size_t size = gprtTextureFormatGetSize(format);
+    size_t count = width * height * depth;
+    void* mapped = texture->mapped;
+    memcpy(mapped, init, size * count);
+    texture->unmap();
+  }
+
+  context->textures.push_back(texture);
+  return (GPRTTexture)texture;
+}
+
+GPRT_API GPRTTexture
+gprtSharedTextureCreate(GPRTContext _context, 
+  GPRTTextureType type, GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |  // means "flush" and "invalidate"  not needed
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth
+  );
+
+  // Pin the texture to the host
+  texture->map();
+  if (init) {
+    size_t size = gprtTextureFormatGetSize(format);
+    size_t count = width * height * depth;
+    void* mapped = texture->mapped;
+    memcpy(mapped, init, size * count);
+  }
+
+  context->textures.push_back(texture);
+  return (GPRTTexture)texture;
+}
+
+GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  return texture->subresourceLayout.rowPitch;
+}
+
+GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  return texture->subresourceLayout.depthPitch;
+}
+
+GPRT_API void
+gprtTextureDestroy(GPRTTexture _texture)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  texture->destroy();
+  delete texture;
+  LOG("texture destroyed");
+}
+
 GPRT_API GPRTBuffer
 gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
@@ -4009,8 +4844,6 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
   if (init) {
     void* mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
-    buffer->flush();
-    buffer->invalidate();
   }
   LOG("buffer created");
   return (GPRTBuffer)buffer;
@@ -4351,6 +5184,10 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  if (context->descriptorSet != VK_NULL_HANDLE) {
+    vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->pipelineLayout, 0, 1, &context->descriptorSet, 0, NULL);
+  }
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);

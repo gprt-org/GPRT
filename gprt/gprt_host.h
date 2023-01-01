@@ -105,6 +105,7 @@ using GPRTMiss     = struct _GPRTMiss*;
 using GPRTCompute  = struct _GPRTCompute*;
 
 template <typename T> struct _GPRTBufferOf;
+template <typename T> struct _GPRTTextureOf;
 template <typename T> struct _GPRTRayGenOf;
 template <typename T> struct _GPRTMissOf;
 template <typename T> struct _GPRTComputeOf;
@@ -112,6 +113,7 @@ template <typename T> struct _GPRTGeomOf;
 template <typename T> struct _GPRTGeomTypeOf;
 template <typename T> using GPRTRayGenOf   = struct _GPRTRayGenOf<T>*;
 template <typename T> using GPRTBufferOf   = struct _GPRTBufferOf<T>*;
+template <typename T> using GPRTTextureOf   = struct _GPRTTextureOf<T>*;
 template <typename T> using GPRTMissOf   = struct _GPRTMissOf<T>*;
 template <typename T> using GPRTComputeOf   = struct _GPRTComputeOf<T>*;
 template <typename T> using GPRTGeomOf   = struct _GPRTGeomOf<T>*;
@@ -126,6 +128,11 @@ namespace gprt {
   };
 
   struct Accel {
+    uint64_t x;
+    uint64_t y;
+  };
+
+  struct Texture {
     uint64_t x;
     uint64_t y;
   };
@@ -169,6 +176,50 @@ typedef enum
   //  GPRT_CURVES
   }
   GPRTGeomKind;
+
+/*! supported formats for texels in textures */
+typedef enum 
+  {
+    GPRT_TYPE_1D = 0,
+    GPRT_TYPE_2D = 1,
+    GPRT_TYPE_3D = 2,
+  }
+  GPRTTextureType;
+
+/*! supported formats for texels in textures */
+typedef enum 
+  {
+    // note, for now, values here are made to match VkFormat equivalents.
+    GPRT_FORMAT_R8_UINT = VK_FORMAT_R8_UINT,
+    GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
+    GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
+    GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
+    GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT
+  }
+  GPRTTextureFormat;
+
+/*! currently supported texture filter modes */
+typedef enum {
+  GPRT_FILTER_MODE_NEAREST,
+  GPRT_FILTER_MODE_LINEAR
+}
+GPRTTextureFilterMode;
+
+/*! currently supported texture filter modes */
+typedef enum {
+  GPRT_ADDRESS_MODE_WRAP,
+  GPRT_ADDRESS_MODE_CLAMP,
+  GPRT_ADDRESS_MODE_BORDER,
+  GPRT_ADDRESS_MODE_MIRROR
+}
+GPRTTextureAddressMode;
+
+/*! Indicates if a texture is linear or SRGB */
+typedef enum {
+  GPRT_COLOR_SPACE_LINEAR,
+  GPRT_COLOR_SPACE_SRGB
+}
+GPRTTextureColorSpace;
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext context, GPRTProgram spvCode);
 GPRT_API void gprtModuleDestroy(GPRTModule module);
@@ -678,6 +729,72 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type,
                           GPRTModule module,
                           const char *progName) {
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
+}
+
+GPRT_API GPRTTexture
+gprtHostTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtHostTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtHostTextureCreate(context, type, format, width, height, depth, (void*)init); 
+}
+
+GPRT_API GPRTTexture
+gprtDeviceTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtDeviceTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtDeviceTextureCreate(context, type, format, width, height, depth, (void*)init); 
+}
+
+GPRT_API GPRTTexture
+gprtSharedTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, 
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtSharedTextureCreate(GPRTContext context, 
+  GPRTTextureType type, 
+  GPRTTextureFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtSharedTextureCreate(context, type, format, width, height, depth, (void*)init); 
+}
+
+// Returns the number of bytes between each row of texels in the image. 
+// Note, this might be larger than the width of the image.
+GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture texture);
+
+// Returns the number of bytes between each slice of a 3D image.
+// Note, this might be larger than the width*height*bytes of the image.
+GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture texture);
+
+/*! Destroys all underlying Vulkan resources for the given texture and frees any
+  underlying memory*/
+GPRT_API void
+gprtTextureDestroy(GPRTTexture texture);
+
+template <typename T> void
+gprtTextureDestroy( GPRTTextureOf<T> texture) {
+ gprtTextureDestroy((GPRTTexture)texture);
 }
 
 /*! Creates a buffer that uses memory located on the host; that memory is 
