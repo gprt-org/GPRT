@@ -779,6 +779,22 @@ gprtSharedTextureCreate(GPRTContext context,
  return (GPRTTextureOf<T>)gprtSharedTextureCreate(context, type, format, width, height, depth, (void*)init); 
 }
 
+GPRT_API void* 
+gprtTextureGetPointer(GPRTTexture texture, int deviceID GPRT_IF_CPP(=0));
+
+template <typename T> T*
+gprtTextureGetPointer( GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(=0)) {
+ return (T*)gprtTextureGetPointer((GPRTTexture)texture, deviceID);
+}
+
+GPRT_API gprt::Texture 
+gprtTextureGetHandle(GPRTTexture texture, int deviceID GPRT_IF_CPP(=0));
+
+template <typename T> gprt::Texture
+gprtTextureGetHandle( GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(=0)) {
+ return gprtTextureGetHandle((GPRTTexture)texture, deviceID);
+}
+
 // Returns the number of bytes between each row of texels in the image. 
 // Note, this might be larger than the width of the image.
 GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture texture);

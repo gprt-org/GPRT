@@ -22,10 +22,6 @@
 
 #include "sharedCode.h"
 
-// Descriptor binding, then set number.
-[[vk::binding(0, 0)]] Texture2D texture2ds[];
-[[vk::binding(0, 0)]] SamplerState sampler2ds[];
-
 // The first parameter here is the name of our entry point.
 //
 // The second is the type and name of the shader record. A shader record
@@ -39,8 +35,8 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
 
     float2 screen = float2(pixelID) / float2(dims);
 
-    Texture2D texture = texture2ds[0];
-    SamplerState sampler = sampler2ds[0];
+    Texture2D texture = gprt::getTexture2DHandle(record.texture);
+    SamplerState sampler = gprt::getSampler2DHandle(record.texture);
 
     float4 color = texture.SampleLevel(sampler, screen, 0);
     const int fbOfs = pixelID.x + dims.x * pixelID.y;

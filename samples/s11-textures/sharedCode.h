@@ -25,6 +25,6 @@
 /* variables available to all programs */
 
 struct RayGenData {
-  alignas(16) gprt::Texture texturePtr;
+  alignas(16) gprt::Texture texture;
   alignas(16) gprt::Buffer framebuffer;
 };

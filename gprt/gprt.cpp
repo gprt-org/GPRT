@@ -646,6 +646,8 @@ inline size_t gprtTextureFormatGetSize(GPRTTextureFormat format) {
 }
 
 struct Texture {
+  static std::vector<Texture*> textures;
+
   VkDevice device;
   VkPhysicalDeviceMemoryProperties memoryProperties;
   VkCommandBuffer commandBuffer;
@@ -662,6 +664,9 @@ struct Texture {
   VkImage image = VK_NULL_HANDLE;
   VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
   VkDeviceMemory memory = VK_NULL_HANDLE;
+
+  // Technically, textures in vulkan don't support addresses.
+  // Instead, we make our own virtual "texture address space".
   VkDeviceAddress address = -1;
 
   VkImageView imageView = VK_NULL_HANDLE;
@@ -974,6 +979,20 @@ struct Texture {
     VkImageType type, VkFormat format, uint32_t _width, uint32_t _height, uint32_t _depth, 
     const void *data = nullptr
     ) {
+    // Hunt for an existing free address for this texture
+    for (uint32_t i = 0; i < Texture::textures.size(); ++i) {
+      if (Texture::textures[i] == nullptr) {
+        Texture::textures[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current texture list, allocate a new one
+    if (address == -1) {
+      textures.push_back(this);
+      address = textures.size() - 1;
+    }
+    
     device = logicalDevice;
     memoryPropertyFlags = _memoryPropertyFlags;
     usageFlags = _usageFlags;
@@ -1202,6 +1221,9 @@ struct Texture {
   /*! Calls vkDestroy on the buffer, and frees underlying memory */
   void destroy()
   {
+    // Free texture slot for use by subsequently made textures
+    Texture::textures[address] = nullptr;
+
     if (sampler) {
       vkDestroySampler(device, sampler, nullptr);
       sampler = VK_NULL_HANDLE;
@@ -1228,6 +1250,8 @@ struct Texture {
     }
   }
 };
+
+std::vector<Texture*> Texture::textures;
 
 struct SBTEntry {
   size_t recordSize = 0;
@@ -2709,7 +2733,6 @@ struct Context {
   std::vector<Accel*> accels;
 
   uint32_t previousNumTextures = 0;
-  std::vector<Texture*> textures;
   VkDescriptorSetLayout descriptorSetLayout{};
   VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
@@ -3694,16 +3717,16 @@ struct Context {
   {
     // If the number of textures has changed, we need to make a new 
     // descriptor pool             
-    if (descriptorPool && previousNumTextures != textures.size()) {
+    if (descriptorPool && previousNumTextures != Texture::textures.size()) {
       vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
       vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
       descriptorPool = VK_NULL_HANDLE;
     }
-    if (!descriptorPool && textures.size() > 0) {
+    if (!descriptorPool && Texture::textures.size() > 0) {
       VkDescriptorPoolSize poolSize;
       poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-      poolSize.descriptorCount = textures.size();
+      poolSize.descriptorCount = Texture::textures.size();
 
       VkDescriptorPoolCreateInfo descriptorPoolInfo{};
       descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -3715,7 +3738,7 @@ struct Context {
 
       VkDescriptorSetLayoutBinding binding{};
       binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-      binding.descriptorCount = textures.size();
+      binding.descriptorCount = Texture::textures.size();
       binding.binding = 0; 
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
                           | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
@@ -3745,7 +3768,7 @@ struct Context {
       // Now, making the descriptor sets
       VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
 
-      uint32_t variableDescCounts[] = { static_cast<uint32_t>(textures.size())};
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(Texture::textures.size())};
 
       variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
       variableDescriptorCountAllocInfo.descriptorSetCount = 1;
@@ -3763,11 +3786,11 @@ struct Context {
       std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
 
       // Image descriptors for the texture array
-      std::vector<VkDescriptorImageInfo> textureDescriptors(textures.size());
-      for (size_t i = 0; i < textures.size(); i++) {
-        textureDescriptors[i].imageLayout = textures[i]->layout;
-        textureDescriptors[i].sampler = textures[i]->sampler;
-        textureDescriptors[i].imageView = textures[i]->imageView;
+      std::vector<VkDescriptorImageInfo> textureDescriptors(Texture::textures.size());
+      for (size_t i = 0; i < Texture::textures.size(); i++) {
+        textureDescriptors[i].imageLayout = Texture::textures[i]->layout;
+        textureDescriptors[i].sampler = Texture::textures[i]->sampler;
+        textureDescriptors[i].imageView = Texture::textures[i]->imageView;
       }
 
       // [POI] Second and final descriptor is a texture array
@@ -3777,7 +3800,7 @@ struct Context {
       writeDescriptorSets[0].dstBinding = 0;
       writeDescriptorSets[0].dstArrayElement = 0;
       writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(textures.size());
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(Texture::textures.size());
       writeDescriptorSets[0].pBufferInfo = 0;
       writeDescriptorSets[0].dstSet = descriptorSet;
       writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
@@ -3785,7 +3808,7 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
       // Finally, keep track of if the texture count here changes
-      previousNumTextures = textures.size();
+      previousNumTextures = Texture::textures.size();
     }
 
     VkPushConstantRange pushConstantRange = {};
@@ -4870,7 +4893,6 @@ gprtHostTextureCreate(GPRTContext _context,
     memcpy(mapped, init, size * count);
   }
 
-  context->textures.push_back(texture);
   return (GPRTTexture)texture;
 }
 
@@ -4909,7 +4931,6 @@ gprtDeviceTextureCreate(GPRTContext _context,
     texture->unmap();
   }
 
-  context->textures.push_back(texture);
   return (GPRTTexture)texture;
 }
 
@@ -4950,7 +4971,6 @@ gprtSharedTextureCreate(GPRTContext _context,
     memcpy(mapped, init, size * count);
   }
 
-  context->textures.push_back(texture);
   return (GPRTTexture)texture;
 }
 
@@ -4964,6 +4984,25 @@ GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture _texture)
 {
   Texture *texture = (Texture*)_texture;
   return texture->subresourceLayout.depthPitch;
+}
+
+GPRT_API void* 
+gprtTextureGetPointer(GPRTTexture _texture, int deviceID)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  return texture->mapped;
+}
+
+GPRT_API gprt::Texture 
+gprtTextureGetHandle(GPRTTexture _texture, int deviceID)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  gprt::Texture texHandle;
+  texHandle.x = texture->address;
+  texHandle.y = 0; // for future use
+  return texHandle;
 }
 
 GPRT_API void

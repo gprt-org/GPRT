@@ -102,7 +102,7 @@ int main(int ac, char **av) {
 
   GPRTTextureOf<stbi_uc> texture = 
       gprtSharedTextureCreate<stbi_uc>(gprt, 
-        GPRT_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM,
+        GPRT_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB,
         texWidth, texHeight, 1, pixels);
 
   // (re-)builds all vulkan programs, with current pipeline settings
@@ -114,7 +114,7 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   RayGenData *data = gprtRayGenGetPointer(rayGen);
   data->framebuffer = gprtBufferGetHandle(frameBuffer);
-  // todo
+  data->texture = gprtTextureGetHandle(texture);
 
   // Build a shader binding table entry for the ray generation record.
   gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
@@ -129,6 +129,7 @@ int main(int ac, char **av) {
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(gprt, frameBuffer);
+    // gprtTexturePresent(gprt, texture);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(gprt));

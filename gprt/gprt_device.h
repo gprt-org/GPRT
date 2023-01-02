@@ -35,6 +35,10 @@ struct PushConstants {
 };
 [[vk::push_constant]] PushConstants pc;
 
+// Descriptor binding, then set number.
+[[vk::binding(0, 0)]] Texture2D texture2ds[];
+[[vk::binding(0, 0)]] SamplerState sampler2ds[];
+
 namespace gprt {
   inline uint32_t make_8bit(const float f)
   {
@@ -97,6 +101,16 @@ namespace gprt {
     return getAccelHandle(accel.x);
   }
 
+  typedef uint64_t2 Texture;
+
+  Texture2D getTexture2DHandle(gprt::Texture texture) {
+    return texture2ds[texture.x];
+  }
+
+  SamplerState getSampler2DHandle(gprt::Texture texture) {
+    return sampler2ds[texture.x];
+  }
+
   void amdkludge() {
     if (pc.r[15]) {
       struct Stubstruct {
@@ -118,7 +132,6 @@ namespace gprt {
     }
   }
 
-  typedef uint64_t2 Texture;
 };
 
 
