@@ -62,7 +62,7 @@ int main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   int texWidth, texHeight, texChannels;
-  stbi_uc* pixels = stbi_load("C:/Users/Nate/Pictures/caribou1.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  stbi_uc* pixels = stbi_load("C:/Users/Nate/git/GPRT/build/Debug/UVMS1_colorgrid.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
   fbSize.x = texWidth;
   fbSize.y = texHeight;
@@ -101,7 +101,7 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate<uint32_t>(gprt, fbSize.x * fbSize.y);
 
   GPRTTextureOf<stbi_uc> texture = 
-      gprtSharedTextureCreate<stbi_uc>(gprt, 
+      gprtDeviceTextureCreate<stbi_uc>(gprt, 
         GPRT_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB,
         texWidth, texHeight, 1, pixels);
 
@@ -128,8 +128,8 @@ int main(int ac, char **av) {
     gprtRayGenLaunch2D(gprt, rayGen, fbSize.x, fbSize.y);
 
     // If a window exists, presents the framebuffer here to that window
-    gprtBufferPresent(gprt, frameBuffer);
-    // gprtTexturePresent(gprt, texture);
+    // gprtBufferPresent(gprt, frameBuffer);
+    gprtTexturePresent(gprt, texture);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(gprt));

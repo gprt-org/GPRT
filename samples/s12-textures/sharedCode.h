@@ -20,24 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "sharedCode.h"
+#include "gprt.h"
 
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
-    uint2 dims = DispatchRaysDimensions().xy;
-    uint2 pixelID = DispatchRaysIndex().xy;
+/* variables available to all programs */
 
-    float2 screen = float2(pixelID) / float2(dims);
+/* variables for the triangle mesh geometry */
+struct TrianglesGeomData {
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer index; // vec3i*
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer vertex; // vec3f *
+  /*! array/buffer of vertex positions */
+  alignas(16) gprt::Buffer texcoord; // vec2f *
+  /*! base color we use for the entire mesh */
+  alignas(16) gprt::Texture texture;
+};
 
-    Texture2D texture = gprt::getTexture2DHandle(record.texture);
-    SamplerState sampler = gprt::getSampler2DHandle(record.texture);
+struct RayGenData {
+  alignas(16) gprt::Accel world;
+  alignas(16) gprt::Buffer framebuffer;
 
-    float4 color = texture.SampleLevel(sampler, screen, 0);
-    
-    const int fbOfs = pixelID.x + dims.x * pixelID.y;
-    gprt::store(record.framebuffer, fbOfs, gprt::make_bgra(color));
+  alignas(8) int2 fbSize;
+  
 
-}
+  struct {
+    alignas(16) float3 pos;
+    alignas(16) float3 dir_00;
+    alignas(16) float3 dir_du;
+    alignas(16) float3 dir_dv;
+  } camera;
+};
+
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
+};
