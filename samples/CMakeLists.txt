@@ -28,6 +28,3 @@ add_subdirectory(s04-computeAABBs)
 add_subdirectory(s05-computeVertex)
 add_subdirectory(s06-computeTransform)
 add_subdirectory(s07-multipleGeometry)
-
-add_subdirectory(s11-textures)
-add_subdirectory(s12-textures)
