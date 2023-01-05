@@ -37,7 +37,9 @@ struct PushConstants {
 
 // Descriptor binding, then set number.
 [[vk::binding(0, 0)]] SamplerState samplers[];
-[[vk::binding(0, 1)]] Texture2D texture2Ds[];
+[[vk::binding(0, 1)]] Texture1D texture1Ds[];
+[[vk::binding(0, 2)]] Texture2D texture2Ds[];
+[[vk::binding(0, 3)]] Texture3D texture3Ds[];
 
 namespace gprt {
   inline uint32_t make_8bit(const float f)
@@ -103,8 +105,16 @@ namespace gprt {
 
   typedef uint64_t2 Texture;
 
+  Texture1D getTexture1DHandle(gprt::Texture texture) {
+    return texture1Ds[texture.x];
+  }
+
   Texture2D getTexture2DHandle(gprt::Texture texture) {
     return texture2Ds[texture.x];
+  }
+
+  Texture3D getTexture3DHandle(gprt::Texture texture) {
+    return texture3Ds[texture.x];
   }
 
   typedef uint64_t2 Sampler;

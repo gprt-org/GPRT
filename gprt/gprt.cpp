@@ -646,7 +646,9 @@ inline size_t gprtFormatGetSize(GPRTFormat format) {
 }
 
 struct Texture {
-  static std::vector<Texture*> textures;
+  static std::vector<Texture*> texture1Ds;
+  static std::vector<Texture*> texture2Ds;
+  static std::vector<Texture*> texture3Ds;
 
   VkDevice device;
   VkPhysicalDeviceMemoryProperties memoryProperties;
@@ -670,6 +672,8 @@ struct Texture {
   VkDeviceAddress address = -1;
 
   VkImageView imageView = VK_NULL_HANDLE;
+  
+  VkImageType imageType;
 
   uint32_t width;
   uint32_t height;
@@ -978,10 +982,15 @@ struct Texture {
     VkImageType type, VkFormat format, uint32_t _width, uint32_t _height, uint32_t _depth, 
     const void *data = nullptr
     ) {
+    
+    std::vector<Texture*> &textures = (type == VK_IMAGE_TYPE_1D) ? texture1Ds :
+                                      (type == VK_IMAGE_TYPE_2D) ? texture2Ds : 
+                                    /*(type == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
+
     // Hunt for an existing free address for this texture
-    for (uint32_t i = 0; i < Texture::textures.size(); ++i) {
-      if (Texture::textures[i] == nullptr) {
-        Texture::textures[i] = this;
+    for (uint32_t i = 0; i < textures.size(); ++i) {
+      if (textures[i] == nullptr) {
+        textures[i] = this;
         address = i;
         break;
       }
@@ -1001,6 +1010,7 @@ struct Texture {
     height = _height;
     depth = _depth;
     size = width * height * depth * gprtFormatGetSize((GPRTFormat)format);
+    imageType = type;
 
     // Check if the image can be mapped to a host pointer. 
     // If the image isn't host visible, this is image and requires 
@@ -1197,7 +1207,11 @@ struct Texture {
   void destroy()
   {
     // Free texture slot for use by subsequently made textures
-    Texture::textures[address] = nullptr;
+    std::vector<Texture*> &textures = (imageType == VK_IMAGE_TYPE_1D) ? texture1Ds :
+                                      (imageType == VK_IMAGE_TYPE_2D) ? texture2Ds : 
+                                    /*(imageType == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
+                                
+    textures[address] = nullptr;
 
     if (imageView) {
       vkDestroyImageView(device, imageView, nullptr);
@@ -1222,7 +1236,9 @@ struct Texture {
   }
 };
 
-std::vector<Texture*> Texture::textures;
+std::vector<Texture*> Texture::texture1Ds;
+std::vector<Texture*> Texture::texture2Ds;
+std::vector<Texture*> Texture::texture3Ds;
 
 struct Sampler {
   static std::vector<Sampler*> samplers;
@@ -2771,25 +2787,36 @@ struct Context {
 
   std::vector<Accel*> accels;
 
-  // Descriptor set pool
+  Sampler *defaultSampler = nullptr;
+  Texture *defaultTexture1D = nullptr;
+  Texture *defaultTexture2D = nullptr;
+  Texture *defaultTexture3D = nullptr;
+
   VkDescriptorPool samplerDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
 
   uint32_t previousNumSamplers = 0;
+  uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
+  uint32_t previousNumTexture3Ds = 0;
 
   VkDescriptorSetLayout samplerDescriptorSetLayout{};
+  VkDescriptorSetLayout texture1DDescriptorSetLayout{};
   VkDescriptorSetLayout texture2DDescriptorSetLayout{};
+  VkDescriptorSetLayout texture3DDescriptorSetLayout{};
 
   VkDescriptorSet samplerDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
 
   uint32_t numRayTypes = 1;
   
-
   // struct InternalStages {
   //   // for copying transforms into the instance buffer
   //   std::string fillInstanceDataEntryPoint = "gprtFillInstanceData";
@@ -3519,18 +3546,69 @@ struct Context {
       vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
         imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
     }
+
+    // For texture / sampler arrays, we need some defaults
+    {
+      const VkImageUsageFlags imageUsageFlags = 
+        // means we can make an image view required to assign this image to a descriptor
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        // means we can use this image to transfer into another
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+        // means we can use this image to receive data transferred from another
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT
+      ;
+      const VkMemoryPropertyFlags memoryUsageFlags =
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+      
+      defaultSampler = new Sampler(
+        physicalDevice, logicalDevice, 
+        VK_FILTER_LINEAR, VK_FILTER_LINEAR, 
+        VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
+      );
+      defaultTexture1D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+      );
+      defaultTexture2D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+      );
+      defaultTexture3D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+      );
+    }
   };
 
   void destroy() {
 
+    if (defaultSampler) { defaultSampler->destroy(); delete defaultSampler;}
+    if (defaultTexture1D) { defaultTexture1D->destroy(); delete defaultTexture1D;}
+    if (defaultTexture2D) { defaultTexture2D->destroy(); delete defaultTexture2D;}
+    if (defaultTexture3D) { defaultTexture3D->destroy(); delete defaultTexture3D;}
+
     if (samplerDescriptorSet) vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
+    if (texture1DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
     if (texture2DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
+    if (texture3DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
     
     if (samplerDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
+    if (texture1DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
     if (texture2DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
+    if (texture3DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
     
     if (samplerDescriptorPool) vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
+    if (texture1DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
     if (texture2DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
+    if (texture3DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
 
     if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
     if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
@@ -3822,7 +3900,7 @@ struct Context {
       // Now, making the descriptor sets
       VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
 
-      uint32_t variableDescCounts[] = { static_cast<uint32_t>(Texture::textures.size())};
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
 
       variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
       variableDescriptorCountAllocInfo.descriptorSetCount = 1;
@@ -3842,7 +3920,7 @@ struct Context {
       // Image descriptors for the sampler array
       std::vector<VkDescriptorImageInfo> samplerDescriptors(poolSize.descriptorCount);
       for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-        VkSampler sampler = VK_NULL_HANDLE;
+        VkSampler sampler = defaultSampler->sampler;
         if (Sampler::samplers.size() > 0 && Sampler::samplers[i]) sampler = Sampler::samplers[i]->sampler;
         samplerDescriptors[i].sampler = sampler;
         samplerDescriptors[i].imageView = VK_NULL_HANDLE;
@@ -3866,9 +3944,112 @@ struct Context {
       previousNumSamplers = poolSize.descriptorCount;
     }
 
+    // If the number of texture1ds has changed, we need to make a new 
+    // descriptor pool             
+    if (texture1DDescriptorPool && previousNumTexture1Ds != Texture::texture1Ds.size()) {
+      vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
+      texture1DDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!texture1DDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture1Ds.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture1DDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &texture1DDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = texture1DDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &texture1DDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture1DDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkImageView imageView = defaultTexture1D->imageView;
+        VkImageLayout layout = defaultTexture1D->layout;
+
+        if (Texture::texture1Ds.size() > 0 && Texture::texture1Ds[i]) {
+          imageView = Texture::texture1Ds[i]->imageView;
+          layout = Texture::texture1Ds[i]->layout;
+        }
+
+        textureDescriptors[i].imageView = imageView;
+        textureDescriptors[i].imageLayout = layout;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = texture1DDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTexture1Ds = Texture::texture1Ds.size();
+    }
+
     // If the number of texture2ds has changed, we need to make a new 
     // descriptor pool             
-    if (texture2DDescriptorPool && previousNumTexture2Ds != Texture::textures.size()) {
+    if (texture2DDescriptorPool && previousNumTexture2Ds != Texture::texture2Ds.size()) {
       vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
@@ -3877,7 +4058,7 @@ struct Context {
     if (!texture2DDescriptorPool) {
       VkDescriptorPoolSize poolSize;
       poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-      poolSize.descriptorCount =  std::max(uint32_t(Texture::textures.size()), uint32_t(1));
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture2Ds.size()), uint32_t(1));
 
       VkDescriptorPoolCreateInfo descriptorPoolInfo{};
       descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -3939,12 +4120,12 @@ struct Context {
       // Image descriptors for the texture array
       std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
       for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-        VkImageView imageView = VK_NULL_HANDLE;
-        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImageView imageView = defaultTexture2D->imageView;
+        VkImageLayout layout = defaultTexture2D->layout;
 
-        if (Texture::textures.size() > 0 && Texture::textures[i]) {
-          imageView = Texture::textures[i]->imageView;
-          layout = Texture::textures[i]->layout;
+        if (Texture::texture2Ds.size() > 0 && Texture::texture2Ds[i]) {
+          imageView = Texture::texture2Ds[i]->imageView;
+          layout = Texture::texture2Ds[i]->layout;
         }
 
         textureDescriptors[i].imageView = imageView;
@@ -3958,7 +4139,7 @@ struct Context {
       writeDescriptorSets[0].dstBinding = 0;
       writeDescriptorSets[0].dstArrayElement = 0;
       writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(Texture::textures.size());
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
       writeDescriptorSets[0].pBufferInfo = 0;
       writeDescriptorSets[0].dstSet = texture2DDescriptorSet;
       writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
@@ -3966,10 +4147,112 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 
       // Finally, keep track of if the texture count here changes
-      previousNumTexture2Ds = Texture::textures.size();
+      previousNumTexture2Ds = Texture::texture2Ds.size();
+    }
+
+    // If the number of texture2ds has changed, we need to make a new 
+    // descriptor pool             
+    if (texture3DDescriptorPool && previousNumTexture3Ds != Texture::texture3Ds.size()) {
+      vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
+      texture3DDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!texture3DDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture3Ds.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture3DDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &texture3DDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = texture3DDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &texture3DDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture3DDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkImageView imageView = defaultTexture3D->imageView;
+        VkImageLayout layout = defaultTexture3D->layout;
+
+        if (Texture::texture3Ds.size() > 0 && Texture::texture3Ds[i]) {
+          imageView = Texture::texture3Ds[i]->imageView;
+          layout = Texture::texture3Ds[i]->layout;
+        }
+
+        textureDescriptors[i].imageView = imageView;
+        textureDescriptors[i].imageLayout = layout;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = texture3DDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTexture3Ds = Texture::texture3Ds.size();
     }
     
-
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.size = 128;
     pushConstantRange.offset = 0;
@@ -3983,7 +4266,9 @@ struct Context {
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     std::vector<VkDescriptorSetLayout> layouts = {
       samplerDescriptorSetLayout,
+      texture1DDescriptorSetLayout,
       texture2DDescriptorSetLayout,
+      texture3DDescriptorSetLayout,
     };
     pipelineLayoutCI.setLayoutCount = layouts.size();
     pipelineLayoutCI.pSetLayouts = layouts.data();
@@ -5592,12 +5877,14 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
-
   std::vector<VkDescriptorSet> descriptorSets = {
     context->samplerDescriptorSet,
-    context->texture2DDescriptorSet
+    context->texture1DDescriptorSet,
+    context->texture2DDescriptorSet,
+    context->texture3DDescriptorSet
   };
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
+  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
@@ -5746,6 +6033,15 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
     vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
+
+  std::vector<VkDescriptorSet> descriptorSets = {
+    context->samplerDescriptorSet,
+    context->texture1DDescriptorSet,
+    context->texture2DDescriptorSet,
+    context->texture3DDescriptorSet
+  };
+  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
   
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
