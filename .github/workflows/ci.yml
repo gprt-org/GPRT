@@ -43,18 +43,13 @@ jobs:
       run: |
          echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Pull and unpack dxc compiler
-      shell: bash
-      run: |
-        ./util/download-dxc.sh
-
     - name: Build Static
       shell: bash
       run: |
         mkdir bld-static
         cd bld-static
         cmake --version
-        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin
+        cmake ..
         make VERBOSE=1 -j4
 
     - name: Build Shared
@@ -63,8 +58,7 @@ jobs:
         mkdir bld-shared
         cd bld-shared
         cmake --version
-        cmake .. -DVulkan_BIN_DIR=$HOME/dxc-artifacts/bin \
-                 -DGPRT_BUILD_SHARED=ON
+        cmake .. -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
 
 
