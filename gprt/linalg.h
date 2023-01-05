@@ -605,7 +605,6 @@ namespace linalg
     // Provide typedefs for common element types and vector/matrix sizes
     namespace aliases
     {
-        typedef uint8_t byte;
         typedef vec<bool,1> bool1; typedef vec<uint8_t,1> byte1; typedef vec<int16_t,1> short1; typedef vec<uint16_t,1> ushort1;
         typedef vec<bool,2> bool2; typedef vec<uint8_t,2> byte2; typedef vec<int16_t,2> short2; typedef vec<uint16_t,2> ushort2; 
         typedef vec<bool,3> bool3; typedef vec<uint8_t,3> byte3; typedef vec<int16_t,3> short3; typedef vec<uint16_t,3> ushort3; 
