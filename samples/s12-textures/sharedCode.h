@@ -34,6 +34,7 @@ struct TrianglesGeomData {
   alignas(16) gprt::Buffer texcoord; // vec2f *
   /*! base color we use for the entire mesh */
   alignas(16) gprt::Texture texture;
+  alignas(16) gprt::Sampler sampler;
 };
 
 struct RayGenData {

@@ -54,8 +54,8 @@ template <typename T> struct Mesh {
   GPRTGeomOf<TrianglesGeomData> geometry;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, GPRTTextureOf<stbi_uc> texture,
-       float4x4 transform) {
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, 
+      GPRTTextureOf<stbi_uc> texture, GPRTSampler sampler, float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
     while (!vertGenerator.done()) {
@@ -89,11 +89,13 @@ template <typename T> struct Mesh {
     geomData->texcoord = gprtBufferGetHandle(texcoordBuffer);
     geomData->index = gprtBufferGetHandle(indexBuffer);
     geomData->texture = gprtTextureGetHandle(texture);
+    geomData->sampler = gprtSamplerGetHandle(sampler);
   };
 
   void cleanup() {
     gprtGeomDestroy(geometry);
     gprtBufferDestroy(vertexBuffer);
+    gprtBufferDestroy(texcoordBuffer);
     gprtBufferDestroy(indexBuffer);
   };
 };
@@ -172,8 +174,14 @@ int main(int ac, char **av) {
 
   GPRTTextureOf<stbi_uc> texture = 
       gprtDeviceTextureCreate<stbi_uc>(context, 
-        GPRT_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM,
+        GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM,
         texWidth, texHeight, 1, pixels);
+
+  GPRTSampler sampler = 
+    gprtSamplerCreate(context, 
+      GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+      GPRT_SAMPLER_ADDRESS_MODE_WRAP, 
+      GPRT_BORDER_COLOR_OPAQUE_BLACK);
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(context);
@@ -193,20 +201,20 @@ int main(int ac, char **av) {
   #define M_PI 3.14
   #endif
   Mesh<TorusKnotMesh> torusMesh1(
-      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, texture,
+      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, texture, sampler,
       translation_matrix(
           float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh2(
-      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, texture,
+      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, texture, sampler,
       translation_matrix(
           float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh3(
-      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, texture,
+      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, texture, sampler,
       translation_matrix(
           float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
   Mesh<CappedCylinderMesh> floorMesh(
-      context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
-      texture, translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+      context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, texture, sampler, 
+      translation_matrix(float3(0.0f, 0.0f, -4.0f)));
   std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
                                 torusMesh3.geometry, floorMesh.geometry};
   GPRTAccel trianglesBLAS =
@@ -306,9 +314,18 @@ int main(int ac, char **av) {
   // ##################################################################
 
   LOG("cleaning up ...");
+  torusMesh1.cleanup();
+  torusMesh2.cleanup();
+  torusMesh3.cleanup();
+  floorMesh.cleanup();
+  gprtSamplerDestroy(sampler);
   gprtTextureDestroy(texture);
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
+  gprtMissDestroy(miss);
+  gprtAccelDestroy(trianglesBLAS);
+  gprtAccelDestroy(trianglesTLAS);
+  gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

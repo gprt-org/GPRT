@@ -85,7 +85,7 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
               + TCA * (1.f - (attributes.bc.x + attributes.bc.y));
 
     Texture2D texture = gprt::getTexture2DHandle(record.texture);
-    SamplerState sampler = gprt::getSampler2DHandle(record.texture);
+    SamplerState sampler = gprt::getSamplerHandle(record.sampler);
 
     float4 color = texture.SampleLevel(sampler, TC, 0);
 
