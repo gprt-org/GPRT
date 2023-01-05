@@ -24,7 +24,7 @@ cmake_minimum_required(VERSION 3.12)
 
 find_program(CMAKE_DXC_COMPILER dxc
   DOC "Path to the dxc executable."
-  HINTS ${Vulkan_INCLUDE_DIR}/../Bin/ ${DXC_BIN_DIR}
+  HINTS ${Vulkan_INCLUDE_DIR}/../bin/ ${Vulkan_INCLUDE_DIR}/../Bin/ ${DXC_BIN_DIR}
 )
 
 # set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
