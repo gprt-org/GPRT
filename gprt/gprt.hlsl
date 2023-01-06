@@ -35,12 +35,22 @@ void __compute__gprtFillInstanceData( uint3 DTid : SV_DispatchThreadID )
   uint64_t transformOffset = pc.r[4];
   uint64_t transformStride = pc.r[5];
   uint64_t instanceOffsetsBufferPtr = pc.r[6];
+  uint64_t instanceVisibilityMasksPtr = pc.r[7];
 
   VkAccelerationStructureInstanceKHR instance;
   // float3x4 transform = vk::RawBufferLoad<float3x4>(
   //     transformBufferPtr + sizeof(float3x4) * DTid.x);;
   
-  instance.instanceCustomIndex24Mask8 = 0 | 0xFF << 24;
+  // The instance custom index we currently assume is a value from 
+  // 0 -> num instances. 
+
+  int mask = 0XFF;
+  if (instanceVisibilityMasksPtr != -1) {
+    mask = vk::RawBufferLoad<int32_t>(
+      instanceVisibilityMasksPtr + sizeof(int32_t) * DTid.x
+    );
+  }
+  instance.instanceCustomIndex24Mask8 = uint(DTid.x) | mask << 24;
 
   int blasOffset = vk::RawBufferLoad<int32_t>(
     instanceOffsetsBufferPtr + sizeof(int32_t) * DTid.x

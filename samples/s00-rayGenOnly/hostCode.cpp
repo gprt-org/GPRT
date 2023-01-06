@@ -96,8 +96,7 @@ int main(int ac, char **av) {
   RayGenData *data = gprtRayGenGetPointer(rayGen);
   data->color0 = float3(0.1f, 0.1f, 0.1f);
   data->color1 = float3(0.0f, 0.0f, 0.0f); 
-  data->fbPtr = gprtBufferGetHandle(frameBuffer);
-  data->fbSize = fbSize;
+  data->frameBuffer = gprtBufferGetHandle(frameBuffer);
   
   // Build a shader binding table entry for the ray generation record.
   gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);

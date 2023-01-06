@@ -156,8 +156,7 @@ int main(int ac, char **av) {
   
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
-  rayGenData->fbPtr = gprtBufferGetHandle(frameBuffer);
-  rayGenData->fbSize = fbSize;
+  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetPointer(miss);
