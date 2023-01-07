@@ -27,6 +27,7 @@ Since GPRT is all about tracing rays, it's worth talking about what exactly a ra
 Rays in GPRT are represented using the following structure:
 
 .. code-block:: hlsl
+
   struct RayDesc
   {
       float3 Origin;
