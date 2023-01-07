@@ -17,6 +17,74 @@ To make this process faster and easier, we'll utilize the RT cores in our ray tr
 Finally, we'll make this example interactive, allowing you to click and drag on the window to manipulate the camera viewing the triangle.
 
 
+Background
+----------
+
+What is a Ray?
+^^^^^^^^^^^^^^
+
+Since GPRT is all about tracing rays, it's worth talking about what exactly a ray is. 
+Rays in GPRT are represented using the following structure:
+
+.. code-block:: hlsl
+  struct RayDesc
+  {
+      float3 Origin;
+      float  TMin;
+      float3 Direction;
+      float  TMax;
+  };
+
+All rays have an origin, representing where the ray starts in 3D space. 
+Then, rays have a direction, telling us what orientation in 3D space the ray is traveling.
+We can use this definition of a ray to define a function where we give a distance *T* along the ray, and that function returns a position along that ray.
+
+.. code-block:: hlsl
+
+  float3 getPositionAlongRay(RayDesc ray, float T) 
+  {
+    return ray.Origin + T * ray.Direction;
+  }
+  
+Rays also have a "TMin" and a "TMax". You can think of these properties as a minimum and a maximum distance "T" that a position can be along a ray.
+
+.. code-block:: hlsl
+
+  float3 getPositionAlongRay(RayDesc ray, float T) 
+  {
+    T = clamp(T, ray.TMin, ray.TMax); // this is new!
+    return ray.Origin + T * ray.Direction;
+  }
+
+Ray Primitive Intersectors
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As these rays travel through the world, they will hit surfaces. 
+The math for where these rays intersect surfaces can be a bit complicated, but fortunately our ray tracing cores include a built-in ray-triangle intersector, so we'll be using that function.
+
+.. code-block:: hlsl
+
+  bool rayTriangleIntersect(RayDesc ray, Triangle triangle, out hitDistance, out barycentrics);
+
+Ray intersector functions usually look something like the above. 
+We give the function our ray, as well as the primitive (in our case, a triangle). 
+The function returns True if the ray hits the primitive.
+If the primitive is hit, the function also returns the hit distance *T*.
+
+Finally, for triangle intersectors, we're given something called the "barycentric coordinates" of the intersection position.
+These barycentric coordinates allow us to interpolate per-vertex data on our triangle primitive. 
+For example, we might want to compute the position for where our ray hit our triangle: 
+
+.. code-block:: hlsl
+
+  float3 getHitPosition(float2 barycentrics, Triangle triangle) 
+  {
+    return   triangle.v1 * barycentrics.x
+           + triangle.v2 * barycentrics.y
+           + triangle.v3 * (-1.0 - (barycentrics.x + barycentrics.y);
+  }
+  
+
 Rendering a Single Triangle
 ---------------------------
 
