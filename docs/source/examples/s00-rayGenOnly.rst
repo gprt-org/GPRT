@@ -83,7 +83,7 @@ parameters we pass to these kernels, how many threads to launch, and so on.
 
 Configuring the Build System
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Before we can use GPRT, we need to configure how to compile our code together
+The first step in using GPRT is to configure how to compile our code together
 into an executable. Our samples do this by using the *CMakeLists.txt* files. In 
 a typical workflow, this CMake file would be configured as follows:
 
@@ -92,9 +92,10 @@ a typical workflow, this CMake file would be configured as follows:
    :lines: 23-36
 
 
-The `embed_devicecode` macro compiles our *deviceCode.hlsl* into 
-assembly we can run on our raytracing device. This assembly is then 
-embedded into a .cpp file matching the ``OUTPUT_TARGET`` name. 
+The `embed_devicecode` macro sets up a compilation target for our 
+*deviceCode.hlsl* into assembly we can run on our raytracing device. 
+This assembly is then embedded into a .cpp file matching 
+the ``OUTPUT_TARGET`` name. 
 
 .. note::
    For another minimal example, `check out the CMakeLists.txt in this project
@@ -102,6 +103,7 @@ embedded into a .cpp file matching the ``OUTPUT_TARGET`` name.
 
 Creating our Checkerboard Test Pattern
 --------------------------------------
+The second step is to write our GPU program.
 To create our checkerboard test pattern, we'll write a small program that will 
 run in parallel on our ray tracing device, where we'll use individual threads to 
 generate our pixel colors. 
@@ -184,7 +186,8 @@ Also, just like on the CPU, we can use printf to print out helpful debug message
 Host Code
 ^^^^^^^^^
 
-All that's left is to write our host side code. We begin by requesting a window 
+As our Final step, all that's left is to write our host side code. 
+We begin by requesting a window 
 and creating a ``GPRTContext``: 
 
 .. that we will use to show our checkerboard pattern. 
