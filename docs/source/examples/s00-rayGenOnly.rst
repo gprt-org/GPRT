@@ -238,6 +238,7 @@ are read-only on the device.
 To represent our checkerboard image, we'll use a buffer of ``uint32_t``, 
 where the first 8 bits represent the blue channel, the next 8 bits represent the 
 green channel, then red, and finally alpha. 
+
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
    :lines: 84-88
