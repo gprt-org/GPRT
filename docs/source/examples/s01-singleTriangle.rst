@@ -7,11 +7,15 @@ An example demonstrating triangle geometry
 Introduction
 ------------
 
-Overview
-^^^^^^^^
-
 Objective of this Sample
 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Up until this point, we haven't actually used GPRT to trace any rays...
+So in this example, we'll build off the previous one and use GPRT to trace rays through the lens of a pinhole camera. 
+Then, we'll test for intersection against a single "hello world triangle", coloring the triangle using something called "barycentric coordinates". 
+To make this process faster and easier, we'll utilize the RT cores in our ray tracing device.
+Finally, we'll make this example interactive, allowing you to click and drag on the window to manipulate the camera viewing the triangle.
+
 
 Rendering a Single Triangle
 ---------------------------
