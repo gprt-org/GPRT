@@ -34,9 +34,8 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  alignas(16) gprt::Buffer fbPtr;
+  alignas(16) gprt::Buffer frameBuffer;
 
-  alignas(8) int2 fbSize;
   alignas(16) gprt::Accel world;
 
   struct {

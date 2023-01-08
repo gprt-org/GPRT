@@ -28,6 +28,7 @@
 // can be thought of as the parameters passed to this kernel.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 fbSize = DispatchRaysDimensions().xy;
 
   if (pixelID.x == 0 && pixelID.y == 0) {
     printf("Hello from your first raygen program!\n");
@@ -40,6 +41,6 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   const float3 color = (pattern & 1) ? record.color1 : record.color0;
 
   // find the frame buffer location (x + width*y) and put the result there
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
-  gprt::store(record.fbPtr, fbOfs, gprt::make_bgra(color));
+  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(color));
 }

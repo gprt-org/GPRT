@@ -1,0 +1,23 @@
+/*
+ * This stylesheet is applied after the theme's default one,
+ * and thus any overrides or additions can be added here.
+ *
+ * More info:
+ *		https://www.sphinx-doc.org/en/master/extdev/appapi.html#sphinx.application.Sphinx.add_css_file
+ */
+
+/* Allow text to flow around right aligned images */
+.align-right {
+  float: right;
+  margin: 0 0 24px 24px;
+}
+
+/* Prevent images from flowing into other headings */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  clear: both;
+}
