@@ -16,6 +16,11 @@ Then, we'll test for intersection against a single "hello world triangle", color
 To make this process faster and easier, we'll utilize the RT cores in our ray tracing device.
 Finally, we'll make this example interactive, allowing you to click and drag on the window to manipulate the camera viewing the triangle.
 
+After running this example, you should see an image like this appear on your 
+screen and be saved as s01-singleTriangle.png in the same directory as the sample's 
+executable:
+
+.. image:: ../images/s01-singleTriangle.png
 
 Background
 ----------
