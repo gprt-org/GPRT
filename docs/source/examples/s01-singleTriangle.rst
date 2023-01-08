@@ -24,7 +24,7 @@ What is a Ray?
 ^^^^^^^^^^^^^^
 
 Since GPRT is all about tracing rays, it's worth talking about what exactly a ray is. 
-Rays in GPRT are represented using the following structure:
+To start, tays in GPRT are represented using the following structure:
 
 .. code-block:: hlsl
 
@@ -61,7 +61,7 @@ Ray Primitive Intersectors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 As these rays travel through the world, they will hit surfaces. 
-The math for where these rays intersect surfaces can be a bit complicated, but fortunately our ray tracing cores include a built-in ray-triangle intersector, so we'll be using that function.
+The math for where these rays intersect surfaces can be a bit complicated, but fortunately our RT cores include a built-in ray-triangle intersector, so for now we'll be using that function.
 
 .. code-block:: hlsl
 
@@ -85,6 +85,25 @@ For example, we might want to compute the position for where our ray hit our tri
            + triangle.v3 * (-1.0 - (barycentrics.x + barycentrics.y);
   }
   
+But those same barycentrics might be used to interpolate per-vertex colors, texture coordinates, surface normals, and so on.
+
+This process is called *Ray Tracing*.
+
+The Ray Tracing Pipeline
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+So now, say we have more than one triangle, and we want to know which triangles our ray hit.
+We could do a linear traversal over all the triangles in our scene, checking potential ray triangle intersections for each triangle.
+But that quickly become prohibitively expensive, since a scene that we might want to trace rays through might contain thousands if not millions of these triangles. 
+And we also might have millions, if not billions of rays that we want to trace all at the same time.
+So instead, we construct a hierarchical data structure, called an *Acceleration Structure*, in order to skip testing intersections against large collections of triangles. 
+
+In GPRT, we provide real-time acceleration structure construction methods that scale to millions of triangles. 
+Then, this traversal process is handled for us by our RT cores. 
+To make this traversal process fast, some parts of the traversal process are handled for us, and then other parts of this traversal process we have control over. 
+This pipeline is called the Ray Tracing Pipeline.
+
+
 
 Rendering a Single Triangle
 ---------------------------
