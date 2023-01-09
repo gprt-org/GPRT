@@ -760,6 +760,7 @@ gprtHostTextureCreate(GPRTContext context,
   GPRTImageType type, 
   GPRTFormat format, 
   uint32_t width, uint32_t height, uint32_t depth, 
+  bool allocateMipmap,
   const void* init GPRT_IF_CPP(= nullptr));
 
 template <typename T> GPRTTextureOf<T>
@@ -767,8 +768,9 @@ gprtHostTextureCreate(GPRTContext context,
   GPRTImageType type, 
   GPRTFormat format, 
   uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
   const T* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTTextureOf<T>)gprtHostTextureCreate(context, type, format, width, height, depth, (void*)init); 
+ return (GPRTTextureOf<T>)gprtHostTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
 }
 
 GPRT_API GPRTTexture
@@ -776,6 +778,7 @@ gprtDeviceTextureCreate(GPRTContext context,
   GPRTImageType type, 
   GPRTFormat format, 
   uint32_t width, uint32_t height, uint32_t depth, 
+  bool allocateMipmap,
   const void* init GPRT_IF_CPP(= nullptr));
 
 template <typename T> GPRTTextureOf<T>
@@ -783,15 +786,17 @@ gprtDeviceTextureCreate(GPRTContext context,
   GPRTImageType type, 
   GPRTFormat format, 
   uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
   const T* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTTextureOf<T>)gprtDeviceTextureCreate(context, type, format, width, height, depth, (void*)init); 
+ return (GPRTTextureOf<T>)gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
 }
 
 GPRT_API GPRTTexture
 gprtSharedTextureCreate(GPRTContext context, 
   GPRTImageType type, 
   GPRTFormat format, 
-  uint32_t width, uint32_t height, uint32_t depth, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
   const void* init GPRT_IF_CPP(= nullptr));
 
 template <typename T> GPRTTextureOf<T>
@@ -799,8 +804,9 @@ gprtSharedTextureCreate(GPRTContext context,
   GPRTImageType type, 
   GPRTFormat format, 
   uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
   const T* init GPRT_IF_CPP(= nullptr)) {
- return (GPRTTextureOf<T>)gprtSharedTextureCreate(context, type, format, width, height, depth, (void*)init); 
+ return (GPRTTextureOf<T>)gprtSharedTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
 }
 
 GPRT_API void* 
@@ -826,6 +832,9 @@ GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture texture);
 // Returns the number of bytes between each slice of a 3D image.
 // Note, this might be larger than the width*height*bytes of the image.
 GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture texture);
+
+// Generates mipmaps for the specified texture object. 
+GPRT_API void gprtTextureGenerateMipmap(GPRTTexture texture);
 
 /** If a window was requested, this call presents the contents of the texture
  * to the window, potentially waiting for the screen to update before swapping.

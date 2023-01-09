@@ -673,6 +673,8 @@ struct Texture {
 
   VkImageView imageView = VK_NULL_HANDLE;
   
+  uint32_t mipLevels;
+  
   VkImageType imageType;
 
   uint32_t width;
@@ -834,10 +836,10 @@ struct Texture {
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
 
       // transition device to a transfer source format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
       
       // VkImageCopy region;
@@ -876,11 +878,11 @@ struct Texture {
       vkCmdCopyImageToBuffer(commandBuffer, image, layout, stagingBuffer.buffer, 1, &copyRegion);
 
       // transition device to previous format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
-      layout = VK_IMAGE_LAYOUT_GENERAL;
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
       err = vkEndCommandBuffer(commandBuffer);
-      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
 
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -894,10 +896,10 @@ struct Texture {
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
       err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
-      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
-      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
 
       // todo, transfer device data to host
       if (mapped) return VK_SUCCESS;
@@ -920,10 +922,10 @@ struct Texture {
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
 
       // transition device to a transfer destination format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
       // copy data
@@ -944,11 +946,11 @@ struct Texture {
       vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
 
       // transition device to an optimal device format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
-      layout = VK_IMAGE_LAYOUT_GENERAL;
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
       err = vkEndCommandBuffer(commandBuffer);
-      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
       
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -962,10 +964,10 @@ struct Texture {
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
       err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
-      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
-      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
       
       // todo, transfer device data to device
       if (mapped) {
@@ -976,17 +978,153 @@ struct Texture {
     }
   }
 
+  void generateMipmap()
+  {
+    // do nothing if we don't have a mipmap to generate
+    if (mipLevels == 1) return;
+
+    // double check we have the right usage flags...
+    // Shouldn't happen, but doesn't hurt to double check.
+    if (usageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT == 0) 
+      GPRT_RAISE("image needs transfer src usage bit for texture mipmap generation! \n");
+
+    if (usageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT == 0) 
+      GPRT_RAISE("image needs transfer dst usage bit for texture mipmap generation! \n");
+
+    VkResult err;
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err) GPRT_RAISE("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+
+    // transition device to a transfer destination format
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+    layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+
+    int32_t mipWidth = width;
+    int32_t mipHeight = height;
+    int32_t mipDepth = depth;
+
+    // note, loop here starts at 1, not 0
+    for (uint32_t i = 1; i < mipLevels; i++) {
+      // just transitioning the layouts of individual mips
+      barrier.subresourceRange.baseMipLevel = i - 1;
+      barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+      // this will wait for level i-1 to be filled from either a vkCmdCopyBufferToImae call, 
+      // or the previous blit command
+      vkCmdPipelineBarrier(commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+      // here, we specify the regions to use for the blit
+      VkImageBlit blit{};
+      blit.srcOffsets[0] = { 0, 0, 0 };
+      blit.srcOffsets[1] = { mipWidth, mipHeight, mipDepth };
+      blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.srcSubresource.mipLevel = i - 1;
+      blit.srcSubresource.baseArrayLayer = 0;
+      blit.srcSubresource.layerCount = 1;
+      blit.dstOffsets[0] = { 0, 0, 0 };
+      blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, mipDepth > 1 ? mipDepth / 2 : 1 };
+      blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.dstSubresource.mipLevel = i;
+      blit.dstSubresource.baseArrayLayer = 0;
+      blit.dstSubresource.layerCount = 1;
+
+      // This blit will downsample the current mip layer into the one above.
+      // It also transitions the image 
+      vkCmdBlitImage(commandBuffer,
+        image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit,
+        VK_FILTER_LINEAR);
+
+      // Now, transition the layer to VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+      barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+      vkCmdPipelineBarrier(commandBuffer,
+          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+          0, nullptr,
+          0, nullptr,
+          1, &barrier);
+
+      // now, divide the current mip dimensions by two.
+      // mip levels can't be smaller than 1 though.
+      if (mipWidth > 1) mipWidth /= 2;
+      if (mipHeight > 1) mipHeight /= 2;
+      if (mipDepth > 1) mipDepth /= 2;
+    }
+
+
+    // at the very end, we need one more barrier to transition the lastmip level
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+    // Now, all layers in the mip chan have this layout
+    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err) GPRT_RAISE("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
+    
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    if (err) GPRT_RAISE("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err) GPRT_RAISE("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+  }
+
   Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
     VkCommandBuffer _commandBuffer, VkQueue _queue,
     VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags,
     VkImageType type, VkFormat format, uint32_t _width, uint32_t _height, uint32_t _depth, 
-    const void *data = nullptr
+    bool allocateMipmap, const void *data = nullptr
     ) {
     
     std::vector<Texture*> &textures = (type == VK_IMAGE_TYPE_1D) ? texture1Ds :
                                       (type == VK_IMAGE_TYPE_2D) ? texture2Ds : 
                                     /*(type == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
-
+    
     // Hunt for an existing free address for this texture
     for (uint32_t i = 0; i < textures.size(); ++i) {
       if (textures[i] == nullptr) {
@@ -1011,6 +1149,19 @@ struct Texture {
     depth = _depth;
     size = width * height * depth * gprtFormatGetSize((GPRTFormat)format);
     imageType = type;
+
+    uint32_t largestDimension = std::max(std::max(width, height), depth);
+    if (allocateMipmap) {
+      // Compute total mip levels (each being half the previous)
+      // floor here accounts for non-power-of-two textures.
+      mipLevels = static_cast<uint32_t>(
+        std::floor(
+          std::log2(largestDimension)
+        )
+      ) + 1;
+    } else {
+      mipLevels = 1;
+    }
 
     // Check if the image can be mapped to a host pointer. 
     // If the image isn't host visible, this is image and requires 
@@ -1056,7 +1207,7 @@ struct Texture {
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
     imageInfo.extent.depth = depth;
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.format = format;
 
@@ -1150,7 +1301,7 @@ struct Texture {
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_GENERAL;
 
       err = vkEndCommandBuffer(commandBuffer);
@@ -1184,7 +1335,7 @@ struct Texture {
     viewInfo.format = format;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
@@ -1199,7 +1350,11 @@ struct Texture {
     }
 
     if (data != nullptr) {
-      GPRT_RAISE("NOT IMPLEMENTED!");
+      map();
+      memcpy(mapped, data, size);
+      unmap();
+
+      if (mipLevels > 1) generateMipmap();
     }
   }
 
@@ -3571,19 +3726,19 @@ struct Context {
         physicalDevice, logicalDevice,
         graphicsCommandBuffer, graphicsQueue,
         imageUsageFlags, memoryUsageFlags,
-        VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+        VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
       );
       defaultTexture2D = new Texture(
         physicalDevice, logicalDevice,
         graphicsCommandBuffer, graphicsQueue,
         imageUsageFlags, memoryUsageFlags,
-        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
       );
       defaultTexture3D = new Texture(
         physicalDevice, logicalDevice,
         graphicsCommandBuffer, graphicsQueue,
         imageUsageFlags, memoryUsageFlags,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
       );
     }
   };
@@ -4701,7 +4856,7 @@ GPRT_API void gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   }
 
   // transfer the texture to a transfer source
-  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
   // now do the transfer
   {
@@ -4781,7 +4936,7 @@ GPRT_API void gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   }
 
   // and revert the texture format back to its previous layout
-  texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1});
+  texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
   context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
 
@@ -5349,7 +5504,7 @@ gprtSamplerGetHandle(GPRTSampler _sampler)
 GPRT_API GPRTTexture
 gprtHostTextureCreate(GPRTContext _context, 
   GPRTImageType type, GPRTFormat format, 
-  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
 {
   LOG_API_CALL();
 
@@ -5370,17 +5525,12 @@ gprtHostTextureCreate(GPRTContext _context,
     context->physicalDevice, context->logicalDevice,
     context->graphicsCommandBuffer, context->graphicsQueue,
     imageUsageFlags, memoryUsageFlags,
-    (VkImageType)type, (VkFormat)format, width, height, depth
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
   );
 
   // Pin the texture to the host
   texture->map();
-  if (init) {
-    size_t size = gprtFormatGetSize(format);
-    size_t count = width * height * depth;
-    void* mapped = texture->mapped;
-    memcpy(mapped, init, size * count);
-  }
 
   return (GPRTTexture)texture;
 }
@@ -5388,7 +5538,7 @@ gprtHostTextureCreate(GPRTContext _context,
 GPRT_API GPRTTexture
 gprtDeviceTextureCreate(GPRTContext _context, 
   GPRTImageType type, GPRTFormat format, 
-  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
 {
   LOG_API_CALL();
 
@@ -5408,17 +5558,9 @@ gprtDeviceTextureCreate(GPRTContext _context,
     context->physicalDevice, context->logicalDevice,
     context->graphicsCommandBuffer, context->graphicsQueue,
     imageUsageFlags, memoryUsageFlags,
-    (VkImageType)type, (VkFormat)format, width, height, depth
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
   );
-
-  if (init) {
-    texture->map();
-    size_t size = gprtFormatGetSize(format);
-    size_t count = width * height * depth;
-    void* mapped = texture->mapped;
-    memcpy(mapped, init, size * count);
-    texture->unmap();
-  }
 
   return (GPRTTexture)texture;
 }
@@ -5426,7 +5568,7 @@ gprtDeviceTextureCreate(GPRTContext _context,
 GPRT_API GPRTTexture
 gprtSharedTextureCreate(GPRTContext _context, 
   GPRTImageType type, GPRTFormat format, 
-  uint32_t width, uint32_t height, uint32_t depth, const void* init)
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
 {
   LOG_API_CALL();
 
@@ -5448,17 +5590,12 @@ gprtSharedTextureCreate(GPRTContext _context,
     context->physicalDevice, context->logicalDevice,
     context->graphicsCommandBuffer, context->graphicsQueue,
     imageUsageFlags, memoryUsageFlags,
-    (VkImageType)type, (VkFormat)format, width, height, depth
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
   );
 
   // Pin the texture to the host
   texture->map();
-  if (init) {
-    size_t size = gprtFormatGetSize(format);
-    size_t count = width * height * depth;
-    void* mapped = texture->mapped;
-    memcpy(mapped, init, size * count);
-  }
 
   return (GPRTTexture)texture;
 }
@@ -5473,6 +5610,12 @@ GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture _texture)
 {
   Texture *texture = (Texture*)_texture;
   return texture->subresourceLayout.depthPitch;
+}
+
+GPRT_API void gprtTextureGenerateMipmap(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  texture->generateMipmap();
 }
 
 GPRT_API void* 
