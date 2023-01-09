@@ -35,6 +35,12 @@ struct PushConstants {
 };
 [[vk::push_constant]] PushConstants pc;
 
+// Descriptor binding, then set number.
+[[vk::binding(0, 0)]] SamplerState samplers[];
+[[vk::binding(0, 1)]] Texture1D texture1Ds[];
+[[vk::binding(0, 2)]] Texture2D texture2Ds[];
+[[vk::binding(0, 3)]] Texture3D texture3Ds[];
+
 namespace gprt {
   inline uint32_t make_8bit(const float f)
   {
@@ -57,6 +63,15 @@ namespace gprt {
       (make_8bit(color.y) << 8) +
       (make_8bit(color.x) << 16) +
       (0xffU << 24);
+  }
+
+  inline uint32_t make_bgra(const float4 color)
+  {
+    return
+      (make_8bit(color.z) << 0) +
+      (make_8bit(color.y) << 8) +
+      (make_8bit(color.x) << 16) +
+      (make_8bit(color.w) << 24);
   }
 
     // struct Buffer {
@@ -88,6 +103,26 @@ namespace gprt {
     return getAccelHandle(accel.x);
   }
 
+  typedef uint64_t2 Texture;
+
+  Texture1D getTexture1DHandle(gprt::Texture texture) {
+    return texture1Ds[texture.x];
+  }
+
+  Texture2D getTexture2DHandle(gprt::Texture texture) {
+    return texture2Ds[texture.x];
+  }
+
+  Texture3D getTexture3DHandle(gprt::Texture texture) {
+    return texture3Ds[texture.x];
+  }
+
+  typedef uint64_t2 Sampler;
+
+  SamplerState getSamplerHandle(gprt::Sampler sampler) {
+    return samplers[sampler.x];
+  }
+
   void amdkludge() {
     if (pc.r[15]) {
       struct Stubstruct {
@@ -108,6 +143,7 @@ namespace gprt {
       vk::RawBufferStore<int>(0, stubstruct.tmp);
     }
   }
+
 };
 
 
