@@ -360,7 +360,7 @@ struct Buffer {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
@@ -408,7 +408,7 @@ struct Buffer {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
@@ -1274,7 +1274,7 @@ struct TriangleAccel : public Accel {
     // err = vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence);
     // if (err) GPRT_RAISE("failed to create fence for triangle accel build! : \n" + errorString(err));
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1481,7 +1481,7 @@ struct AABBAccel : public Accel {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for AABB accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1802,7 +1802,7 @@ struct InstanceAccel : public Accel {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1945,7 +1945,7 @@ struct InstanceAccel : public Accel {
 
     err = vkQueueWaitIdle(queue);
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
