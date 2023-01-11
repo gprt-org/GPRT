@@ -832,74 +832,58 @@ struct Texture {
       else return vkMapMemory(device, memory, offset, size, 0, &mapped);
     }
     else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
+      // Finding that this causes bugs on Intel ARC. It seems that vkCmdCopyImageToBuffer doesn't respect
+      // vulkan fences. We don't need this, at the moment textures can only be written to by the host...
+      // But it might be worth filing a bug over...
 
-      // transition device to a transfer source format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      
-      // VkImageCopy region;
-      // region.srcOffset.x = 0;
-      // region.srcOffset.y = 0;
-      // region.srcOffset.z = 0;
-      // region.dstOffset.x = 0;
-      // region.dstOffset.y = 0;
-      // region.dstOffset.z = 0;
-      // region.extent.width = width;
-      // region.extent.height = height;
-      // region.extent.depth = depth;
-      // region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      // region.srcSubresource.baseArrayLayer = 0;
-      // region.srcSubresource.layerCount = 1;
-      // region.srcSubresource.mipLevel = 0;
+      // VkResult err;
+      // VkCommandBufferBeginInfo cmdBufInfo{};
+      // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      // err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      // if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
 
-      // // staging image is the same as the final
-      // region.dstSubresource = region.srcSubresource;
-      // vkCmdCopyImage(commandBuffer, image, layout, stagingImage.image, stagingImage.layout, 1, &region);
+      // // transition device to a transfer source format
+      // setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      // layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
-      VkBufferImageCopy copyRegion;
-      copyRegion.imageOffset.x = 0;
-      copyRegion.imageOffset.y = 0;
-      copyRegion.imageOffset.z = 0;
-      copyRegion.imageExtent.width = width;
-      copyRegion.imageExtent.height = height;
-      copyRegion.imageExtent.depth = depth;
-      copyRegion.bufferOffset = 0;
-      copyRegion.bufferRowLength = 0;
-      copyRegion.bufferImageHeight = 0;
-      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      copyRegion.imageSubresource.baseArrayLayer = 0;
-      copyRegion.imageSubresource.layerCount = 1;
-      copyRegion.imageSubresource.mipLevel = 0;
-      vkCmdCopyImageToBuffer(commandBuffer, image, layout, stagingBuffer.buffer, 1, &copyRegion);
+      // VkBufferImageCopy copyRegion;
+      // copyRegion.imageOffset.x = 0;
+      // copyRegion.imageOffset.y = 0;
+      // copyRegion.imageOffset.z = 0;
+      // copyRegion.imageExtent.width = width;
+      // copyRegion.imageExtent.height = height;
+      // copyRegion.imageExtent.depth = depth;
+      // copyRegion.bufferOffset = 0;
+      // copyRegion.bufferRowLength = 0;
+      // copyRegion.bufferImageHeight = 0;
+      // copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      // copyRegion.imageSubresource.baseArrayLayer = 0;
+      // copyRegion.imageSubresource.layerCount = 1;
+      // copyRegion.imageSubresource.mipLevel = 0;
+      // vkCmdCopyImageToBuffer(commandBuffer, image, layout, stagingBuffer.buffer, 1, &copyRegion);
 
-      // transition device to previous format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      // // transition device to previous format
+      // setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      // layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-      err = vkEndCommandBuffer(commandBuffer);
-      if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
+      // err = vkEndCommandBuffer(commandBuffer);
+      // if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+      // VkSubmitInfo submitInfo;
+      // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      // submitInfo.pNext = NULL;
+      // submitInfo.waitSemaphoreCount = 0;
+      // submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      // submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      // submitInfo.commandBufferCount = 1;
+      // submitInfo.pCommandBuffers = &commandBuffer;
+      // submitInfo.signalSemaphoreCount = 0;
+      // submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+      // err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      // if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
-      if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(queue);
-      if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
+      // err = vkQueueWaitIdle(queue);
+      // if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
 
       // todo, transfer device data to host
       if (mapped) return VK_SUCCESS;
