@@ -87,8 +87,9 @@ int main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   int texWidth, texHeight, texChannels;
-  stbi_uc* pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-  
+  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth,
+                              &texHeight, &texChannels, STBI_rgb_alpha);
+
   // Since we'll be using a window, we request support for an image swapchain
   // If a window can't be made, we can still use GPRT, but a window wont appear.
   gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
@@ -108,17 +109,18 @@ int main(int ac, char **av) {
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  GPRTComputeOf<TransformData> transformProgram = 
-    gprtComputeCreate<TransformData>(context, module, "Transform");
-    
+  GPRTComputeOf<TransformData> transformProgram =
+      gprtComputeCreate<TransformData>(context, module, "Transform");
+
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // Allocate room for one RayGen shader, create it, and hold on to it with
   // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen =
       gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
-  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
-  
+  GPRTMissOf<MissProgData> miss =
+      gprtMissCreate<MissProgData>(context, module, "miss");
+
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -134,64 +136,62 @@ int main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
-  GPRTTextureOf<stbi_uc> texture = 
-      gprtDeviceTextureCreate<stbi_uc>(context, 
-        GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM,
-        texWidth, texHeight, /*depth*/ 1, 
-        /* generate mipmaps */ true, pixels);
+  GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth,
+      texHeight, /*depth*/ 1,
+      /* generate mipmaps */ true, pixels);
 
   std::vector<GPRTSampler> samplers = {
       // First texture will use the default sampler
       gprtSamplerCreate(context),
-      // Next texture we'll show off mipmapping, so we'll use the 
+      // Next texture we'll show off mipmapping, so we'll use the
       // default sampler here too
       gprtSamplerCreate(context),
-      
+
       // Then here, we'll demonstrate linear vs nearest for the magfilter
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
 
       // Here, we'll demonstrate linear vs nearest for the minFilter
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 16,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      
-      // Anisotropy of 1 vs 16. Should see less blurring with higher 
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(
+          context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+          16, GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+
+      // Anisotropy of 1 vs 16. Should see less blurring with higher
       // anisotropy values
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, 
-      GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 16,
-      GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(
+          context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+          16, GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+
       // Changing wrap mode
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_CLAMP, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
 
       // Changing border mode
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, 
-        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
-        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)
-  };
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_BORDER,
+                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_BORDER,
+                        GPRT_BORDER_COLOR_OPAQUE_WHITE)};
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(context);
-  
+
   // ------------------------------------------------------------------
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
@@ -202,30 +202,32 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  GPRTBufferOf<float3> vertexBuffer = 
-    gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<float2> texcoordBuffer = 
-    gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
-  GPRTBufferOf<int3> indexBuffer = 
-    gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-    
-  GPRTGeomOf<TrianglesGeomData> plane = gprtGeomCreate(context, trianglesGeomType);
+  GPRTBufferOf<float3> vertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float2> texcoordBuffer =
+      gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
+  GPRTBufferOf<int3> indexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+
+  GPRTGeomOf<TrianglesGeomData> plane =
+      gprtGeomCreate(context, trianglesGeomType);
 
   gprtTrianglesSetVertices(plane, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(plane, indexBuffer, NUM_INDICES);
-  
-  TrianglesGeomData* planeData = gprtGeomGetPointer(plane);
+
+  TrianglesGeomData *planeData = gprtGeomGetPointer(plane);
   planeData->index = gprtBufferGetHandle(indexBuffer);
   planeData->vertex = gprtBufferGetHandle(vertexBuffer);
   planeData->texcoord = gprtBufferGetHandle(texcoordBuffer);
   planeData->texture = gprtTextureGetHandle(texture);
+  planeData->now = 0.0;
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
 
-  GPRTBufferOf<float4x4> transformBuffer = 
-    gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
-  
+  GPRTBufferOf<float4x4> transformBuffer =
+      gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
+
   TransformData *transformData = gprtComputeGetPointer(transformProgram);
   transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
@@ -234,16 +236,16 @@ int main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context, transformProgram, samplers.size());
 
-  GPRTAccel trianglesBLAS =
-      gprtTrianglesAccelCreate(context, 1, &plane);
+  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, 1, &plane);
 
   std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
+  GPRTAccel trianglesTLAS =
+      gprtInstanceAccelCreate(context, instances.size(), instances.data());
   gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
-  
+
   raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   gprtBuildPipeline(context);
@@ -311,8 +313,8 @@ int main(int ac, char **av) {
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
-      raygenData->camera.fovy = cosFovy * .5f;
-      
+      raygenData->camera.fovy = cosFovy;
+
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
@@ -324,9 +326,9 @@ int main(int ac, char **av) {
 
     gprtAccelBuild(context, trianglesTLAS);
     raygenData->world = gprtAccelGetHandle(trianglesTLAS);
-    
-    TrianglesGeomData* planeMeshData = gprtGeomGetPointer(plane);
-    planeMeshData->time = gprtGetTime(context);
+
+    TrianglesGeomData *planeMeshData = gprtGeomGetPointer(plane);
+    planeMeshData->now = gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
 
     // Calls the GPU raygen kernel function
@@ -337,7 +339,6 @@ int main(int ac, char **av) {
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
-
 
   // Save final frame to an image
   LOG("done with launch, writing frame buffer to " << outFileName);

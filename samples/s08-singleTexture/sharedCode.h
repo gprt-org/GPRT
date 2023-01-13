@@ -40,11 +40,12 @@ struct TrianglesGeomData {
   alignas(16) gprt::Buffer vertex; // vec3f *
   /*! array/buffer of vertex positions */
   alignas(16) gprt::Buffer texcoord; // vec2f *
-  /*! base color we use for the entire mesh */
+  /*! base color texture we use for the entire mesh */
   alignas(16) gprt::Texture texture;
+  /*! an array of texture samplers to use */
   alignas(16) gprt::Sampler samplers[12];
-
-  alignas(8) float time;
+  /*! the current time */
+  alignas(8) float now;
 };
 
 struct RayGenData {
@@ -52,7 +53,6 @@ struct RayGenData {
   alignas(16) gprt::Buffer framebuffer;
 
   alignas(8) int2 fbSize;
-  
 
   struct {
     alignas(16) float3 pos;
