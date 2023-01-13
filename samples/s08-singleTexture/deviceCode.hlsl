@@ -46,6 +46,8 @@ float3x3 AngleAxis3x3(float angle, float3 axis)
 
 GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record))
 {
+    // This kernel animates the texture planes, rotating them in a circle
+    // and placing them in a grid.
     int transformID = DispatchThreadID.x;
 
     int transformX = transformID / 2;
@@ -53,7 +55,6 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record))
 
     int numTransforms = record.numTransforms;
     float angle = record.now;
-    // if (transformID == 6 || transformID == 7) angle = -1.1f;
     float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
     float4 transforma = float4(aa[0], lerp(-5, 5, transformX / float((numTransforms / 2) - 1)));
@@ -84,6 +85,7 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 1e20f;
 
+    // compute the spreading angle of the ray to determine the sampling footprint
     float phi = record.camera.fovy;
     float H = dims.y;
     payload.spreadAngle = atan(2.f * tan(phi / 2.f) / H);
@@ -121,12 +123,13 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
     float3 C = gprt::load<float3>(record.vertex, index.z);
     float3 Ng = normalize(cross(B - A, C - A));
 
+    // compute texture coordinate:
     float2 TCA = gprt::load<float2>(record.texcoord, index.x);
     float2 TCB = gprt::load<float2>(record.texcoord, index.y);
     float2 TCC = gprt::load<float2>(record.texcoord, index.z);
-
     float2 TC = TCB * attributes.bc.x + TCC * attributes.bc.y + TCA * (1.f - (attributes.bc.x + attributes.bc.y));
 
+    // fetch the texture and sampler for this plane
     Texture2D texture = gprt::getTexture2DHandle(record.texture);
     SamplerState sampler = gprt::getSamplerHandle(record.samplers[instanceID]);
 
@@ -137,9 +140,24 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
     float2 DDY = float2(footprint, footprint) * .5f;
     float4 color;
 
-    // For the 3rd and 4th textures, we want to zoom in to show the mag filter.
-    // We also want to force mip level 0
-    if (instanceID == 2 || instanceID == 3)
+    // Here's how you'd normally sample a texture
+    if (instanceID == 0)
+    {
+        color = texture.SampleGrad(sampler, TC, DDX, DDY);
+    }
+    // for the second texture, we want to demonstrate that mipmapping works.
+    // We can use SampleLevel instead of SampleGrad to do this.
+    else if (instanceID == 1)
+    {
+        float w, h;
+        texture.GetDimensions(w, h);
+        int levels = log2(max(w, h));
+        color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(record.now))));
+    }
+
+    // For the 3rd and 4th textures, we want to zoom in to show the magnification filter.
+    // We also want to force mip level 0.
+    else if (instanceID == 2 || instanceID == 3)
     {
         TC = TC * .05 + .475;
         DDX *= .05;
@@ -147,7 +165,7 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
         color = texture.SampleLevel(sampler, TC, 0);
     }
     // For the 5th and 6th textures, we want to zoom out and show how the
-    // min filter blends when many texels fall within the sample footprint
+    // min filter blends when many texels fall within the sample footprint.
     else if (instanceID == 4 || instanceID == 5)
     {
         TC *= 10;
@@ -156,6 +174,9 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
         color = texture.SampleGrad(sampler, TC, DDX, DDY);
     }
 
+    // For the 7th and 8th textures, we also want to zoom out, now to show
+    // the effect of anisotropic sampling. Higher the anisotroic samples, the
+    // less blurry the image should look
     else if (instanceID == 6 || instanceID == 7)
     {
         TC *= 5;
@@ -164,22 +185,11 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
         color = texture.SampleGrad(sampler, TC, DDX, DDY);
     }
 
+    // For the last set of textures, we want to show wrapping and border colors,
+    // so we zoom out again.
     else if (instanceID == 8 || instanceID == 9 || instanceID == 10 || instanceID == 11)
     {
         TC = TC * 2;
-        color = texture.SampleGrad(sampler, TC, DDX, DDY);
-    }
-
-    // for the second texture, we want to demonstrate that mipmapping works.
-    else if (instanceID == 1)
-    {
-        float w, h;
-        texture.GetDimensions(w, h);
-        int levels = log2(max(w, h));
-        color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(record.now))));
-    }
-    else
-    {
         color = texture.SampleGrad(sampler, TC, DDX, DDY);
     }
 
