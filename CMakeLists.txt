@@ -98,7 +98,6 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
-option(GPRT_BUILD_TESTS "Build the Tests?" ON)
 option(BUILD_DOC "Build documentation" OFF)
 
 add_subdirectory(3rdParty)
