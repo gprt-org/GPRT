@@ -1394,7 +1394,8 @@ struct Sampler {
   ~Sampler() {};
 
   Sampler(VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
-    VkFilter minFilter, VkFilter magFilter, VkSamplerMipmapMode mipFilter, 
+    VkFilter magFilter, VkFilter minFilter, VkSamplerMipmapMode mipFilter, 
+    uint32_t anisotropy,
     VkSamplerAddressMode addressMode, VkBorderColor borderColor
   )
   {
@@ -1421,11 +1422,11 @@ struct Sampler {
     samplerInfo.addressModeU = addressMode;
     samplerInfo.addressModeV = addressMode;
     samplerInfo.addressModeW = addressMode;
-    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.anisotropyEnable = (anisotropy == 1) ? VK_FALSE : VK_TRUE;
     
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.maxAnisotropy = std::min(properties.limits.maxSamplerAnisotropy, float(anisotropy));
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
     samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -3703,6 +3704,7 @@ struct Context {
         physicalDevice, logicalDevice, 
         VK_FILTER_LINEAR, VK_FILTER_LINEAR, 
         VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        1,
         VK_SAMPLER_ADDRESS_MODE_REPEAT,
         VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
       );
@@ -5447,16 +5449,17 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
 
 GPRT_API GPRTSampler
 gprtSamplerCreate(GPRTContext _context,
-  GPRTFilter minFilter, GPRTFilter magFilter, GPRTFilter mipFilter, 
-  GPRTSamplerAddressMode addressMode, GPRTBorderColor borderColor
+  GPRTFilter magFilter, GPRTFilter minFilter, GPRTFilter mipFilter, 
+  uint32_t anisotropy, GPRTSamplerAddressMode addressMode, GPRTBorderColor borderColor
 ) {
   LOG_API_CALL();
 
   Context *context = (Context*)_context;
   Sampler *sampler = new Sampler(
     context->physicalDevice, context->logicalDevice,
-    (VkFilter) minFilter, (VkFilter) magFilter,
+    (VkFilter) magFilter, (VkFilter) minFilter,
     (VkSamplerMipmapMode) mipFilter,
+    anisotropy,
     (VkSamplerAddressMode) addressMode,
     (VkBorderColor) borderColor
   );

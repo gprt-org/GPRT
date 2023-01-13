@@ -33,7 +33,6 @@ target_link_libraries(s08_textures
     s08_deviceCode
     gprt::gprt
     stb_image
-    generator
 )
 target_compile_definitions(s08_textures
   PRIVATE ASSETS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../3rdParty/GPRT-SampleAssets/"

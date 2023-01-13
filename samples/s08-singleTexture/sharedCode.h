@@ -24,6 +24,14 @@
 
 /* variables available to all programs */
 
+struct TransformData {
+  /*! array/buffer of instance transforms */
+  alignas(16) gprt::Buffer transforms;
+  alignas(4) int numTransforms;
+  /*! the current time */
+  alignas(4) float now;
+};
+
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
@@ -34,7 +42,7 @@ struct TrianglesGeomData {
   alignas(16) gprt::Buffer texcoord; // vec2f *
   /*! base color we use for the entire mesh */
   alignas(16) gprt::Texture texture;
-  alignas(16) gprt::Sampler sampler;
+  alignas(16) gprt::Sampler samplers[12];
 
   alignas(8) float time;
 };
@@ -51,6 +59,7 @@ struct RayGenData {
     alignas(16) float3 dir_00;
     alignas(16) float3 dir_du;
     alignas(16) float3 dir_dv;
+    alignas(4) float fovy;
   } camera;
 };
 

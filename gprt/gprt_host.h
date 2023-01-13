@@ -213,7 +213,7 @@ GPRTFilter;
 
 /*! currently supported texture filter modes */
 typedef enum {
-  GPRT_SAMPLER_ADDRESS_MODE_WRAP = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+  GPRT_SAMPLER_ADDRESS_MODE_REPEAT = VK_SAMPLER_ADDRESS_MODE_REPEAT,
   GPRT_SAMPLER_ADDRESS_MODE_CLAMP = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
   GPRT_SAMPLER_ADDRESS_MODE_BORDER = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
   GPRT_SAMPLER_ADDRESS_MODE_MIRROR = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
@@ -744,10 +744,34 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type,
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
 }
 
+/**
+ * @brief Creates a sampler object for use in sampling textures. Behavior below
+ * defines how texture.SampleLevel and texture.SampleGrad operate. The "sampled footprint"
+ * mentioned below refers to the texture coordinate differentials given to Texture.SampleGrad.
+ * 
+ * @param context The GPRT context used to make the sampler.
+ * @param magFilter How to sample a texture when a texel's footprint covers more than the sampled footprint.
+ * The default is GPRT_FILTER_LINEAR, which takes the four closest texels and bilinearly interpolates among them. 
+ * GPRT_FILTER_NEAREST returns the nearest texel.
+ * @param minFilter How the texture is sampled when a texel's footprint is smaller than the sampled footprint.
+ * The default is GPRT_FILTER_LINEAR, which uses mipmapping and a trilinear filter to filter
+ * the eight closest texels between the two closest mip levels.
+ * @param anisotropy The number of samples to take, between 1 and 16 and typically a power of 2, along the axis of 
+ * the sampled footprint that has the highest density of texels. A higher value gives a less blurry result than a 
+ * basic mipmap, but at the cost of more texture samples being used. 
+ * @param addressMode How the image is wrapped both horizontally and vertically when the sampled beyond the interval [0, 1).
+ * The default is GPRT_SAMPLER_ADDRESS_MODE_REPEAT, which causes the texture to repeat when sampled beyond the normal interval.
+ * @param borderColor If address mode is set to GPRT_ADDRESS_MODE_BORDER, this sets the border color to use.
+ * @return GPRTSampler The sampler object that was made.
+ */
 GPRT_API GPRTSampler
 gprtSamplerCreate(GPRTContext context, 
-  GPRTFilter minFilter, GPRTFilter magFilter, GPRTFilter mipFilter, 
-  GPRTSamplerAddressMode addressMode, GPRTBorderColor borderColor);
+  GPRTFilter magFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  GPRTFilter minFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  GPRTFilter mipFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  uint32_t anisotropy GPRT_IF_CPP(= 1),
+  GPRTSamplerAddressMode addressMode GPRT_IF_CPP(=GPRT_SAMPLER_ADDRESS_MODE_REPEAT), 
+  GPRTBorderColor borderColor GPRT_IF_CPP(= GPRT_BORDER_COLOR_OPAQUE_BLACK));
 
 GPRT_API gprt::Sampler 
 gprtSamplerGetHandle(GPRTSampler sampler);

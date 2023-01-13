@@ -24,8 +24,49 @@
 
 struct Payload
 {
+    float spreadAngle;
     float3 color;
 };
+
+float3x3 AngleAxis3x3(float angle, float3 axis)
+{
+    float c, s;
+    sincos(angle, s, c);
+
+    float t = 1 - c;
+    float x = axis.x;
+    float y = axis.y;
+    float z = axis.z;
+
+    return float3x3(
+        t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+        t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+        t * x * z - s * y, t * y * z + s * x, t * z * z + c
+    );
+}
+
+GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record))
+{
+    int transformID = DispatchThreadID.x;
+
+    int transformX = transformID / 2;
+    int transformY = transformID % 2;
+
+    int numTransforms = record.numTransforms;
+    float angle = record.now;
+    // if (transformID == 6 || transformID == 7) angle = -1.1f;
+    float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
+
+    float4 transforma = float4(aa[0], lerp(-5, 5, transformX / float((numTransforms / 2) - 1)));
+    float4 transformb = float4(aa[1], lerp(-1, 1, transformY));
+    float4 transformc = float4(aa[2], 0.0);
+    float4 transformd = float4(0.0, 0.0, 0.0, 1.0);
+
+    gprt::store(record.transforms, transformID * 4 + 0, transforma);
+    gprt::store(record.transforms, transformID * 4 + 1, transformb);
+    gprt::store(record.transforms, transformID * 4 + 2, transformc);
+    gprt::store(record.transforms, transformID * 4 + 3, transformd); 
+}
 
 GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
 {
@@ -43,6 +84,10 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record))
         normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 1e20f;
+
+    float phi = record.camera.fovy;
+    float H = dims.y;
+    payload.spreadAngle = atan(2.f * tan(phi / 2.f) / H);
 
     // Trace ray against surface
     RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -69,6 +114,7 @@ struct TriangleAttributes
 GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payload), (TriangleAttributes, attributes))
 {
     // compute normal:
+    uint instanceID = InstanceIndex();
     uint primID = PrimitiveIndex();
     int3 index = gprt::load<int3>(record.index, primID);
     float3 A = gprt::load<float3>(record.vertex, index.x);
@@ -85,9 +131,55 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
               + TCA * (1.f - (attributes.bc.x + attributes.bc.y));
 
     Texture2D texture = gprt::getTexture2DHandle(record.texture);
-    SamplerState sampler = gprt::getSamplerHandle(record.sampler);
+    SamplerState sampler = gprt::getSamplerHandle(record.samplers[instanceID]);
 
-    float4 color = texture.SampleLevel(sampler, TC, 11 * abs(sin(record.time * .5)));
+    // For now, we're using an approximate ray cone method to drive texture sampling.
+    // The cone footprint grows larger with distance, and is grows larger at glancing angles
+    float footprint = payload.spreadAngle * RayTCurrent() / (dot(Ng, normalize(ObjectRayDirection())));
+    float2 DDX = float2(footprint, footprint);
+    float2 DDY = float2(footprint, footprint);
+    float4 color;
+
+    // For the 3rd and 4th textures, we want to zoom in to show the mag filter.
+    // We also want to force mip level 0
+    if (instanceID == 2 || instanceID == 3) {
+        TC = TC * .05 + .475;
+        DDX *= .05;
+        DDY *= .05;
+        color = texture.SampleLevel(sampler, TC, 0);
+    }
+    // For the 5th and 6th textures, we want to zoom out and show how the
+    // min filter blends when many texels fall within the sample footprint
+    else if (instanceID == 4 || instanceID == 5) {
+        TC *= 10;
+        DDX *= 10;
+        DDY *= 10;
+        color = texture.SampleGrad(sampler, TC, DDX, DDY);
+    }
+
+    else if (instanceID == 6 || instanceID == 7) {
+        TC  *= 5;
+        DDX *= 5;
+        DDY *= 5;
+        color = texture.SampleGrad(sampler, TC, DDX, DDY);
+    }
+
+    else if (instanceID == 8 || instanceID == 9 || instanceID == 10 || instanceID == 11) {
+        TC = TC * 2;
+        color = texture.SampleGrad(sampler, TC, DDX, DDY);
+    }
+
+    // for the second texture, we want to demonstrate that mipmapping works.
+    else if (instanceID == 1) {
+        float w, h;
+        texture.GetDimensions(w, h);
+        int levels = log2(max(w, h));
+        color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(record.time))));
+    }
+    else {
+        color = texture.SampleGrad(sampler, TC, DDX, DDY);
+    }
+
     payload.color = color.rgb;
 }
 

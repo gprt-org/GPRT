@@ -26,10 +26,6 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-// for generating meshes
-#include <generator.hpp>
-using namespace generator;
-
 // library for image output
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -44,66 +40,31 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-template <typename T> struct Mesh {
-  std::vector<float3> vertices;
-  std::vector<float2> texcoords;
-  std::vector<uint3> indices;
-  GPRTBufferOf<float2> texcoordBuffer;
-  GPRTBufferOf<float3> vertexBuffer;
-  GPRTBufferOf<uint3> indexBuffer;
-  GPRTGeomOf<TrianglesGeomData> geometry;
-
-  Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, 
-      GPRTTextureOf<stbi_uc> texture, GPRTSampler sampler, float4x4 transform) {
-    auto vertGenerator = generator.vertices();
-    auto triGenerator = generator.triangles();
-    while (!vertGenerator.done()) {
-      auto vertex = vertGenerator.generate();
-      auto position = vertex.position;
-      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1],
-                                       vertex.position[2], 1.0));
-      float2 tc = float2(vertex.texCoord[0], vertex.texCoord[1]);
-      vertices.push_back(p.xyz());
-      texcoords.push_back(tc);
-      vertGenerator.next();
-    }
-    while (!triGenerator.done()) {
-      Triangle triangle = triGenerator.generate();
-      auto vertices = triangle.vertices;
-      indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
-      triGenerator.next();
-    }
-
-    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
-                                          vertices.data());
-    texcoordBuffer = gprtDeviceBufferCreate<float2>(context, texcoords.size(),
-                                          texcoords.data());
-    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
-                                         indices.data());
-    geometry = gprtGeomCreate(context, geomType);
-    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
-    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
-    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
-    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-    geomData->texcoord = gprtBufferGetHandle(texcoordBuffer);
-    geomData->index = gprtBufferGetHandle(indexBuffer);
-    geomData->texture = gprtTextureGetHandle(texture);
-    geomData->sampler = gprtSamplerGetHandle(sampler);
-  };
-
-  void cleanup() {
-    gprtGeomDestroy(geometry);
-    gprtBufferDestroy(vertexBuffer);
-    gprtBufferDestroy(texcoordBuffer);
-    gprtBufferDestroy(indexBuffer);
-  };
-};
-
 extern GPRTProgram s08_deviceCode;
 
+// Vertices are the points that define our texture plane
+const int NUM_VERTICES = 4;
+float3 vertices[NUM_VERTICES] = {
+    {-0.9f, -0.9f, 0.f},
+    {+0.9f, -0.9f, 0.f},
+    {-0.9f, +0.9f, 0.f},
+    {+0.9f, +0.9f, 0.f},
+};
+
+// texture coordinates map vertices to texture locations
+float2 texcoords[NUM_VERTICES] = {
+    {0.f, 0.f},
+    {1.f, 0.f},
+    {0.f, 1.f},
+    {1.f, 1.f},
+};
+
+// Indices connect those vertices together.
+const int NUM_INDICES = 2;
+int3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
+
 // initial image resolution
- int2 fbSize = {1024, 1024};
+const int2 fbSize = {1400, 460};
 
 // final image output
 const char *outFileName = "s08-textures.png";
@@ -126,12 +87,11 @@ int main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   int texWidth, texHeight, texChannels;
-  stbi_uc* pixels = stbi_load(ASSETS_DIRECTORY "image.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-  // stbi_uc* pixels = stbi_load("C:/Users/Nate/Pictures/caribou.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-
+  stbi_uc* pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  
   // Since we'll be using a window, we request support for an image swapchain
   // If a window can't be made, we can still use GPRT, but a window wont appear.
-  gprtRequestWindow(fbSize.x, fbSize.y, "Int00 Raygen Only");
+  gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
 
   // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices
@@ -148,13 +108,15 @@ int main(int ac, char **av) {
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
+  GPRTComputeOf<TransformData> transformProgram = 
+    gprtComputeCreate<TransformData>(context, module, "Transform");
+    
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // Allocate room for one RayGen shader, create it, and hold on to it with
   // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen =
       gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
-  
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
   
   // Miss program checkerboard background colors
@@ -175,13 +137,57 @@ int main(int ac, char **av) {
   GPRTTextureOf<stbi_uc> texture = 
       gprtDeviceTextureCreate<stbi_uc>(context, 
         GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM,
-        texWidth, texHeight, 1, true, pixels);
+        texWidth, texHeight, /*depth*/ 1, 
+        /* generate mipmaps */ true, pixels);
 
-  GPRTSampler sampler = 
-    gprtSamplerCreate(context, 
-      GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-      GPRT_SAMPLER_ADDRESS_MODE_WRAP, 
-      GPRT_BORDER_COLOR_OPAQUE_BLACK);
+  std::vector<GPRTSampler> samplers = {
+      // First texture will use the default sampler
+      gprtSamplerCreate(context),
+      // Next texture we'll show off mipmapping, so we'll use the 
+      // default sampler here too
+      gprtSamplerCreate(context),
+      
+      // Then here, we'll demonstrate linear vs nearest for the magfilter
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+
+      // Here, we'll demonstrate linear vs nearest for the minFilter
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 16,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      
+      // Anisotropy of 1 vs 16. Should see less blurring with higher 
+      // anisotropy values
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, 
+      GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 16,
+      GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      
+      // Changing wrap mode
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_CLAMP, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+
+      // Changing border mode
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, 
+        GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)
+  };
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(context);
@@ -190,26 +196,55 @@ int main(int ac, char **av) {
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  RayGenData *data = gprtRayGenGetPointer(rayGen);
-  data->framebuffer = gprtBufferGetHandle(frameBuffer);
-  //data->texture = gprtTextureGetHandle(texture);
+  RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+  raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
 
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  #ifndef M_PI
-  #define M_PI 3.14
-  #endif
-  Mesh<PlaneMesh> planeMesh(
-      context, trianglesGeomType, PlaneMesh{}, texture, sampler, identity);
-  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {planeMesh.geometry};
+  GPRTBufferOf<float3> vertexBuffer = 
+    gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float2> texcoordBuffer = 
+    gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
+  GPRTBufferOf<int3> indexBuffer = 
+    gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+    
+  GPRTGeomOf<TrianglesGeomData> plane = gprtGeomCreate(context, trianglesGeomType);
+
+  gprtTrianglesSetVertices(plane, vertexBuffer, NUM_VERTICES);
+  gprtTrianglesSetIndices(plane, indexBuffer, NUM_INDICES);
+  
+  TrianglesGeomData* planeData = gprtGeomGetPointer(plane);
+  planeData->index = gprtBufferGetHandle(indexBuffer);
+  planeData->vertex = gprtBufferGetHandle(vertexBuffer);
+  planeData->texcoord = gprtBufferGetHandle(texcoordBuffer);
+  planeData->texture = gprtTextureGetHandle(texture);
+  for (uint32_t i = 0; i < samplers.size(); ++i) {
+    planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
+  }
+
+  GPRTBufferOf<float4x4> transformBuffer = 
+    gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
+  
+  TransformData *transformData = gprtComputeGetPointer(transformProgram);
+  transformData->now = 0.0;
+  transformData->transforms = gprtBufferGetHandle(transformBuffer);
+  transformData->numTransforms = samplers.size();
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+  gprtComputeLaunch1D(context, transformProgram, samplers.size());
+
   GPRTAccel trianglesBLAS =
-      gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
+      gprtTrianglesAccelCreate(context, 1, &plane);
+
+  std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
+  gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
+
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
   
-  data->world = gprtAccelGetHandle(trianglesTLAS);
+  raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   gprtBuildPipeline(context);
 
@@ -276,13 +311,22 @@ int main(int ac, char **av) {
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
-
+      raygenData->camera.fovy = cosFovy * .5f;
+      
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    TrianglesGeomData* planeMeshData = gprtGeomGetPointer(planeMesh.geometry);
-    planeMeshData->time = gprtGetTime(context);
+    // Animate transforms
+    TransformData *transformData = gprtComputeGetPointer(transformProgram);
+    transformData->now = .5 * gprtGetTime(context);
+    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+    gprtComputeLaunch1D(context, transformProgram, instances.size());
+
+    gprtAccelBuild(context, trianglesTLAS);
+    raygenData->world = gprtAccelGetHandle(trianglesTLAS);
     
+    TrianglesGeomData* planeMeshData = gprtGeomGetPointer(plane);
+    planeMeshData->time = gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
 
     // Calls the GPU raygen kernel function
@@ -305,10 +349,18 @@ int main(int ac, char **av) {
   // ##################################################################
 
   LOG("cleaning up ...");
-  planeMesh.cleanup();
-  gprtSamplerDestroy(sampler);
+  for (auto &sampler : samplers) {
+    gprtSamplerDestroy(sampler);
+  }
+
+  gprtBufferDestroy(transformBuffer);
+  gprtBufferDestroy(vertexBuffer);
+  gprtBufferDestroy(texcoordBuffer);
+  gprtBufferDestroy(indexBuffer);
+  gprtGeomDestroy(plane);
   gprtTextureDestroy(texture);
   gprtBufferDestroy(frameBuffer);
+  gprtComputeDestroy(transformProgram);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(trianglesBLAS);
