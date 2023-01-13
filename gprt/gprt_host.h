@@ -98,6 +98,7 @@ using GPRTModule   = struct _GPRTModule*;
 using GPRTAccel    = struct _GPRTAccel*;
 using GPRTBuffer   = struct _GPRTBuffer*;
 using GPRTTexture  = struct _GPRTTexture*;
+using GPRTSampler  = struct _GPRTSampler*;
 using GPRTGeom     = struct _GPRTGeom*;
 using GPRTGeomType = struct _GPRTGeomType*;
 using GPRTRayGen   = struct _GPRTRayGen*;
@@ -105,6 +106,7 @@ using GPRTMiss     = struct _GPRTMiss*;
 using GPRTCompute  = struct _GPRTCompute*;
 
 template <typename T> struct _GPRTBufferOf;
+template <typename T> struct _GPRTTextureOf;
 template <typename T> struct _GPRTRayGenOf;
 template <typename T> struct _GPRTMissOf;
 template <typename T> struct _GPRTComputeOf;
@@ -112,6 +114,7 @@ template <typename T> struct _GPRTGeomOf;
 template <typename T> struct _GPRTGeomTypeOf;
 template <typename T> using GPRTRayGenOf   = struct _GPRTRayGenOf<T>*;
 template <typename T> using GPRTBufferOf   = struct _GPRTBufferOf<T>*;
+template <typename T> using GPRTTextureOf   = struct _GPRTTextureOf<T>*;
 template <typename T> using GPRTMissOf   = struct _GPRTMissOf<T>*;
 template <typename T> using GPRTComputeOf   = struct _GPRTComputeOf<T>*;
 template <typename T> using GPRTGeomOf   = struct _GPRTGeomOf<T>*;
@@ -126,6 +129,16 @@ namespace gprt {
   };
 
   struct Accel {
+    uint64_t x;
+    uint64_t y;
+  };
+
+  struct Texture {
+    uint64_t x;
+    uint64_t y;
+  };
+
+  struct Sampler {
     uint64_t x;
     uint64_t y;
   };
@@ -169,6 +182,57 @@ typedef enum
   //  GPRT_CURVES
   }
   GPRTGeomKind;
+
+/*! supported formats for texels in textures */
+typedef enum 
+  {
+    GPRT_IMAGE_TYPE_1D = VK_IMAGE_TYPE_1D,
+    GPRT_IMAGE_TYPE_2D = VK_IMAGE_TYPE_2D,
+    GPRT_IMAGE_TYPE_3D = VK_IMAGE_TYPE_3D,
+  }
+  GPRTImageType;
+
+/*! supported formats for texels in textures */
+typedef enum 
+  {
+    // note, for now, values here are made to match VkFormat equivalents.
+    GPRT_FORMAT_R8_UINT = VK_FORMAT_R8_UINT,
+    GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
+    GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
+    GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
+    GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT
+  }
+  GPRTFormat;
+
+/*! currently supported texture filter modes */
+typedef enum {
+  GPRT_FILTER_NEAREST = VK_FILTER_NEAREST,
+  GPRT_FILTER_LINEAR = VK_FILTER_LINEAR
+}
+GPRTFilter;
+
+/*! currently supported texture filter modes */
+typedef enum {
+  GPRT_SAMPLER_ADDRESS_MODE_REPEAT = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+  GPRT_SAMPLER_ADDRESS_MODE_CLAMP = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+  GPRT_SAMPLER_ADDRESS_MODE_BORDER = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+  GPRT_SAMPLER_ADDRESS_MODE_MIRROR = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+}
+GPRTSamplerAddressMode;
+
+
+typedef enum {
+  GPRT_BORDER_COLOR_TRANSPARENT_BLACK = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+  GPRT_BORDER_COLOR_OPAQUE_BLACK = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+  GPRT_BORDER_COLOR_OPAQUE_WHITE = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
+} GPRTBorderColor;
+
+/*! Indicates if a texture is linear or SRGB */
+typedef enum {
+  GPRT_COLOR_SPACE_LINEAR,
+  GPRT_COLOR_SPACE_SRGB
+}
+GPRTColorSpace;
 
 GPRT_API GPRTModule gprtModuleCreate(GPRTContext context, GPRTProgram spvCode);
 GPRT_API void gprtModuleDestroy(GPRTModule module);
@@ -678,6 +742,144 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type,
                           GPRTModule module,
                           const char *progName) {
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
+}
+
+/**
+ * @brief Creates a sampler object for use in sampling textures. Behavior below
+ * defines how texture.SampleLevel and texture.SampleGrad operate. The "sampled footprint"
+ * mentioned below refers to the texture coordinate differentials given to Texture.SampleGrad.
+ * 
+ * @param context The GPRT context used to make the sampler.
+ * @param magFilter How to sample a texture when a texel's footprint covers more than the sampled footprint.
+ * The default is GPRT_FILTER_LINEAR, which takes the four closest texels and bilinearly interpolates among them. 
+ * GPRT_FILTER_NEAREST returns the nearest texel.
+ * @param minFilter How the texture is sampled when a texel's footprint is smaller than the sampled footprint.
+ * The default is GPRT_FILTER_LINEAR, which uses mipmapping and a trilinear filter to filter
+ * the eight closest texels between the two closest mip levels.
+ * @param anisotropy The number of samples to take, between 1 and 16 and typically a power of 2, along the axis of 
+ * the sampled footprint that has the highest density of texels. A higher value gives a less blurry result than a 
+ * basic mipmap, but at the cost of more texture samples being used. 
+ * @param addressMode How the image is wrapped both horizontally and vertically when the sampled beyond the interval [0, 1).
+ * The default is GPRT_SAMPLER_ADDRESS_MODE_REPEAT, which causes the texture to repeat when sampled beyond the normal interval.
+ * @param borderColor If address mode is set to GPRT_ADDRESS_MODE_BORDER, this sets the border color to use.
+ * @return GPRTSampler The sampler object that was made.
+ */
+GPRT_API GPRTSampler
+gprtSamplerCreate(GPRTContext context, 
+  GPRTFilter magFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  GPRTFilter minFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  GPRTFilter mipFilter GPRT_IF_CPP(= GPRT_FILTER_LINEAR), 
+  uint32_t anisotropy GPRT_IF_CPP(= 1),
+  GPRTSamplerAddressMode addressMode GPRT_IF_CPP(=GPRT_SAMPLER_ADDRESS_MODE_REPEAT), 
+  GPRTBorderColor borderColor GPRT_IF_CPP(= GPRT_BORDER_COLOR_OPAQUE_BLACK));
+
+GPRT_API gprt::Sampler 
+gprtSamplerGetHandle(GPRTSampler sampler);
+
+GPRT_API void
+gprtSamplerDestroy(GPRTSampler);
+
+GPRT_API GPRTTexture
+gprtHostTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, 
+  bool allocateMipmap,
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtHostTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtHostTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
+}
+
+GPRT_API GPRTTexture
+gprtDeviceTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, 
+  bool allocateMipmap,
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtDeviceTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
+}
+
+GPRT_API GPRTTexture
+gprtSharedTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
+  const void* init GPRT_IF_CPP(= nullptr));
+
+template <typename T> GPRTTextureOf<T>
+gprtSharedTextureCreate(GPRTContext context, 
+  GPRTImageType type, 
+  GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth,
+  bool allocateMipmap,
+  const T* init GPRT_IF_CPP(= nullptr)) {
+ return (GPRTTextureOf<T>)gprtSharedTextureCreate(context, type, format, width, height, depth, allocateMipmap, (void*)init); 
+}
+
+GPRT_API void* 
+gprtTextureGetPointer(GPRTTexture texture, int deviceID GPRT_IF_CPP(=0));
+
+template <typename T> T*
+gprtTextureGetPointer( GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(=0)) {
+ return (T*)gprtTextureGetPointer((GPRTTexture)texture, deviceID);
+}
+
+GPRT_API gprt::Texture 
+gprtTextureGetHandle(GPRTTexture texture, int deviceID GPRT_IF_CPP(=0));
+
+template <typename T> gprt::Texture
+gprtTextureGetHandle( GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(=0)) {
+ return gprtTextureGetHandle((GPRTTexture)texture, deviceID);
+}
+
+// Returns the number of bytes between each row of texels in the image. 
+// Note, this might be larger than the width of the image.
+GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture texture);
+
+// Returns the number of bytes between each slice of a 3D image.
+// Note, this might be larger than the width*height*bytes of the image.
+GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture texture);
+
+// Generates mipmaps for the specified texture object. 
+GPRT_API void gprtTextureGenerateMipmap(GPRTTexture texture);
+
+/** If a window was requested, this call presents the contents of the texture
+ * to the window, potentially waiting for the screen to update before swapping.
+ * 
+ * If a window was not requested (ie headless), this function does nothing. 
+*/
+GPRT_API void gprtTexturePresent(GPRTContext context, GPRTTexture texture);
+
+template <typename T> void
+gprtTexturePresent( GPRTContext context, GPRTTextureOf<T> texture) {
+ gprtTexturePresent(context, (GPRTTexture)texture);
+}
+
+/*! Destroys all underlying Vulkan resources for the given texture and frees any
+  underlying memory*/
+GPRT_API void
+gprtTextureDestroy(GPRTTexture texture);
+
+template <typename T> void
+gprtTextureDestroy( GPRTTextureOf<T> texture) {
+ gprtTextureDestroy((GPRTTexture)texture);
 }
 
 /*! Creates a buffer that uses memory located on the host; that memory is 

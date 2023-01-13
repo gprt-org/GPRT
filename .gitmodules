@@ -4,3 +4,6 @@
 [submodule "3rdParty/generator"]
 	path = 3rdParty/generator
 	url = git@github.com:natevm/generator.git
+[submodule "3rdParty/GPRT-SampleAssets"]
+	path = 3rdParty/GPRT-SampleAssets
+	url = git@github.com:gprt-org/GPRT-SampleAssets.git
