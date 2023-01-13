@@ -86,24 +86,18 @@ int main(int ac, char **av) {
 
   LOG("building module, programs, and pipeline");
 
+  // Load the texture we'll display
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth,
                               &texHeight, &texChannels, STBI_rgb_alpha);
 
-  // Since we'll be using a window, we request support for an image swapchain
-  // If a window can't be made, we can still use GPRT, but a window wont appear.
   gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
-
-  // Initialize Vulkan, and create a "gprt device," a context to hold the
-  // ray generation shader and output buffer. The "1" is the number of devices
-  // requested.
   GPRTContext context = gprtContextCreate(nullptr, 1);
-
-  // SPIR-V is the intermediate code that the GPU deviceCode.hlsl shader program
-  // is converted into. You can see the machine-centric SPIR-V code in
-  // build\samples\cmd00-rayGenOnly\deviceCode.spv
-  // We store this SPIR-V intermediate code representation in a GPRT module.
   GPRTModule module = gprtModuleCreate(context, s08_deviceCode);
+
+  // ##################################################################
+  // set up all the GPU kernels we want to run
+  // ##################################################################
 
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
       gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
@@ -112,29 +106,15 @@ int main(int ac, char **av) {
   GPRTComputeOf<TransformData> transformProgram =
       gprtComputeCreate<TransformData>(context, module, "Transform");
 
-  // All ray tracing programs start off with a "Ray Generation" kernel.
-  // Allocate room for one RayGen shader, create it, and hold on to it with
-  // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen =
       gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   GPRTMissOf<MissProgData> miss =
       gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
-  missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  missData->color1 = float3(0.0f, 0.0f, 0.0f);
-
   // ------------------------------------------------------------------
-  // allocating buffers
+  // Create our texture and sampler
   // ------------------------------------------------------------------
-
-  // Our framebuffer here will be used to hold pixel color values
-  // that we'll present to the window / save to an image
-  LOG("allocating frame buffer");
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth,
@@ -149,37 +129,26 @@ int main(int ac, char **av) {
       gprtSamplerCreate(context),
 
       // Then here, we'll demonstrate linear vs nearest for the magfilter
-      gprtSamplerCreate(context, GPRT_FILTER_NEAREST, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_NEAREST),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR),
 
       // Here, we'll demonstrate linear vs nearest for the minFilter
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(
-          context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-          16, GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR),
 
       // Anisotropy of 1 vs 16. Should see less blurring with higher
       // anisotropy values
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(
-          context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-          16, GPRT_SAMPLER_ADDRESS_MODE_REPEAT, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+                        GPRT_FILTER_LINEAR, 1),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
+                        GPRT_FILTER_LINEAR, 16),
 
       // Changing wrap mode
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_REPEAT,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+                        GPRT_FILTER_LINEAR, 1,
+                        GPRT_SAMPLER_ADDRESS_MODE_REPEAT),
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
+                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP),
 
       // Changing border mode
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -191,13 +160,6 @@ int main(int ac, char **av) {
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(context);
-
-  // ------------------------------------------------------------------
-  // build the shader binding table, used by rays to map geometry,
-  // instances and ray types to GPU kernels
-  // ------------------------------------------------------------------
-  RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
-  raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
 
   // ------------------------------------------------------------------
   // Meshes
@@ -246,12 +208,23 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
 
+  // ------------------------------------------------------------------
+  // Setup the ray generation and miss programs
+  // ------------------------------------------------------------------
+  GPRTBufferOf<uint32_t> frameBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
+  RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+  raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
   raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
-  gprtBuildPipeline(context);
+  // Miss program checkerboard background colors
+  MissProgData *missData = gprtMissGetPointer(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // Build a shader binding table entry for the ray generation record.
-  gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
