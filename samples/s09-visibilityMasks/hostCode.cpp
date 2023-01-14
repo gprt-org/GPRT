@@ -38,32 +38,59 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s10_deviceCode;
+extern GPRTProgram s09_deviceCode;
 
-// Vertices are the points that define our triangles
-const int NUM_VERTICES = 3;
-float3 vertices[NUM_VERTICES] = {
-    {-1.f, -.5f, 0.f},
-    {+1.f, -.5f, 0.f},
-    {0.f, +.5f, 0.f},
+const int NUM_WALL_VERTICES = 54;
+float3 wallVertices[NUM_WALL_VERTICES] = {
+    {0.0, 0.0, 0.0},  {1.0, 0.0, 0.0},  {1.0, 1.0, 0.0}, {0.0, 0.0, 0.0},
+    {1.0, 1.0, 0.0},  {0.0, 1.0, 0.0},  {1.0, 0.0, 0.0}, {2.0, 0.0, 0.0},
+    {2.0, 1.0, 0.0},  {1.0, 0.0, 0.0},  {2.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
+    {2.0, 0.0, 0.0},  {3.0, 0.0, 0.0},  {3.0, 1.0, 0.0}, {2.0, 0.0, 0.0},
+    {3.0, 1.0, 0.0},  {2.0, 1.0, 0.0},  {0.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
+    {1.0, 2.0, 0.0},  {0.0, 1.0, 0.0},  {1.0, 2.0, 0.0}, {0.0, 2.0, 0.0},
+    {2.0, 1.0, 0.0},  {3.0, 1.0, 0.0},  {3.0, 2.0, 0.0}, {2.0, 1.0, 0.0},
+    {3.0, 2.0, 0.0},  {2.0, 2.0, 0.0},  {0.0, 2.0, 0.0}, {1.0, 2.0, 0.0},
+    {1.0, 3.0, 0.0},  {0.0, 2.0, 0.0},  {1.0, 3.0, 0.0}, {0.0, 3.0, 0.0},
+    {1.0, 2.0, 0.0},  {2.0, 2.0, 0.0},  {2.0, 3.0, 0.0}, {1.0, 2.0, 0.0},
+    {2.0, 3.0, 0.0},  {1.0, 3.0, 0.0},  {2.0, 2.0, 0.0}, {3.0, 2.0, 0.0},
+    {3.0, 3.0, 0.0},  {2.0, 2.0, 0.0},  {3.0, 3.0, 0.0}, {2.0, 3.0, 0.0},
+    {0.0, 0.0, -3.0}, {3.0, 0.0, -3.0}, {3.0, 0.0, 0.0}, {0.0, 0.0, -3.0},
+    {3.0, 0.0, 0.0},  {0.0, 0.0, 0.0},
 };
 
-// Indices connect those vertices together.
-// Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
-const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+const int NUM_WALL_INDICES = 18;
+int3 wallIndices[NUM_WALL_INDICES] = {
+    {0, 1, 2},    {3, 4, 5},    {6, 7, 8},    {9, 10, 11},  {12, 13, 14},
+    {15, 16, 17}, {18, 19, 20}, {21, 22, 23}, {24, 25, 26}, {27, 28, 29},
+    {30, 31, 32}, {33, 34, 35}, {36, 37, 38}, {39, 40, 41}, {42, 43, 44},
+    {45, 46, 47}, {48, 49, 50}, {51, 52, 53}};
+
+const int NUM_WINDOW_VERTICES = 6;
+float3 windowVertices[NUM_WINDOW_VERTICES] = {
+    {1.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {2.0, 2.0, 0.0},
+    {1.0, 1.0, 0.0}, {2.0, 2.0, 0.0}, {1.0, 2.0, 0.0},
+};
+
+const int NUM_WINDOW_INDICES = 6;
+int3 windowIndices[NUM_WINDOW_INDICES] = {
+    {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
+};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s10-visibilityMasks.png";
+const char *outFileName = "s09-visibilityMasks.png";
 
 // Initial camera parameters
-float3 lookFrom = {0.f, 0.f, -4.f};
-float3 lookAt = {0.f, 0.f, 0.f};
+float3 lookFrom = {6.f, 6.f, -6.f};
+float3 lookAt = {1.5f, 1.5f, -1.5f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
+
+// Light position
+float3 lightPos = {1.5f, 6.0f, 6.0f};
+float3 lightColor = {20.f, 20.f, 20.f};
 
 #include <iostream>
 int main(int ac, char **av) {
@@ -72,9 +99,9 @@ int main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S10 Visibility Masks");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S09 Visibility Masks");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s09_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -109,6 +136,9 @@ int main(int ac, char **av) {
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
+  rayGenData->lightPos = lightPos;
+  rayGenData->lightColor = lightColor;
+
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -116,40 +146,53 @@ int main(int ac, char **av) {
 
   LOG("building geometries ...");
 
-  // The vertex and index buffers here define the triangle vertices
-  // and how those vertices are connected together.
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-
-  // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeomOf<TrianglesGeomData> trianglesGeom =
+  // First, we'll make some walls...
+  GPRTBufferOf<float3> wallVertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_WALL_VERTICES, wallVertices);
+  GPRTBufferOf<int3> wallIndexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_WALL_INDICES, wallIndices);
+  GPRTGeomOf<TrianglesGeomData> wallGeom =
       gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  // We use these calls to tell the geometry what buffers store triangle
-  // indices and vertices
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
+  gprtTrianglesSetVertices(wallGeom, wallVertexBuffer, NUM_WALL_VERTICES);
+  gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
+  GPRTAccel wallAccel = gprtTrianglesAccelCreate(context, 1, &wallGeom);
+  gprtAccelBuild(context, wallAccel);
 
-  // Once we have our geometry, we need to place that geometry into an
-  // acceleration structure. These acceleration structures allow rays to
-  // determine which triangle the ray hits in a sub-linear amount of time.
-  // This first acceleration structure level is called a bottom level
-  // acceleration structure, or a BLAS.
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
+  TrianglesGeomData *wallData = gprtGeomGetPointer(wallGeom);
+  wallData->color = float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
+  wallData->vertices = gprtBufferGetHandle(wallVertexBuffer);
+  wallData->indices = gprtBufferGetHandle(wallIndexBuffer);
 
-  // We can then make multiple "instances", or copies, of that BLAS in
-  // a top level acceleration structure, or a TLAS. (we'll cover this later.)
-  // Rays can only be traced into TLAS, so for now we just make one BLAS
-  // instance.
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  // Then we'll make a window
+  GPRTBufferOf<float3> windowVertexBuffer = gprtDeviceBufferCreate<float3>(
+      context, NUM_WINDOW_VERTICES, windowVertices);
+  GPRTBufferOf<int3> windowIndexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_WINDOW_INDICES, windowIndices);
+  GPRTGeomOf<TrianglesGeomData> windowGeom =
+      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  gprtTrianglesSetVertices(windowGeom, windowVertexBuffer, NUM_WINDOW_VERTICES);
+  gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
+  GPRTAccel windowAccel = gprtTrianglesAccelCreate(context, 1, &windowGeom);
+  gprtAccelBuild(context, windowAccel);
+
+  TrianglesGeomData *windowData = gprtGeomGetPointer(windowGeom);
+  windowData->color = float3(199.f / 255.f, 227.f / 255.f, 225.f / 255.f);
+  windowData->vertices = gprtBufferGetHandle(windowVertexBuffer);
+  windowData->indices = gprtBufferGetHandle(windowIndexBuffer);
+
+  // This is new! We'll set the wall to hit all rays, but
+  // make the window only visible to non-shadow rays
+  std::vector<int32_t> masks = {0b11111111, 0b11111110};
+  GPRTBufferOf<int32_t> masksBuffer =
+      gprtDeviceBufferCreate<int32_t>(context, masks.size(), masks.data());
+
+  // Now stick both of these into a tree
+  std::vector<GPRTAccel> BLAS = {wallAccel, windowAccel};
+  GPRTAccel world = gprtInstanceAccelCreate(context, BLAS.size(), BLAS.data());
+  gprtInstanceAccelSetVisibilityMasks(world, masksBuffer);
   gprtAccelBuild(context, world);
 
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
+  // Set the accel handle
   rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
@@ -233,6 +276,10 @@ int main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
+    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 4.0f,
+                                  4.f + 3.f * cos(gprtGetTime(context)));
+    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
@@ -253,14 +300,16 @@ int main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
+  gprtBufferDestroy(wallVertexBuffer);
+  gprtBufferDestroy(wallIndexBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
+  gprtAccelDestroy(wallAccel);
+  gprtAccelDestroy(windowAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
+  gprtGeomDestroy(wallGeom);
+  gprtGeomDestroy(windowGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);

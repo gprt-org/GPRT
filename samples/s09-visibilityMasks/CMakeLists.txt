@@ -22,14 +22,14 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s10_deviceCode
+    s09_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(s10_visibilityMasks hostCode.cpp)
-target_link_libraries(s10_visibilityMasks
+add_executable(s09_visibilityMasks hostCode.cpp)
+target_link_libraries(s09_visibilityMasks
   PRIVATE
-    s10_deviceCode
+    s09_deviceCode
     gprt::gprt
 )
