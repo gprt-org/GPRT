@@ -29,13 +29,6 @@ struct Payload
     float hitT;
 };
 
-// This ray generation program will kick off the ray tracing process,
-// generating rays and tracing them into the world.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
     Payload payload;
@@ -74,10 +67,9 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
         float3 hitPos = rayDesc.Origin + payload.hitT * rayDesc.Direction;
 
         // note, adding a normal offset to avoid self-intersections
-        rayDesc.Origin = hitPos + .001f * -normal;
-        rayDesc.Direction = normalize(record.lightPos - rayDesc.Origin);
-        rayDesc.TMax = distance(record.lightPos, rayDesc.Origin);
-
+        rayDesc.Origin = hitPos + .001f * normal;
+        rayDesc.Direction = normalize(record.lightPos);
+        
         // Trace our primary visibility ray
         TraceRay(world,                 // the tree
                  RAY_FLAG_FORCE_OPAQUE, // ray flags
@@ -89,7 +81,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
                  payload                // the payload IO
         );
 
-        float ambient = .3f;
+        float ambient = .7f;
         shadedColor = color * ambient;
 
         // We hit the light
@@ -109,22 +101,7 @@ struct Attributes
     float2 bc;
 };
 
-// This closest hit program will be called when rays hit triangles.
-// Here, we can fetch per-geometry data, process that data, and send
-// it back to our ray generation program.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-//
-// The third is the type of the ray payload structure. We use the ray payload
-// to pass data between this program and our ray generation program.
-//
-// The fourth is the type of the intersection attributes structure.
-// For triangles, this is always a struct containing two floats
-// called "barycentrics", which we use to interpolate per-vertex
-// values.
+
 GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record),
                          (Payload, payload), (Attributes, attributes))
 {
@@ -140,16 +117,10 @@ GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record),
     payload.hitT = RayTCurrent();
     // NOTE: we are assuming an identity transform from object to world
     payload.normal = normalize(cross(B - A, C - A));
+    float normalSign = (dot(payload.normal, WorldRayDirection()) < 0.f) ? 1.f : -1.f;
+    payload.normal = normalSign * payload.normal;
 }
 
-// This miss program will be called when rays miss all primitives.
-// We often define some "default" ray payload behavior here,
-// for example, returning a background color.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;

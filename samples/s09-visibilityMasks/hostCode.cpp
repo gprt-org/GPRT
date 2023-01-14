@@ -40,7 +40,18 @@
 
 extern GPRTProgram s09_deviceCode;
 
-const int NUM_WALL_VERTICES = 54;
+const int NUM_FLOOR_VERTICES = 6;
+float3 floorVertices[NUM_FLOOR_VERTICES] = {
+  {0.0, 0.0, -3.0}, {3.0, 0.0, -3.0}, {3.0, 0.0, 0.0}, 
+  {0.0, 0.0, -3.0}, {3.0, 0.0, 0.0},  {0.0, 0.0, 0.0},
+};
+
+const int NUM_FLOOR_INDICES = 6;
+int3 floorIndices[NUM_FLOOR_INDICES] = {
+    {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
+};
+
+const int NUM_WALL_VERTICES = 48;
 float3 wallVertices[NUM_WALL_VERTICES] = {
     {0.0, 0.0, 0.0},  {1.0, 0.0, 0.0},  {1.0, 1.0, 0.0}, {0.0, 0.0, 0.0},
     {1.0, 1.0, 0.0},  {0.0, 1.0, 0.0},  {1.0, 0.0, 0.0}, {2.0, 0.0, 0.0},
@@ -54,16 +65,14 @@ float3 wallVertices[NUM_WALL_VERTICES] = {
     {1.0, 2.0, 0.0},  {2.0, 2.0, 0.0},  {2.0, 3.0, 0.0}, {1.0, 2.0, 0.0},
     {2.0, 3.0, 0.0},  {1.0, 3.0, 0.0},  {2.0, 2.0, 0.0}, {3.0, 2.0, 0.0},
     {3.0, 3.0, 0.0},  {2.0, 2.0, 0.0},  {3.0, 3.0, 0.0}, {2.0, 3.0, 0.0},
-    {0.0, 0.0, -3.0}, {3.0, 0.0, -3.0}, {3.0, 0.0, 0.0}, {0.0, 0.0, -3.0},
-    {3.0, 0.0, 0.0},  {0.0, 0.0, 0.0},
 };
 
-const int NUM_WALL_INDICES = 18;
+const int NUM_WALL_INDICES = 16;
 int3 wallIndices[NUM_WALL_INDICES] = {
     {0, 1, 2},    {3, 4, 5},    {6, 7, 8},    {9, 10, 11},  {12, 13, 14},
     {15, 16, 17}, {18, 19, 20}, {21, 22, 23}, {24, 25, 26}, {27, 28, 29},
     {30, 31, 32}, {33, 34, 35}, {36, 37, 38}, {39, 40, 41}, {42, 43, 44},
-    {45, 46, 47}, {48, 49, 50}, {51, 52, 53}};
+    {45, 46, 47}};
 
 const int NUM_WINDOW_VERTICES = 6;
 float3 windowVertices[NUM_WINDOW_VERTICES] = {
@@ -76,6 +85,25 @@ int3 windowIndices[NUM_WINDOW_INDICES] = {
     {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
 };
 
+const int NUM_INSTANCES = 15;
+float4x4 transforms[NUM_INSTANCES] = {
+  transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3( 0.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3( 0.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3( 0.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
+  transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
+};
+
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
@@ -83,7 +111,7 @@ const int2 fbSize = {1400, 460};
 const char *outFileName = "s09-visibilityMasks.png";
 
 // Initial camera parameters
-float3 lookFrom = {6.f, 6.f, -6.f};
+float3 lookFrom = {1.5f, 4.f, -10.f};
 float3 lookAt = {1.5f, 1.5f, -1.5f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
@@ -146,7 +174,24 @@ int main(int ac, char **av) {
 
   LOG("building geometries ...");
 
-  // First, we'll make some walls...
+  // First, we'll make a floor
+  GPRTBufferOf<float3> floorVertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_FLOOR_VERTICES, floorVertices);
+  GPRTBufferOf<int3> floorIndexBuffer =
+      gprtDeviceBufferCreate<int3>(context, NUM_FLOOR_INDICES, floorIndices);
+  GPRTGeomOf<TrianglesGeomData> floorGeom =
+      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  gprtTrianglesSetVertices(floorGeom, floorVertexBuffer, NUM_FLOOR_VERTICES);
+  gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
+  GPRTAccel floorAccel = gprtTrianglesAccelCreate(context, 1, &floorGeom);
+  gprtAccelBuild(context, floorAccel);
+
+  TrianglesGeomData *floorData = gprtGeomGetPointer(floorGeom);
+  floorData->color = float3(0.5, 0.5, 0.5);//float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
+  floorData->vertices = gprtBufferGetHandle(floorVertexBuffer);
+  floorData->indices = gprtBufferGetHandle(floorIndexBuffer);
+
+  // Then, we'll make a wall with a hole in it...
   GPRTBufferOf<float3> wallVertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_WALL_VERTICES, wallVertices);
   GPRTBufferOf<int3> wallIndexBuffer =
@@ -159,7 +204,7 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, wallAccel);
 
   TrianglesGeomData *wallData = gprtGeomGetPointer(wallGeom);
-  wallData->color = float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
+  wallData->color = float3(1.0, 1.0, 1.0);//float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
   wallData->vertices = gprtBufferGetHandle(wallVertexBuffer);
   wallData->indices = gprtBufferGetHandle(wallIndexBuffer);
 
@@ -176,20 +221,38 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, windowAccel);
 
   TrianglesGeomData *windowData = gprtGeomGetPointer(windowGeom);
-  windowData->color = float3(199.f / 255.f, 227.f / 255.f, 225.f / 255.f);
+  windowData->color = float3(1.0, 1.0, 1.0);//float3(199.f / 255.f, 227.f / 255.f, 225.f / 255.f);
   windowData->vertices = gprtBufferGetHandle(windowVertexBuffer);
   windowData->indices = gprtBufferGetHandle(windowIndexBuffer);
 
   // This is new! We'll set the wall to hit all rays, but
   // make the window only visible to non-shadow rays
-  std::vector<int32_t> masks = {0b11111111, 0b11111110};
+  std::vector<int32_t> masks = {
+    0b11111111, 0b11111111, 0b11111110, 
+    0b11111111, 0b11111111, 0b11111110, 
+    0b11111111, 0b11111111, 0b11111110,
+    0b11111111, 0b11111111, 0b11111110,
+    0b11111111, 0b11111111, 0b11111110,
+  };
   GPRTBufferOf<int32_t> masksBuffer =
       gprtDeviceBufferCreate<int32_t>(context, masks.size(), masks.data());
+  
+  GPRTBufferOf<float4x4> transformsBuffer =
+    gprtDeviceBufferCreate<float4x4>(context, NUM_INSTANCES, transforms);
 
-  // Now stick both of these into a tree
-  std::vector<GPRTAccel> BLAS = {wallAccel, windowAccel};
+  // Now stick both of these into a tree.
+  // Note, we're making multiple instances of the same wall and window. 
+  // The transforms buffer will place these walls and windows into the world
+  std::vector<GPRTAccel> BLAS = {
+    floorAccel, wallAccel, windowAccel, 
+    floorAccel, wallAccel, windowAccel, 
+    floorAccel, wallAccel, windowAccel, 
+    floorAccel, wallAccel, windowAccel,
+    floorAccel, wallAccel, windowAccel,
+  };
   GPRTAccel world = gprtInstanceAccelCreate(context, BLAS.size(), BLAS.data());
   gprtInstanceAccelSetVisibilityMasks(world, masksBuffer);
+  gprtInstanceAccelSet4x4Transforms(world, transformsBuffer);
   gprtAccelBuild(context, world);
 
   // Set the accel handle
