@@ -29,13 +29,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s04_deviceCode;
@@ -43,14 +43,12 @@ extern GPRTProgram s04_deviceCode;
 // Vertices and radii that will be used to define spheres
 const int NUM_VERTICES = 11;
 float3 vertices[NUM_VERTICES] = {
-    {0.0f, 0.0f, 0.0f}, {0.1f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f},
-    {0.3f, 0.0f, 0.0f}, {0.4f, 0.0f, 0.0f}, {0.5f, 0.0f, 0.0f},
-    {0.6f, 0.0f, 0.0f}, {0.7f, 0.0f, 0.0f}, {0.8f, 0.0f, 0.0f},
-    {0.9f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
+    {0.0f, 0.0f, 0.0f}, {0.1f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f}, {0.3f, 0.0f, 0.0f},
+    {0.4f, 0.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, {0.6f, 0.0f, 0.0f}, {0.7f, 0.0f, 0.0f},
+    {0.8f, 0.0f, 0.0f}, {0.9f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
 };
 
-float radii[NUM_VERTICES] = {.015f, .025f, .035f, .045f, .055f, .065f,
-                             .055f, .045f, .035f, .025f, .015f};
+float radii[NUM_VERTICES] = {.015f, .025f, .035f, .045f, .055f, .065f, .055f, .045f, .035f, .025f, .015f};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -65,7 +63,8 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // In this example, we'll use a compute shader to generate a set of
   // procedural axis aligned bounding boxes in parallel on the GPU. Each
   // AABB will contain a single sphere.
@@ -83,17 +82,14 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeOf<SphereGeomData> sphereGeomType = 
-      gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
+  GPRTGeomTypeOf<SphereGeomData> sphereGeomType = gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
   gprtGeomTypeSetClosestHitProg(sphereGeomType, 0, module, "SphereClosestHit");
-  gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module,
-                                  "SphereIntersection");
+  gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module, "SphereIntersection");
 
   // -------------------------------------------------------
   // set up sphere bounding box compute program
   // -------------------------------------------------------
-  GPRTComputeOf<SphereBoundsData> boundsProgram =
-      gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
+  GPRTComputeOf<SphereBoundsData> boundsProgram = gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
 
   // -------------------------------------------------------
   // set up miss
@@ -117,17 +113,14 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<float> radiusBuffer =
-      gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
-  GPRTBufferOf<float3> aabbPositionsBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float> radiusBuffer = gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
+  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
 
   GPRTGeomOf<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
-  SphereGeomData* geomData = gprtGeomGetPointer(aabbGeom); 
+  SphereGeomData *geomData = gprtGeomGetPointer(aabbGeom);
   geomData->vertex = gprtBufferGetHandle(vertexBuffer);
   geomData->radius = gprtBufferGetHandle(radiusBuffer);
 
@@ -135,7 +128,7 @@ int main(int ac, char **av) {
   boundsData->vertex = gprtBufferGetHandle(vertexBuffer);
   boundsData->radius = gprtBufferGetHandle(radiusBuffer);
   boundsData->aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
-  
+
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
@@ -155,9 +148,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
-  
+  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -218,16 +210,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

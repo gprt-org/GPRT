@@ -26,13 +26,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s00_deviceCode;
@@ -44,7 +44,8 @@ const int2 fbSize = {1400, 460};
 const char *outFileName = "s00-rayGenOnly.png";
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // The output window will show comments for many of the methods called.
   // Walking through the code line by line with a debugger is educational.
   LOG("gprt example '" << av[0] << "' starting up");
@@ -62,20 +63,21 @@ int main(int ac, char **av) {
   // Initialize Vulkan, and create a "gprt device," a context to hold the
   // ray generation shader and output buffer. The "1" is the number of devices
   // requested.
-  GPRTContext gprt = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate(nullptr, 1);
 
   // SPIR-V is the intermediate code that the GPU deviceCode.hlsl shader program
   // is converted into. You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(gprt, s00_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
-  GPRTRayGenOf<RayGenData> rayGen =
-      gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
+  // Allocate room for one RayGen shader, create it, and hold on to it with
+  // the "gprt" context
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(gprt);
+  gprtBuildPipeline(context);
 
   // ------------------------------------------------------------------
   // allocating buffers
@@ -84,8 +86,7 @@ int main(int ac, char **av) {
   // Our framebuffer here will be used to hold pixel color values
   // that we'll present to the window / save to an image
   LOG("allocating frame buffer");
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(gprt, fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // ------------------------------------------------------------------
   // build the shader binding table, used by rays to map geometry,
@@ -93,11 +94,11 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   RayGenData *data = gprtRayGenGetPointer(rayGen);
   data->color0 = float3(0.1f, 0.1f, 0.1f);
-  data->color1 = float3(0.0f, 0.0f, 0.0f); 
+  data->color1 = float3(0.0f, 0.0f, 0.0f);
   data->frameBuffer = gprtBufferGetHandle(frameBuffer);
-  
+
   // Build a shader binding table entry for the ray generation record.
-  gprtBuildShaderBindingTable(gprt, GPRT_SBT_RAYGEN);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -105,13 +106,13 @@ int main(int ac, char **av) {
   LOG("executing the launch ...");
   do {
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(gprt, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
     // If a window exists, presents the framebuffer here to that window
-    gprtBufferPresent(gprt, frameBuffer);
+    gprtBufferPresent(context, frameBuffer);
   }
   // returns true if "X" pressed or if in "headless" mode
-  while (!gprtWindowShouldClose(gprt));
+  while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
   LOG("done with launch, writing frame buffer to " << outFileName);
@@ -126,7 +127,7 @@ int main(int ac, char **av) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtModuleDestroy(module);
-  gprtContextDestroy(gprt);
+  gprtContextDestroy(context);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

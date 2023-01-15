@@ -29,13 +29,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 const int GRID_SIDE_LENGTH = 1000;
@@ -53,7 +53,8 @@ float3 lookUp = {0.f, 0.f, -1.f};
 float cosFovy = 0.3f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // In this example, we will use a GPU compute kernel to animate the vertices
   // of a mesh, like you might do in a traditional rasterization pipeline.
   // Every time the vertices move, we must rebuild the underlying acceleration
@@ -71,15 +72,13 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
-      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up vertex program to animate vertices
   // -------------------------------------------------------
-  GPRTComputeOf<TrianglesGeomData> vertexProgram =
-      gprtComputeCreate<TrianglesGeomData>(context, module, "Vertex");
+  GPRTComputeOf<TrianglesGeomData> vertexProgram = gprtComputeCreate<TrianglesGeomData>(context, module, "Vertex");
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -104,10 +103,8 @@ int main(int ac, char **av) {
   // them in on the device by using our vertex program.
   unsigned int numTriangles = 2 * GRID_SIDE_LENGTH * GRID_SIDE_LENGTH;
   unsigned int numVertices = 3 * numTriangles;
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, numVertices, nullptr);
-  GPRTBufferOf<uint3> indexBuffer =
-      gprtDeviceBufferCreate<uint3>(context, numTriangles, nullptr);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, numVertices, nullptr);
+  GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, numTriangles, nullptr);
 
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate(context, trianglesGeomType);
 
@@ -123,14 +120,14 @@ int main(int ac, char **av) {
   geomData->index = gprtBufferGetHandle(indexBuffer);
   geomData->now = 0.f;
   geomData->gridSize = GRID_SIDE_LENGTH;
-  
+
   // Parameters for our vertex program that'll animate our vertices
   TrianglesGeomData *vertexData = gprtComputeGetPointer(vertexProgram);
   vertexData->vertex = gprtBufferGetHandle(vertexBuffer);
   vertexData->index = gprtBufferGetHandle(indexBuffer);
   vertexData->now = 0.f;
   vertexData->gridSize = GRID_SIDE_LENGTH;
-  
+
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
@@ -139,8 +136,7 @@ int main(int ac, char **av) {
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
@@ -151,9 +147,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -212,22 +207,20 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData*)gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = (RayGenData *) gprtRayGenGetPointer(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
@@ -242,10 +235,10 @@ int main(int ac, char **av) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
 
-    // Now that the vertices have moved, we need to rebuild our bottom level tree    
+    // Now that the vertices have moved, we need to rebuild our bottom level tree
     gprtAccelBuild(context, trianglesAccel);
 
-    // And since the bottom level tree is part of the top level tree, we need 
+    // And since the bottom level tree is part of the top level tree, we need
     // to rebuild the top level tree as well
     gprtAccelBuild(context, world);
 

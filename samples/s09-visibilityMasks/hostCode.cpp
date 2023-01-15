@@ -29,13 +29,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s09_deviceCode;
@@ -46,8 +46,7 @@ extern GPRTProgram s09_deviceCode;
 // hole with a window.
 const int NUM_FLOOR_VERTICES = 6;
 float3 floorVertices[NUM_FLOOR_VERTICES] = {
-    {0.0, 0.0, -6.0}, {3.0, 0.0, -6.0}, {3.0, 0.0, 6.0},
-    {0.0, 0.0, -6.0}, {3.0, 0.0, 6.0},  {0.0, 0.0, 6.0},
+    {0.0, 0.0, -6.0}, {3.0, 0.0, -6.0}, {3.0, 0.0, 6.0}, {0.0, 0.0, -6.0}, {3.0, 0.0, 6.0}, {0.0, 0.0, 6.0},
 };
 
 const int NUM_FLOOR_INDICES = 6;
@@ -57,31 +56,24 @@ int3 floorIndices[NUM_FLOOR_INDICES] = {
 
 const int NUM_WALL_VERTICES = 48;
 float3 wallVertices[NUM_WALL_VERTICES] = {
-    {0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {1.0, 1.0, 0.0}, {0.0, 0.0, 0.0},
-    {1.0, 1.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 0.0, 0.0}, {2.0, 0.0, 0.0},
-    {2.0, 1.0, 0.0}, {1.0, 0.0, 0.0}, {2.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
-    {2.0, 0.0, 0.0}, {3.0, 0.0, 0.0}, {3.0, 1.0, 0.0}, {2.0, 0.0, 0.0},
-    {3.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
-    {1.0, 3.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 3.0, 0.0}, {0.0, 3.0, 0.0},
-    {2.0, 1.0, 0.0}, {3.0, 1.0, 0.0}, {3.0, 3.0, 0.0}, {2.0, 1.0, 0.0},
-    {3.0, 3.0, 0.0}, {2.0, 3.0, 0.0}, {0.0, 3.0, 0.0}, {1.0, 3.0, 0.0},
-    {1.0, 4.0, 0.0}, {0.0, 3.0, 0.0}, {1.0, 4.0, 0.0}, {0.0, 4.0, 0.0},
-    {1.0, 3.0, 0.0}, {2.0, 3.0, 0.0}, {2.0, 4.0, 0.0}, {1.0, 3.0, 0.0},
-    {2.0, 4.0, 0.0}, {1.0, 4.0, 0.0}, {2.0, 3.0, 0.0}, {3.0, 3.0, 0.0},
-    {3.0, 4.0, 0.0}, {2.0, 3.0, 0.0}, {3.0, 4.0, 0.0}, {2.0, 4.0, 0.0},
+    {0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {1.0, 1.0, 0.0}, {0.0, 0.0, 0.0}, {1.0, 1.0, 0.0}, {0.0, 1.0, 0.0},
+    {1.0, 0.0, 0.0}, {2.0, 0.0, 0.0}, {2.0, 1.0, 0.0}, {1.0, 0.0, 0.0}, {2.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
+    {2.0, 0.0, 0.0}, {3.0, 0.0, 0.0}, {3.0, 1.0, 0.0}, {2.0, 0.0, 0.0}, {3.0, 1.0, 0.0}, {2.0, 1.0, 0.0},
+    {0.0, 1.0, 0.0}, {1.0, 1.0, 0.0}, {1.0, 3.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 3.0, 0.0}, {0.0, 3.0, 0.0},
+    {2.0, 1.0, 0.0}, {3.0, 1.0, 0.0}, {3.0, 3.0, 0.0}, {2.0, 1.0, 0.0}, {3.0, 3.0, 0.0}, {2.0, 3.0, 0.0},
+    {0.0, 3.0, 0.0}, {1.0, 3.0, 0.0}, {1.0, 4.0, 0.0}, {0.0, 3.0, 0.0}, {1.0, 4.0, 0.0}, {0.0, 4.0, 0.0},
+    {1.0, 3.0, 0.0}, {2.0, 3.0, 0.0}, {2.0, 4.0, 0.0}, {1.0, 3.0, 0.0}, {2.0, 4.0, 0.0}, {1.0, 4.0, 0.0},
+    {2.0, 3.0, 0.0}, {3.0, 3.0, 0.0}, {3.0, 4.0, 0.0}, {2.0, 3.0, 0.0}, {3.0, 4.0, 0.0}, {2.0, 4.0, 0.0},
 };
 
 const int NUM_WALL_INDICES = 16;
 int3 wallIndices[NUM_WALL_INDICES] = {
-    {0, 1, 2},    {3, 4, 5},    {6, 7, 8},    {9, 10, 11},
-    {12, 13, 14}, {15, 16, 17}, {18, 19, 20}, {21, 22, 23},
-    {24, 25, 26}, {27, 28, 29}, {30, 31, 32}, {33, 34, 35},
-    {36, 37, 38}, {39, 40, 41}, {42, 43, 44}, {45, 46, 47}};
+    {0, 1, 2},    {3, 4, 5},    {6, 7, 8},    {9, 10, 11},  {12, 13, 14}, {15, 16, 17}, {18, 19, 20}, {21, 22, 23},
+    {24, 25, 26}, {27, 28, 29}, {30, 31, 32}, {33, 34, 35}, {36, 37, 38}, {39, 40, 41}, {42, 43, 44}, {45, 46, 47}};
 
 const int NUM_WINDOW_VERTICES = 6;
 float3 windowVertices[NUM_WINDOW_VERTICES] = {
-    {1.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {2.0, 3.0, 0.0},
-    {1.0, 1.0, 0.0}, {2.0, 3.0, 0.0}, {1.0, 3.0, 0.0},
+    {1.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {2.0, 3.0, 0.0}, {1.0, 1.0, 0.0}, {2.0, 3.0, 0.0}, {1.0, 3.0, 0.0},
 };
 
 const int NUM_WINDOW_INDICES = 6;
@@ -94,20 +86,13 @@ int3 windowIndices[NUM_WINDOW_INDICES] = {
 // transform the floor, wall, and window, so 3 transforms per "copy".
 const int NUM_INSTANCES = 15;
 float4x4 transforms[NUM_INSTANCES] = {
-    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))), transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))), transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(-3.0, 0.0, 0.0))), transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),  transpose(translation_matrix(float3(0.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),  transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(+3.0, 0.0, 0.0))), transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
+    transpose(translation_matrix(float3(+6.0, 0.0, 0.0))), transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
     transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
 };
 
@@ -125,10 +110,11 @@ float cosFovy = 0.66f;
 
 // Light position
 float3 lightPos = {1.5f, 6.0f, 6.0f};
-float3 lightColor = {253.0 / 255.0, 251.0 / 255.0, 211.0 / 255.0};
+float3 lightColor = {253.f / 255.f, 251.f / 255.f, 211.f / 255.f};
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // In this example, we'll be using a mechanism in modern GPU ray tracing
   // frameworks called "visibility masks". We'll use these masks to make
   // our glass window meshes "invisible" to a shadow ray traced towards
@@ -143,15 +129,12 @@ int main(int ac, char **av) {
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
-      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
-  GPRTRayGenOf<RayGenData> rayGen =
-      gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
-  GPRTMissOf<MissProgData> miss =
-      gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
@@ -160,8 +143,7 @@ int main(int ac, char **av) {
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Here, we'll setup our initial light position and color
@@ -176,12 +158,9 @@ int main(int ac, char **av) {
   LOG("building geometries ...");
 
   // First, we'll make a floor mesh
-  GPRTBufferOf<float3> floorVertexBuffer = gprtDeviceBufferCreate<float3>(
-      context, NUM_FLOOR_VERTICES, floorVertices);
-  GPRTBufferOf<int3> floorIndexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_FLOOR_INDICES, floorIndices);
-  GPRTGeomOf<TrianglesGeomData> floorGeom =
-      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  GPRTBufferOf<float3> floorVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_FLOOR_VERTICES, floorVertices);
+  GPRTBufferOf<int3> floorIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_FLOOR_INDICES, floorIndices);
+  GPRTGeomOf<TrianglesGeomData> floorGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(floorGeom, floorVertexBuffer, NUM_FLOOR_VERTICES);
   gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
   GPRTAccel floorAccel = gprtTrianglesAccelCreate(context, 1, &floorGeom);
@@ -194,12 +173,9 @@ int main(int ac, char **av) {
   floorData->indices = gprtBufferGetHandle(floorIndexBuffer);
 
   // Then, we'll make a wall with a hole in it where our window will go.
-  GPRTBufferOf<float3> wallVertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_WALL_VERTICES, wallVertices);
-  GPRTBufferOf<int3> wallIndexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_WALL_INDICES, wallIndices);
-  GPRTGeomOf<TrianglesGeomData> wallGeom =
-      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  GPRTBufferOf<float3> wallVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_WALL_VERTICES, wallVertices);
+  GPRTBufferOf<int3> wallIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_WALL_INDICES, wallIndices);
+  GPRTGeomOf<TrianglesGeomData> wallGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(wallGeom, wallVertexBuffer, NUM_WALL_VERTICES);
   gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
   GPRTAccel wallAccel = gprtTrianglesAccelCreate(context, 1, &wallGeom);
@@ -212,12 +188,10 @@ int main(int ac, char **av) {
   wallData->indices = gprtBufferGetHandle(wallIndexBuffer);
 
   // Finally we'll make a window
-  GPRTBufferOf<float3> windowVertexBuffer = gprtDeviceBufferCreate<float3>(
-      context, NUM_WINDOW_VERTICES, windowVertices);
-  GPRTBufferOf<int3> windowIndexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_WINDOW_INDICES, windowIndices);
-  GPRTGeomOf<TrianglesGeomData> windowGeom =
-      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  GPRTBufferOf<float3> windowVertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_WINDOW_VERTICES, windowVertices);
+  GPRTBufferOf<int3> windowIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_WINDOW_INDICES, windowIndices);
+  GPRTGeomOf<TrianglesGeomData> windowGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(windowGeom, windowVertexBuffer, NUM_WINDOW_VERTICES);
   gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
   GPRTAccel windowAccel = gprtTrianglesAccelCreate(context, 1, &windowGeom);
@@ -233,13 +207,11 @@ int main(int ac, char **av) {
   // Note, we're making multiple instances of the same wall and window.
   // The transforms buffer will place these walls and windows into the world
   std::vector<GPRTAccel> BLAS = {
-      floorAccel,  wallAccel,   windowAccel, floorAccel,  wallAccel,
-      windowAccel, floorAccel,  wallAccel,   windowAccel, floorAccel,
-      wallAccel,   windowAccel, floorAccel,  wallAccel,   windowAccel,
+      floorAccel,  wallAccel,  windowAccel, floorAccel,  wallAccel,  windowAccel, floorAccel,  wallAccel,
+      windowAccel, floorAccel, wallAccel,   windowAccel, floorAccel, wallAccel,   windowAccel,
   };
 
-  GPRTBufferOf<float4x4> transformsBuffer =
-      gprtDeviceBufferCreate<float4x4>(context, NUM_INSTANCES, transforms);
+  GPRTBufferOf<float4x4> transformsBuffer = gprtDeviceBufferCreate<float4x4>(context, NUM_INSTANCES, transforms);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, BLAS.size(), BLAS.data());
   gprtInstanceAccelSet4x4Transforms(world, transformsBuffer);
@@ -257,13 +229,11 @@ int main(int ac, char **av) {
   // to rays traced with a visibility mask of 0b00000001, since
   // 0b00000001 & 0b1111110 == 0
   std::vector<uint32_t> masks = {
-      0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111,
-      0b11111110, 0b11111111, 0b11111111, 0b11111110, 0b11111111,
-      0b11111111, 0b11111110, 0b11111111, 0b11111111, 0b11111110,
+      0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111,
+      0b11111110, 0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111, 0b11111110,
   };
 
-  GPRTBufferOf<uint32_t> masksBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, masks.size(), masks.data());
+  GPRTBufferOf<uint32_t> masksBuffer = gprtDeviceBufferCreate<uint32_t>(context, masks.size(), masks.data());
   gprtInstanceAccelSetVisibilityMasks(world, masksBuffer);
 
   // Now that our instance acceleration structure is setup, build it.
@@ -321,16 +291,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;
@@ -346,8 +314,7 @@ int main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 3.f,
-                                  3.f * cos(gprtGetTime(context)));
+    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 3.f, 3.f * cos(gprtGetTime(context)));
     gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
     // Calls the GPU raygen kernel function

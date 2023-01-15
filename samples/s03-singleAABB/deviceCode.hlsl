@@ -37,19 +37,18 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du +
-                screen.y * record.camera.dir_dv);
+      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                 // the tree
-           RAY_FLAG_FORCE_OPAQUE, // ray flags
-           0xff,                  // instance inclusion mask
-           0,                     // ray type
-           1,                     // number of ray types
-           0,                     // miss type
-           rayDesc,               // the ray to trace
-           payload                // the payload IO
+  TraceRay(world,                   // the tree
+           RAY_FLAG_FORCE_OPAQUE,   // ray flags
+           0xff,                    // instance inclusion mask
+           0,                       // ray type
+           1,                       // number of ray types
+           0,                       // miss type
+           rayDesc,                 // the ray to trace
+           payload                  // the payload IO
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
@@ -83,8 +82,7 @@ GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record)) {
 //
 // Also note, this program is also called after all ReportHit's have been
 // called and we can conclude which reported hit is closest.
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record),
-                         (Payload, payload), (Attribute, attribute)) {
+GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute)) {
   payload.color = attribute.color;
 }
 

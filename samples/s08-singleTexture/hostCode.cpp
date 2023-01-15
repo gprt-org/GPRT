@@ -31,13 +31,13 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s08_deviceCode;
@@ -75,7 +75,8 @@ float3 lookUp = {0.f, 1.f, 0.f};
 float cosFovy = 0.4f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // The output window will show comments for many of the methods called.
   // Walking through the code line by line with a debugger is educational.
   LOG("gprt example '" << av[0] << "' starting up");
@@ -88,8 +89,7 @@ int main(int ac, char **av) {
 
   // Load the texture we'll display
   int texWidth, texHeight, texChannels;
-  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth,
-                              &texHeight, &texChannels, STBI_rgb_alpha);
+  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
   gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
@@ -99,26 +99,21 @@ int main(int ac, char **av) {
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
-      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  GPRTComputeOf<TransformData> transformProgram =
-      gprtComputeCreate<TransformData>(context, module, "Transform");
+  GPRTComputeOf<TransformData> transformProgram = gprtComputeCreate<TransformData>(context, module, "Transform");
 
-  GPRTRayGenOf<RayGenData> rayGen =
-      gprtRayGenCreate<RayGenData>(context, module, "raygen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
-  GPRTMissOf<MissProgData> miss =
-      gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ------------------------------------------------------------------
   // Create our texture and sampler
   // ------------------------------------------------------------------
 
   GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth,
-      texHeight, /*depth*/ 1,
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, /*depth*/ 1,
       /* generate mipmaps */ true, pixels);
 
   std::vector<GPRTSampler> samplers = {
@@ -129,8 +124,7 @@ int main(int ac, char **av) {
       gprtSamplerCreate(context),
 
       // Then here, we'll demonstrate linear vs nearest for the magfilter
-      gprtSamplerCreate(context, GPRT_FILTER_NEAREST),
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR),
+      gprtSamplerCreate(context, GPRT_FILTER_NEAREST), gprtSamplerCreate(context, GPRT_FILTER_LINEAR),
 
       // Here, we'll demonstrate linear vs nearest for the minFilter
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_NEAREST),
@@ -138,25 +132,20 @@ int main(int ac, char **av) {
 
       // Anisotropy of 1 vs 16. Should see less blurring with higher
       // anisotropy values
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1),
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 16),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 16),
 
       // Changing wrap mode
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1,
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
                         GPRT_SAMPLER_ADDRESS_MODE_REPEAT),
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+                        GPRT_SAMPLER_ADDRESS_MODE_CLAMP),
 
       // Changing border mode
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_BORDER,
-                        GPRT_BORDER_COLOR_OPAQUE_BLACK),
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_BORDER,
-                        GPRT_BORDER_COLOR_OPAQUE_WHITE)};
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+                        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_BLACK),
+      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
+                        GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)};
 
   // (re-)builds all vulkan programs, with current pipeline settings
   gprtBuildPipeline(context);
@@ -164,15 +153,11 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<float2> texcoordBuffer =
-      gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
-  GPRTBufferOf<int3> indexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float2> texcoordBuffer = gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
+  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
-  GPRTGeomOf<TrianglesGeomData> plane =
-      gprtGeomCreate(context, trianglesGeomType);
+  GPRTGeomOf<TrianglesGeomData> plane = gprtGeomCreate(context, trianglesGeomType);
 
   gprtTrianglesSetVertices(plane, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(plane, indexBuffer, NUM_INDICES);
@@ -187,8 +172,7 @@ int main(int ac, char **av) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
 
-  GPRTBufferOf<float4x4> transformBuffer =
-      gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
+  GPRTBufferOf<float4x4> transformBuffer = gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
 
   TransformData *transformData = gprtComputeGetPointer(transformProgram);
   transformData->now = 0.0;
@@ -201,8 +185,7 @@ int main(int ac, char **av) {
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, 1, &plane);
 
   std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
-  GPRTAccel trianglesTLAS =
-      gprtInstanceAccelCreate(context, instances.size(), instances.data());
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
   gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
   gprtAccelBuild(context, trianglesBLAS);
@@ -211,8 +194,7 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Setup the ray generation and miss programs
   // ------------------------------------------------------------------
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
   raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
@@ -266,16 +248,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

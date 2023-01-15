@@ -29,13 +29,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s01_deviceCode;
@@ -66,7 +66,8 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   LOG("gprt example '" << av[0] << "' starting up");
 
   LOG("building module, programs, and pipeline");
@@ -83,13 +84,11 @@ int main(int ac, char **av) {
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = 
-    gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // We'll also need a ray generation program.
-  GPRTRayGenOf<RayGenData> rayGen = 
-    gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // Finally, we need a "miss" program, which will be called when
   // a ray misses all triangles. Just like geometry declarations
@@ -101,9 +100,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -117,14 +115,11 @@ int main(int ac, char **av) {
 
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
-  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
-    gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
@@ -135,8 +130,7 @@ int main(int ac, char **av) {
   // determine which triangle the ray hits in a sub-linear amount of time.
   // This first acceleration structure level is called a bottom level
   // acceleration structure, or a BLAS.
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
 
   // We can then make multiple "instances", or copies, of that BLAS in
@@ -207,16 +201,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;
@@ -227,7 +219,7 @@ int main(int ac, char **av) {
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
-      
+
       // Use this to upload all set parameters to our ray tracing device
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }

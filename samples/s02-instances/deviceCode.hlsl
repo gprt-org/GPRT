@@ -37,19 +37,18 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du +
-                screen.y * record.camera.dir_dv);
+      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                 // the tree
-           RAY_FLAG_FORCE_OPAQUE, // ray flags
-           0xff,                  // instance inclusion mask
-           0,                     // ray type
-           1,                     // number of ray types
-           0,                     // miss type
-           rayDesc,               // the ray to trace
-           payload                // the payload IO
+  TraceRay(world,                   // the tree
+           RAY_FLAG_FORCE_OPAQUE,   // ray flags
+           0xff,                    // instance inclusion mask
+           0,                       // ray type
+           1,                       // number of ray types
+           0,                       // miss type
+           rayDesc,                 // the ray to trace
+           payload                  // the payload IO
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
@@ -60,7 +59,8 @@ struct Attributes {
   float2 bc;
 };
 
-float3 hsv2rgb(float3 input) {
+float3
+hsv2rgb(float3 input) {
   float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
   float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
   return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
@@ -69,8 +69,7 @@ float3 hsv2rgb(float3 input) {
 // This closest hit program will be called when rays hit triangles.
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record),
-                         (Payload, payload), (Attributes, attributes)) {
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes)) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();

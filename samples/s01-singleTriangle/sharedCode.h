@@ -26,7 +26,7 @@
 
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
-  alignas(8) int tmp; // unused for now
+  alignas(8) int tmp;   // unused for now
 };
 
 struct RayGenData {
