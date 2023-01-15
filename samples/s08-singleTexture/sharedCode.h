@@ -35,11 +35,11 @@ struct TransformData {
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index; // vec3i*
+  alignas(16) gprt::Buffer index;   // vec3i*
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex; // vec3f *
+  alignas(16) gprt::Buffer vertex;   // vec3f *
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer texcoord; // vec2f *
+  alignas(16) gprt::Buffer texcoord;   // vec2f *
   /*! base color texture we use for the entire mesh */
   alignas(16) gprt::Texture texture;
   /*! an array of texture samplers to use */

@@ -22,8 +22,8 @@
 
 #include "sharedCode.h"
 
-float3 getPos(float px, float py, float k, float width, float depth,
-              float height, float now) {
+float3
+getPos(float px, float py, float k, float width, float depth, float height, float now) {
   float x = lerp(-1.f, 1.f, px);
   float y = lerp(-1.f, 1.f, py);
   float z = sin(now + k * x) * cos(now + k * y);
@@ -80,8 +80,7 @@ GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record)) {
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du +
-                screen.y * record.camera.dir_dv);
+      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -94,14 +93,14 @@ struct Attribute {
   float2 bc;
 };
 
-float3 hsv2rgb(float3 input) {
+float3
+hsv2rgb(float3 input) {
   float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
   float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
   return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
 }
 
-GPRT_CLOSEST_HIT_PROGRAM(ClosestHit, (TrianglesGeomData, record),
-                         (Payload, payload), (Attribute, attribute)) {
+GPRT_CLOSEST_HIT_PROGRAM(ClosestHit, (TrianglesGeomData, record), (Payload, payload), (Attribute, attribute)) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
   int3 index = gprt::load<int3>(record.index, primID);

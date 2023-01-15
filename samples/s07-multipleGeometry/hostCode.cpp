@@ -33,13 +33,13 @@
 #include <generator.hpp>
 using namespace generator;
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s07_deviceCode;
@@ -52,15 +52,13 @@ template <typename T> struct Mesh {
   GPRTGeomOf<TrianglesGeomData> geometry;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color,
-       float4x4 transform) {
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color, float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
     while (!vertGenerator.done()) {
       auto vertex = vertGenerator.generate();
       auto position = vertex.position;
-      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1],
-                                       vertex.position[2], 1.0));
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
       vertices.push_back(p.xyz());
       vertGenerator.next();
     }
@@ -71,10 +69,8 @@ template <typename T> struct Mesh {
       triGenerator.next();
     }
 
-    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
-                                          vertices.data());
-    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
-                                         indices.data());
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
     geometry = gprtGeomCreate(context, geomType);
     TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
@@ -102,7 +98,8 @@ float3 lookUp = {0.f, 0.f, -1.f};
 float cosFovy = 0.4f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // This example serves to demonstrate that multiple geometry can be placed
   // in the same bottom level acceleration structure.
   LOG("gprt example '" << av[0] << "' starting up");
@@ -119,8 +116,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
-      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
@@ -141,25 +137,17 @@ int main(int ac, char **av) {
 #ifndef M_PI
 #define M_PI 3.14
 #endif
-  Mesh<TorusKnotMesh> torusMesh1(
-      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
-      translation_matrix(
-          float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh2(
-      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
-      translation_matrix(
-          float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh3(
-      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
-      translation_matrix(
-          float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
-  Mesh<CappedCylinderMesh> floorMesh(
-      context, trianglesGeomType, CappedCylinderMesh{5, 4, 128},
-      float3(1, 1, 1), translation_matrix(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry,
-                                 torusMesh3.geometry, floorMesh.geometry};
-  GPRTAccel trianglesBLAS =
-      gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
+  Mesh<TorusKnotMesh> torusMesh1(context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
+                                 translation_matrix(float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh2(context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
+                                 translation_matrix(float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh3(context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
+                                 translation_matrix(float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
+  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1, 1, 1),
+                                     translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry,
+                                                      floorMesh.geometry};
+  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
   gprtAccelBuild(context, trianglesBLAS);
   gprtAccelBuild(context, trianglesTLAS);
@@ -169,11 +157,10 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
-  RayGenData *rayGenData =gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
   rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
@@ -230,16 +217,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

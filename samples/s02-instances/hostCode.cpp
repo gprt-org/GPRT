@@ -29,37 +29,33 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s02_deviceCode;
 
 // Vertices and indices of a cube
 const int NUM_VERTICES = 8;
-float3 vertices[NUM_VERTICES] = {{-1.f, -1.f, -1.f}, {+1.f, -1.f, -1.f},
-                                 {-1.f, +1.f, -1.f}, {+1.f, +1.f, -1.f},
-                                 {-1.f, -1.f, +1.f}, {+1.f, -1.f, +1.f},
-                                 {-1.f, +1.f, +1.f}, {+1.f, +1.f, +1.f}};
+float3 vertices[NUM_VERTICES] = {{-1.f, -1.f, -1.f}, {+1.f, -1.f, -1.f}, {-1.f, +1.f, -1.f}, {+1.f, +1.f, -1.f},
+                                 {-1.f, -1.f, +1.f}, {+1.f, -1.f, +1.f}, {-1.f, +1.f, +1.f}, {+1.f, +1.f, +1.f}};
 
 const int NUM_INDICES = 12;
-int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4},
-                             {0, 4, 5}, {0, 5, 1}, {2, 3, 7}, {2, 7, 6},
-                             {1, 5, 7}, {1, 7, 3}, {4, 0, 2}, {4, 2, 6}};
+int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4}, {0, 4, 5}, {0, 5, 1},
+                             {2, 3, 7}, {2, 7, 6}, {1, 5, 7}, {1, 7, 3}, {4, 0, 2}, {4, 2, 6}};
 
 // Several affine transformation matrices to place instances of our cube in the
 // world. The first, second, third and third column represent "right", "up", and
 // "forward" basis respectively. The last column represents the position.
 const int NUM_INSTANCES = 3;
-float transforms[NUM_INSTANCES][12] = {
-    {0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-    {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-    {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
+float transforms[NUM_INSTANCES][12] = {{0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
+                                       {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
+                                       {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -74,7 +70,8 @@ float3 lookUp = {0.f, 1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // This example is very similar to the last, but with one key difference.
   // Now, we create multiple "instances", or copies, of the same bottom level
   // acceleration structure in one top level tree.
@@ -92,8 +89,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType =
-      gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
 
   // -------------------------------------------------------
@@ -111,9 +107,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -126,12 +121,9 @@ int main(int ac, char **av) {
   LOG("building geometries ...");
 
   // Create our cube mesh
-  GPRTBufferOf<float3> vertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer =
-      gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-  GPRTGeomOf<TrianglesGeomData> trianglesGeom = 
-      gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
@@ -142,26 +134,22 @@ int main(int ac, char **av) {
   triangleData->index = gprtBufferGetHandle(indexBuffer);
 
   // Place that single cube mesh in a bottom level acceleration structure
-  GPRTAccel trianglesAccel =
-      gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel);
 
   // We will now create three instances of that cube mesh. On the gpu,
   // we will use the "instance ID" to determine what color each cube should be.
 
   // First, we create a list of BLAS objects
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel,
-                                                trianglesAccel};
+  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel, trianglesAccel};
 
   // Then, we create a transform buffer, one transform per instance.
   // These transforms are defined at the top of our program, in the "transforms"
   // array referenced by the last parameter here.
-  GPRTBufferOf<float3x4> transformBuffer = 
-    gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
+  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
 
   // Finally, we create a top level acceleration structure here.
-  GPRTAccel world =
-      gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
+  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
   // Similar to how we set the vertex and index buffers on triangle primitives,
   // we set the transforms buffer here for instance primitives
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
@@ -171,7 +159,7 @@ int main(int ac, char **av) {
   // kernel's parameters, so that we can access that tree when
   // we go to trace our rays.
   rayGenData->world = gprtAccelGetHandle(world);
-  
+
   // ##################################################################
   // build the pipeline and shader binding table
   // ##################################################################
@@ -220,16 +208,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

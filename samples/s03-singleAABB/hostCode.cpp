@@ -29,13 +29,13 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s03_deviceCode;
@@ -56,7 +56,8 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // In this example, we will create an axis aligned bounding box (AABB). These
   // are more general than triangle primitives, and can be used for custom
   // primitive types.
@@ -75,8 +76,7 @@ int main(int ac, char **av) {
   // declare geometry type
   // -------------------------------------------------------
   GPRTGeomTypeOf<AABBGeomData> aabbGeomType =
-      gprtGeomTypeCreate<AABBGeomData>(context,
-                                       GPRT_AABBS /* <- This is new! */);
+      gprtGeomTypeCreate<AABBGeomData>(context, GPRT_AABBS /* <- This is new! */);
   gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
   gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
 
@@ -94,9 +94,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -111,8 +110,7 @@ int main(int ac, char **av) {
   // Create our AABB geometry. Every AABB is defined using two float3's. The
   // first float3 defines the bottom lower left near corner, and the second
   // float3 defines the upper far right corner.
-  GPRTBufferOf<float3> aabbPositionsBuffer =
-      gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
+  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
   GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
 
@@ -174,16 +172,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

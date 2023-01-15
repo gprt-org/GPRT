@@ -33,13 +33,13 @@
 #include <generator.hpp>
 using namespace generator;
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                                                                                   \
+  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                                                                                \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
+  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s06_deviceCode;
@@ -82,10 +82,8 @@ template <typename T> struct Mesh {
     }
 
     // Upload those to the device, create the geometry
-    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(),
-                                          vertices.data());
-    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(),
-                                         indices.data());
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
     geometry = gprtGeomCreate(context, geomType);
 
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
@@ -93,7 +91,7 @@ template <typename T> struct Mesh {
     TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
     geomData->index = gprtBufferGetHandle(indexBuffer);
-    
+
     // Build the bottom level acceleration structure
     accel = gprtTrianglesAccelCreate(context, 1, &geometry);
     gprtAccelBuild(context, accel);
@@ -108,7 +106,8 @@ template <typename T> struct Mesh {
 };
 
 #include <iostream>
-int main(int ac, char **av) {
+int
+main(int ac, char **av) {
   // In this example, we'll use a instance transform program to manipulate
   // instance positions in parallel on the GPU. The point of this example
   // is to show that the primitives of an instance tree can be efficiently
@@ -127,15 +126,13 @@ int main(int ac, char **av) {
   // Setup geometry types
   // -------------------------------------------------------
 
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = 
-    gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
+  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
 
   // -------------------------------------------------------
   // set up instance transform program to animate instances
   // -------------------------------------------------------
-  GPRTComputeOf<TransformData> transformProgram = 
-    gprtComputeCreate<TransformData>(context, module, "Transform");
+  GPRTComputeOf<TransformData> transformProgram = gprtComputeCreate<TransformData>(context, module, "Transform");
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -145,8 +142,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissOf<MissProgData> miss =
-      gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // Note, we'll need to call this again after creating our acceleration
   // structures, as acceleration structures will introduce new shader
@@ -180,14 +176,12 @@ int main(int ac, char **av) {
   // acceleration structure an unpopulated buffer of transforms, so long as
   // those transforms are filled in before we go to build our acceleration
   // structure.
-  GPRTBufferOf<float3x4> transformBuffer =
-      gprtDeviceBufferCreate<float3x4>(context, numInstances, nullptr);
-  GPRTAccel world =
-      gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());
+  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, numInstances, nullptr);
+  GPRTAccel world = gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
 
   // Parameters for our transform program that'll animate our transforms
-  TransformData* transformData = gprtComputeGetPointer(transformProgram);
+  TransformData *transformData = gprtComputeGetPointer(transformProgram);
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = numInstances;
   transformData->now = 0.f;
@@ -207,9 +201,8 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer =
-      gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
-  
+  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -268,16 +261,14 @@ int main(int ac, char **av) {
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY =
-          rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
       float3 camera_pos = lookFrom;
       float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu =
-          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
       camera_d00 -= 0.5f * camera_ddu;
       camera_d00 -= 0.5f * camera_ddv;

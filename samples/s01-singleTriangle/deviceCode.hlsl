@@ -42,19 +42,18 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du +
-                screen.y * record.camera.dir_dv);
+      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                 // the tree
-           RAY_FLAG_FORCE_OPAQUE, // ray flags
-           0xff,                  // instance inclusion mask
-           0,                     // ray type
-           1,                     // number of ray types
-           0,                     // miss type
-           rayDesc,               // the ray to trace
-           payload                // the payload IO
+  TraceRay(world,                   // the tree
+           RAY_FLAG_FORCE_OPAQUE,   // ray flags
+           0xff,                    // instance inclusion mask
+           0,                       // ray type
+           1,                       // number of ray types
+           0,                       // miss type
+           rayDesc,                 // the ray to trace
+           payload                  // the payload IO
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
@@ -81,8 +80,7 @@ struct Attributes {
 // For triangles, this is always a struct containing two floats
 // called "barycentrics", which we use to interpolate per-vertex
 // values.
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record),
-                         (Payload, payload), (Attributes, attributes)) {
+GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes)) {
   float2 bc = attributes.bc;
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
