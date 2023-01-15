@@ -669,9 +669,35 @@ GPRT_API void
 gprtInstanceAccelSetIDs(GPRTAccel instanceAccel,
                         const uint32_t *instanceIDs);
 
+/**
+ * @brief Assigns a 32-bit int buffer to the instance acceleration structure 
+ * for the visibility mask, with only last 8 bits used. Rays will bitwise AND 
+ * their instance inclusion mask with these masks, skipping over instances when 
+ * the result is "0".
+ * 
+ * @param instanceAccel The instance acceleration structure
+ * @param masks A buffer of 32-bit ints, one int per instance in the instance
+ * acceleration structure.
+ */
 GPRT_API void
 gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel,
-                                    const uint8_t *visibilityMasks);
+                                    GPRTBuffer masks);
+
+/**
+ * @brief Assigns a 32-bit int buffer to the instance acceleration structure 
+ * for the visibility mask, with only last 8 bits used. Rays will bitwise AND 
+ * their instance inclusion mask with these masks, skipping over instances when 
+ * the result is "0".
+ * 
+ * @tparam T The template type of the given buffer (will be cast to a 32-bit int)
+ * @param instanceAccel The instance acceleration structure
+ * @param masks A buffer of 32-bit ints, one int per instance in the instance
+ * acceleration structure.
+ */
+template <typename T> void
+gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBufferOf<T> masks) {
+  gprtInstanceAccelSetVisibilityMasks(instanceAccel, (GPRTBuffer)masks);
+}
 
 GPRT_API void
 gprtAccelDestroy(GPRTAccel accel);

@@ -2352,6 +2352,12 @@ struct InstanceAccel : public Accel {
     Buffer* buffer = nullptr;
     // size_t stride = 0;
     // size_t offset = 0;
+  } visibilityMasks;
+
+  struct {
+    Buffer* buffer = nullptr;
+    // size_t stride = 0;
+    // size_t offset = 0;
   } offsets;
 
   // todo, accept this in constructor
@@ -2423,6 +2429,16 @@ struct InstanceAccel : public Accel {
     this->references.buffer = references;
   }
 
+  void setVisibilityMasks(
+    Buffer* masks = nullptr//,
+    // size_t count,
+    // size_t stride,
+    // size_t offset
+    ) 
+  {
+    this->visibilityMasks.buffer = masks;
+  }
+
   void setOffsets(
     Buffer* offsets = nullptr//,
     // size_t count,
@@ -2467,8 +2483,8 @@ struct InstanceAccel : public Accel {
     }
     instanceOffset = instanceShaderBindingTableRecordOffset;
     
-    // No instance addressed provided, so we need to supply our own.
     uint64_t referencesAddress;
+    // No instance addressed provided, so we need to supply our own.
     if (references.buffer == nullptr) {
       // delete if not big enough
       if (accelAddressesBuffer && accelAddressesBuffer->size != numInstances * sizeof(uint64_t))
@@ -2506,6 +2522,12 @@ struct InstanceAccel : public Accel {
     // Instance acceleration structure references provided by the user
     else {
       referencesAddress = references.buffer->address;
+    }
+
+    // If the visibility mask address is -1, we assume a mask of 0xFF
+    uint64_t visibilityMasksAddress = -1;
+    if (visibilityMasks.buffer != nullptr) {
+      visibilityMasksAddress = visibilityMasks.buffer->address;
     }
 
     // No instance offsets provided, so we need to supply our own.
@@ -2580,7 +2602,8 @@ struct InstanceAccel : public Accel {
       uint64_t transformOffset;
       uint64_t transformStride;
       uint64_t instanceOffsetsBufferAddr;
-      uint64_t pad[16-7];
+      uint64_t instanceVisibilityMasksBufferAddr;
+      uint64_t pad[16-8];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
@@ -2590,6 +2613,7 @@ struct InstanceAccel : public Accel {
     pushConstants.transformOffset = transforms.offset;
     pushConstants.transformStride = transforms.stride;
     pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+    pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -5913,6 +5937,17 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
   Buffer *transforms = (Buffer*)_transforms;
   accel->setTransforms(transforms, stride, offset);
   LOG("Setting instance accel transforms...");
+}
+
+GPRT_API void
+gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel,
+                                    GPRTBuffer _masks)
+{
+  LOG_API_CALL();
+  InstanceAccel *accel = (InstanceAccel*)instanceAccel;
+  Buffer *masks = (Buffer*)_masks;
+  accel->setVisibilityMasks(masks);
+  LOG("Setting instance accel visibility masks...");
 }
 
 GPRT_API void 
