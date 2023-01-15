@@ -42,8 +42,8 @@ extern GPRTProgram s09_deviceCode;
 
 const int NUM_FLOOR_VERTICES = 6;
 float3 floorVertices[NUM_FLOOR_VERTICES] = {
-  {0.0, 0.0, -3.0}, {3.0, 0.0, -3.0}, {3.0, 0.0, 0.0}, 
-  {0.0, 0.0, -3.0}, {3.0, 0.0, 0.0},  {0.0, 0.0, 0.0},
+  {0.0, 0.0, -6.0}, {3.0, 0.0, -6.0}, {3.0, 0.0, 0.0}, 
+  {0.0, 0.0, -6.0}, {3.0, 0.0, 0.0},  {0.0, 0.0, 0.0},
 };
 
 const int NUM_FLOOR_INDICES = 6;
@@ -58,13 +58,13 @@ float3 wallVertices[NUM_WALL_VERTICES] = {
     {2.0, 1.0, 0.0},  {1.0, 0.0, 0.0},  {2.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
     {2.0, 0.0, 0.0},  {3.0, 0.0, 0.0},  {3.0, 1.0, 0.0}, {2.0, 0.0, 0.0},
     {3.0, 1.0, 0.0},  {2.0, 1.0, 0.0},  {0.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
-    {1.0, 2.0, 0.0},  {0.0, 1.0, 0.0},  {1.0, 2.0, 0.0}, {0.0, 2.0, 0.0},
-    {2.0, 1.0, 0.0},  {3.0, 1.0, 0.0},  {3.0, 2.0, 0.0}, {2.0, 1.0, 0.0},
-    {3.0, 2.0, 0.0},  {2.0, 2.0, 0.0},  {0.0, 2.0, 0.0}, {1.0, 2.0, 0.0},
-    {1.0, 3.0, 0.0},  {0.0, 2.0, 0.0},  {1.0, 3.0, 0.0}, {0.0, 3.0, 0.0},
-    {1.0, 2.0, 0.0},  {2.0, 2.0, 0.0},  {2.0, 3.0, 0.0}, {1.0, 2.0, 0.0},
-    {2.0, 3.0, 0.0},  {1.0, 3.0, 0.0},  {2.0, 2.0, 0.0}, {3.0, 2.0, 0.0},
-    {3.0, 3.0, 0.0},  {2.0, 2.0, 0.0},  {3.0, 3.0, 0.0}, {2.0, 3.0, 0.0},
+    {1.0, 3.0, 0.0},  {0.0, 1.0, 0.0},  {1.0, 3.0, 0.0}, {0.0, 3.0, 0.0},
+    {2.0, 1.0, 0.0},  {3.0, 1.0, 0.0},  {3.0, 3.0, 0.0}, {2.0, 1.0, 0.0},
+    {3.0, 3.0, 0.0},  {2.0, 3.0, 0.0},  {0.0, 3.0, 0.0}, {1.0, 3.0, 0.0},
+    {1.0, 4.0, 0.0},  {0.0, 3.0, 0.0},  {1.0, 4.0, 0.0}, {0.0, 4.0, 0.0},
+    {1.0, 3.0, 0.0},  {2.0, 3.0, 0.0},  {2.0, 4.0, 0.0}, {1.0, 3.0, 0.0},
+    {2.0, 4.0, 0.0},  {1.0, 4.0, 0.0},  {2.0, 3.0, 0.0}, {3.0, 3.0, 0.0},
+    {3.0, 4.0, 0.0},  {2.0, 3.0, 0.0},  {3.0, 4.0, 0.0}, {2.0, 4.0, 0.0},
 };
 
 const int NUM_WALL_INDICES = 16;
@@ -76,8 +76,8 @@ int3 wallIndices[NUM_WALL_INDICES] = {
 
 const int NUM_WINDOW_VERTICES = 6;
 float3 windowVertices[NUM_WINDOW_VERTICES] = {
-    {1.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {2.0, 2.0, 0.0},
-    {1.0, 1.0, 0.0}, {2.0, 2.0, 0.0}, {1.0, 2.0, 0.0},
+    {1.0, 1.0, 0.0}, {2.0, 1.0, 0.0}, {2.0, 3.0, 0.0},
+    {1.0, 1.0, 0.0}, {2.0, 3.0, 0.0}, {1.0, 3.0, 0.0},
 };
 
 const int NUM_WINDOW_INDICES = 6;
@@ -118,7 +118,7 @@ float cosFovy = 0.66f;
 
 // Light position
 float3 lightPos = {1.5f, 6.0f, 6.0f};
-float3 lightColor = {20.f, 20.f, 20.f};
+float3 lightColor = {253.0 / 255.0, 251.0 / 255.0, 211.0 / 255.0};
 
 #include <iostream>
 int main(int ac, char **av) {
@@ -187,7 +187,7 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, floorAccel);
 
   TrianglesGeomData *floorData = gprtGeomGetPointer(floorGeom);
-  floorData->color = float3(0.5, 0.5, 0.5);//float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
+  floorData->color = float4(153.f / 255.f, 121.f / 255.f, 80.f / 255.f, 1.f);
   floorData->vertices = gprtBufferGetHandle(floorVertexBuffer);
   floorData->indices = gprtBufferGetHandle(floorIndexBuffer);
 
@@ -204,7 +204,7 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, wallAccel);
 
   TrianglesGeomData *wallData = gprtGeomGetPointer(wallGeom);
-  wallData->color = float3(1.0, 1.0, 1.0);//float3(230.0f / 255.0f, 225.0f / 255.0f, 221.0f / 255.0f);
+  wallData->color = float4(230.f / 255.f, 225.f / 255.f, 221.f / 255.f, 1.f);
   wallData->vertices = gprtBufferGetHandle(wallVertexBuffer);
   wallData->indices = gprtBufferGetHandle(wallIndexBuffer);
 
@@ -221,7 +221,7 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, windowAccel);
 
   TrianglesGeomData *windowData = gprtGeomGetPointer(windowGeom);
-  windowData->color = float3(1.0, 1.0, 1.0);//float3(199.f / 255.f, 227.f / 255.f, 225.f / 255.f);
+  windowData->color = float4(199.f / 255.f, 227.f / 255.f, 225.f / 255.f, 0.5f);
   windowData->vertices = gprtBufferGetHandle(windowVertexBuffer);
   windowData->indices = gprtBufferGetHandle(windowIndexBuffer);
 
@@ -339,8 +339,8 @@ int main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 4.0f,
-                                  4.f + 3.f * cos(gprtGetTime(context)));
+    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 3.f,
+                                  3.f * cos(gprtGetTime(context)));
     gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
     // Calls the GPU raygen kernel function

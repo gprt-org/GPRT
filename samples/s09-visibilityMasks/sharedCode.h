@@ -28,7 +28,7 @@
 struct TrianglesGeomData {
   alignas(16) gprt::Buffer indices;
   alignas(16) gprt::Buffer vertices;
-  alignas(16) float3 color;
+  alignas(16) float4 color;
 };
 
 struct RayGenData {

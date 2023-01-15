@@ -24,10 +24,17 @@
 
 struct Payload
 {
-    float3 color;
+    float4 color;
     float3 normal;
     float hitT;
 };
+
+float4 over(float4 a, float4 b) {
+    float4 o;
+    o.a = a.a + b.a * (1.f - a.a);
+    o.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / o.a;
+    return o;
+}
 
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
 {
@@ -56,13 +63,41 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
              payload                // the payload IO
     );
 
-    float3 shadedColor = payload.color;
+    float4 shadedColor = float4(0.f, 0.f, 0.f, 0.f);
+    
+    // Did we hit something transparent?
+    float4 transparentColor = float4(0.f, 0.f, 0.f, 0.f);
+    if (payload.hitT != -1.f && payload.color.a < 1.f)
+    {
+        // cache the transparent object's color
+        transparentColor = payload.color;
 
-    // If we hit something...
-    if (payload.hitT != -1.f)
+        // Move ray to hit object position
+        rayDesc.Origin = rayDesc.Origin + payload.hitT * rayDesc.Direction;
+
+        // Trace another ray to get color of what's behind
+        TraceRay(world,                 // the tree
+                 RAY_FLAG_FORCE_OPAQUE, // ray flags
+                 0b111111111,           // instance inclusion mask
+                 0,                     // ray type
+                 1,                     // number of ray types
+                 0,                     // miss type
+                 rayDesc,               // the ray to trace
+                 payload                // the payload IO
+        );
+    }
+
+    // If at this point we hit the background, composite
+    if (payload.hitT == -1.f) {
+        // set the shaded color to what was returned
+        shadedColor = over(transparentColor, payload.color);
+    }
+
+    // Else we hit something opaque...
+    else
     {
         // Now trace a shadow ray towards the light
-        float3 color = payload.color;
+        float3 color = payload.color.rgb;
         float3 normal = payload.normal;
         float3 hitPos = rayDesc.Origin + payload.hitT * rayDesc.Direction;
 
@@ -81,19 +116,20 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record))
                  payload                // the payload IO
         );
 
-        float ambient = .7f;
-        shadedColor = color * ambient;
+        float ambient = .5f;
+        float3 litColor = color * ambient;
 
         // We hit the light
         if (payload.hitT == -1.f)
         {
-            float falloff = 1.f / pow(distance(record.lightPos, rayDesc.Origin), 2.f);
-            shadedColor += color * abs(dot(normal, rayDesc.Direction)) * (1.f - ambient) * falloff * record.lightColor;
+            litColor += color * max(dot(normal, rayDesc.Direction), 0.0f) * (1.f - ambient) * record.lightColor;
         }
+
+        shadedColor = over(transparentColor, float4(litColor, 1.f));
     }
 
     const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-    gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(shadedColor));
+    gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(shadedColor.rgb));
 }
 
 struct Attributes
@@ -125,6 +161,6 @@ GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload))
 {
     uint2 pixelID = DispatchRaysIndex().xy;
     int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-    payload.color = (pattern & 1) ? record.color1 : record.color0;
+    payload.color = float4((pattern & 1) ? record.color1 : record.color0, 1.f);
     payload.hitT = -1.f;
 }
