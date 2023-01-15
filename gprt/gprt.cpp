@@ -319,7 +319,6 @@ struct Buffer {
   struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDeviceAddress address = 0;
   } stagingBuffer;
 
   VkDeviceSize size = 0;
@@ -360,7 +359,7 @@ struct Buffer {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
@@ -408,7 +407,7 @@ struct Buffer {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
@@ -572,9 +571,9 @@ struct Buffer {
 
     // Create the memory backing up the buffer handle
     VkMemoryRequirements memReqs;
+    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
     VkMemoryAllocateInfo memAllocInfo {};
     memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
     memAllocInfo.allocationSize = memReqs.size;
     // Find a memory type index that fits the properties of the buffer
     memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
@@ -600,22 +599,14 @@ struct Buffer {
 
       // Create the memory backing up the staging buffer handle
       VkMemoryRequirements memReqs;
+      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
       VkMemoryAllocateInfo memAllocInfo {};
       memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
       memAllocInfo.allocationSize = memReqs.size;
       // Find a memory type index that fits the properties of the buffer
       memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-      // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
-      // need to enable the appropriate flag during allocation
-      VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
-      if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-        allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
-        allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
-        memAllocInfo.pNext = &allocFlagsInfo;
-      }
+
       VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
-      alignment = memReqs.alignment;
 
       // Attach the memory to the buffer object
       VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
@@ -640,6 +631,825 @@ struct Buffer {
       address = getDeviceAddress();
   }
 };
+
+inline size_t gprtFormatGetSize(GPRTFormat format) {
+  switch(format) {
+    case GPRT_FORMAT_R8_UINT: return 1;
+    case GPRT_FORMAT_R8G8B8A8_UNORM: return 4;
+    case GPRT_FORMAT_R8G8B8A8_SRGB: return 4;
+    case GPRT_FORMAT_R32_SFLOAT: return 4;
+    case GPRT_FORMAT_R32G32B32A32_SFLOAT: return 16;
+    default: 
+    throw std::runtime_error("Error, unhandled image format");
+    return -1;
+  }
+}
+
+struct Texture {
+  static std::vector<Texture*> texture1Ds;
+  static std::vector<Texture*> texture2Ds;
+  static std::vector<Texture*> texture3Ds;
+
+  VkDevice device;
+  VkPhysicalDeviceMemoryProperties memoryProperties;
+  VkCommandBuffer commandBuffer;
+  VkQueue queue;
+
+  /** @brief Usage flags to be filled by external source at image creation */
+  VkImageUsageFlags usageFlags;
+
+  /** @brief Memory property flags to be filled by external source at image creation */
+  VkMemoryPropertyFlags memoryPropertyFlags;
+
+  bool hostVisible;
+
+  VkImage image = VK_NULL_HANDLE;
+  VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+
+  // Technically, textures in vulkan don't support addresses.
+  // Instead, we make our own virtual "texture address space".
+  VkDeviceAddress address = -1;
+
+  VkImageView imageView = VK_NULL_HANDLE;
+  
+  uint32_t mipLevels;
+  
+  VkImageType imageType;
+
+  uint32_t width;
+  uint32_t height;
+  uint32_t depth;
+  VkDeviceSize size = 0;
+  VkDeviceSize alignment = 0;
+  void* mapped = nullptr;
+
+  VkSubresourceLayout subresourceLayout{};
+
+  struct StagingBuffer {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+  } stagingBuffer;
+
+  /* Default Constructor */
+  Texture() {};
+  
+  ~Texture() {};
+
+  void setImageLayout(
+    VkCommandBuffer cmdbuffer,
+    VkImage image,
+    VkImageLayout oldImageLayout,
+    VkImageLayout newImageLayout,
+    VkImageSubresourceRange subresourceRange,
+    VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 
+    VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
+  {
+    // Create an image barrier object
+    VkImageMemoryBarrier imageMemoryBarrier{};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    imageMemoryBarrier.oldLayout = oldImageLayout;
+    imageMemoryBarrier.newLayout = newImageLayout;
+    imageMemoryBarrier.image = image;
+    imageMemoryBarrier.subresourceRange = subresourceRange;
+
+    // Source layouts (old)
+    // Source access mask controls actions that have to be finished on the old layout
+    // before it will be transitioned to the new layout
+    switch (oldImageLayout)
+    {
+    case VK_IMAGE_LAYOUT_UNDEFINED:
+      // Image layout is undefined (or does not matter)
+      // Only valid as initial layout
+      // No flags required, listed only for completeness
+      imageMemoryBarrier.srcAccessMask = 0;
+      break;
+
+    case VK_IMAGE_LAYOUT_PREINITIALIZED:
+      // Image is preinitialized
+      // Only valid as initial layout for linear images, preserves memory contents
+      // Make sure host writes have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      // Image is a color attachment
+      // Make sure any writes to the color buffer have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+      // Image is a depth/stencil attachment
+      // Make sure any writes to the depth/stencil buffer have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+      // Image is a transfer source
+      // Make sure any reads from the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+      // Image is a transfer destination
+      // Make sure any writes to the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+      // Image is read by a shader
+      // Make sure any shader reads from the image have been finished
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      break;
+    default:
+      // Other source layouts aren't handled (yet)
+      break;
+    }
+
+    // Target layouts (new)
+    // Destination access mask controls the dependency for the new image layout
+    switch (newImageLayout)
+    {
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+      // Image will be used as a transfer destination
+      // Make sure any writes to the image have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+      // Image will be used as a transfer source
+      // Make sure any reads from the image have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      // Image will be used as a color attachment
+      // Make sure any writes to the color buffer have been finished
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+      // Image layout will be used as a depth/stencil attachment
+      // Make sure any writes to depth/stencil buffer have been finished
+      imageMemoryBarrier.dstAccessMask = imageMemoryBarrier.dstAccessMask | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      break;
+
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+      // Image will be read in a shader (sampler, input attachment)
+      // Make sure any writes to the image have been finished
+      if (imageMemoryBarrier.srcAccessMask == 0)
+      {
+        imageMemoryBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+      }
+      imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      break;
+    default:
+      // Other source layouts aren't handled (yet)
+      break;
+    }
+
+    // Put barrier inside setup command buffer
+    vkCmdPipelineBarrier(
+      cmdbuffer,
+      srcStageMask,
+      dstStageMask,
+      0,
+      0, nullptr,
+      0, nullptr,
+      1, &imageMemoryBarrier);
+  }
+  
+  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+  {
+    if (hostVisible) {
+      // Assuming layout is general
+      if (mapped) return VK_SUCCESS;
+      else return vkMapMemory(device, memory, offset, size, 0, &mapped);
+    }
+    else {
+      // Finding that this causes bugs on Intel ARC. It seems that vkCmdCopyImageToBuffer doesn't respect
+      // vulkan fences. We don't need this, at the moment textures can only be written to by the host...
+      // But it might be worth filing a bug over...
+
+      // VkResult err;
+      // VkCommandBufferBeginInfo cmdBufInfo{};
+      // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      // err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      // if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
+
+      // // transition device to a transfer source format
+      // setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      // layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+      // VkBufferImageCopy copyRegion;
+      // copyRegion.imageOffset.x = 0;
+      // copyRegion.imageOffset.y = 0;
+      // copyRegion.imageOffset.z = 0;
+      // copyRegion.imageExtent.width = width;
+      // copyRegion.imageExtent.height = height;
+      // copyRegion.imageExtent.depth = depth;
+      // copyRegion.bufferOffset = 0;
+      // copyRegion.bufferRowLength = 0;
+      // copyRegion.bufferImageHeight = 0;
+      // copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      // copyRegion.imageSubresource.baseArrayLayer = 0;
+      // copyRegion.imageSubresource.layerCount = 1;
+      // copyRegion.imageSubresource.mipLevel = 0;
+      // vkCmdCopyImageToBuffer(commandBuffer, image, layout, stagingBuffer.buffer, 1, &copyRegion);
+
+      // // transition device to previous format
+      // setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      // layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+      // err = vkEndCommandBuffer(commandBuffer);
+      // if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
+
+      // VkSubmitInfo submitInfo;
+      // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      // submitInfo.pNext = NULL;
+      // submitInfo.waitSemaphoreCount = 0;
+      // submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      // submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      // submitInfo.commandBufferCount = 1;
+      // submitInfo.pCommandBuffers = &commandBuffer;
+      // submitInfo.signalSemaphoreCount = 0;
+      // submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+      // err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      // if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
+
+      // err = vkQueueWaitIdle(queue);
+      // if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
+
+      // todo, transfer device data to host
+      if (mapped) return VK_SUCCESS;
+      // else return vkMapMemory(device, stagingImage.memory, offset, mapSize, 0, &mapped);
+      else return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
+    }
+  }
+
+  void unmap()
+  {
+    if (hostVisible) {
+      // assuming layout is general
+      if (mapped) {
+        vkUnmapMemory(device, memory);
+        mapped = nullptr;
+      }
+    }
+    else {
+      VkResult err;
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
+
+      // transition device to a transfer destination format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+      // copy data
+      VkBufferImageCopy copyRegion;
+      copyRegion.imageOffset.x = 0;
+      copyRegion.imageOffset.y = 0;
+      copyRegion.imageOffset.z = 0;
+      copyRegion.imageExtent.width = width;
+      copyRegion.imageExtent.height = height;
+      copyRegion.imageExtent.depth = depth;
+      copyRegion.bufferOffset = 0;
+      copyRegion.bufferRowLength = 0;
+      copyRegion.bufferImageHeight = 0;
+      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      copyRegion.imageSubresource.baseArrayLayer = 0;
+      copyRegion.imageSubresource.layerCount = 1;
+      copyRegion.imageSubresource.mipLevel = 0;
+      vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
+
+      // transition device to an optimal device format
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
+      
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
+      
+      // todo, transfer device data to device
+      if (mapped) {
+        // vkUnmapMemory(device, stagingImage.memory);
+        vkUnmapMemory(device, stagingBuffer.memory);
+        mapped = nullptr;
+      }
+    }
+  }
+
+  void generateMipmap()
+  {
+    // do nothing if we don't have a mipmap to generate
+    if (mipLevels == 1) return;
+
+    // double check we have the right usage flags...
+    // Shouldn't happen, but doesn't hurt to double check.
+    if (usageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT == 0) 
+      GPRT_RAISE("image needs transfer src usage bit for texture mipmap generation! \n");
+
+    if (usageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT == 0) 
+      GPRT_RAISE("image needs transfer dst usage bit for texture mipmap generation! \n");
+
+    VkResult err;
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err) GPRT_RAISE("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+
+    // transition device to a transfer destination format
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+    layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+
+    int32_t mipWidth = width;
+    int32_t mipHeight = height;
+    int32_t mipDepth = depth;
+
+    // note, loop here starts at 1, not 0
+    for (uint32_t i = 1; i < mipLevels; i++) {
+      // just transitioning the layouts of individual mips
+      barrier.subresourceRange.baseMipLevel = i - 1;
+      barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+      // this will wait for level i-1 to be filled from either a vkCmdCopyBufferToImae call, 
+      // or the previous blit command
+      vkCmdPipelineBarrier(commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+      // here, we specify the regions to use for the blit
+      VkImageBlit blit{};
+      blit.srcOffsets[0] = { 0, 0, 0 };
+      blit.srcOffsets[1] = { mipWidth, mipHeight, mipDepth };
+      blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.srcSubresource.mipLevel = i - 1;
+      blit.srcSubresource.baseArrayLayer = 0;
+      blit.srcSubresource.layerCount = 1;
+      blit.dstOffsets[0] = { 0, 0, 0 };
+      blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, mipDepth > 1 ? mipDepth / 2 : 1 };
+      blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.dstSubresource.mipLevel = i;
+      blit.dstSubresource.baseArrayLayer = 0;
+      blit.dstSubresource.layerCount = 1;
+
+      // This blit will downsample the current mip layer into the one above.
+      // It also transitions the image 
+      vkCmdBlitImage(commandBuffer,
+        image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit,
+        VK_FILTER_LINEAR);
+
+      // Now, transition the layer to VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+      barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+      vkCmdPipelineBarrier(commandBuffer,
+          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+          0, nullptr,
+          0, nullptr,
+          1, &barrier);
+
+      // now, divide the current mip dimensions by two.
+      // mip levels can't be smaller than 1 though.
+      if (mipWidth > 1) mipWidth /= 2;
+      if (mipHeight > 1) mipHeight /= 2;
+      if (mipDepth > 1) mipDepth /= 2;
+    }
+
+
+    // at the very end, we need one more barrier to transition the lastmip level
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier);
+
+    // Now, all layers in the mip chan have this layout
+    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err) GPRT_RAISE("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
+    
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    if (err) GPRT_RAISE("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err) GPRT_RAISE("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+  }
+
+  Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, 
+    VkCommandBuffer _commandBuffer, VkQueue _queue,
+    VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags,
+    VkImageType type, VkFormat format, uint32_t _width, uint32_t _height, uint32_t _depth, 
+    bool allocateMipmap, const void *data = nullptr
+    ) {
+    
+    std::vector<Texture*> &textures = (type == VK_IMAGE_TYPE_1D) ? texture1Ds :
+                                      (type == VK_IMAGE_TYPE_2D) ? texture2Ds : 
+                                    /*(type == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
+    
+    // Hunt for an existing free address for this texture
+    for (uint32_t i = 0; i < textures.size(); ++i) {
+      if (textures[i] == nullptr) {
+        textures[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current texture list, allocate a new one
+    if (address == -1) {
+      textures.push_back(this);
+      address = textures.size() - 1;
+    }
+    
+    device = logicalDevice;
+    memoryPropertyFlags = _memoryPropertyFlags;
+    usageFlags = _usageFlags;
+    commandBuffer = _commandBuffer;
+    queue = _queue;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    size = width * height * depth * gprtFormatGetSize((GPRTFormat)format);
+    imageType = type;
+
+    uint32_t largestDimension = std::max(std::max(width, height), depth);
+    if (allocateMipmap) {
+      // Compute total mip levels (each being half the previous)
+      // floor here accounts for non-power-of-two textures.
+      mipLevels = static_cast<uint32_t>(
+        std::floor(
+          std::log2(largestDimension)
+        )
+      ) + 1;
+    } else {
+      mipLevels = 1;
+    }
+
+    // Check if the image can be mapped to a host pointer. 
+    // If the image isn't host visible, this is image and requires 
+    // an additional staging image...
+    if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0) 
+      hostVisible = true;
+    else 
+      hostVisible = false;
+
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+    auto getMemoryType = [this](
+      uint32_t typeBits, VkMemoryPropertyFlags properties,
+      VkBool32 *memTypeFound = nullptr) -> uint32_t {
+
+      // memory type bits is a bitmask and contains one bit set for every supported memory type.
+      // Bit i is set if and only if the memory type i in the memory properties is supported.
+      for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+        if ((typeBits & 1) == 1) {
+          if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            if (memTypeFound) {
+              *memTypeFound = true;
+            }
+            return i;
+          }
+        }
+        typeBits >>= 1;
+      }
+
+      if (memTypeFound) {
+        *memTypeFound = false;
+        return 0;
+      }
+      else {
+        GPRT_RAISE("Could not find a matching memory type");
+      }
+    };
+    
+    // Create the image handle
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = type;
+    imageInfo.extent.width = width;
+    imageInfo.extent.height = height;
+    imageInfo.extent.depth = depth;
+    imageInfo.mipLevels = mipLevels;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+
+    // can be VK_IMAGE_TILING_LINEAR or VK_IMAGE_TILING_OPTIMAL.
+    // VK_IMAGE_TILING_LINEAR means texels are laid out in a row-major order
+    // VK_IMAGE_TILING_OPTIMAL means texels are laid out in an order that is implementation defined for optimal access
+    // LINEAR is required for reading texels directly. 
+    // This tiling cannot be changed.
+    if (hostVisible) 
+      imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
+    else 
+      imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+
+    // Can be either VK_IMAGE_LAYOUT_UNDEFINED or VK_IMAGE_LAYOUT_PREINITIALIZED.
+    // Preinitialized is required if we're uploading straight to texture as if it were
+    //   a staging image. If we instead use a staging buffer, then this should be undefined
+    if (hostVisible)
+      imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    else 
+      imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    imageInfo.usage = usageFlags;
+
+    // Since this image is oonly going to be used by graphics queues, we have this set to exclusive.
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    // If this image were to be used with MSAA as an attachment, we'd set this to something 
+    // other than
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.flags = 0; // Optional, but some options here for sparse images, like volumes with large sections of just air values.
+
+    VK_CHECK_RESULT(vkCreateImage(logicalDevice, &imageInfo, nullptr, &image));
+
+    if (!hostVisible) {
+      const VkBufferUsageFlags bufferUsageFlags =
+        // means we can use this buffer to transfer into another
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        // means we can use this buffer to receive data transferred from another
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT
+      ;
+
+      VkBufferCreateInfo bufferCreateInfo {};
+      bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      bufferCreateInfo.usage = bufferUsageFlags;
+      bufferCreateInfo.size = size;
+      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
+    }
+
+
+    // Create the memory backing up the image handle
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(logicalDevice, image, &memReqs);
+    VkMemoryAllocateInfo memAllocInfo{};
+    memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memAllocInfo.allocationSize = memReqs.size;
+    // Find a memory type index that firts the properties of the image
+    memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+
+    VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
+    alignment = memReqs.alignment;
+
+    // Attach the memory to the image object
+    VK_CHECK_RESULT(vkBindImageMemory(logicalDevice, image, memory, 0));
+
+    if (!hostVisible) {
+      const VkMemoryPropertyFlags memoryPropertyFlags =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+      // Create the memory backing up the staging buffer handle
+      VkMemoryRequirements memReqs;
+      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
+      VkMemoryAllocateInfo memAllocInfo {};
+      memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+      memAllocInfo.allocationSize = memReqs.size;
+      // Find a memory type index that fits the properties of the buffer
+      memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
+
+      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
+
+      // Attach the memory to the buffer object
+      VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
+      if (err) GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
+    }
+
+    // We need to transition the image into a known layout
+    {
+      VkResult err;
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err) GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+      layout = VK_IMAGE_LAYOUT_GENERAL;
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err) GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+      
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;//&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;//&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      if (err) GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err) GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+    }
+
+    // Now we need an image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = image;
+    // note, image type and image view type share common enum values up to a point...
+    // todo, how to handle cube maps? 1d/2d arrays? cube map arrays? 
+    viewInfo.viewType = (VkImageViewType) type; 
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    VK_CHECK_RESULT(vkCreateImageView(logicalDevice, &viewInfo, nullptr, &imageView));
+
+    if (hostVisible) {
+      VkImageSubresource subRes = {};
+      subRes.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      subRes.mipLevel = 0;
+      subRes.arrayLayer = 0;
+      vkGetImageSubresourceLayout(logicalDevice, image, &subRes, &subresourceLayout);
+    }
+
+    if (data != nullptr) {
+      map();
+      memcpy(mapped, data, size);
+      unmap();
+
+      if (mipLevels > 1) generateMipmap();
+    }
+  }
+
+  /*! Calls vkDestroy on the image, and frees underlying memory */
+  void destroy()
+  {
+    // Free texture slot for use by subsequently made textures
+    std::vector<Texture*> &textures = (imageType == VK_IMAGE_TYPE_1D) ? texture1Ds :
+                                      (imageType == VK_IMAGE_TYPE_2D) ? texture2Ds : 
+                                    /*(imageType == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
+                                
+    textures[address] = nullptr;
+
+    if (imageView) {
+      vkDestroyImageView(device, imageView, nullptr);
+      imageView = VK_NULL_HANDLE;
+    }
+    if (image) {
+      vkDestroyImage(device, image, nullptr);
+      image = VK_NULL_HANDLE;
+    }
+    if (memory) {
+      vkFreeMemory(device, memory, nullptr);
+      memory = VK_NULL_HANDLE;
+    }
+    if (stagingBuffer.buffer) {
+      vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      stagingBuffer.buffer = VK_NULL_HANDLE;
+    }
+    if (stagingBuffer.memory) {
+      vkFreeMemory(device, stagingBuffer.memory, nullptr);
+      stagingBuffer.memory = VK_NULL_HANDLE;
+    }
+  }
+};
+
+std::vector<Texture*> Texture::texture1Ds;
+std::vector<Texture*> Texture::texture2Ds;
+std::vector<Texture*> Texture::texture3Ds;
+
+struct Sampler {
+  static std::vector<Sampler*> samplers;
+
+  VkDevice device;
+  VkSampler sampler;
+
+  // Technically, samplers in vulkan don't support addresses.
+  // Instead, we make our own virtual "sampler address space".
+  VkDeviceAddress address = -1;
+
+  Sampler() {};
+  
+  ~Sampler() {};
+
+  Sampler(VkPhysicalDevice physicalDevice, VkDevice logicalDevice,
+    VkFilter magFilter, VkFilter minFilter, VkSamplerMipmapMode mipFilter, 
+    uint32_t anisotropy,
+    VkSamplerAddressMode addressMode, VkBorderColor borderColor
+  )
+  {
+    // Hunt for an existing free address for this sampler
+    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
+      if (Sampler::samplers[i] == nullptr) {
+        Sampler::samplers[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current texture list, allocate a new one
+    if (address == -1) {
+      samplers.push_back(this);
+      address = samplers.size() - 1;
+    }
+    
+    device = logicalDevice;
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = magFilter;
+    samplerInfo.minFilter = minFilter;
+    samplerInfo.addressModeU = addressMode;
+    samplerInfo.addressModeV = addressMode;
+    samplerInfo.addressModeW = addressMode;
+    samplerInfo.anisotropyEnable = (anisotropy == 1) ? VK_FALSE : VK_TRUE;
+    
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+    samplerInfo.maxAnisotropy = std::min(properties.limits.maxSamplerAnisotropy, float(anisotropy));
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = mipFilter;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+    samplerInfo.borderColor = borderColor;
+
+    VK_CHECK_RESULT(vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &sampler));
+  }
+
+  void destroy() {
+    // Free sampler slot for use by subsequently made samplers
+    Sampler::samplers[address] = nullptr;
+    
+    if (sampler) {
+      vkDestroySampler(device, sampler, nullptr);
+    }
+  }
+};
+
+std::vector<Sampler*> Sampler::samplers;
 
 struct SBTEntry {
   size_t recordSize = 0;
@@ -1274,7 +2084,7 @@ struct TriangleAccel : public Accel {
     // err = vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence);
     // if (err) GPRT_RAISE("failed to create fence for triangle accel build! : \n" + errorString(err));
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1481,7 +2291,7 @@ struct AABBAccel : public Accel {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for AABB accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1537,6 +2347,12 @@ struct InstanceAccel : public Accel {
     // size_t stride = 0;
     // size_t offset = 0;
   } references;
+
+  struct {
+    Buffer* buffer = nullptr;
+    // size_t stride = 0;
+    // size_t offset = 0;
+  } visibilityMasks;
 
   struct {
     Buffer* buffer = nullptr;
@@ -1613,6 +2429,16 @@ struct InstanceAccel : public Accel {
     this->references.buffer = references;
   }
 
+  void setVisibilityMasks(
+    Buffer* masks = nullptr//,
+    // size_t count,
+    // size_t stride,
+    // size_t offset
+    ) 
+  {
+    this->visibilityMasks.buffer = masks;
+  }
+
   void setOffsets(
     Buffer* offsets = nullptr//,
     // size_t count,
@@ -1657,8 +2483,8 @@ struct InstanceAccel : public Accel {
     }
     instanceOffset = instanceShaderBindingTableRecordOffset;
     
-    // No instance addressed provided, so we need to supply our own.
     uint64_t referencesAddress;
+    // No instance addressed provided, so we need to supply our own.
     if (references.buffer == nullptr) {
       // delete if not big enough
       if (accelAddressesBuffer && accelAddressesBuffer->size != numInstances * sizeof(uint64_t))
@@ -1696,6 +2522,12 @@ struct InstanceAccel : public Accel {
     // Instance acceleration structure references provided by the user
     else {
       referencesAddress = references.buffer->address;
+    }
+
+    // If the visibility mask address is -1, we assume a mask of 0xFF
+    uint64_t visibilityMasksAddress = -1;
+    if (visibilityMasks.buffer != nullptr) {
+      visibilityMasksAddress = visibilityMasks.buffer->address;
     }
 
     // No instance offsets provided, so we need to supply our own.
@@ -1770,7 +2602,8 @@ struct InstanceAccel : public Accel {
       uint64_t transformOffset;
       uint64_t transformStride;
       uint64_t instanceOffsetsBufferAddr;
-      uint64_t pad[16-7];
+      uint64_t instanceVisibilityMasksBufferAddr;
+      uint64_t pad[16-8];
     } pushConstants;
 
     pushConstants.instanceBufferAddr = instancesBuffer->address;
@@ -1780,6 +2613,7 @@ struct InstanceAccel : public Accel {
     pushConstants.transformOffset = transforms.offset;
     pushConstants.transformStride = transforms.stride;
     pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+    pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
 
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
@@ -1802,7 +2636,7 @@ struct InstanceAccel : public Accel {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -1945,7 +2779,7 @@ struct InstanceAccel : public Accel {
 
     err = vkQueueWaitIdle(queue);
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err) GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
@@ -2102,10 +2936,7 @@ struct Context {
   std::vector<VkFramebuffer>frameBuffers;
   // Active frame buffer index
   uint32_t currentBuffer = 0;
-  // Descriptor set pool
-  VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-  // List of shader modules created (stored for cleanup)
-  std::vector<VkShaderModule> shaderModules;
+
   // Pipeline cache object
   VkPipelineCache pipelineCache;
     
@@ -2120,11 +2951,36 @@ struct Context {
 
   std::vector<Accel*> accels;
 
+  Sampler *defaultSampler = nullptr;
+  Texture *defaultTexture1D = nullptr;
+  Texture *defaultTexture2D = nullptr;
+  Texture *defaultTexture3D = nullptr;
+
+  VkDescriptorPool samplerDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
+
+  uint32_t previousNumSamplers = 0;
+  uint32_t previousNumTexture1Ds = 0;
+  uint32_t previousNumTexture2Ds = 0;
+  uint32_t previousNumTexture3Ds = 0;
+
+  VkDescriptorSetLayout samplerDescriptorSetLayout{};
+  VkDescriptorSetLayout texture1DDescriptorSetLayout{};
+  VkDescriptorSetLayout texture2DDescriptorSetLayout{};
+  VkDescriptorSetLayout texture3DDescriptorSetLayout{};
+
+  VkDescriptorSet samplerDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
+
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
 
   uint32_t numRayTypes = 1;
-
+  
   // struct InternalStages {
   //   // for copying transforms into the instance buffer
   //   std::string fillInstanceDataEntryPoint = "gprtFillInstanceData";
@@ -2244,7 +3100,7 @@ struct Context {
     if (requestedFeatures.window) {
       if (!glfwInit()) {
       	LOG("Warning: Unable to create window. Falling back to headless mode.");
-	requestedFeatures.window = false;
+	      requestedFeatures.window = false;
       }
       else {
         if (!glfwVulkanSupported()) {
@@ -2584,12 +3440,19 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
+    descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
+    descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
     bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
     bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
-    bufferDeviceAddressFeatures.pNext = nullptr;
+    bufferDeviceAddressFeatures.pNext = &descriptorIndexingFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -2847,12 +3710,74 @@ struct Context {
       vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, 
         imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
     }
+
+    // For texture / sampler arrays, we need some defaults
+    {
+      const VkImageUsageFlags imageUsageFlags = 
+        // means we can make an image view required to assign this image to a descriptor
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        // means we can use this image to transfer into another
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+        // means we can use this image to receive data transferred from another
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT
+      ;
+      const VkMemoryPropertyFlags memoryUsageFlags =
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+      
+      defaultSampler = new Sampler(
+        physicalDevice, logicalDevice, 
+        VK_FILTER_LINEAR, VK_FILTER_LINEAR, 
+        VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        1,
+        VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK
+      );
+      defaultTexture1D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
+      );
+      defaultTexture2D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
+      );
+      defaultTexture3D = new Texture(
+        physicalDevice, logicalDevice,
+        graphicsCommandBuffer, graphicsQueue,
+        imageUsageFlags, memoryUsageFlags,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false
+      );
+    }
   };
 
   void destroy() {
 
+    if (defaultSampler) { defaultSampler->destroy(); delete defaultSampler;}
+    if (defaultTexture1D) { defaultTexture1D->destroy(); delete defaultTexture1D;}
+    if (defaultTexture2D) { defaultTexture2D->destroy(); delete defaultTexture2D;}
+    if (defaultTexture3D) { defaultTexture3D->destroy(); delete defaultTexture3D;}
+
+    if (samplerDescriptorSet) vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
+    if (texture1DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
+    if (texture2DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
+    if (texture3DDescriptorSet) vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
+    
+    if (samplerDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
+    if (texture1DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
+    if (texture2DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
+    if (texture3DDescriptorSetLayout) vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
+    
+    if (samplerDescriptorPool) vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
+    if (texture1DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
+    if (texture2DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
+    if (texture3DDescriptorPool) vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
+
     if (imageAvailableSemaphore) vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
     if (renderFinishedSemaphore) vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+    
     if (inFlightFence) vkDestroyFence(logicalDevice, inFlightFence, nullptr);
 
     if (swapchain) {
@@ -3087,7 +4012,412 @@ struct Context {
 
   void buildPipeline()
   {
+    // If the number of textures has changed, we need to make a new 
+    // descriptor pool             
+    if (samplerDescriptorPool && previousNumSamplers != Sampler::samplers.size()) {
+      vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
+      samplerDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!samplerDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLER;
+      poolSize.descriptorCount = std::max(uint32_t(Sampler::samplers.size()), uint32_t(1));
 
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &samplerDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &samplerDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = samplerDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &samplerDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &samplerDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the sampler array
+      std::vector<VkDescriptorImageInfo> samplerDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkSampler sampler = defaultSampler->sampler;
+        if (Sampler::samplers.size() > 0 && Sampler::samplers[i]) sampler = Sampler::samplers[i]->sampler;
+        samplerDescriptors[i].sampler = sampler;
+        samplerDescriptors[i].imageView = VK_NULL_HANDLE;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(Sampler::samplers.size());
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = samplerDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = samplerDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumSamplers = poolSize.descriptorCount;
+    }
+
+    // If the number of texture1ds has changed, we need to make a new 
+    // descriptor pool             
+    if (texture1DDescriptorPool && previousNumTexture1Ds != Texture::texture1Ds.size()) {
+      vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
+      texture1DDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!texture1DDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture1Ds.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture1DDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &texture1DDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = texture1DDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &texture1DDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture1DDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkImageView imageView = defaultTexture1D->imageView;
+        VkImageLayout layout = defaultTexture1D->layout;
+
+        if (Texture::texture1Ds.size() > 0 && Texture::texture1Ds[i]) {
+          imageView = Texture::texture1Ds[i]->imageView;
+          layout = Texture::texture1Ds[i]->layout;
+        }
+
+        textureDescriptors[i].imageView = imageView;
+        textureDescriptors[i].imageLayout = layout;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = texture1DDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTexture1Ds = Texture::texture1Ds.size();
+    }
+
+    // If the number of texture2ds has changed, we need to make a new 
+    // descriptor pool             
+    if (texture2DDescriptorPool && previousNumTexture2Ds != Texture::texture2Ds.size()) {
+      vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
+      texture2DDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!texture2DDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture2Ds.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture2DDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &texture2DDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = texture2DDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &texture2DDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture2DDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkImageView imageView = defaultTexture2D->imageView;
+        VkImageLayout layout = defaultTexture2D->layout;
+
+        if (Texture::texture2Ds.size() > 0 && Texture::texture2Ds[i]) {
+          imageView = Texture::texture2Ds[i]->imageView;
+          layout = Texture::texture2Ds[i]->layout;
+        }
+
+        textureDescriptors[i].imageView = imageView;
+        textureDescriptors[i].imageLayout = layout;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = texture2DDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTexture2Ds = Texture::texture2Ds.size();
+    }
+
+    // If the number of texture2ds has changed, we need to make a new 
+    // descriptor pool             
+    if (texture3DDescriptorPool && previousNumTexture3Ds != Texture::texture3Ds.size()) {
+      vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
+      texture3DDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!texture3DDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      poolSize.descriptorCount =  std::max(uint32_t(Texture::texture3Ds.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1; // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture3DDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0; 
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_ANY_HIT_BIT_KHR 
+                          | VK_SHADER_STAGE_INTERSECTION_BIT_KHR 
+                          | VK_SHADER_STAGE_MISS_BIT_KHR 
+                          | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+      
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        binding
+      };
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT
+      };
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+			descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+			descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &texture3DDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = { static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts  = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo {};
+			descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocateInfo.descriptorPool = texture3DDescriptorPool;
+			descriptorSetAllocateInfo.pSetLayouts = &texture3DDescriptorSetLayout;
+			descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+      
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture3DDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      // Image descriptors for the texture array
+      std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkImageView imageView = defaultTexture3D->imageView;
+        VkImageLayout layout = defaultTexture3D->layout;
+
+        if (Texture::texture3Ds.size() > 0 && Texture::texture3Ds[i]) {
+          imageView = Texture::texture3Ds[i]->imageView;
+          layout = Texture::texture3Ds[i]->layout;
+        }
+
+        textureDescriptors[i].imageView = imageView;
+        textureDescriptors[i].imageLayout = layout;
+      }
+
+      // [POI] Second and final descriptor is a texture array
+      // Unlike an array texture, these are adressed like typical arrays
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].dstSet = texture3DDescriptorSet;
+      writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the texture count here changes
+      previousNumTexture3Ds = Texture::texture3Ds.size();
+    }
+    
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.size = 128;
     pushConstantRange.offset = 0;
@@ -3097,17 +4427,17 @@ struct Context {
                                   | VK_SHADER_STAGE_MISS_BIT_KHR 
                                   | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
-    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCreateInfo.setLayoutCount = 0;    // if ever we use descriptors
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr; // if ever we use descriptors
-
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    // pipelineLayoutCI.setLayoutCount = 1;
-    // pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
-    pipelineLayoutCI.setLayoutCount = 0;
-    pipelineLayoutCI.pSetLayouts = nullptr;
+    std::vector<VkDescriptorSetLayout> layouts = {
+      samplerDescriptorSetLayout,
+      texture1DDescriptorSetLayout,
+      texture2DDescriptorSetLayout,
+      texture3DDescriptorSetLayout,
+    };
+    pipelineLayoutCI.setLayoutCount = layouts.size();
+    pipelineLayoutCI.pSetLayouts = layouts.data();
+
     pipelineLayoutCI.pushConstantRangeCount = 1;
     pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 
@@ -3475,6 +4805,170 @@ GPRT_API double gprtGetTime(GPRTContext _context)
   Context *context = (Context*)_context;
   if (!requestedFeatures.window) return 0.0;
   return glfwGetTime();
+}
+
+GPRT_API void gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
+  LOG_API_CALL();
+  if (!requestedFeatures.window) return;
+  Context *context = (Context*)_context;
+  Texture *texture = (Texture*)_texture;
+  
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+  // VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+  // submitInfo.signalSemaphoreCount = 1;
+  // submitInfo.pSignalSemaphores = signalSemaphores;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // transfer the texture to a transfer source
+  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
+
+  // now do the transfer
+  {
+    VkImageBlit region{};
+
+    region.srcOffsets[0].x = 0;
+    region.srcOffsets[0].y = 0;
+    region.srcOffsets[0].z = 0;
+    region.srcOffsets[1].x = context->windowExtent.width;
+    region.srcOffsets[1].y = context->windowExtent.height;
+    region.srcOffsets[1].z = 1;
+
+    region.dstOffsets[0].x = 0;
+    region.dstOffsets[0].y = 0;
+    region.dstOffsets[0].z = 0;
+    region.dstOffsets[1].x = texture->width;
+    region.dstOffsets[1].y = texture->height;
+    region.dstOffsets[1].z = 1;
+
+    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.srcSubresource.baseArrayLayer = 0;
+    region.srcSubresource.layerCount = 1;
+    region.srcSubresource.mipLevel = 0;
+
+    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.dstSubresource.baseArrayLayer = 0;
+    region.dstSubresource.layerCount = 1;
+    region.dstSubresource.mipLevel = 0;
+
+    vkCmdBlitImage(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 
+      context->swapchainImages[context->currentImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1, &region, VK_FILTER_LINEAR
+    );
+  }
+
+  // now go from TRANSFER_DST back to PRESENT_SRC
+  {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    
+    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents of the original 
+    // image. I'm assuming this is ok.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    // The new layout for the image
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // If we're transferring which queue owns this image, we need to set these.
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    // specify the image that is affected and the specific parts of that image.
+    barrier.image = context->swapchainImages[context->currentImageIndex];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage;
+    VkPipelineStageFlags destinationStage;
+
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+  }
+
+  // and revert the texture format back to its previous layout
+  texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,  {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+
+  presentInfo.waitSemaphoreCount = 0;
+  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+
+  VkSwapchainKHR swapchains[] = {context->swapchain};
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = swapchains;
+  presentInfo.pImageIndices = &context->currentImageIndex;
+
+  presentInfo.pResults = nullptr;
+
+  // currently throwing an error because the images given by the swapchain don't 
+  // have a defined layout...
+  VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+
+
+  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, 
+        VK_NULL_HANDLE, context->inFlightFence, &context->currentImageIndex);
+  vkWaitForFences(context->logicalDevice,1, &context->inFlightFence, true, UINT_MAX);
+  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
 GPRT_API void gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
@@ -3977,6 +5471,193 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType,
   LOG("assigning intersect program to geom type...");
 }
 
+GPRT_API GPRTSampler
+gprtSamplerCreate(GPRTContext _context,
+  GPRTFilter magFilter, GPRTFilter minFilter, GPRTFilter mipFilter, 
+  uint32_t anisotropy, GPRTSamplerAddressMode addressMode, GPRTBorderColor borderColor
+) {
+  LOG_API_CALL();
+
+  Context *context = (Context*)_context;
+  Sampler *sampler = new Sampler(
+    context->physicalDevice, context->logicalDevice,
+    (VkFilter) magFilter, (VkFilter) minFilter,
+    (VkSamplerMipmapMode) mipFilter,
+    anisotropy,
+    (VkSamplerAddressMode) addressMode,
+    (VkBorderColor) borderColor
+  );
+
+  return (GPRTSampler) sampler;
+}
+
+GPRT_API void
+gprtSamplerDestroy(GPRTSampler _sampler) {
+  LOG_API_CALL();
+
+  Sampler *sampler = (Sampler*)_sampler;
+  sampler->destroy();
+
+  delete sampler;
+}
+
+GPRT_API gprt::Sampler 
+gprtSamplerGetHandle(GPRTSampler _sampler)
+{
+  LOG_API_CALL();
+  Sampler *sampler = (Sampler*)_sampler;
+  gprt::Sampler samplerHandle;
+  samplerHandle.x = sampler->address;
+  samplerHandle.y = 0; // for future use
+  return samplerHandle;
+}
+
+GPRT_API GPRTTexture
+gprtHostTextureCreate(GPRTContext _context, 
+  GPRTImageType type, GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT; // means "flush" and "invalidate"  not needed
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
+  );
+
+  // Pin the texture to the host
+  texture->map();
+
+  return (GPRTTexture)texture;
+}
+
+GPRT_API GPRTTexture
+gprtDeviceTextureCreate(GPRTContext _context, 
+  GPRTImageType type, GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
+  );
+
+  return (GPRTTexture)texture;
+}
+
+GPRT_API GPRTTexture
+gprtSharedTextureCreate(GPRTContext _context, 
+  GPRTImageType type, GPRTFormat format, 
+  uint32_t width, uint32_t height, uint32_t depth, bool allocateMipmaps, const void* init)
+{
+  LOG_API_CALL();
+
+  const VkImageUsageFlags imageUsageFlags = 
+    // means we can make an image view required to assign this image to a descriptor
+    VK_IMAGE_USAGE_SAMPLED_BIT |
+    // means we can use this image to transfer into another
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+    // means we can use this image to receive data transferred from another
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT
+  ;
+  const VkMemoryPropertyFlags memoryUsageFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | // mappable to host with vkMapMemory
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |  // means "flush" and "invalidate"  not needed
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT; // means most efficient for device access
+
+  Context *context = (Context*)_context;
+  Texture *texture = new Texture(
+    context->physicalDevice, context->logicalDevice,
+    context->graphicsCommandBuffer, context->graphicsQueue,
+    imageUsageFlags, memoryUsageFlags,
+    (VkImageType)type, (VkFormat)format, width, height, depth,
+    allocateMipmaps, init
+  );
+
+  // Pin the texture to the host
+  texture->map();
+
+  return (GPRTTexture)texture;
+}
+
+GPRT_API size_t gprtTextureGetRowPitch(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  return texture->subresourceLayout.rowPitch;
+}
+
+GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  return texture->subresourceLayout.depthPitch;
+}
+
+GPRT_API void gprtTextureGenerateMipmap(GPRTTexture _texture)
+{
+  Texture *texture = (Texture*)_texture;
+  texture->generateMipmap();
+}
+
+GPRT_API void* 
+gprtTextureGetPointer(GPRTTexture _texture, int deviceID)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  return texture->mapped;
+}
+
+GPRT_API gprt::Texture 
+gprtTextureGetHandle(GPRTTexture _texture, int deviceID)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  gprt::Texture texHandle;
+  texHandle.x = texture->address;
+  texHandle.y = 0; // for future use
+  return texHandle;
+}
+
+GPRT_API void
+gprtTextureDestroy(GPRTTexture _texture)
+{
+  LOG_API_CALL();
+  Texture *texture = (Texture*)_texture;
+  texture->destroy();
+  delete texture;
+  LOG("texture destroyed");
+}
+
 GPRT_API GPRTBuffer
 gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void* init)
 {
@@ -4009,8 +5690,6 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
   if (init) {
     void* mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
-    buffer->flush();
-    buffer->invalidate();
   }
   LOG("buffer created");
   return (GPRTBuffer)buffer;
@@ -4260,6 +5939,17 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel,
   LOG("Setting instance accel transforms...");
 }
 
+GPRT_API void
+gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel,
+                                    GPRTBuffer _masks)
+{
+  LOG_API_CALL();
+  InstanceAccel *accel = (InstanceAccel*)instanceAccel;
+  Buffer *masks = (Buffer*)_masks;
+  accel->setVisibilityMasks(masks);
+  LOG("Setting instance accel visibility masks...");
+}
+
 GPRT_API void 
 gprtInstanceAccelSetReferences(GPRTAccel instanceAccel,
                                GPRTBuffer _references//,
@@ -4351,6 +6041,15 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  std::vector<VkDescriptorSet> descriptorSets = {
+    context->samplerDescriptorSet,
+    context->texture1DDescriptorSet,
+    context->texture2DDescriptorSet,
+    context->texture3DDescriptorSet
+  };
+  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
@@ -4499,6 +6198,15 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
     vkCmdResetQueryPool(context->graphicsCommandBuffer,  context->queryPool, 0, 2);
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
+
+  std::vector<VkDescriptorSet> descriptorSets = {
+    context->samplerDescriptorSet,
+    context->texture1DDescriptorSet,
+    context->texture2DDescriptorSet,
+    context->texture3DDescriptorSet
+  };
+  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, 
+    context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
   
   vkCmdBindPipeline(
     context->graphicsCommandBuffer,
