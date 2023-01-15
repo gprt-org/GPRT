@@ -40,6 +40,10 @@
 
 extern GPRTProgram s09_deviceCode;
 
+// Scene geometry. Looks a bit intimidating, but basically just a couple
+// hand-plotted triangles, two definiting a floor plane, 16 triangles defining
+// a wall with a hole in it for a window, and then two triangles filling that
+// hole with a window.
 const int NUM_FLOOR_VERTICES = 6;
 float3 floorVertices[NUM_FLOOR_VERTICES] = {
     {0.0, 0.0, -6.0}, {3.0, 0.0, -6.0}, {3.0, 0.0, 6.0},
@@ -85,6 +89,9 @@ int3 windowIndices[NUM_WINDOW_INDICES] = {
     {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
 };
 
+// We'll make a couple copies of the above geometry. Just transforming
+// those copies around using the transforms below. Note, we need to
+// transform the floor, wall, and window, so 3 transforms per "copy".
 const int NUM_INSTANCES = 15;
 float4x4 transforms[NUM_INSTANCES] = {
     transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
@@ -363,16 +370,28 @@ int main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
+  gprtBufferDestroy(floorVertexBuffer);
+  gprtBufferDestroy(floorIndexBuffer);
+  gprtGeomDestroy(floorGeom);
+  gprtAccelDestroy(floorAccel);
+
   gprtBufferDestroy(wallVertexBuffer);
   gprtBufferDestroy(wallIndexBuffer);
+  gprtGeomDestroy(wallGeom);
+  gprtAccelDestroy(wallAccel);
+
+  gprtBufferDestroy(windowVertexBuffer);
+  gprtBufferDestroy(windowIndexBuffer);
+  gprtGeomDestroy(windowGeom);
+  gprtAccelDestroy(windowAccel);
+
+  gprtBufferDestroy(transformsBuffer);
+  gprtBufferDestroy(masksBuffer);
+  gprtAccelDestroy(world);
+
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(wallAccel);
-  gprtAccelDestroy(windowAccel);
-  gprtAccelDestroy(world);
-  gprtGeomDestroy(wallGeom);
-  gprtGeomDestroy(windowGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
