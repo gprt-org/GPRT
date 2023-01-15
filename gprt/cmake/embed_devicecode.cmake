@@ -61,11 +61,13 @@ function(embed_devicecode)
 
     list(GET ENTRY_POINT_TYPES ${idx} ENTRY_POINT_TYPE)
 
+    
     # Compile hlsl to SPIRV
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
       COMMAND ${CMAKE_DXC_COMPILER}
       -HV 2021
+      -enable-16bit-types
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
       -HV 2021
