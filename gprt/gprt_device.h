@@ -315,3 +315,37 @@ where ARG is "(type_, name)". */
                 uint3 GroupID) /* program args and body supplied by user ... */
 #endif
 #endif
+
+#ifndef GPRT_VERTEX_PROGRAM
+#ifdef VERTEX
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+  /* fwd decl for the kernel func to call */                                                                           \
+  void progName();                                                                                                     \
+                                                                                                                       \
+  [shader("vertex")] void __vertex__##progName() { progName(); }                                                       \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  void progName() /* program args and body supplied by user ... */
+#else
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  void progName() /* program args and body supplied by user ... */
+#endif
+#endif
+
+#ifndef GPRT_PIXEL_PROGRAM
+#ifdef PIXEL
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  void progName();                                                                                                     \
+                                                                                                                       \
+  [shader("pixel")] void __pixel__##progName() { progName(); }                                                         \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  void progName() /* program args and body supplied by user ... */
+#else
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  void progName() /* program args and body supplied by user ... */
+#endif
+#endif

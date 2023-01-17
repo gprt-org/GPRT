@@ -49,8 +49,6 @@ endif()
 option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
 set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
 
-option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
-
 # ------------------------------------------------------------------
 # External configuration variables
 # ------------------------------------------------------------------
@@ -98,6 +96,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
+option(GPRT_BUILD_TESTS "Build the Test Code?" OFF)
 option(BUILD_DOC "Build documentation" OFF)
 
 add_subdirectory(3rdParty)
@@ -113,6 +112,10 @@ add_subdirectory(gprt)
 # ------------------------------------------------------------------
 if (GPRT_BUILD_SAMPLES)
   add_subdirectory(samples)
+endif()
+
+if (GPRT_BUILD_TESTS)
+  add_subdirectory(tests)
 endif()
 
 if (GPRT_IS_SUBPROJECT)
