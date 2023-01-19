@@ -191,7 +191,8 @@ typedef enum {
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
-  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT
+  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
+  GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
 
 /*! currently supported texture filter modes */
@@ -239,6 +240,14 @@ template <typename T>
 T *
 gprtGeomGetPointer(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtGeomGetPointer((GPRTGeom) geometry, deviceID);
+}
+
+void gprtGeomRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry);
+
+template <typename T>
+void
+gprtGeomRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry) {
+  gprtGeomRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry);
 }
 
 // ==================================================================
@@ -657,6 +666,33 @@ template <typename T>
 void
 gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rayType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rayType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rayType, GPRTTexture colorAttachment,
+                                               GPRTTexture depthAttachment);
+
+template <typename T1, typename T2, typename T3>
+void
+gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rayType, GPRTTextureOf<T2> colorAttachment,
+                                 GPRTTextureOf<T3> depthAttachment) {
+  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rayType, (GPRTTexture) colorAttachment,
+                                   (GPRTTexture) depthAttachment);
 }
 
 /**

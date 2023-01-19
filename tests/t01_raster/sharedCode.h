@@ -23,7 +23,7 @@
 #include "gprt.h"
 
 // note! HLSL aligns to float4 boundaries!
-struct VertexData {
+struct TrianglesGeomData {
   // pointers are represented using uint64_t
   alignas(16) gprt::Buffer frameBuffer;
 
@@ -31,10 +31,8 @@ struct VertexData {
   alignas(16) float3 color1;   // note the 16 byte alignment (not 12 byte) here
 };
 
-struct PixelData {
+// note! HLSL aligns to float4 boundaries!
+struct RayGenData {
   // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer frameBuffer;
-
-  alignas(16) float3 color0;   // note the 16 byte alignment (not 12 byte) here
-  alignas(16) float3 color1;   // note the 16 byte alignment (not 12 byte) here
+  alignas(8) uint64_t tmp;
 };

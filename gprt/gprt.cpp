@@ -635,6 +635,8 @@ gprtFormatGetSize(GPRTFormat format) {
     return 4;
   case GPRT_FORMAT_R32_SFLOAT:
     return 4;
+  case GPRT_FORMAT_D32_SFLOAT:
+    return 4;
   case GPRT_FORMAT_R32G32B32A32_SFLOAT:
     return 16;
   default:
@@ -675,6 +677,9 @@ struct Texture {
   uint32_t mipLevels;
 
   VkImageType imageType;
+
+  VkFormat format;
+  VkImageAspectFlagBits aspectFlagBits;
 
   uint32_t width;
   uint32_t height;
@@ -831,7 +836,7 @@ struct Texture {
 
       // // transition device to a transfer source format
       // setImageLayout(commandBuffer, image, layout,
-      // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+      // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {aspectFlagBits, 0,
       // mipLevels, 0, 1}); layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
       // VkBufferImageCopy copyRegion;
@@ -844,7 +849,7 @@ struct Texture {
       // copyRegion.bufferOffset = 0;
       // copyRegion.bufferRowLength = 0;
       // copyRegion.bufferImageHeight = 0;
-      // copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      // copyRegion.imageSubresource.aspectMask = aspectFlagBits;
       // copyRegion.imageSubresource.baseArrayLayer = 0;
       // copyRegion.imageSubresource.layerCount = 1;
       // copyRegion.imageSubresource.mipLevel = 0;
@@ -853,7 +858,7 @@ struct Texture {
 
       // // transition device to previous format
       // setImageLayout(commandBuffer, image, layout,
-      // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {VK_IMAGE_ASPECT_COLOR_BIT,
+      // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, {aspectFlagBits,
       // 0, mipLevels, 0, 1}); layout =
       // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -908,7 +913,7 @@ struct Texture {
 
       // transition device to a transfer destination format
       setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+                     {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
       // copy data
@@ -922,7 +927,7 @@ struct Texture {
       copyRegion.bufferOffset = 0;
       copyRegion.bufferRowLength = 0;
       copyRegion.bufferImageHeight = 0;
-      copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      copyRegion.imageSubresource.aspectMask = aspectFlagBits;
       copyRegion.imageSubresource.baseArrayLayer = 0;
       copyRegion.imageSubresource.layerCount = 1;
       copyRegion.imageSubresource.mipLevel = 0;
@@ -930,7 +935,7 @@ struct Texture {
 
       // transition device to an optimal device format
       setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+                     {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
       err = vkEndCommandBuffer(commandBuffer);
@@ -989,7 +994,7 @@ struct Texture {
 
     // transition device to a transfer destination format
     setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+                   {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
     layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     VkImageMemoryBarrier barrier{};
@@ -997,7 +1002,7 @@ struct Texture {
     barrier.image = image;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = aspectFlagBits;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
     barrier.subresourceRange.levelCount = 1;
@@ -1024,14 +1029,14 @@ struct Texture {
       VkImageBlit blit{};
       blit.srcOffsets[0] = {0, 0, 0};
       blit.srcOffsets[1] = {mipWidth, mipHeight, mipDepth};
-      blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.srcSubresource.aspectMask = aspectFlagBits;
       blit.srcSubresource.mipLevel = i - 1;
       blit.srcSubresource.baseArrayLayer = 0;
       blit.srcSubresource.layerCount = 1;
       blit.dstOffsets[0] = {0, 0, 0};
       blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1,
                             mipDepth > 1 ? mipDepth / 2 : 1};
-      blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.dstSubresource.aspectMask = aspectFlagBits;
       blit.dstSubresource.mipLevel = i;
       blit.dstSubresource.baseArrayLayer = 0;
       blit.dstSubresource.layerCount = 1;
@@ -1098,7 +1103,7 @@ struct Texture {
   }
 
   Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer _commandBuffer, VkQueue _queue,
-          VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type, VkFormat format,
+          VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type, VkFormat _format,
           uint32_t _width, uint32_t _height, uint32_t _depth, bool allocateMipmap, const void *data = nullptr) {
 
     std::vector<Texture *> &textures = (type == VK_IMAGE_TYPE_1D)   ? texture1Ds
@@ -1129,8 +1134,11 @@ struct Texture {
     width = _width;
     height = _height;
     depth = _depth;
+    format = _format;
     size = width * height * depth * gprtFormatGetSize((GPRTFormat) format);
     imageType = type;
+
+    aspectFlagBits = (format == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
     uint32_t largestDimension = std::max(std::max(width, height), depth);
     if (allocateMipmap) {
@@ -1208,6 +1216,10 @@ struct Texture {
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     imageInfo.usage = usageFlags;
+    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT)
+      imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
+      imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
     // Since this image is oonly going to be used by graphics queues, we have
     // this set to exclusive.
@@ -1285,7 +1297,7 @@ struct Texture {
         GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
       setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL,
-                     {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1});
+                     {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_GENERAL;
 
       err = vkEndCommandBuffer(commandBuffer);
@@ -1320,7 +1332,7 @@ struct Texture {
     // point... todo, how to handle cube maps? 1d/2d arrays? cube map arrays?
     viewInfo.viewType = (VkImageViewType) type;
     viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = aspectFlagBits;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -1330,7 +1342,7 @@ struct Texture {
 
     if (hostVisible) {
       VkImageSubresource subRes = {};
-      subRes.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      subRes.aspectMask = aspectFlagBits;
       subRes.mipLevel = 0;
       subRes.arrayLayer = 0;
       vkGetImageSubresourceLayout(logicalDevice, image, &subRes, &subresourceLayout);
@@ -1589,31 +1601,54 @@ struct Miss : public SBTEntry {
     primitive geometry types, etc */
 struct GeomType : public SBTEntry {
   VkDevice logicalDevice;
+  uint32_t numRayTypes;
+
   std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
   std::vector<VkPipelineShaderStageCreateInfo> anyHitShaderStages;
   std::vector<VkPipelineShaderStageCreateInfo> intersectionShaderStages;
+  std::vector<VkPipelineShaderStageCreateInfo> vertexShaderStages;
+  std::vector<VkPipelineShaderStageCreateInfo> pixelShaderStages;
 
   std::vector<std::string> closestHitShaderEntryPoints;
   std::vector<std::string> anyHitShaderEntryPoints;
   std::vector<std::string> intersectionShaderEntryPoints;
+  std::vector<std::string> vertexShaderEntryPoints;
+  std::vector<std::string> pixelShaderEntryPoints;
 
   std::vector<bool> closestHitShaderUsed;
   std::vector<bool> intersectionShaderUsed;
   std::vector<bool> anyHitShaderUsed;
+  std::vector<bool> vertexShaderUsed;
+  std::vector<bool> pixelShaderUsed;
+
+  VkRenderPass rasterRenderPass = VK_NULL_HANDLE;
+  VkFramebuffer rasterFrameBuffer = VK_NULL_HANDLE;
+  Texture *colorTextureAttachment = nullptr;
+  Texture *depthTextureAttachment = nullptr;
+
+  VkPipeline rasterPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout rasterPipelineLayout = VK_NULL_HANDLE;
 
   GeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
     std::cout << "Geom type is being made!" << std::endl;
+    this->numRayTypes = numRayTypes;
     closestHitShaderStages.resize(numRayTypes, {});
     anyHitShaderStages.resize(numRayTypes, {});
     intersectionShaderStages.resize(numRayTypes, {});
+    vertexShaderStages.resize(numRayTypes, {});
+    pixelShaderStages.resize(numRayTypes, {});
 
     closestHitShaderEntryPoints.resize(numRayTypes, {});
     anyHitShaderEntryPoints.resize(numRayTypes, {});
     intersectionShaderEntryPoints.resize(numRayTypes, {});
+    vertexShaderEntryPoints.resize(numRayTypes, {});
+    pixelShaderEntryPoints.resize(numRayTypes, {});
 
     closestHitShaderUsed.resize(numRayTypes, false);
     intersectionShaderUsed.resize(numRayTypes, false);
     anyHitShaderUsed.resize(numRayTypes, false);
+    vertexShaderUsed.resize(numRayTypes, false);
+    pixelShaderUsed.resize(numRayTypes, false);
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -1685,6 +1720,274 @@ struct GeomType : public SBTEntry {
     assert(intersectionShaderStages[rayType].module != VK_NULL_HANDLE);
   }
 
+  void setVertex(int rayType, Module *module, const char *entryPoint) {
+    vertexShaderUsed[rayType] = true;
+    vertexShaderEntryPoints[rayType] = std::string("__vertex__") + std::string(entryPoint);
+    auto binary = module->getBinary("VERTEX");
+    VkShaderModuleCreateInfo moduleCreateInfo{};
+    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+    moduleCreateInfo.pCode = binary.data();
+
+    VkShaderModule shaderModule;
+    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+
+    vertexShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexShaderStages[rayType].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexShaderStages[rayType].module = shaderModule;
+    vertexShaderStages[rayType].pName = vertexShaderEntryPoints[rayType].c_str();
+    assert(vertexShaderStages[rayType].module != VK_NULL_HANDLE);
+  }
+
+  void setPixel(int rayType, Module *module, const char *entryPoint) {
+    pixelShaderUsed[rayType] = true;
+    pixelShaderEntryPoints[rayType] = std::string("__pixel__") + std::string(entryPoint);
+    auto binary = module->getBinary("PIXEL");
+    VkShaderModuleCreateInfo moduleCreateInfo{};
+    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+    moduleCreateInfo.pCode = binary.data();
+
+    VkShaderModule shaderModule;
+    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+
+    pixelShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pixelShaderStages[rayType].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pixelShaderStages[rayType].module = shaderModule;
+    pixelShaderStages[rayType].pName = pixelShaderEntryPoints[rayType].c_str();
+    assert(pixelShaderStages[rayType].module != VK_NULL_HANDLE);
+  }
+
+  void setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
+    if (rasterRenderPass != VK_NULL_HANDLE)
+      vkDestroyRenderPass(logicalDevice, rasterRenderPass, nullptr);
+
+    colorTextureAttachment = colorTexture;
+    depthTextureAttachment = depthTexture;
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = colorTexture->format;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    // clear here says to clear the values to a constant at start.
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // save rasterized fragments to memory
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    // not currently using a stencil
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // Initial and final layouts of the texture
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthTexture->format;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.attachmentCount = attachments.size();
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &rasterRenderPass);
+
+    VkImageView attachmentViews[] = {colorTextureAttachment->imageView, depthTextureAttachment->imageView};
+
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = rasterRenderPass;
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.pAttachments = attachmentViews;
+    framebufferInfo.width = colorTextureAttachment->width;
+    framebufferInfo.height = colorTextureAttachment->height;
+    framebufferInfo.layers = 1;
+
+    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &rasterFrameBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create framebuffer!");
+    }
+  }
+
+  void buildRasterPipeline() {
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {vertexShaderStages[0], pixelShaderStages[0]};
+
+    // describes format of the vertex data
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.pVertexBindingDescriptions = nullptr;   // Optional
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.pVertexAttributeDescriptions = nullptr;   // Optional
+
+    // describes what kind of geometry will be drawn
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    // describes the region of the framebuffer that the output will be rendered to
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float) colorTextureAttachment->width;
+    viewport.height = (float) colorTextureAttachment->height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    // used to potentially crop the image
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent.width = colorTextureAttachment->width;
+    scissor.extent.height = colorTextureAttachment->height;
+
+    // Things that can change without needing to rebuild the pipeline...
+    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages.data();
+
+    // takes geometry and turns it into fragments
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasConstantFactor = 0.0f;   // Optional
+    rasterizer.depthBiasClamp = 0.0f;            // Optional
+    rasterizer.depthBiasSlopeFactor = 0.0f;      // Optional
+
+    // for MSAA, one way to do antialiasing
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.minSampleShading = 1.0f;            // Optional
+    multisampling.pSampleMask = nullptr;              // Optional
+    multisampling.alphaToCoverageEnable = VK_FALSE;   // Optional
+    multisampling.alphaToOneEnable = VK_FALSE;        // Optional
+
+    // compositing configuration
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;               // Optional
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;               // Optional
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.logicOp = VK_LOGIC_OP_COPY;   // Optional
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+    colorBlending.blendConstants[0] = 0.0f;   // Optional
+    colorBlending.blendConstants[1] = 0.0f;   // Optional
+    colorBlending.blendConstants[2] = 0.0f;   // Optional
+    colorBlending.blendConstants[3] = 0.0f;   // Optional
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.minDepthBounds = 0.0f;   // Optional
+    depthStencil.maxDepthBounds = 1.0f;   // Optional
+    depthStencil.stencilTestEnable = VK_FALSE;
+    depthStencil.front = {};   // Optional
+    depthStencil.back = {};    // Optional
+
+    // The layout here describes descriptor sets and push constants used
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 0;              // Optional
+    pipelineLayoutInfo.pSetLayouts = nullptr;           // Optional
+    pipelineLayoutInfo.pushConstantRangeCount = 0;      // Optional
+    pipelineLayoutInfo.pPushConstantRanges = nullptr;   // Optional
+
+    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &rasterPipelineLayout) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create pipeline layout!");
+    }
+
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;   // Optional
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+
+    pipelineInfo.layout = rasterPipelineLayout;
+
+    pipelineInfo.renderPass = rasterRenderPass;
+    pipelineInfo.subpass = 0;
+
+    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;   // Optional
+    pipelineInfo.basePipelineIndex = -1;                // Optional
+
+    if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rasterPipeline) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create graphics pipeline!");
+    }
+  }
+
   void destroy() {
     std::cout << "geom type is being destroyed!" << std::endl;
     for (uint32_t i = 0; i < closestHitShaderStages.size(); ++i) {
@@ -1698,6 +2001,26 @@ struct GeomType : public SBTEntry {
     for (uint32_t i = 0; i < intersectionShaderStages.size(); ++i) {
       if (intersectionShaderStages[i].module)
         vkDestroyShaderModule(logicalDevice, intersectionShaderStages[i].module, nullptr);
+    }
+    for (uint32_t i = 0; i < vertexShaderStages.size(); ++i) {
+      if (vertexShaderStages[i].module)
+        vkDestroyShaderModule(logicalDevice, vertexShaderStages[i].module, nullptr);
+    }
+    for (uint32_t i = 0; i < pixelShaderStages.size(); ++i) {
+      if (pixelShaderStages[i].module)
+        vkDestroyShaderModule(logicalDevice, pixelShaderStages[i].module, nullptr);
+    }
+
+    if (rasterPipelineLayout) {
+      vkDestroyPipelineLayout(logicalDevice, rasterPipelineLayout, nullptr);
+    }
+
+    if (rasterRenderPass) {
+      vkDestroyRenderPass(logicalDevice, rasterRenderPass, nullptr);
+    }
+
+    if (rasterFrameBuffer) {
+      vkDestroyFramebuffer(logicalDevice, rasterFrameBuffer, nullptr);
     }
   }
 
@@ -5101,6 +5424,109 @@ gprtGeomGetPointer(GPRTGeom _geometry, int deviceID) {
   return geometry->SBTRecord;
 }
 
+void
+gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry) {
+  LOG_API_CALL();
+
+  Context *context = (Context *) _context;
+  GeomType *geometryType = (GeomType *) _geomType;
+  Geom **geometry = (Geom **) _geometry;
+
+  VkResult err;
+
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+  VkClearValue clearValues[2];
+  clearValues[0].color = {{0.0f, 0.0f, 0.2f, 1.0f}};
+  clearValues[1].depthStencil = {1.0f, 0};
+
+  VkRenderPassBeginInfo renderPassBeginInfo = {};
+  renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  renderPassBeginInfo.pNext = nullptr;
+  renderPassBeginInfo.renderPass = geometryType->rasterRenderPass;
+  renderPassBeginInfo.renderArea.offset.x = 0;
+  renderPassBeginInfo.renderArea.offset.y = 0;
+  renderPassBeginInfo.renderArea.extent.width = geometryType->colorTextureAttachment->width;
+  renderPassBeginInfo.renderArea.extent.height = geometryType->colorTextureAttachment->height;
+  renderPassBeginInfo.clearValueCount = 2;
+  renderPassBeginInfo.pClearValues = clearValues;
+  renderPassBeginInfo.framebuffer = geometryType->rasterFrameBuffer;
+
+  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  // This will clear the color and depth attachment
+  vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  if (geometryType->rasterPipeline == VK_NULL_HANDLE) {
+    geometryType->buildRasterPipeline();
+  }
+
+  // Bind the rendering pipeline
+  // todo, if pipeline doesn't exist, create it.
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, geometryType->rasterPipeline);
+
+  VkViewport viewport{};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(geometryType->colorTextureAttachment->width);
+  viewport.height = static_cast<float>(geometryType->colorTextureAttachment->height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(context->graphicsCommandBuffer, 0, 1, &viewport);
+
+  VkRect2D scissor{};
+  scissor.offset = {0, 0};
+  scissor.extent.width = static_cast<float>(geometryType->colorTextureAttachment->width);
+  scissor.extent.height = static_cast<float>(geometryType->colorTextureAttachment->height);
+  vkCmdSetScissor(context->graphicsCommandBuffer, 0, 1, &scissor);
+
+  for (uint32_t i = 0; i < numGeometry; ++i) {
+    GeomType *geomType = geometry[i]->geomType;
+
+    if (geomType->getKind() == GPRT_TRIANGLES) {
+      TriangleGeom *geom = (TriangleGeom *) geometry[i];
+      VkDeviceSize offsets[1] = {0};
+
+      vkCmdDraw(context->graphicsCommandBuffer, 3, 1, 0, 0);
+
+      // // Bind triangle vertex buffer (contains positions)
+      // vkCmdBindVertexBuffers(context->graphicsCommandBuffer, 0, 1, &geom->vertex.buffers[0]->buffer, offsets);
+
+      // // Bind triangle index buffer
+      // vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+
+      // // Draw indexed triangle
+      // vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count, 1, 0, 0, 0);
+    }
+  }
+
+  vkCmdEndRenderPass(context->graphicsCommandBuffer);
+
+  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  if (err)
+    GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
+
+  VkSubmitInfo submitInfo;
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err)
+    GPRT_RAISE("failed to submit to queue! : \n" + errorString(err));
+
+  err = vkQueueWaitIdle(context->graphicsQueue);
+  if (err)
+    GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+}
+
 // ==================================================================
 // "Triangles" functions
 // ==================================================================
@@ -5305,6 +5731,36 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
 
   geomType->setIntersection(rayType, module, progName);
   LOG("assigning intersect program to geom type...");
+}
+
+GPRT_API void
+gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rayType, GPRTModule _module, const char *progName) {
+  LOG_API_CALL();
+  GeomType *geomType = (GeomType *) _geomType;
+  Module *module = (Module *) _module;
+
+  geomType->setVertex(rayType, module, progName);
+  LOG("assigning vertex program to geom type...");
+}
+
+GPRT_API void
+gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rayType, GPRTModule _module, const char *progName) {
+  LOG_API_CALL();
+  GeomType *geomType = (GeomType *) _geomType;
+  Module *module = (Module *) _module;
+
+  geomType->setPixel(rayType, module, progName);
+  LOG("assigning pixel program to geom type...");
+}
+
+GPRT_API void
+gprtGeomTypeSetRasterAttachments(GPRTGeomType _geomType, int rayType, GPRTTexture _colorAttachment,
+                                 GPRTTexture _depthAttachment) {
+  LOG_API_CALL();
+  GeomType *geomType = (GeomType *) _geomType;
+  Texture *colorAttachment = (Texture *) _colorAttachment;
+  Texture *depthAttachment = (Texture *) _depthAttachment;
+  geomType->setRasterAttachments(colorAttachment, depthAttachment);
 }
 
 GPRT_API GPRTSampler

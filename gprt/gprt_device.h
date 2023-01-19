@@ -318,34 +318,36 @@ where ARG is "(type_, name)". */
 
 #ifndef GPRT_VERTEX_PROGRAM
 #ifdef VERTEX
-#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl, VertexIDDecl, ReturnDecl)                                            \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName();                                                                                                     \
+  ReturnDecl progName(uint VertexIDDecl);                                                                              \
                                                                                                                        \
-  [shader("vertex")] void __vertex__##progName() { progName(); }                                                       \
+  [shader("vertex")] ReturnDecl __vertex__##progName(uint VertexID : SV_VertexID) { return progName(VertexID); }       \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName() /* program args and body supplied by user ... */
+  ReturnDecl progName(uint VertexIDDecl) /* program args and body supplied by user ... */
 #else
-#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl, VertexIDDecl, ReturnDecl)                                            \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName() /* program args and body supplied by user ... */
+  ReturnDecl progName(uint VertexIDDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
-#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl, ColorDecl)                                                            \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName();                                                                                                     \
+  float4 progName(in float3 ColorDecl);                                                                                \
                                                                                                                        \
-  [shader("pixel")] void __pixel__##progName() { progName(); }                                                         \
+  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float3 Color : COLOR0) : SV_TARGET {                \
+    return progName(Color);                                                                                            \
+  }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName() /* program args and body supplied by user ... */
+  float4 progName(in float3 ColorDecl) /* program args and body supplied by user ... */
 #else
-#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl, ColorDecl)                                                            \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName() /* program args and body supplied by user ... */
+  float4 progName(in float3 ColorDecl) /* program args and body supplied by user ... */
 #endif
 #endif
