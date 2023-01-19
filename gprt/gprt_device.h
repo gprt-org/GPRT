@@ -316,38 +316,66 @@ where ARG is "(type_, name)". */
 #endif
 #endif
 
+static uint32_t _VertexIndex = -1;
+
+uint32_t
+VertexIndex() {
+  return _VertexIndex;
+}
+
 #ifndef GPRT_VERTEX_PROGRAM
 #ifdef VERTEX
-#define GPRT_VERTEX_PROGRAM(progName, RecordDecl, VertexIDDecl, ReturnDecl)                                            \
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+  struct progName##VSOutput {                                                                                          \
+    float4 position : SV_POSITION;                                                                                     \
+    float2 barycentrics : TEXCOORD0;                                                                                   \
+  };                                                                                                                   \
+                                                                                                                       \
   /* fwd decl for the kernel func to call */                                                                           \
-  ReturnDecl progName(uint VertexIDDecl);                                                                              \
+  float4 progName();                                                                                                   \
                                                                                                                        \
-  [shader("vertex")] ReturnDecl __vertex__##progName(uint VertexID : SV_VertexID) { return progName(VertexID); }       \
-                                                                                                                       \
-  /* now the actual device code that the user is writing: */                                                           \
-  ReturnDecl progName(uint VertexIDDecl) /* program args and body supplied by user ... */
-#else
-#define GPRT_VERTEX_PROGRAM(progName, RecordDecl, VertexIDDecl, ReturnDecl)                                            \
-  /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  ReturnDecl progName(uint VertexIDDecl) /* program args and body supplied by user ... */
-#endif
-#endif
-
-#ifndef GPRT_PIXEL_PROGRAM
-#ifdef PIXEL
-#define GPRT_PIXEL_PROGRAM(progName, RecordDecl, ColorDecl)                                                            \
-  /* fwd decl for the kernel func to call */                                                                           \
-  float4 progName(in float3 ColorDecl);                                                                                \
-                                                                                                                       \
-  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float3 Color : COLOR0) : SV_TARGET {                \
-    return progName(Color);                                                                                            \
+  [shader("vertex")] progName##VSOutput __vertex__##progName(uint SVVID : SV_VertexID) {                               \
+    _VertexIndex = SVVID;                                                                                              \
+    progName##VSOutput output;                                                                                         \
+    output.position = progName();                                                                                      \
+    output.barycentrics = (((SVVID % 3) == 0)   ? float2(0.f, 0.f)                                                     \
+                           : ((SVVID % 3) == 1) ? float2(1.f, 0.f)                                                     \
+                                                : float2(0.f, 1.f));                                                   \
+    return output;                                                                                                     \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  float4 progName(in float3 ColorDecl) /* program args and body supplied by user ... */
+  float4 progName() /* program args and body supplied by user ... */
 #else
-#define GPRT_PIXEL_PROGRAM(progName, RecordDecl, ColorDecl)                                                            \
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  float4 progName(in float3 ColorDecl) /* program args and body supplied by user ... */
+  float4 progName() /* program args and body supplied by user ... */
+#endif
+#endif
+
+static float2 _Barycentrics = float2(0.f, 0.f);
+
+float2
+Barycentrics() {
+  return _Barycentrics;
+}
+
+#ifndef GPRT_PIXEL_PROGRAM
+#ifdef PIXEL
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  float4 progName();                                                                                                   \
+                                                                                                                       \
+  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float2 baryWeights : TEXCOORD0) : SV_TARGET {       \
+    _Barycentrics = baryWeights;                                                                                       \
+    return progName();                                                                                                 \
+  }                                                                                                                    \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  float4 progName() /* program args and body supplied by user ... */
+#else
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  float4 progName() /* program args and body supplied by user ... */
 #endif
 #endif
