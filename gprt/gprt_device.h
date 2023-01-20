@@ -36,6 +36,9 @@ struct PushConstants {
 [[vk::push_constant]] PushConstants pc;
 
 // Descriptor binding, then set number.
+// Currently, 0, N is used for textures
+// Then, 1, N is used for record data passed
+// to compute and raster programs.
 [[vk::binding(0, 0)]] SamplerState samplers[];
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
@@ -317,10 +320,22 @@ where ARG is "(type_, name)". */
 #endif
 
 static uint32_t _VertexIndex = -1;
+static uint32_t _PrimitiveIndex = -1;
+static float2 _Barycentrics = float2(0.f, 0.f);
 
 uint32_t
 VertexIndex() {
   return _VertexIndex;
+}
+
+uint32_t
+TriangleIndex() {
+  return _PrimitiveIndex;
+}
+
+float2
+Barycentrics() {
+  return _Barycentrics;
 }
 
 #ifndef GPRT_VERTEX_PROGRAM
@@ -331,13 +346,16 @@ VertexIndex() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+                                                                                                                       \
   /* fwd decl for the kernel func to call */                                                                           \
-  float4 progName();                                                                                                   \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
                                                                                                                        \
   [shader("vertex")] progName##VSOutput __vertex__##progName(uint SVVID : SV_VertexID) {                               \
     _VertexIndex = SVVID;                                                                                              \
+    _PrimitiveIndex = _VertexIndex % 3;                                                                                \
     progName##VSOutput output;                                                                                         \
-    output.position = progName();                                                                                      \
+    output.position = progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                       \
     output.barycentrics = (((SVVID % 3) == 0)   ? float2(0.f, 0.f)                                                     \
                            : ((SVVID % 3) == 1) ? float2(1.f, 0.f)                                                     \
                                                 : float2(0.f, 1.f));                                                   \
@@ -345,37 +363,36 @@ VertexIndex() {
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  float4 progName() /* program args and body supplied by user ... */
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  float4 progName() /* program args and body supplied by user ... */
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif
-
-static float2 _Barycentrics = float2(0.f, 0.f);
-
-float2
-Barycentrics() {
-  return _Barycentrics;
-}
 
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  /* fwd decl for the kernel func to call */                                                                           \
-  float4 progName();                                                                                                   \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
-  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float2 baryWeights : TEXCOORD0) : SV_TARGET {       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
+                                                                                                                       \
+  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float2 baryWeights                                  \
+                                               : TEXCOORD0, uint32_t PrimitiveID                                       \
+                                               : SV_PrimitiveID)                                                       \
+      : SV_TARGET {                                                                                                    \
     _Barycentrics = baryWeights;                                                                                       \
-    return progName();                                                                                                 \
+    _PrimitiveIndex = PrimitiveID;                                                                                     \
+    return progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                                  \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  float4 progName() /* program args and body supplied by user ... */
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  float4 progName() /* program args and body supplied by user ... */
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif

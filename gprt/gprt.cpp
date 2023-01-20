@@ -1621,13 +1621,17 @@ struct GeomType : public SBTEntry {
   std::vector<bool> vertexShaderUsed;
   std::vector<bool> pixelShaderUsed;
 
-  VkRenderPass rasterRenderPass = VK_NULL_HANDLE;
-  VkFramebuffer rasterFrameBuffer = VK_NULL_HANDLE;
-  Texture *colorTextureAttachment = nullptr;
-  Texture *depthTextureAttachment = nullptr;
-
-  VkPipeline rasterPipeline = VK_NULL_HANDLE;
-  VkPipelineLayout rasterPipelineLayout = VK_NULL_HANDLE;
+  // Optional resources for rasterizing geometry
+  struct Raster {
+    uint32_t width = -1;
+    uint32_t height = -1;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
+    Texture *colorAttachment = nullptr;
+    Texture *depthAttachment = nullptr;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  } raster;
 
   GeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
     std::cout << "Geom type is being made!" << std::endl;
@@ -1759,11 +1763,18 @@ struct GeomType : public SBTEntry {
   }
 
   void setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
-    if (rasterRenderPass != VK_NULL_HANDLE)
-      vkDestroyRenderPass(logicalDevice, rasterRenderPass, nullptr);
+    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
+      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
+    } else {
+      raster.width = colorTexture->width;
+      raster.height = colorTexture->height;
+    }
 
-    colorTextureAttachment = colorTexture;
-    depthTextureAttachment = depthTexture;
+    if (raster.renderPass != VK_NULL_HANDLE)
+      vkDestroyRenderPass(logicalDevice, raster.renderPass, nullptr);
+
+    raster.colorAttachment = colorTexture;
+    raster.depthAttachment = depthTexture;
 
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = colorTexture->format;
@@ -1777,7 +1788,7 @@ struct GeomType : public SBTEntry {
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     // Initial and final layouts of the texture
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = depthTexture->format;
@@ -1825,25 +1836,29 @@ struct GeomType : public SBTEntry {
     createInfo.dependencyCount = 1;
     createInfo.pDependencies = &dependency;
 
-    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &rasterRenderPass);
+    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &raster.renderPass);
 
-    VkImageView attachmentViews[] = {colorTextureAttachment->imageView, depthTextureAttachment->imageView};
+    VkImageView attachmentViews[] = {raster.colorAttachment->imageView, raster.depthAttachment->imageView};
 
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = rasterRenderPass;
+    framebufferInfo.renderPass = raster.renderPass;
     framebufferInfo.attachmentCount = 2;
     framebufferInfo.pAttachments = attachmentViews;
-    framebufferInfo.width = colorTextureAttachment->width;
-    framebufferInfo.height = colorTextureAttachment->height;
+    framebufferInfo.width = raster.width;
+    framebufferInfo.height = raster.height;
     framebufferInfo.layers = 1;
 
-    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &rasterFrameBuffer) != VK_SUCCESS) {
+    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &raster.frameBuffer) != VK_SUCCESS) {
       throw std::runtime_error("failed to create framebuffer!");
     }
   }
 
-  void buildRasterPipeline() {
+  void buildRasterPipeline(VkDescriptorSetLayout samplerDescriptorSetLayout,
+                           VkDescriptorSetLayout texture1DDescriptorSetLayout,
+                           VkDescriptorSetLayout texture2DDescriptorSetLayout,
+                           VkDescriptorSetLayout texture3DDescriptorSetLayout,
+                           VkDescriptorSetLayout recordDescriptorSetLayout) {
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {vertexShaderStages[0], pixelShaderStages[0]};
 
     // describes format of the vertex data
@@ -1864,16 +1879,16 @@ struct GeomType : public SBTEntry {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float) colorTextureAttachment->width;
-    viewport.height = (float) colorTextureAttachment->height;
+    viewport.width = (float) raster.width;
+    viewport.height = (float) raster.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     // used to potentially crop the image
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent.width = colorTextureAttachment->width;
-    scissor.extent.height = colorTextureAttachment->height;
+    scissor.extent.width = raster.width;
+    scissor.extent.height = raster.height;
 
     // Things that can change without needing to rebuild the pipeline...
     std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1956,12 +1971,21 @@ struct GeomType : public SBTEntry {
     // The layout here describes descriptor sets and push constants used
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;              // Optional
-    pipelineLayoutInfo.pSetLayouts = nullptr;           // Optional
-    pipelineLayoutInfo.pushConstantRangeCount = 0;      // Optional
-    pipelineLayoutInfo.pPushConstantRanges = nullptr;   // Optional
+    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                                  texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+                                                  recordDescriptorSetLayout};
+    pipelineLayoutInfo.setLayoutCount = layouts.size();
+    pipelineLayoutInfo.pSetLayouts = layouts.data();
 
-    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &rasterPipelineLayout) != VK_SUCCESS) {
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.size = 128;
+    pushConstantRange.offset = 0;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &raster.pipelineLayout) != VK_SUCCESS) {
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -1974,15 +1998,15 @@ struct GeomType : public SBTEntry {
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
 
-    pipelineInfo.layout = rasterPipelineLayout;
+    pipelineInfo.layout = raster.pipelineLayout;
 
-    pipelineInfo.renderPass = rasterRenderPass;
+    pipelineInfo.renderPass = raster.renderPass;
     pipelineInfo.subpass = 0;
 
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;   // Optional
     pipelineInfo.basePipelineIndex = -1;                // Optional
 
-    if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rasterPipeline) !=
+    if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &raster.pipeline) !=
         VK_SUCCESS) {
       throw std::runtime_error("failed to create graphics pipeline!");
     }
@@ -2011,16 +2035,16 @@ struct GeomType : public SBTEntry {
         vkDestroyShaderModule(logicalDevice, pixelShaderStages[i].module, nullptr);
     }
 
-    if (rasterPipelineLayout) {
-      vkDestroyPipelineLayout(logicalDevice, rasterPipelineLayout, nullptr);
+    if (raster.pipelineLayout) {
+      vkDestroyPipelineLayout(logicalDevice, raster.pipelineLayout, nullptr);
     }
 
-    if (rasterRenderPass) {
-      vkDestroyRenderPass(logicalDevice, rasterRenderPass, nullptr);
+    if (raster.renderPass) {
+      vkDestroyRenderPass(logicalDevice, raster.renderPass, nullptr);
     }
 
-    if (rasterFrameBuffer) {
-      vkDestroyFramebuffer(logicalDevice, rasterFrameBuffer, nullptr);
+    if (raster.frameBuffer) {
+      vkDestroyFramebuffer(logicalDevice, raster.frameBuffer, nullptr);
     }
   }
 
@@ -2031,15 +2055,39 @@ struct GeomType : public SBTEntry {
   abstract, and will get fleshed out in its derived classes
   (AABBGeom, TriangleGeom, ...) */
 struct Geom : public SBTEntry {
-  Geom() : SBTEntry(){};
+  // Our own virtual "geometry address space".
+  VkDeviceAddress address = -1;
+
+  static std::vector<Geom *> geoms;
+
+  Geom() : SBTEntry() {
+    // Hunt for an existing free address for this geometry
+    for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
+      if (Geom::geoms[i] == nullptr) {
+        Geom::geoms[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      geoms.push_back(this);
+      address = geoms.size() - 1;
+    }
+  };
   ~Geom(){};
 
-  void destroy() {}
+  void destroy() {
+    // Free geometry slot for use by subsequently made geometries
+    Geom::geoms[address] = nullptr;
+  }
 
   /*! This acts as a template that describes this geometry's variables and
       programs. */
   GeomType *geomType;
 };
+
+std::vector<Geom *> Geom::geoms;
 
 struct TriangleGeom : public Geom {
   struct {
@@ -3209,25 +3257,32 @@ struct Context {
   Texture *defaultTexture2D = nullptr;
   Texture *defaultTexture3D = nullptr;
 
+  Buffer *recordBuffer = nullptr;
+
   VkDescriptorPool samplerDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool recordDescriptorPool = VK_NULL_HANDLE;
 
   uint32_t previousNumSamplers = 0;
   uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
   uint32_t previousNumTexture3Ds = 0;
+  uint32_t previousNumRecords = 0;
 
-  VkDescriptorSetLayout samplerDescriptorSetLayout{};
-  VkDescriptorSetLayout texture1DDescriptorSetLayout{};
-  VkDescriptorSetLayout texture2DDescriptorSetLayout{};
-  VkDescriptorSetLayout texture3DDescriptorSetLayout{};
+  VkDescriptorSetLayout samplerDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout texture1DDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout texture2DDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout texture3DDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout recordDescriptorSetLayout = VK_NULL_HANDLE;
 
   VkDescriptorSet samplerDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
+
+  std::vector<VkDescriptorSet> recordDescriptorSets;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
@@ -3993,6 +4048,25 @@ struct Context {
           new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
                       memoryUsageFlags, VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
     }
+
+    // For the SBT record descriptor for compute and raster shaders
+    {
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      binding.descriptorCount = 1;   // we only have one of these bound at any point in time
+      binding.binding = 0;
+      binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+      descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+      descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = nullptr;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
+                                                  &recordDescriptorSetLayout));
+    }
   };
 
   void destroy() {
@@ -4031,6 +4105,8 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
     if (texture3DDescriptorSetLayout)
       vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
+    if (recordDescriptorSetLayout)
+      vkDestroyDescriptorSetLayout(logicalDevice, recordDescriptorSetLayout, nullptr);
 
     if (samplerDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
@@ -4040,6 +4116,8 @@ struct Context {
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
     if (texture3DDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
+    if (recordDescriptorPool)
+      vkDestroyDescriptorPool(logicalDevice, recordDescriptorPool, nullptr);
 
     if (imageAvailableSemaphore)
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
@@ -4279,6 +4357,18 @@ struct Context {
           }
         }
       }
+    }
+
+    // Update geometry record data in the record buffer for compute and raster programs
+    {
+      recordBuffer->map();
+      uint8_t *mapped = ((uint8_t *) (recordBuffer->mapped));
+      for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
+        size_t offset = recordSize * i;
+        uint8_t *params = mapped + offset;
+        memcpy(params, Geom::geoms[i]->SBTRecord, Geom::geoms[i]->recordSize);
+      }
+      recordBuffer->unmap();
     }
   }
 
@@ -4685,6 +4775,95 @@ struct Context {
 
       // Finally, keep track of if the texture count here changes
       previousNumTexture3Ds = Texture::texture3Ds.size();
+    }
+
+    // If the number of records has changed, we need to make a new descriptor pool
+    if (recordDescriptorPool && previousNumRecords != Geom::geoms.size()) {
+      if (recordBuffer) {
+        recordBuffer->destroy();
+        delete recordBuffer;
+      }
+      vkFreeDescriptorSets(logicalDevice, recordDescriptorPool, recordDescriptorSets.size(),
+                           recordDescriptorSets.data());
+      vkDestroyDescriptorPool(logicalDevice, recordDescriptorPool, nullptr);
+      recordDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (!recordDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      poolSize.descriptorCount = std::max(uint32_t(Geom::geoms.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = poolSize.descriptorCount;   // One descriptor per geometry
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &recordDescriptorPool));
+
+      // Create the descriptor sets themselves
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = recordDescriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = &recordDescriptorSetLayout;
+      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
+      descriptorSetAllocateInfo.pNext = nullptr;
+
+      recordDescriptorSets.resize(poolSize.descriptorCount);
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, recordDescriptorSets.data()));
+
+      // Create buffer to contain uniform buffer data
+      const VkBufferUsageFlags bufferUsageFlags =
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          // means we can use this buffer to transfer into another
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+          // means we can use this buffer to receive data transferred from another
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          // means we can use this buffer as a uniform buffer
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
+                                                                                            // device access
+
+      // for the moment, just assume the max group size
+      auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+        return (value + alignment - 1) & ~(alignment - 1);
+      };
+
+      auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
+
+      const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+      const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+      const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+
+      recordBuffer = new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+                                memoryUsageFlags, recordSize * poolSize.descriptorCount);
+
+      // Uniform buffer descriptors for each geometry's record
+      std::vector<VkDescriptorBufferInfo> uniformBufferDescriptors(poolSize.descriptorCount);
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        uniformBufferDescriptors[i].offset = i * recordSize;
+        uniformBufferDescriptors[i].buffer = recordBuffer->buffer;
+        uniformBufferDescriptors[i].range = recordSize;
+
+        writeDescriptorSets[i] = {};
+        writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSets[i].dstBinding = 0;
+        writeDescriptorSets[i].dstArrayElement = 0;
+        writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSets[i].descriptorCount = 1;   // one UBO per descriptor here
+        writeDescriptorSets[i].pBufferInfo = &uniformBufferDescriptors[i];
+        writeDescriptorSets[i].pImageInfo = 0;
+        writeDescriptorSets[i].dstSet = recordDescriptorSets[i];
+      }
+
+      // We'll write these descriptors now, but the actual recordBuffer will be written to later.
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                             writeDescriptorSets.data(), 0, nullptr);
+
+      // Finally, keep track of if the record count here changes
+      previousNumRecords = Geom::geoms.size();
     }
 
     VkPushConstantRange pushConstantRange = {};
@@ -5438,47 +5617,49 @@ gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeom
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
   VkClearValue clearValues[2];
-  clearValues[0].color = {{0.0f, 0.0f, 0.2f, 1.0f}};
+  clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
   clearValues[1].depthStencil = {1.0f, 0};
 
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   renderPassBeginInfo.pNext = nullptr;
-  renderPassBeginInfo.renderPass = geometryType->rasterRenderPass;
+  renderPassBeginInfo.renderPass = geometryType->raster.renderPass;
   renderPassBeginInfo.renderArea.offset.x = 0;
   renderPassBeginInfo.renderArea.offset.y = 0;
-  renderPassBeginInfo.renderArea.extent.width = geometryType->colorTextureAttachment->width;
-  renderPassBeginInfo.renderArea.extent.height = geometryType->colorTextureAttachment->height;
+  renderPassBeginInfo.renderArea.extent.width = geometryType->raster.width;
+  renderPassBeginInfo.renderArea.extent.height = geometryType->raster.height;
   renderPassBeginInfo.clearValueCount = 2;
   renderPassBeginInfo.pClearValues = clearValues;
-  renderPassBeginInfo.framebuffer = geometryType->rasterFrameBuffer;
+  renderPassBeginInfo.framebuffer = geometryType->raster.frameBuffer;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   // This will clear the color and depth attachment
   vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  if (geometryType->rasterPipeline == VK_NULL_HANDLE) {
-    geometryType->buildRasterPipeline();
+  if (geometryType->raster.pipeline == VK_NULL_HANDLE) {
+    geometryType->buildRasterPipeline(context->samplerDescriptorSetLayout, context->texture1DDescriptorSetLayout,
+                                      context->texture2DDescriptorSetLayout, context->texture3DDescriptorSetLayout,
+                                      context->recordDescriptorSetLayout);
   }
 
   // Bind the rendering pipeline
   // todo, if pipeline doesn't exist, create it.
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, geometryType->rasterPipeline);
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, geometryType->raster.pipeline);
 
   VkViewport viewport{};
   viewport.x = 0.0f;
   viewport.y = 0.0f;
-  viewport.width = static_cast<float>(geometryType->colorTextureAttachment->width);
-  viewport.height = static_cast<float>(geometryType->colorTextureAttachment->height);
+  viewport.width = static_cast<float>(geometryType->raster.width);
+  viewport.height = static_cast<float>(geometryType->raster.height);
   viewport.minDepth = 0.0f;
   viewport.maxDepth = 1.0f;
   vkCmdSetViewport(context->graphicsCommandBuffer, 0, 1, &viewport);
 
   VkRect2D scissor{};
   scissor.offset = {0, 0};
-  scissor.extent.width = static_cast<float>(geometryType->colorTextureAttachment->width);
-  scissor.extent.height = static_cast<float>(geometryType->colorTextureAttachment->height);
+  scissor.extent.width = geometryType->raster.width;
+  scissor.extent.height = geometryType->raster.height;
   vkCmdSetScissor(context->graphicsCommandBuffer, 0, 1, &scissor);
 
   for (uint32_t i = 0; i < numGeometry; ++i) {
@@ -5487,6 +5668,13 @@ gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeom
     if (geomType->getKind() == GPRT_TRIANGLES) {
       TriangleGeom *geom = (TriangleGeom *) geometry[i];
       VkDeviceSize offsets[1] = {0};
+
+      std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
+                                                     context->texture2DDescriptorSet, context->texture3DDescriptorSet,
+                                                     context->recordDescriptorSets[i]};
+      vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              geomType->raster.pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0,
+                              nullptr);
 
       vkCmdDraw(context->graphicsCommandBuffer, 3, 1, 0, 0);
 

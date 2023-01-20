@@ -24,11 +24,9 @@
 
 // note! HLSL aligns to float4 boundaries!
 struct TrianglesGeomData {
-  // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer frameBuffer;
-
-  alignas(16) float3 color0;   // note the 16 byte alignment (not 12 byte) here
-  alignas(16) float3 color1;   // note the 16 byte alignment (not 12 byte) here
+  /*! array/buffer of vertex indices */
+  alignas(16) gprt::Buffer index;   // int3*
+  alignas(16) gprt::Buffer color;   // float3*
 };
 
 // note! HLSL aligns to float4 boundaries!

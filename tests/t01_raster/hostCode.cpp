@@ -48,6 +48,12 @@ float3 vertices[NUM_VERTICES] = {
     {0.f, +.5f, 0.f},
 };
 
+float3 colors[NUM_VERTICES] = {
+    {1.f, 0.f, 0.f},
+    {0.f, 1.f, 0.f},
+    {0.f, 0.f, 1.f},
+};
+
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
 const int NUM_INDICES = 1;
@@ -105,13 +111,13 @@ main(int ac, char **av) {
   // ... and also probably a depth buffer
   //   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
-  GPRTTextureOf<uint32_t> colorBuffer = gprtDeviceTextureCreate<uint32_t>(
+  GPRTTextureOf<uint32_t> colorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
 
-  GPRTTextureOf<float> depthBuffer = gprtDeviceTextureCreate<float>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT,
-                                                                    fbSize.x, fbSize.y, 1, false, nullptr);
+  GPRTTextureOf<float> depthAttachment = gprtDeviceTextureCreate<float>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
 
-  gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorBuffer, depthBuffer);
+  gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorAttachment, depthAttachment);
   //   // Raygen program frame buffer
   //   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   //   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
@@ -126,6 +132,7 @@ main(int ac, char **av) {
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float3> colorBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, colors);
   GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
@@ -134,6 +141,9 @@ main(int ac, char **av) {
   // indices and vertices
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
+  TrianglesGeomData *data = gprtGeomGetPointer(trianglesGeom);
+  data->color = gprtBufferGetHandle<float3>(colorBuffer);
+  data->index = gprtBufferGetHandle<int3>(indexBuffer);
 
   // Once we have our geometry, we need to place that geometry into an
   // acceleration structure. These acceleration structures allow rays to
@@ -241,7 +251,7 @@ main(int ac, char **av) {
     gprtGeomRasterize(context, trianglesGeomType, drawList.size(), drawList.data());
 
     // If a window exists, presents the framebuffer here to that window
-    gprtTexturePresent(context, colorBuffer);
+    gprtTexturePresent(context, colorAttachment);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
@@ -258,9 +268,10 @@ main(int ac, char **av) {
   LOG("cleaning up ...");
 
   gprtBufferDestroy(vertexBuffer);
+  gprtBufferDestroy(colorBuffer);
   gprtBufferDestroy(indexBuffer);
-  gprtTextureDestroy(colorBuffer);
-  gprtTextureDestroy(depthBuffer);
+  gprtTextureDestroy(colorAttachment);
+  gprtTextureDestroy(depthAttachment);
   //   gprtBufferDestroy(frameBuffer);
   //   gprtRayGenDestroy(rayGen);
   //   gprtMissDestroy(miss);
