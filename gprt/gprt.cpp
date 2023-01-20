@@ -5675,17 +5675,8 @@ gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeom
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               geomType->raster.pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0,
                               nullptr);
-
-      vkCmdDraw(context->graphicsCommandBuffer, 3, 1, 0, 0);
-
-      // // Bind triangle vertex buffer (contains positions)
-      // vkCmdBindVertexBuffers(context->graphicsCommandBuffer, 0, 1, &geom->vertex.buffers[0]->buffer, offsets);
-
-      // // Bind triangle index buffer
-      // vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-
-      // // Draw indexed triangle
-      // vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count, 1, 0, 0, 0);
+      vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, 1, 0, 0, 0);
     }
   }
 
@@ -6123,7 +6114,9 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
       // means we can use this buffer to transfer into another
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
       // means we can use this buffer to receive data transferred from another
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      // means we can use this buffer as an index buffer for rasterization
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and "invalidate"
@@ -6155,7 +6148,9 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       // means we can use this buffer to transfer into another
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
       // means we can use this buffer to receive data transferred from another
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      // means we can use this buffer as an index buffer for rasterization
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                         // device access
 
@@ -6184,7 +6179,9 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       // means we can use this buffer to transfer into another
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
       // means we can use this buffer to receive data transferred from another
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+      // means we can use this buffer as an index buffer for rasterization
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |    // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |   // means "flush" and "invalidate"

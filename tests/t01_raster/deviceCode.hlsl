@@ -2,8 +2,8 @@
 
 GPRT_VERTEX_PROGRAM(simpleVertex, (TrianglesGeomData, record)) {
   uint32_t vertexID = VertexIndex();
-  float2 positions[3] = { float2(0.0, -0.5), float2(0.5, 0.5), float2(-0.5, 0.5) };
-  return float4(positions[vertexID], 0.f, 1.f);
+  float3 position = gprt::load<float3>(record.vertex, vertexID);
+  return float4(position, 1.f);
 }
 
 GPRT_PIXEL_PROGRAM(simplePixel, (TrianglesGeomData, record)) {

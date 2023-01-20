@@ -25,8 +25,9 @@
 // note! HLSL aligns to float4 boundaries!
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index;   // int3*
-  alignas(16) gprt::Buffer color;   // float3*
+  alignas(16) gprt::Buffer index;    // int3*
+  alignas(16) gprt::Buffer vertex;   // float3*
+  alignas(16) gprt::Buffer color;    // float3*
 };
 
 // note! HLSL aligns to float4 boundaries!

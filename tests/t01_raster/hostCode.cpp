@@ -143,6 +143,7 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
   TrianglesGeomData *data = gprtGeomGetPointer(trianglesGeom);
   data->color = gprtBufferGetHandle<float3>(colorBuffer);
+  data->vertex = gprtBufferGetHandle<float3>(vertexBuffer);
   data->index = gprtBufferGetHandle<int3>(indexBuffer);
 
   // Once we have our geometry, we need to place that geometry into an
