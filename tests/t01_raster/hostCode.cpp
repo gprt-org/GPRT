@@ -87,9 +87,6 @@ main(int ac, char **av) {
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // temporary
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
-
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.

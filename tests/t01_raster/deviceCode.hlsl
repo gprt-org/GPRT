@@ -16,6 +16,3 @@ GPRT_PIXEL_PROGRAM(simplePixel, (TrianglesGeomData, record)) {
   float3 C = C2 * bc.x + C3 * bc.y + C1 * (1.f - (bc.x + bc.y));
   return float4(C, 1.0f);
 }
-
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {}
-

@@ -4180,179 +4180,183 @@ struct Context {
     // for the moment, just assume the max group size
     const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
-    const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
-    const uint32_t sbtSize = groupCount * handleSize;
+    // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
+    // we might only have raster programs, and no RT programs.
+    if (shaderGroups.size() > 0) {
+      const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
+      const uint32_t sbtSize = groupCount * handleSize;
 
-    std::vector<uint8_t> shaderHandleStorage(sbtSize);
-    VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize,
-                                                           shaderHandleStorage.data());
-    if (err)
-      GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
+      std::vector<uint8_t> shaderHandleStorage(sbtSize);
+      VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize,
+                                                             shaderHandleStorage.data());
+      if (err)
+        GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can use this buffer as a SBT
-        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
-                                                                                           // vkMapMemory
-                                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
-                                                                                           // "invalidate" not needed
+      const VkBufferUsageFlags bufferUsageFlags =
+          // means we can use this buffer as a SBT
+          VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
+                                                                                             // vkMapMemory
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
+                                                                                             // "invalidate" not needed
 
-    // std::cout<<"Todo, get some smarter memory allocation working..."
-    // <<std::endl;
+      // std::cout<<"Todo, get some smarter memory allocation working..."
+      // <<std::endl;
 
-    size_t numComputes = computePrograms.size();
-    size_t numRayGens = raygenPrograms.size();
-    size_t numMissProgs = missPrograms.size();
-    size_t numHitRecords = getNumHitRecords();
+      size_t numComputes = computePrograms.size();
+      size_t numRayGens = raygenPrograms.size();
+      size_t numMissProgs = missPrograms.size();
+      size_t numHitRecords = getNumHitRecords();
 
-    size_t numRecords = numComputes + numRayGens + numMissProgs + numHitRecords;
+      size_t numRecords = numComputes + numRayGens + numMissProgs + numHitRecords;
 
-    if (shaderBindingTable.size != recordSize * numRecords) {
-      shaderBindingTable.destroy();
-    }
-    if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
-      shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-                                  memoryUsageFlags, recordSize * numRecords);
-    }
-    shaderBindingTable.map();
-    uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
-
-    // Compute records
-    if (computePrograms.size() > 0) {
-      for (uint32_t idx = 0; idx < computePrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
-
-        // First, copy handle
-        size_t recordOffset = recordStride * idx;
-        size_t handleOffset = handleStride * idx;
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        Compute *compute = computePrograms[idx];
-        memcpy(params, compute->SBTRecord, compute->recordSize);
+      if (shaderBindingTable.size != recordSize * numRecords) {
+        shaderBindingTable.destroy();
       }
-    }
-
-    // Raygen records
-    if (raygenPrograms.size() > 0) {
-      for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
-
-        // First, copy handle
-        size_t recordOffset = recordStride * idx + recordStride * numComputes;
-        size_t handleOffset = handleStride * idx + handleStride * numComputes;
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        RayGen *raygen = raygenPrograms[idx];
-        memcpy(params, raygen->SBTRecord, raygen->recordSize);
+      if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
+        shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+                                    memoryUsageFlags, recordSize * numRecords);
       }
-    }
+      shaderBindingTable.map();
+      uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
 
-    // Miss records
-    if (missPrograms.size() > 0) {
-      for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
+      // Compute records
+      if (computePrograms.size() > 0) {
+        for (uint32_t idx = 0; idx < computePrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
 
-        // First, copy handle
-        size_t recordOffset = recordStride * idx + recordStride * numRayGens + recordStride * numComputes;
-        size_t handleOffset = handleStride * idx + handleStride * numRayGens + handleStride * numComputes;
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+          // First, copy handle
+          size_t recordOffset = recordStride * idx;
+          size_t handleOffset = handleStride * idx;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        Miss *miss = missPrograms[idx];
-        memcpy(params, miss->SBTRecord, miss->recordSize);
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t *params = mapped + recordOffset;
+          Compute *compute = computePrograms[idx];
+          memcpy(params, compute->SBTRecord, compute->recordSize);
+        }
       }
-    }
 
-    // Hit records
-    if (numHitRecords > 0) {
-      // Go over all TLAS by order they were created
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-        Accel *tlas = accels[tlasID];
-        if (!tlas)
-          continue;
-        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-          // this is an issue, because if instances can be set on device, we
-          // don't have a list of instances we can iterate through and copy the
-          // SBT data... So, if we have a bunch of instances set by reference on
-          // device, we need to eventually do something smarter here...
-          size_t geomIDOffset = 0;
-          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+      // Raygen records
+      if (raygenPrograms.size() > 0) {
+        for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
 
-            Accel *blas = instanceAccel->instances[blasID];
-            if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-              TriangleAccel *triAccel = (TriangleAccel *) blas;
+          // First, copy handle
+          size_t recordOffset = recordStride * idx + recordStride * numComputes;
+          size_t handleOffset = handleStride * idx + handleStride * numComputes;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-                auto &geom = triAccel->geometries[geomID];
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t *params = mapped + recordOffset;
+          RayGen *raygen = raygenPrograms[idx];
+          memcpy(params, raygen->SBTRecord, raygen->recordSize);
+        }
+      }
 
-                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                  size_t recordStride = recordSize;
-                  size_t handleStride = handleSize;
+      // Miss records
+      if (missPrograms.size() > 0) {
+        for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
+          size_t recordStride = recordSize;
+          size_t handleStride = handleSize;
 
-                  // First, copy handle
-                  // Account for all prior instance's geometries and for prior
-                  // BLAS's geometry
-                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                        recordStride * (numComputes + numRayGens + numMissProgs);
-                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                        handleStride * (numComputes + numRayGens + numMissProgs);
-                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+          // First, copy handle
+          size_t recordOffset = recordStride * idx + recordStride * numRayGens + recordStride * numComputes;
+          size_t handleOffset = handleStride * idx + handleStride * numRayGens + handleStride * numComputes;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-                  // Then, copy params following handle
-                  recordOffset = recordOffset + handleSize;
-                  uint8_t *params = mapped + recordOffset;
-                  memcpy(params, geom->SBTRecord, geom->recordSize);
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t *params = mapped + recordOffset;
+          Miss *miss = missPrograms[idx];
+          memcpy(params, miss->SBTRecord, miss->recordSize);
+        }
+      }
+
+      // Hit records
+      if (numHitRecords > 0) {
+        // Go over all TLAS by order they were created
+        for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+          Accel *tlas = accels[tlasID];
+          if (!tlas)
+            continue;
+          if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+            InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+            // this is an issue, because if instances can be set on device, we
+            // don't have a list of instances we can iterate through and copy the
+            // SBT data... So, if we have a bunch of instances set by reference on
+            // device, we need to eventually do something smarter here...
+            size_t geomIDOffset = 0;
+            for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+
+              Accel *blas = instanceAccel->instances[blasID];
+              if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+                TriangleAccel *triAccel = (TriangleAccel *) blas;
+
+                for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                  auto &geom = triAccel->geometries[geomID];
+
+                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                    size_t recordStride = recordSize;
+                    size_t handleStride = handleSize;
+
+                    // First, copy handle
+                    // Account for all prior instance's geometries and for prior
+                    // BLAS's geometry
+                    size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
+                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
+                                          recordStride * (numComputes + numRayGens + numMissProgs);
+                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
+                                          handleStride * (numComputes + numRayGens + numMissProgs);
+                    memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+                    // Then, copy params following handle
+                    recordOffset = recordOffset + handleSize;
+                    uint8_t *params = mapped + recordOffset;
+                    memcpy(params, geom->SBTRecord, geom->recordSize);
+                  }
                 }
+                geomIDOffset += triAccel->geometries.size();
               }
-              geomIDOffset += triAccel->geometries.size();
-            }
 
-            else if (blas->getType() == GPRT_AABB_ACCEL) {
-              AABBAccel *aabbAccel = (AABBAccel *) blas;
+              else if (blas->getType() == GPRT_AABB_ACCEL) {
+                AABBAccel *aabbAccel = (AABBAccel *) blas;
 
-              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
-                auto &geom = aabbAccel->geometries[geomID];
+                for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                  auto &geom = aabbAccel->geometries[geomID];
 
-                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                  size_t recordStride = recordSize;
-                  size_t handleStride = handleSize;
+                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                    size_t recordStride = recordSize;
+                    size_t handleStride = handleSize;
 
-                  // First, copy handle
-                  // Account for all prior instance's geometries and for prior
-                  // BLAS's geometry
-                  size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                  size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                        recordStride * (numComputes + numRayGens + numMissProgs);
-                  size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                        handleStride * (numComputes + numRayGens + numMissProgs);
-                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+                    // First, copy handle
+                    // Account for all prior instance's geometries and for prior
+                    // BLAS's geometry
+                    size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
+                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
+                                          recordStride * (numComputes + numRayGens + numMissProgs);
+                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
+                                          handleStride * (numComputes + numRayGens + numMissProgs);
+                    memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-                  // Then, copy params following handle
-                  recordOffset = recordOffset + handleSize;
-                  uint8_t *params = mapped + recordOffset;
-                  memcpy(params, geom->SBTRecord, geom->recordSize);
+                    // Then, copy params following handle
+                    recordOffset = recordOffset + handleSize;
+                    uint8_t *params = mapped + recordOffset;
+                    memcpy(params, geom->SBTRecord, geom->recordSize);
+                  }
                 }
+                geomIDOffset += aabbAccel->geometries.size();
               }
-              geomIDOffset += aabbAccel->geometries.size();
-            }
 
-            else {
-              GPRT_RAISE("Unaccounted for BLAS type!");
+              else {
+                GPRT_RAISE("Unaccounted for BLAS type!");
+              }
             }
           }
         }
@@ -5032,26 +5036,28 @@ struct Context {
       }
     }
 
-    /*
-      Create the ray tracing pipeline
-    */
-    VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
-    rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-    rayTracingPipelineCI.pStages = shaderStages.data();
-    rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
-    rayTracingPipelineCI.pGroups = shaderGroups.data();
-    rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
-    rayTracingPipelineCI.layout = pipelineLayout;
+    if (shaderStages.size() > 0) {
+      /*
+        Create the ray tracing pipeline
+      */
+      VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
+      rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+      rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+      rayTracingPipelineCI.pStages = shaderStages.data();
+      rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
+      rayTracingPipelineCI.pGroups = shaderGroups.data();
+      rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
+      rayTracingPipelineCI.layout = pipelineLayout;
 
-    if (pipeline != VK_NULL_HANDLE) {
-      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
-      pipeline = VK_NULL_HANDLE;
-    }
-    VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
-                                                     &rayTracingPipelineCI, nullptr, &pipeline);
-    if (err) {
-      GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
+      if (pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+        pipeline = VK_NULL_HANDLE;
+      }
+      VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
+                                                       &rayTracingPipelineCI, nullptr, &pipeline);
+      if (err) {
+        GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
+      }
     }
   }
 
