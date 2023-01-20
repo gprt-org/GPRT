@@ -5604,7 +5604,8 @@ gprtGeomGetPointer(GPRTGeom _geometry, int deviceID) {
 }
 
 void
-gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry) {
+gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry,
+                      uint32_t *instanceCounts) {
   LOG_API_CALL();
 
   Context *context = (Context *) _context;
@@ -5669,6 +5670,11 @@ gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeom
       TriangleGeom *geom = (TriangleGeom *) geometry[i];
       VkDeviceSize offsets[1] = {0};
 
+      uint32_t instanceCount = 1;
+      if (instanceCounts != nullptr) {
+        instanceCount = instanceCounts[i];
+      }
+
       std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
                                                      context->texture2DDescriptorSet, context->texture3DDescriptorSet,
                                                      context->recordDescriptorSets[i]};
@@ -5676,7 +5682,7 @@ gprtGeomRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeom
                               geomType->raster.pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0,
                               nullptr);
       vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, 1, 0, 0, 0);
+      vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
     }
   }
 

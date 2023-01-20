@@ -242,14 +242,6 @@ gprtGeomGetPointer(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtGeomGetPointer((GPRTGeom) geometry, deviceID);
 }
 
-void gprtGeomRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry);
-
-template <typename T>
-void
-gprtGeomRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry) {
-  gprtGeomRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry);
-}
-
 // ==================================================================
 // "Triangles" functions
 // ==================================================================
@@ -693,6 +685,16 @@ gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rayType, GPRTTextu
                                  GPRTTextureOf<T3> depthAttachment) {
   gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rayType, (GPRTTexture) colorAttachment,
                                    (GPRTTexture) depthAttachment);
+}
+
+void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
+                           uint32_t *instanceCounts = nullptr);
+
+template <typename T>
+void
+gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry,
+                      uint32_t *instanceCounts = nullptr) {
+  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, instanceCounts);
 }
 
 /**

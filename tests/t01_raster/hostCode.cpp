@@ -249,7 +249,7 @@ main(int ac, char **av) {
     //     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList = {trianglesGeom};
-    gprtGeomRasterize(context, trianglesGeomType, drawList.size(), drawList.data());
+    gprtGeomTypeRasterize(context, trianglesGeomType, drawList.size(), drawList.data());
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);
