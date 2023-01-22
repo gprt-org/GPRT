@@ -30,8 +30,10 @@ struct TrianglesGeomData {
   alignas(16) gprt::Buffer color;    // float3*
 };
 
-// note! HLSL aligns to float4 boundaries!
-struct RayGenData {
-  // pointers are represented using uint64_t
-  alignas(8) uint64_t tmp;
+/* variables for the geometry representing the background */
+struct BackgroundData {
+  alignas(16) gprt::Buffer index;    // int3*
+  alignas(16) gprt::Buffer vertex;   // float3*
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
 };

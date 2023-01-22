@@ -41,14 +41,14 @@
 extern GPRTProgram t01_deviceCode;
 
 // Vertices are the points that define our triangles
-const int NUM_VERTICES = 3;
-float3 vertices[NUM_VERTICES] = {
+const int NUM_TRI_VERTICES = 3;
+float3 triVertices[NUM_TRI_VERTICES] = {
     {-1.f, -.5f, 0.f},
     {+1.f, -.5f, 0.f},
-    {0.f, +.5f, 0.f},
+    {+0.f, +.5f, 0.f},
 };
 
-float3 colors[NUM_VERTICES] = {
+float3 triColors[NUM_TRI_VERTICES] = {
     {1.f, 0.f, 0.f},
     {0.f, 1.f, 0.f},
     {0.f, 0.f, 1.f},
@@ -56,8 +56,21 @@ float3 colors[NUM_VERTICES] = {
 
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
-const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+const int NUM_TRI_INDICES = 1;
+int3 triIndices[NUM_TRI_INDICES] = {{0, 1, 2}};
+
+// These vertices and indices are used to define two triangles
+// that will act as a backdrop
+const int NUM_BACKDROP_VERTICES = 4;
+float3 backdropVertices[NUM_BACKDROP_VERTICES] = {
+    {-1.f, -1.f, 0.99f},
+    {+1.f, -1.f, 0.99f},
+    {-1.f, +1.f, 0.99f},
+    {+1.f, +1.f, 0.99f},
+};
+
+const int NUM_BACKDROP_INDICES = 2;
+int3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -87,61 +100,57 @@ main(int ac, char **av) {
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // First, we need to declare our geometry type.
-  // This includes all GPU kernels tied to the geometry, as well as the
-  // parameters passed to the geometry when hit by rays.
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  // gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
-
-  // maybe? We could enforce that the geometry was GPRT_TRIANGLES this way...
-  // it also might make more sence to tie things here, since you'd rasterize
-  // one geometry at a time, without any acceleration structures being involved.
   gprtGeomTypeSetVertexProg(trianglesGeomType, 0, module, "simpleVertex");
   gprtGeomTypeSetPixelProg(trianglesGeomType, 0, module, "simplePixel");
+
+  GPRTGeomTypeOf<BackgroundData> backdropGeomType = gprtGeomTypeCreate<BackgroundData>(context, GPRT_TRIANGLES);
+  gprtGeomTypeSetVertexProg(backdropGeomType, 0, module, "backgroundVertex");
+  gprtGeomTypeSetPixelProg(backdropGeomType, 0, module, "backgroundPixel");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  // ... We actually probably need a texture here...
-  // ... and also probably a depth buffer
-  //   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-
   GPRTTextureOf<uint32_t> colorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
 
   GPRTTextureOf<float> depthAttachment = gprtDeviceTextureCreate<float>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
 
+  // The background type should clear the screen, but the triangle should not.
+  // really, we should have a separate clear routine...
+  // Every renderpass we don't necessarily want to clear the whole screen.
+  // Instead, we just want to enable or disable depth testing
+  gprtGeomTypeSetRasterAttachments(backdropGeomType, 0, colorAttachment, depthAttachment);
   gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorAttachment, depthAttachment);
-  //   // Raygen program frame buffer
-  //   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
-  //   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
-  //   // Miss program checkerboard background colors
-  //   MissProgData *missData = gprtMissGetPointer(miss);
-  //   missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  //   missData->color1 = float3(0.0f, 0.0f, 0.0f);
+  // todo, consider not rejecting on depth
 
   LOG("building geometries ...");
-
-  // The vertex and index buffers here define the triangle vertices
-  // and how those vertices are connected together.
-  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<float3> colorBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, colors);
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-
-  // Next, we will create an instantiation of our geometry declaration.
+  GPRTBufferOf<float3> triVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triVertices);
+  GPRTBufferOf<float3> triColorBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triColors);
+  GPRTBufferOf<int3> triIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_TRI_INDICES, triIndices);
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  // We use these calls to tell the geometry what buffers store triangle
-  // indices and vertices
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-  TrianglesGeomData *data = gprtGeomGetPointer(trianglesGeom);
-  data->color = gprtBufferGetHandle<float3>(colorBuffer);
-  data->vertex = gprtBufferGetHandle<float3>(vertexBuffer);
-  data->index = gprtBufferGetHandle<int3>(indexBuffer);
+  gprtTrianglesSetVertices(trianglesGeom, triVertexBuffer, NUM_TRI_VERTICES);
+  gprtTrianglesSetIndices(trianglesGeom, triIndexBuffer, NUM_TRI_INDICES);
+  TrianglesGeomData *tridata = gprtGeomGetPointer(trianglesGeom);
+  tridata->color = gprtBufferGetHandle<float3>(triColorBuffer);
+  tridata->vertex = gprtBufferGetHandle<float3>(triVertexBuffer);
+  tridata->index = gprtBufferGetHandle<int3>(triIndexBuffer);
+
+  GPRTBufferOf<float3> backdropVertexBuffer =
+      gprtDeviceBufferCreate<float3>(context, NUM_BACKDROP_VERTICES, backdropVertices);
+  GPRTBufferOf<int3> backdropIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_BACKDROP_INDICES, backdropIndices);
+  GPRTGeomOf<BackgroundData> bgGeom = gprtGeomCreate<BackgroundData>(context, backdropGeomType);
+  gprtTrianglesSetVertices(bgGeom, backdropVertexBuffer, NUM_BACKDROP_VERTICES);
+  gprtTrianglesSetIndices(bgGeom, backdropIndexBuffer, NUM_BACKDROP_INDICES);
+  BackgroundData *bgdata = gprtGeomGetPointer(bgGeom);
+  bgdata->vertex = gprtBufferGetHandle<float3>(backdropVertexBuffer);
+  bgdata->index = gprtBufferGetHandle<int3>(backdropIndexBuffer);
+  bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
+  bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 
   // Once we have our geometry, we need to place that geometry into an
   // acceleration structure. These acceleration structures allow rays to
@@ -245,8 +254,11 @@ main(int ac, char **av) {
     //     // Calls the GPU raygen kernel function
     //     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
 
-    std::vector<GPRTGeomOf<TrianglesGeomData>> drawList = {trianglesGeom};
-    gprtGeomTypeRasterize(context, trianglesGeomType, drawList.size(), drawList.data());
+    std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
+    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data());
+
+    std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
+    gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data());
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);
@@ -265,18 +277,18 @@ main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(colorBuffer);
-  gprtBufferDestroy(indexBuffer);
+  // gprtBufferDestroy(triVertexBuffer);
+  // gprtBufferDestroy(triColorBuffer);
+  // gprtBufferDestroy(triIndexBuffer);
+
+  gprtBufferDestroy(backdropVertexBuffer);
+  gprtBufferDestroy(backdropIndexBuffer);
+
   gprtTextureDestroy(colorAttachment);
   gprtTextureDestroy(depthAttachment);
-  //   gprtBufferDestroy(frameBuffer);
-  //   gprtRayGenDestroy(rayGen);
-  //   gprtMissDestroy(miss);
-  //   gprtAccelDestroy(trianglesAccel);
-  //   gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
-  gprtGeomTypeDestroy(trianglesGeomType);
+
+  // gprtGeomDestroy(trianglesGeom);
+  // gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

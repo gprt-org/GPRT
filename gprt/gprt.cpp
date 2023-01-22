@@ -3282,7 +3282,7 @@ struct Context {
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
 
-  std::vector<VkDescriptorSet> recordDescriptorSets;
+  VkDescriptorSet recordDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
@@ -4052,7 +4052,7 @@ struct Context {
     // For the SBT record descriptor for compute and raster shaders
     {
       VkDescriptorSetLayoutBinding binding{};
-      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
       binding.descriptorCount = 1;   // we only have one of these bound at any point in time
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
@@ -4066,6 +4066,27 @@ struct Context {
       descriptorSetLayoutCreateInfo.pNext = nullptr;
       VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
                                                   &recordDescriptorSetLayout));
+
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      poolSize.descriptorCount = 1;
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = poolSize.descriptorCount;
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &recordDescriptorPool));
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = recordDescriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = &recordDescriptorSetLayout;
+      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
+      descriptorSetAllocateInfo.pNext = nullptr;
+
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &recordDescriptorSet));
     }
   };
 
@@ -4782,40 +4803,11 @@ struct Context {
     }
 
     // If the number of records has changed, we need to make a new descriptor pool
-    if (recordDescriptorPool && previousNumRecords != Geom::geoms.size()) {
-      if (recordBuffer) {
-        recordBuffer->destroy();
-        delete recordBuffer;
-      }
-      vkFreeDescriptorSets(logicalDevice, recordDescriptorPool, recordDescriptorSets.size(),
-                           recordDescriptorSets.data());
-      vkDestroyDescriptorPool(logicalDevice, recordDescriptorPool, nullptr);
-      recordDescriptorPool = VK_NULL_HANDLE;
+    if (recordBuffer && previousNumRecords != Geom::geoms.size()) {
+      recordBuffer->destroy();
+      delete recordBuffer;
     }
-    if (!recordDescriptorPool) {
-      VkDescriptorPoolSize poolSize;
-      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-      poolSize.descriptorCount = std::max(uint32_t(Geom::geoms.size()), uint32_t(1));
-
-      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      descriptorPoolInfo.poolSizeCount = 1;
-      descriptorPoolInfo.pPoolSizes = &poolSize;
-      descriptorPoolInfo.maxSets = poolSize.descriptorCount;   // One descriptor per geometry
-      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &recordDescriptorPool));
-
-      // Create the descriptor sets themselves
-      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = recordDescriptorPool;
-      descriptorSetAllocateInfo.pSetLayouts = &recordDescriptorSetLayout;
-      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
-      descriptorSetAllocateInfo.pNext = nullptr;
-
-      recordDescriptorSets.resize(poolSize.descriptorCount);
-      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, recordDescriptorSets.data()));
-
+    if (!recordBuffer) {
       // Create buffer to contain uniform buffer data
       const VkBufferUsageFlags bufferUsageFlags =
           // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -4841,30 +4833,27 @@ struct Context {
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
       recordBuffer = new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                                memoryUsageFlags, recordSize * poolSize.descriptorCount);
+                                memoryUsageFlags, recordSize * Geom::geoms.size());
 
       // Uniform buffer descriptors for each geometry's record
-      std::vector<VkDescriptorBufferInfo> uniformBufferDescriptors(poolSize.descriptorCount);
-      std::vector<VkWriteDescriptorSet> writeDescriptorSets(poolSize.descriptorCount);
-      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-        uniformBufferDescriptors[i].offset = i * recordSize;
-        uniformBufferDescriptors[i].buffer = recordBuffer->buffer;
-        uniformBufferDescriptors[i].range = recordSize;
+      VkDescriptorBufferInfo uniformBufferDescriptor;
+      VkWriteDescriptorSet writeDescriptorSet;
+      uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
+      uniformBufferDescriptor.buffer = recordBuffer->buffer;
+      uniformBufferDescriptor.range = recordSize;
 
-        writeDescriptorSets[i] = {};
-        writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeDescriptorSets[i].dstBinding = 0;
-        writeDescriptorSets[i].dstArrayElement = 0;
-        writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writeDescriptorSets[i].descriptorCount = 1;   // one UBO per descriptor here
-        writeDescriptorSets[i].pBufferInfo = &uniformBufferDescriptors[i];
-        writeDescriptorSets[i].pImageInfo = 0;
-        writeDescriptorSets[i].dstSet = recordDescriptorSets[i];
-      }
+      writeDescriptorSet = {};
+      writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSet.dstBinding = 0;
+      writeDescriptorSet.dstArrayElement = 0;
+      writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
+      writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
+      writeDescriptorSet.pImageInfo = 0;
+      writeDescriptorSet.dstSet = recordDescriptorSet;
 
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
-      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
-                             writeDescriptorSets.data(), 0, nullptr);
+      vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
       // Finally, keep track of if the record count here changes
       previousNumRecords = Geom::geoms.size();
@@ -5669,6 +5658,18 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   scissor.extent.height = geometryType->raster.height;
   vkCmdSetScissor(context->graphicsCommandBuffer, 0, 1, &scissor);
 
+  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+    return (value + alignment - 1) & ~(alignment - 1);
+  };
+
+  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
+  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
+  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
+  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
+
+  // for the moment, just assume the max group size
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+
   for (uint32_t i = 0; i < numGeometry; ++i) {
     GeomType *geomType = geometry[i]->geomType;
 
@@ -5683,10 +5684,12 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
       std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
                                                      context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                     context->recordDescriptorSets[i]};
+                                                     context->recordDescriptorSet};
+
+      uint32_t offset = geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              geomType->raster.pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0,
-                              nullptr);
+                              geomType->raster.pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 1,
+                              &offset);
       vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
     }

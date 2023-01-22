@@ -322,6 +322,7 @@ where ARG is "(type_, name)". */
 static uint32_t _VertexIndex = -1;
 static uint32_t _PrimitiveIndex = -1;
 static float2 _Barycentrics = float2(0.f, 0.f);
+static float4 _Position = float4(0.f, 0.f, 0.f, 0.f);
 
 uint32_t
 VertexIndex() {
@@ -336,6 +337,11 @@ TriangleIndex() {
 float2
 Barycentrics() {
   return _Barycentrics;
+}
+
+float4
+Position() {
+  return _Position;
 }
 
 #ifndef GPRT_VERTEX_PROGRAM
@@ -379,10 +385,12 @@ Barycentrics() {
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
                                                                                                                        \
-  [shader("pixel")] float4 __pixel__##progName([[vk::location(0)]] float2 baryWeights                                  \
-                                               : TEXCOORD0, uint32_t PrimitiveID                                       \
+  [shader("pixel")] float4 __pixel__##progName(float2 baryWeights                                                      \
+                                               : TEXCOORD0, float4 position                                            \
+                                               : SV_Position, uint32_t PrimitiveID                                     \
                                                : SV_PrimitiveID)                                                       \
       : SV_TARGET {                                                                                                    \
+    _Position = position;                                                                                              \
     _Barycentrics = baryWeights;                                                                                       \
     _PrimitiveIndex = PrimitiveID;                                                                                     \
     return progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                                  \
