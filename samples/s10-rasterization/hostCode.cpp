@@ -119,14 +119,8 @@ main(int ac, char **av) {
   GPRTTextureOf<float> depthAttachment = gprtDeviceTextureCreate<float>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
 
-  // The background type should clear the screen, but the triangle should not.
-  // really, we should have a separate clear routine...
-  // Every renderpass we don't necessarily want to clear the whole screen.
-  // Instead, we just want to enable or disable depth testing
   gprtGeomTypeSetRasterAttachments(backdropGeomType, 0, colorAttachment, depthAttachment);
   gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorAttachment, depthAttachment);
-
-  // todo, consider not rejecting on depth
 
   LOG("building geometries ...");
   GPRTBufferOf<float3> triVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triVertices);
@@ -156,14 +150,7 @@ main(int ac, char **av) {
   // build the pipeline and shader binding table
   // ##################################################################
 
-  // We must build the pipeline after all geometry instances are created.
-  // The pipeline contains programs for each geometry that might be hit by
-  // a ray.
   gprtBuildPipeline(context);
-
-  // Next, the shader binding table is used to assign parameters to our ray
-  // generation and miss programs. We also use the shader binding table to
-  // map parameters to geometry depending on the ray type and instance.
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -199,7 +186,7 @@ main(int ac, char **av) {
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = -(lastxpos - xpos) * deltaAngleX;
+      float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
@@ -212,8 +199,8 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float4x4 lookAtMatrix = lookat_matrix(position.xyz(), pivot.xyz(), lookUp, linalg::pos_z);
-      float4x4 perspectiveMatrix = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f, linalg::pos_z);
+      float4x4 lookAtMatrix = lookat_matrix(position.xyz(), pivot.xyz(), lookUp);
+      float4x4 perspectiveMatrix = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f);
 
       tridata->view = lookAtMatrix;
       tridata->proj = perspectiveMatrix;
