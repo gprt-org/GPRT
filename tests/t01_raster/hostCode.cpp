@@ -152,26 +152,6 @@ main(int ac, char **av) {
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
   bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // Once we have our geometry, we need to place that geometry into an
-  // acceleration structure. These acceleration structures allow rays to
-  // determine which triangle the ray hits in a sub-linear amount of time.
-  // This first acceleration structure level is called a bottom level
-  // acceleration structure, or a BLAS.
-  //   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  //   gprtAccelBuild(context, trianglesAccel);
-
-  // We can then make multiple "instances", or copies, of that BLAS in
-  // a top level acceleration structure, or a TLAS. (we'll cover this later.)
-  // Rays can only be traced into TLAS, so for now we just make one BLAS
-  // instance.
-  //   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
-  //   gprtAccelBuild(context, world);
-
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
-  //   rayGenData->world = gprtAccelGetHandle(world);
-
   // ##################################################################
   // build the pipeline and shader binding table
   // ##################################################################
@@ -268,9 +248,9 @@ main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  // gprtBufferDestroy(triVertexBuffer);
-  // gprtBufferDestroy(triColorBuffer);
-  // gprtBufferDestroy(triIndexBuffer);
+  gprtBufferDestroy(triVertexBuffer);
+  gprtBufferDestroy(triColorBuffer);
+  gprtBufferDestroy(triIndexBuffer);
 
   gprtBufferDestroy(backdropVertexBuffer);
   gprtBufferDestroy(backdropIndexBuffer);
@@ -278,8 +258,9 @@ main(int ac, char **av) {
   gprtTextureDestroy(colorAttachment);
   gprtTextureDestroy(depthAttachment);
 
-  // gprtGeomDestroy(trianglesGeom);
-  // gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomDestroy(bgGeom);
+  gprtGeomDestroy(trianglesGeom);
+  gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 
