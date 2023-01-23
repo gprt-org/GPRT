@@ -51,12 +51,16 @@ make_8bit(const float f) {
 }
 
 inline uint32_t
-make_rgba(const float3 color) {
+make_rgba(float3 color) {
+  float gamma = 2.2;
+  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.z) << 16) + (0xffU << 24);
 }
 
 inline uint32_t
-make_bgra(const float3 color) {
+make_bgra(float3 color) {
+  float gamma = 2.2;
+  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) + (0xffU << 24);
 }
 

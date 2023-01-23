@@ -827,6 +827,9 @@ struct Texture {
       // this, at the moment textures can only be written to by the host... But
       // it might be worth filing a bug over...
 
+      // Update: we actually do need this to work in order to download the contents
+      // of rasterized images.
+
       // VkResult err;
       // VkCommandBufferBeginInfo cmdBufInfo{};
       // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1973,7 +1976,7 @@ struct GeomType : public SBTEntry {
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0f;   // Optional
@@ -6368,6 +6371,32 @@ gprtBufferSaveImage(GPRTBuffer _buffer, uint32_t width, uint32_t height, const c
   // Return mapped to previous state
   if (!mapped)
     buffer->unmap();
+}
+
+GPRT_API void
+gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+
+  // Keep track of whether the texture was mapped before this call
+  bool mapped = true;
+  if (texture->mapped == nullptr)
+    mapped = false;
+
+  // If not mapped currently, map it
+  if (!mapped)
+    texture->map();
+
+  if (texture->format != VK_FORMAT_R8G8B8A8_SRGB) {
+    GPRT_RAISE("Error, only GPRT_FORMAT_R8G8B8A8_SRGB format currently supported!");
+  }
+
+  const uint8_t *fb = (const uint8_t *) texture->mapped;
+  stbi_write_png(imageName, texture->width, texture->height, 4, fb, (uint32_t) (texture->width) * sizeof(uint32_t));
+
+  // Return mapped to previous state
+  if (!mapped)
+    texture->unmap();
 }
 
 GPRT_API void

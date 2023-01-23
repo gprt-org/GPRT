@@ -812,6 +812,27 @@ gprtTexturePresent(GPRTContext context, GPRTTextureOf<T> texture) {
 }
 
 /**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+GPRT_API void gprtTextureSaveImage(GPRTTexture texture, const char *imageName);
+
+/**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+template <typename T>
+void
+gprtTextureSaveImage(GPRTTextureOf<T> texture, const char *imageName) {
+  gprtTextureSaveImage((GPRTTexture) texture, imageName);
+}
+
+/**
  * @brief Clears all values of the given texture to 0
  *
  * @param texture The texture to be cleared

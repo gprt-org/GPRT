@@ -45,7 +45,7 @@ const int NUM_TRI_VERTICES = 3;
 float3 triVertices[NUM_TRI_VERTICES] = {
     {-1.f, -.5f, 0.f},
     {+1.f, -.5f, 0.f},
-    {+0.f, +.5f, 0.f},
+    {0.f, +.5f, 0.f},
 };
 
 float3 triColors[NUM_TRI_VERTICES] = {
@@ -76,7 +76,7 @@ int3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s01-singleTriangle.png";
+const char *outFileName = "t01-singleTriangle.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.f, 0.f, -4.f};
@@ -196,69 +196,57 @@ main(int ac, char **av) {
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
   do {
-    //     float speed = .001f;
-    //     lastxpos = xpos;
-    //     lastypos = ypos;
-    //     gprtGetCursorPos(context, &xpos, &ypos);
-    //     if (firstFrame) {
-    //       lastxpos = xpos;
-    //       lastypos = ypos;
-    //     }
-    //     int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
+    float speed = .001f;
+    lastxpos = xpos;
+    lastypos = ypos;
+    gprtGetCursorPos(context, &xpos, &ypos);
+    if (firstFrame) {
+      lastxpos = xpos;
+      lastypos = ypos;
+    }
+    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
-    //     // If we click the mouse, we should rotate the camera
-    //     // Here, we implement some simple camera controls
-    //     if (state == GPRT_PRESS || firstFrame) {
-    //       firstFrame = false;
-    //       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
-    //       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
-    // #ifndef M_PI
-    // #define M_PI 3.1415926f
-    // #endif
+    // If we click the mouse, we should rotate the camera
+    // Here, we implement some simple camera controls
+    if (state == GPRT_PRESS || firstFrame) {
+      firstFrame = false;
+      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
+      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
+#ifndef M_PI
+#define M_PI 3.1415926f
+#endif
 
-    //       // step 1 : Calculate the amount of rotation given the mouse movement.
-    //       float deltaAngleX = (2 * M_PI / fbSize.x);
-    //       float deltaAngleY = (M_PI / fbSize.y);
-    //       float xAngle = (lastxpos - xpos) * deltaAngleX;
-    //       float yAngle = (lastypos - ypos) * deltaAngleY;
+      // step 1 : Calculate the amount of rotation given the mouse movement.
+      float deltaAngleX = (2 * M_PI / fbSize.x);
+      float deltaAngleY = (M_PI / fbSize.y);
+      float xAngle = -(lastxpos - xpos) * deltaAngleX;
+      float yAngle = (lastypos - ypos) * deltaAngleY;
 
-    //       // step 2: Rotate the camera around the pivot point on the first axis.
-    //       float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
-    //       position = (mul(rotationMatrixX, (position - pivot))) + pivot;
+      // step 2: Rotate the camera around the pivot point on the first axis.
+      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      position = (mul(rotationMatrixX, (position - pivot))) + pivot;
 
-    //       // step 3: Rotate the camera around the pivot point on the second axis.
-    //       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-    //       float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
-    //       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
+      // step 3: Rotate the camera around the pivot point on the second axis.
+      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
+      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
-    //       // ----------- compute variable values  ------------------
-    //       float3 camera_pos = lookFrom;
-    //       float3 camera_d00 = normalize(lookAt - lookFrom);
-    //       float aspect = float(fbSize.x) / float(fbSize.y);
-    //       float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
-    //       float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
-    //       camera_d00 -= 0.5f * camera_ddu;
-    //       camera_d00 -= 0.5f * camera_ddv;
+      float aspect = float(fbSize.x) / float(fbSize.y);
+      float4x4 lookAtMatrix = lookat_matrix(position.xyz(), pivot.xyz(), lookUp, linalg::pos_z);
+      float4x4 perspectiveMatrix = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f, linalg::pos_z);
 
-    //       // ----------- set variables  ----------------------------
-    //       RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
-    //       raygenData->camera.pos = camera_pos;
-    //       raygenData->camera.dir_00 = camera_d00;
-    //       raygenData->camera.dir_du = camera_ddu;
-    //       raygenData->camera.dir_dv = camera_ddv;
+      tridata->view = lookAtMatrix;
+      tridata->proj = perspectiveMatrix;
 
-    //       // Use this to upload all set parameters to our ray tracing device
-    //       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
-    //     }
-
-    //     // Calls the GPU raygen kernel function
-    //     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+      gprtBuildShaderBindingTable(context);
+    }
 
     gprtTextureClear(depthAttachment);
     gprtTextureClear(colorAttachment);
 
     std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
     gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data());
+    gprtTextureClear(depthAttachment);
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
     gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data());
@@ -270,9 +258,9 @@ main(int ac, char **av) {
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  //   LOG("done with launch, writing frame buffer to " << outFileName);
-  //   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  //   LOG_OK("written rendered frame buffer to file " << outFileName);
+  LOG("done with launch, writing frame buffer to " << outFileName);
+  gprtTextureSaveImage(colorAttachment, outFileName);
+  LOG_OK("written rendered frame buffer to file " << outFileName);
 
   // ##################################################################
   // and finally, clean up

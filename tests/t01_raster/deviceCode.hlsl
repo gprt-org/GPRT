@@ -13,14 +13,23 @@ GPRT_VERTEX_PROGRAM(backgroundVertex, (BackgroundData, record)) {
 GPRT_PIXEL_PROGRAM(backgroundPixel, (BackgroundData, record)) {
   int2 pixelID = Position().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  const float3 color = (pattern & 1) ? record.color1 : record.color0;
+  float3 color = (pattern & 1) ? record.color1 : record.color0;
   return float4(color, 1.0f);
 }
 
 GPRT_VERTEX_PROGRAM(simpleVertex, (TrianglesGeomData, record)) {
   uint32_t vertexID = VertexIndex();
-  float3 position = gprt::load<float3>(record.vertex, vertexID);
-  return float4(position, 1.f);
+  float4x4 view = record.view;
+  float4x4 proj = record.proj;
+  float4 position = float4(gprt::load<float3>(record.vertex, vertexID), 1.f);
+  position = mul(view, position);
+  position = mul(proj, position);
+
+  if (vertexID == 0) {
+    printf("pos 0 : %f %f %f %f \n", position.x, position.y, position.z, position.w);
+  }
+
+  return position;
 }
 
 GPRT_PIXEL_PROGRAM(simplePixel, (TrianglesGeomData, record)) {
