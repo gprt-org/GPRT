@@ -811,6 +811,25 @@ gprtTexturePresent(GPRTContext context, GPRTTextureOf<T> texture) {
   gprtTexturePresent(context, (GPRTTexture) texture);
 }
 
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @param texture The texture to be cleared
+ */
+GPRT_API void gprtTextureClear(GPRTTexture texture);
+
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The texture to be cleared
+ */
+template <typename T>
+void
+gprtTextureClear(GPRTTextureOf<T> texture) {
+  gprtTextureClear((GPRTTexture) texture);
+}
+
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
   underlying memory*/
 GPRT_API void gprtTextureDestroy(GPRTTexture texture);

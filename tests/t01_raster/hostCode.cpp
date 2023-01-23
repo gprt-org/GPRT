@@ -63,10 +63,10 @@ int3 triIndices[NUM_TRI_INDICES] = {{0, 1, 2}};
 // that will act as a backdrop
 const int NUM_BACKDROP_VERTICES = 4;
 float3 backdropVertices[NUM_BACKDROP_VERTICES] = {
-    {-1.f, -1.f, 0.99f},
-    {+1.f, -1.f, 0.99f},
-    {-1.f, +1.f, 0.99f},
-    {+1.f, +1.f, 0.99f},
+    {-1.f, -1.f, 0.5f},
+    {+1.f, -1.f, 0.5f},
+    {-1.f, +1.f, 0.5f},
+    {+1.f, +1.f, 0.5f},
 };
 
 const int NUM_BACKDROP_INDICES = 2;
@@ -253,6 +253,9 @@ main(int ac, char **av) {
 
     //     // Calls the GPU raygen kernel function
     //     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+
+    gprtTextureClear(depthAttachment);
+    gprtTextureClear(colorAttachment);
 
     std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
     gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data());

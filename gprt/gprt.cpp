@@ -970,6 +970,62 @@ struct Texture {
     }
   }
 
+  void clear() {
+    VkResult err;
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      GPRT_RAISE("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+
+    // Move to a destination optimal format
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
+
+    // clear the image
+    if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT) {
+      VkClearDepthStencilValue val;
+      val.depth = 1.f;
+      val.stencil = 0;
+      VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
+      vkCmdClearDepthStencilImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1, &range);
+    } else {
+      VkClearColorValue val;
+      val.float32[0] = val.float32[1] = val.float32[2] = val.float32[3] = 0.f;
+      val.int32[0] = val.int32[1] = val.int32[2] = val.int32[3] = 0;
+      val.uint32[0] = val.uint32[1] = val.uint32[2] = val.uint32[3] = 0;
+      VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
+      vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1, &range);
+    }
+
+    // Now go back to the previous layout
+    setImageLayout(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
+                   {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      GPRT_RAISE("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    if (err)
+      GPRT_RAISE("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      GPRT_RAISE("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+  }
+
   void generateMipmap() {
     // do nothing if we don't have a mipmap to generate
     if (mipLevels == 1)
@@ -1296,9 +1352,9 @@ struct Texture {
       if (err)
         GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_GENERAL,
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_GENERAL;
+      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
@@ -1780,25 +1836,26 @@ struct GeomType : public SBTEntry {
     colorAttachment.format = colorTexture->format;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     // clear here says to clear the values to a constant at start.
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
     // save rasterized fragments to memory
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     // not currently using a stencil
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     // Initial and final layouts of the texture
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = depthTexture->format;
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
 
@@ -5612,10 +5669,6 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   VkCommandBufferBeginInfo cmdBufInfo{};
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-  VkClearValue clearValues[2];
-  clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-  clearValues[1].depthStencil = {1.0f, 0};
-
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   renderPassBeginInfo.pNext = nullptr;
@@ -5624,11 +5677,22 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   renderPassBeginInfo.renderArea.offset.y = 0;
   renderPassBeginInfo.renderArea.extent.width = geometryType->raster.width;
   renderPassBeginInfo.renderArea.extent.height = geometryType->raster.height;
-  renderPassBeginInfo.clearValueCount = 2;
-  renderPassBeginInfo.pClearValues = clearValues;
+  renderPassBeginInfo.clearValueCount = 0;
+  renderPassBeginInfo.pClearValues = nullptr;
   renderPassBeginInfo.framebuffer = geometryType->raster.frameBuffer;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  // Transition our attachments into optimal attachment formats
+  geometryType->raster.colorAttachment->setImageLayout(
+      context->graphicsCommandBuffer, geometryType->raster.colorAttachment->image,
+      geometryType->raster.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster.colorAttachment->mipLevels, 0, 1});
+
+  geometryType->raster.depthAttachment->setImageLayout(
+      context->graphicsCommandBuffer, geometryType->raster.depthAttachment->image,
+      geometryType->raster.depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster.depthAttachment->mipLevels, 0, 1});
 
   // This will clear the color and depth attachment
   vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -5696,6 +5760,17 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   }
 
   vkCmdEndRenderPass(context->graphicsCommandBuffer);
+
+  // At the end of the renderpass, we'll transition the layout back to it's previous layout
+  geometryType->raster.colorAttachment->setImageLayout(
+      context->graphicsCommandBuffer, geometryType->raster.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+      geometryType->raster.colorAttachment->layout,
+      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster.colorAttachment->mipLevels, 0, 1});
+
+  geometryType->raster.depthAttachment->setImageLayout(
+      context->graphicsCommandBuffer, geometryType->raster.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+      geometryType->raster.depthAttachment->layout,
+      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster.depthAttachment->mipLevels, 0, 1});
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err)
@@ -6107,6 +6182,13 @@ gprtTextureGetHandle(GPRTTexture _texture, int deviceID) {
   texHandle.x = texture->address;
   texHandle.y = 0;   // for future use
   return texHandle;
+}
+
+GPRT_API void
+gprtTextureClear(GPRTTexture _texture) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+  texture->clear();
 }
 
 GPRT_API void
