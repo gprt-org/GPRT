@@ -191,7 +191,8 @@ typedef enum {
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
-  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT
+  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
+  GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
 
 /*! currently supported texture filter modes */
@@ -659,6 +660,43 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule 
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
 }
 
+GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
+                                               GPRTTexture depthAttachment);
+
+template <typename T1, typename T2, typename T3>
+void
+gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTextureOf<T2> colorAttachment,
+                                 GPRTTextureOf<T3> depthAttachment) {
+  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rasterType, (GPRTTexture) colorAttachment,
+                                   (GPRTTexture) depthAttachment);
+}
+
+void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
+                           uint32_t rasterType = 0, uint32_t *instanceCounts = nullptr);
+
+template <typename T>
+void
+gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry,
+                      uint32_t rayType = 0, uint32_t *instanceCounts = nullptr) {
+  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
+}
+
 /**
  * @brief Creates a sampler object for use in sampling textures. Behavior below
  * defines how texture.SampleLevel and texture.SampleGrad operate. The "sampled
@@ -771,6 +809,46 @@ template <typename T>
 void
 gprtTexturePresent(GPRTContext context, GPRTTextureOf<T> texture) {
   gprtTexturePresent(context, (GPRTTexture) texture);
+}
+
+/**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+GPRT_API void gprtTextureSaveImage(GPRTTexture texture, const char *imageName);
+
+/**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+template <typename T>
+void
+gprtTextureSaveImage(GPRTTextureOf<T> texture, const char *imageName) {
+  gprtTextureSaveImage((GPRTTexture) texture, imageName);
+}
+
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @param texture The texture to be cleared
+ */
+GPRT_API void gprtTextureClear(GPRTTexture texture);
+
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The texture to be cleared
+ */
+template <typename T>
+void
+gprtTextureClear(GPRTTextureOf<T> texture) {
+  gprtTextureClear((GPRTTexture) texture);
 }
 
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
