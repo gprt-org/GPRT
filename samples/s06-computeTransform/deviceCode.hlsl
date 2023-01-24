@@ -22,7 +22,7 @@
 
 #include "sharedCode.h"
 
-GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record)) {
+GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   int numTransforms = record.numTransforms;
   int length = sqrt(numTransforms);
 

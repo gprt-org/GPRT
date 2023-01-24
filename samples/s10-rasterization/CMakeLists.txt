@@ -22,14 +22,14 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    t01_deviceCode
+    s10_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(t01_raster hostCode.cpp)
-target_link_libraries(t01_raster
+add_executable(s10_raster hostCode.cpp)
+target_link_libraries(s10_raster
   PRIVATE
-    t01_deviceCode
+    s10_deviceCode
     gprt::gprt
 )

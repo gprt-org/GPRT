@@ -259,6 +259,7 @@ main(int ac, char **av) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
+  gprtComputeDestroy(boundsProgram);
   gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(aabbGeom);

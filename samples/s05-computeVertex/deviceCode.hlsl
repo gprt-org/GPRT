@@ -31,7 +31,7 @@ getPos(float px, float py, float k, float width, float depth, float height, floa
   return float3(x * width, y * depth, z * height + zoffset);
 }
 
-GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record)) {
+GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record), (1, 1, 1)) {
   uint gridSize = record.gridSize;
   int TriID = DispatchThreadID.x;
   float now = record.now;
