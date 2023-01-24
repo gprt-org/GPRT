@@ -660,41 +660,41 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule 
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
 }
 
-GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
 
 template <typename T>
 void
-gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rayType, module, progName);
+gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, progName);
 }
 
-GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
 
 template <typename T>
 void
-gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rayType, module, progName);
+gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, progName);
 }
 
-GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rayType, GPRTTexture colorAttachment,
+GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
                                                GPRTTexture depthAttachment);
 
 template <typename T1, typename T2, typename T3>
 void
-gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rayType, GPRTTextureOf<T2> colorAttachment,
+gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTextureOf<T2> colorAttachment,
                                  GPRTTextureOf<T3> depthAttachment) {
-  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rayType, (GPRTTexture) colorAttachment,
+  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rasterType, (GPRTTexture) colorAttachment,
                                    (GPRTTexture) depthAttachment);
 }
 
 void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
-                           uint32_t *instanceCounts = nullptr);
+                           uint32_t rasterType = 0, uint32_t *instanceCounts = nullptr);
 
 template <typename T>
 void
 gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry,
-                      uint32_t *instanceCounts = nullptr) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, instanceCounts);
+                      uint32_t rayType = 0, uint32_t *instanceCounts = nullptr) {
+  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
 }
 
 /**
