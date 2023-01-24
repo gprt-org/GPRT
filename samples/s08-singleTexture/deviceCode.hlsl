@@ -41,7 +41,7 @@ AngleAxis3x3(float angle, float3 axis) {
                   t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c);
 }
 
-GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record)) {
+GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
   int transformID = DispatchThreadID.x;

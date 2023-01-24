@@ -38,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram t01_deviceCode;
+extern GPRTProgram s10_deviceCode;
 
 // Vertices are the points that define our triangles
 const int NUM_TRI_VERTICES = 3;
@@ -76,7 +76,7 @@ int3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "t01-singleTriangle.png";
+const char *outFileName = "s10-rasterization.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.f, 0.f, -4.f};
@@ -92,9 +92,9 @@ main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S10 Rasterization");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, t01_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

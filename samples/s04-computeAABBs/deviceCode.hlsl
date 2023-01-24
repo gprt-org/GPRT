@@ -65,7 +65,7 @@ GPRT_CLOSEST_HIT_PROGRAM(SphereClosestHit, (SphereGeomData, record), (Payload, p
   payload.color = abs(normal);
 }
 
-GPRT_COMPUTE_PROGRAM(SphereBounds, (SphereBoundsData, record)) {
+GPRT_COMPUTE_PROGRAM(SphereBounds, (SphereBoundsData, record), (1, 1, 1)) {
   int primID = DispatchThreadID.x;
   float3 position = gprt::load<float3>(record.vertex, primID);
   float radius = gprt::load<float>(record.radius, primID);

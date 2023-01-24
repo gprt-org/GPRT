@@ -1535,14 +1535,34 @@ struct SBTEntry {
 // we can recycle the SBT records mechanism for compute IO, without
 // introducing VK descriptor sets.
 struct Compute : public SBTEntry {
-  VkShaderModule shaderModule;
+
+  // Our own virtual "compute address space".
+  VkDeviceAddress address = -1;
+  static std::vector<Compute *> computes;
+
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
   VkDevice logicalDevice;
   std::string entryPoint;
 
+  VkShaderModule shaderModule = VK_NULL_HANDLE;
+  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  VkPipeline pipeline = VK_NULL_HANDLE;
+
   Compute(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
-    std::cout << "Compute program is being made!" << std::endl;
+    // Hunt for an existing free address for this compute kernel
+    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+      if (Compute::computes[i] == nullptr) {
+        Compute::computes[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      computes.push_back(this);
+      address = computes.size() - 1;
+    }
 
     entryPoint = std::string("__compute__") + std::string(_entryPoint);
     auto binary = module->getBinary("COMPUTE");
@@ -1557,8 +1577,7 @@ struct Compute : public SBTEntry {
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    // shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
@@ -1567,11 +1586,65 @@ struct Compute : public SBTEntry {
     this->SBTRecord = (uint8_t *) malloc(recordSize);
   }
   ~Compute() {}
+
+  void buildPipeline(VkDescriptorSetLayout samplerDescriptorSetLayout,
+                     VkDescriptorSetLayout texture1DDescriptorSetLayout,
+                     VkDescriptorSetLayout texture2DDescriptorSetLayout,
+                     VkDescriptorSetLayout texture3DDescriptorSetLayout,
+                     VkDescriptorSetLayout recordDescriptorSetLayout) {
+    // currently not using cache.
+    VkPipelineCache cache = VK_NULL_HANDLE;
+
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.size = 128;
+    pushConstantRange.offset = 0;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                                  texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+                                                  recordDescriptorSetLayout};
+    pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
+    pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create pipeline layout!");
+    }
+
+    VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+    computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    computePipelineCreateInfo.layout = pipelineLayout;
+    computePipelineCreateInfo.flags = 0;
+    computePipelineCreateInfo.stage = shaderStage;
+
+    if (vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create compute pipeline!");
+    };
+  }
+
   void destroy() {
-    std::cout << "Compute program is being destroyed!" << std::endl;
-    vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    // Free compute slot for use by subsequently made compute kernels
+    Compute::computes[address] = nullptr;
+
+    if (pipelineLayout) {
+      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+    }
+
+    if (pipeline) {
+      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+    }
+
+    if (shaderModule) {
+      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    }
   }
 };
+
+std::vector<Compute *> Compute::computes;
 
 struct RayGen : public SBTEntry {
   VkShaderModule shaderModule;
@@ -1581,8 +1654,6 @@ struct RayGen : public SBTEntry {
   std::string entryPoint;
 
   RayGen(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
-    std::cout << "Ray gen is being made!" << std::endl;
-
     entryPoint = std::string("__raygen__") + std::string(_entryPoint);
     auto binary = module->getBinary("RAYGEN");
 
@@ -1608,7 +1679,6 @@ struct RayGen : public SBTEntry {
   }
   ~RayGen() {}
   void destroy() {
-    std::cout << "Ray gen is being destroyed!" << std::endl;
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
@@ -1622,8 +1692,6 @@ struct Miss : public SBTEntry {
   std::string entryPoint;
 
   Miss(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
-    std::cout << "Miss program is being made!" << std::endl;
-
     entryPoint = std::string("__miss__") + std::string(_entryPoint);
     auto binary = module->getBinary("MISS");
 
@@ -1647,7 +1715,6 @@ struct Miss : public SBTEntry {
   }
   ~Miss() {}
   void destroy() {
-    std::cout << "Miss program is being destroyed!" << std::endl;
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
@@ -1694,7 +1761,6 @@ struct GeomType : public SBTEntry {
   std::vector<RasterData> raster;
 
   GeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
-    std::cout << "Geom type is being made!" << std::endl;
     this->numRayTypes = numRayTypes;
     closestHitShaderStages.resize(numRayTypes, {});
     anyHitShaderStages.resize(numRayTypes, {});
@@ -1723,7 +1789,6 @@ struct GeomType : public SBTEntry {
     this->recordSize = recordSize;
   }
   ~GeomType() {
-    std::cout << "Geom type is being destroyed!" << std::endl;
     // vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
   }
 
@@ -3325,32 +3390,37 @@ struct Context {
   Texture *defaultTexture2D = nullptr;
   Texture *defaultTexture3D = nullptr;
 
-  Buffer *recordBuffer = nullptr;
+  Buffer *rasterRecordBuffer = nullptr;
+  Buffer *computeRecordBuffer = nullptr;
 
   VkDescriptorPool samplerDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool recordDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
 
   uint32_t previousNumSamplers = 0;
   uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
   uint32_t previousNumTexture3Ds = 0;
-  uint32_t previousNumRecords = 0;
+  uint32_t previousNumRasterRecords = 0;
+  uint32_t previousNumComputeRecords = 0;
 
   VkDescriptorSetLayout samplerDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture1DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture2DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture3DDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout recordDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout rasterRecordDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout computeRecordDescriptorSetLayout = VK_NULL_HANDLE;
 
   VkDescriptorSet samplerDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
 
-  VkDescriptorSet recordDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet rasterRecordDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
@@ -4123,7 +4193,7 @@ struct Context {
       binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
       binding.descriptorCount = 1;   // we only have one of these bound at any point in time
       binding.binding = 0;
-      binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+      binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4133,7 +4203,7 @@ struct Context {
       descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
       descriptorSetLayoutCreateInfo.pNext = nullptr;
       VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                  &recordDescriptorSetLayout));
+                                                  &rasterRecordDescriptorSetLayout));
 
       VkDescriptorPoolSize poolSize;
       poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -4145,16 +4215,56 @@ struct Context {
       descriptorPoolInfo.pPoolSizes = &poolSize;
       descriptorPoolInfo.maxSets = poolSize.descriptorCount;
       descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &recordDescriptorPool));
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &rasterRecordDescriptorPool));
 
       VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
       descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = recordDescriptorPool;
-      descriptorSetAllocateInfo.pSetLayouts = &recordDescriptorSetLayout;
+      descriptorSetAllocateInfo.descriptorPool = rasterRecordDescriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = &rasterRecordDescriptorSetLayout;
       descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
       descriptorSetAllocateInfo.pNext = nullptr;
 
-      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &recordDescriptorSet));
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &rasterRecordDescriptorSet));
+    }
+
+    {
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      binding.descriptorCount = 1;   // we only have one of these bound at any point in time
+      binding.binding = 0;
+      binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+      descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+      descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = nullptr;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
+                                                  &computeRecordDescriptorSetLayout));
+
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      poolSize.descriptorCount = 1;
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = poolSize.descriptorCount;
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(
+          vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &computeRecordDescriptorPool));
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = computeRecordDescriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = &computeRecordDescriptorSetLayout;
+      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
+      descriptorSetAllocateInfo.pNext = nullptr;
+
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
     }
   };
 
@@ -4163,18 +4273,34 @@ struct Context {
     if (defaultSampler) {
       defaultSampler->destroy();
       delete defaultSampler;
+      defaultSampler = nullptr;
     }
     if (defaultTexture1D) {
       defaultTexture1D->destroy();
       delete defaultTexture1D;
+      defaultTexture1D = nullptr;
     }
     if (defaultTexture2D) {
       defaultTexture2D->destroy();
       delete defaultTexture2D;
+      defaultTexture2D = nullptr;
     }
     if (defaultTexture3D) {
       defaultTexture3D->destroy();
       delete defaultTexture3D;
+      defaultTexture3D = nullptr;
+    }
+
+    if (rasterRecordBuffer) {
+      rasterRecordBuffer->destroy();
+      delete rasterRecordBuffer;
+      rasterRecordBuffer = nullptr;
+    }
+
+    if (computeRecordBuffer) {
+      computeRecordBuffer->destroy();
+      delete computeRecordBuffer;
+      computeRecordBuffer = nullptr;
     }
 
     if (samplerDescriptorSet)
@@ -4194,8 +4320,10 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
     if (texture3DDescriptorSetLayout)
       vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
-    if (recordDescriptorSetLayout)
-      vkDestroyDescriptorSetLayout(logicalDevice, recordDescriptorSetLayout, nullptr);
+    if (rasterRecordDescriptorSetLayout)
+      vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
+    if (computeRecordDescriptorSetLayout)
+      vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
 
     if (samplerDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
@@ -4205,8 +4333,10 @@ struct Context {
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
     if (texture3DDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
-    if (recordDescriptorPool)
-      vkDestroyDescriptorPool(logicalDevice, recordDescriptorPool, nullptr);
+    if (rasterRecordDescriptorPool)
+      vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
+    if (computeRecordDescriptorPool)
+      vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
 
     if (imageAvailableSemaphore)
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
@@ -4294,12 +4424,11 @@ struct Context {
       // std::cout<<"Todo, get some smarter memory allocation working..."
       // <<std::endl;
 
-      size_t numComputes = computePrograms.size();
       size_t numRayGens = raygenPrograms.size();
       size_t numMissProgs = missPrograms.size();
       size_t numHitRecords = getNumHitRecords();
 
-      size_t numRecords = numComputes + numRayGens + numMissProgs + numHitRecords;
+      size_t numRecords = numRayGens + numMissProgs + numHitRecords;
 
       if (shaderBindingTable.size != recordSize * numRecords) {
         shaderBindingTable.destroy();
@@ -4337,8 +4466,8 @@ struct Context {
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx + recordStride * numComputes;
-          size_t handleOffset = handleStride * idx + handleStride * numComputes;
+          size_t recordOffset = recordStride * idx;
+          size_t handleOffset = handleStride * idx;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
           // Then, copy params following handle
@@ -4356,8 +4485,8 @@ struct Context {
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx + recordStride * numRayGens + recordStride * numComputes;
-          size_t handleOffset = handleStride * idx + handleStride * numRayGens + handleStride * numComputes;
+          size_t recordOffset = recordStride * idx + recordStride * numRayGens;
+          size_t handleOffset = handleStride * idx + handleStride * numRayGens;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
           // Then, copy params following handle
@@ -4400,9 +4529,9 @@ struct Context {
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                     size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numComputes + numRayGens + numMissProgs);
+                                          recordStride * (numRayGens + numMissProgs);
                     size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numComputes + numRayGens + numMissProgs);
+                                          handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -4429,9 +4558,9 @@ struct Context {
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
                     size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numComputes + numRayGens + numMissProgs);
+                                          recordStride * (numRayGens + numMissProgs);
                     size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numComputes + numRayGens + numMissProgs);
+                                          handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -4452,16 +4581,28 @@ struct Context {
       }
     }
 
-    // Update geometry record data in the record buffer for compute and raster programs
+    // Update geometry record data in the record buffer for raster programs
     {
-      recordBuffer->map();
-      uint8_t *mapped = ((uint8_t *) (recordBuffer->mapped));
+      rasterRecordBuffer->map();
+      uint8_t *mapped = ((uint8_t *) (rasterRecordBuffer->mapped));
       for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
         size_t offset = recordSize * i;
         uint8_t *params = mapped + offset;
         memcpy(params, Geom::geoms[i]->SBTRecord, Geom::geoms[i]->recordSize);
       }
-      recordBuffer->unmap();
+      rasterRecordBuffer->unmap();
+    }
+
+    // Update compute record data in the record buffer for compute programs
+    {
+      computeRecordBuffer->map();
+      uint8_t *mapped = ((uint8_t *) (computeRecordBuffer->mapped));
+      for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+        size_t offset = recordSize * i;
+        uint8_t *params = mapped + offset;
+        memcpy(params, Compute::computes[i]->SBTRecord, Compute::computes[i]->recordSize);
+      }
+      computeRecordBuffer->unmap();
     }
   }
 
@@ -4871,11 +5012,12 @@ struct Context {
     }
 
     // If the number of records has changed, we need to make a new descriptor pool
-    if (recordBuffer && previousNumRecords != Geom::geoms.size()) {
-      recordBuffer->destroy();
-      delete recordBuffer;
+    if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
+      rasterRecordBuffer->destroy();
+      delete rasterRecordBuffer;
+      rasterRecordBuffer = nullptr;
     }
-    if (!recordBuffer) {
+    if (!rasterRecordBuffer) {
       // Create buffer to contain uniform buffer data
       const VkBufferUsageFlags bufferUsageFlags =
           // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -4900,14 +5042,15 @@ struct Context {
       const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
-      recordBuffer = new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                                memoryUsageFlags, recordSize * Geom::geoms.size());
+      rasterRecordBuffer =
+          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+                     memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()));
 
       // Uniform buffer descriptors for each geometry's record
       VkDescriptorBufferInfo uniformBufferDescriptor;
       VkWriteDescriptorSet writeDescriptorSet;
       uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
-      uniformBufferDescriptor.buffer = recordBuffer->buffer;
+      uniformBufferDescriptor.buffer = rasterRecordBuffer->buffer;
       uniformBufferDescriptor.range = recordSize;
 
       writeDescriptorSet = {};
@@ -4918,15 +5061,75 @@ struct Context {
       writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
       writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
       writeDescriptorSet.pImageInfo = 0;
-      writeDescriptorSet.dstSet = recordDescriptorSet;
+      writeDescriptorSet.dstSet = rasterRecordDescriptorSet;
 
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
       // Finally, keep track of if the record count here changes
-      previousNumRecords = Geom::geoms.size();
+      previousNumRasterRecords = Geom::geoms.size();
     }
 
+    // If the number of records has changed, we need to make a new descriptor pool
+    if (computeRecordBuffer && previousNumComputeRecords != Compute::computes.size()) {
+      computeRecordBuffer->destroy();
+      delete computeRecordBuffer;
+      computeRecordBuffer = nullptr;
+    }
+    if (!computeRecordBuffer) {
+      // Create buffer to contain uniform buffer data
+      const VkBufferUsageFlags bufferUsageFlags =
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          // means we can use this buffer to transfer into another
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+          // means we can use this buffer to receive data transferred from another
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          // means we can use this buffer as a uniform buffer
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
+                                                                                            // device access
+
+      // for the moment, just assume the max group size
+      auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+        return (value + alignment - 1) & ~(alignment - 1);
+      };
+
+      auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
+
+      const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+      const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+      const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+
+      computeRecordBuffer =
+          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+                     memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()));
+
+      // Uniform buffer descriptors for each geometry's record
+      VkDescriptorBufferInfo uniformBufferDescriptor;
+      VkWriteDescriptorSet writeDescriptorSet;
+      uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
+      uniformBufferDescriptor.buffer = computeRecordBuffer->buffer;
+      uniformBufferDescriptor.range = recordSize;
+
+      writeDescriptorSet = {};
+      writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSet.dstBinding = 0;
+      writeDescriptorSet.dstArrayElement = 0;
+      writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+      writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
+      writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
+      writeDescriptorSet.pImageInfo = 0;
+      writeDescriptorSet.dstSet = computeRecordDescriptorSet;
+
+      // We'll write these descriptors now, but the actual recordBuffer will be written to later.
+      vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
+
+      // Finally, keep track of if the record count here changes
+      previousNumComputeRecords = Compute::computes.size();
+    }
+
+    // Build the ray tracing pipeline
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.size = 128;
     pushConstantRange.offset = 0;
@@ -4959,21 +5162,6 @@ struct Context {
     */
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     shaderGroups.clear();
-
-    // Compute program groups
-    {
-      for (auto compute : computePrograms) {
-        shaderStages.push_back(compute->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
-      }
-    }
 
     // Ray generation groups
     {
@@ -5603,6 +5791,7 @@ gprtContextDestroy(GPRTContext _context) {
   Context *context = (Context *) _context;
   context->destroy();
   delete context;
+  context = nullptr;
   LOG("context destroyed...");
 }
 
@@ -5634,6 +5823,7 @@ gprtModuleDestroy(GPRTModule _module) {
   LOG_API_CALL();
   Module *module = (Module *) _module;
   delete module;
+  module = nullptr;
   LOG("module destroyed...");
 }
 
@@ -5656,6 +5846,7 @@ gprtGeomDestroy(GPRTGeom _geometry) {
   Geom *geometry = (Geom *) _geometry;
   geometry->destroy();
   delete geometry;
+  geometry = nullptr;
   LOG("geometry destroyed...");
 }
 
@@ -5711,7 +5902,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   if (geometryType->raster[rasterType].pipeline == VK_NULL_HANDLE) {
     geometryType->buildRasterPipeline(rasterType, context->samplerDescriptorSetLayout,
                                       context->texture1DDescriptorSetLayout, context->texture2DDescriptorSetLayout,
-                                      context->texture3DDescriptorSetLayout, context->recordDescriptorSetLayout);
+                                      context->texture3DDescriptorSetLayout, context->rasterRecordDescriptorSetLayout);
   }
 
   // Bind the rendering pipeline
@@ -5760,7 +5951,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
       std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
                                                      context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                     context->recordDescriptorSet};
+                                                     context->rasterRecordDescriptorSet};
 
       uint32_t offset = geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -5874,6 +6065,7 @@ gprtRayGenDestroy(GPRTRayGen _rayGen) {
   RayGen *rayGen = (RayGen *) _rayGen;
   rayGen->destroy();
   delete rayGen;
+  rayGen = nullptr;
   LOG("raygen destroyed...");
 }
 
@@ -5904,6 +6096,7 @@ gprtComputeDestroy(GPRTCompute _compute) {
   Compute *compute = (Compute *) _compute;
   compute->destroy();
   delete compute;
+  compute = nullptr;
   LOG("compute destroyed...");
 }
 
@@ -5940,6 +6133,7 @@ gprtMissDestroy(GPRTMiss _miss) {
   Miss *missProg = (Miss *) _miss;
   missProg->destroy();
   delete missProg;
+  missProg = nullptr;
   LOG("miss program destroyed...");
 }
 
@@ -5981,6 +6175,7 @@ gprtGeomTypeDestroy(GPRTGeomType _geomType) {
   GeomType *geomType = (GeomType *) _geomType;
   geomType->destroy();
   delete geomType;
+  geomType = nullptr;
   LOG("geom type destroyed...");
 }
 
@@ -6065,6 +6260,7 @@ gprtSamplerDestroy(GPRTSampler _sampler) {
   sampler->destroy();
 
   delete sampler;
+  sampler = nullptr;
 }
 
 GPRT_API gprt::Sampler
@@ -6209,6 +6405,7 @@ gprtTextureDestroy(GPRTTexture _texture) {
   Texture *texture = (Texture *) _texture;
   texture->destroy();
   delete texture;
+  texture = nullptr;
   LOG("texture destroyed");
 }
 
@@ -6321,6 +6518,7 @@ gprtBufferDestroy(GPRTBuffer _buffer) {
   Buffer *buffer = (Buffer *) _buffer;
   buffer->destroy();
   delete buffer;
+  buffer = nullptr;
   LOG("buffer destroyed");
 }
 
@@ -6509,6 +6707,7 @@ gprtAccelDestroy(GPRTAccel _accel) {
   Accel *accel = (Accel *) _accel;
   accel->destroy();
   delete accel;
+  accel = nullptr;
   LOG("accel destroyed");
 }
 
@@ -6605,7 +6804,6 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   uint64_t baseAddr = getBufferDeviceAddress(context->logicalDevice, context->shaderBindingTable.buffer);
 
   // find raygen in current list of raygens
-  int computeOffset = context->computePrograms.size() * recordSize;
   int raygenOffset = 0;
   for (int i = 0; i < context->raygenPrograms.size(); ++i) {
     if (context->raygenPrograms[i] == raygen) {
@@ -6615,7 +6813,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   }
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset + computeOffset;
+  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride;   // for raygen, can only be one. this needs to
                                                              // be the same as stride.
@@ -6623,8 +6821,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress =
-        baseAddr + recordSize * context->raygenPrograms.size() + recordSize * context->computePrograms.size();
+    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size();
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
@@ -6632,8 +6829,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
     hitShaderSbtEntry.deviceAddress =
-        baseAddr +
-        recordSize * (context->computePrograms.size() + context->raygenPrograms.size() + context->missPrograms.size());
+        baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
@@ -6694,6 +6890,12 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   Compute *compute = (Compute *) _compute;
   VkResult err;
 
+  if (compute->pipeline == VK_NULL_HANDLE) {
+    compute->buildPipeline(context->samplerDescriptorSetLayout, context->texture1DDescriptorSetLayout,
+                           context->texture2DDescriptorSetLayout, context->texture3DDescriptorSetLayout,
+                           context->computeRecordDescriptorSetLayout);
+  }
+
   VkCommandBufferBeginInfo cmdBufInfo{};
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -6704,29 +6906,7 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
-                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet};
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
-
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->pipeline);
-
-  struct PushConstants {
-    uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  } pushConstants;
-  vkCmdPushConstants(context->graphicsCommandBuffer, context->pipelineLayout,
-                     VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_RAYGEN_BIT_KHR,   // todo, replace eventually with
-                                                           // compute.
-                     0, sizeof(PushConstants), &pushConstants);
-
-  auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t {
-    VkBufferDeviceAddressInfoKHR bufferDeviceAI{};
-    bufferDeviceAI.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    bufferDeviceAI.buffer = buffer;
-    return gprt::vkGetBufferDeviceAddress(device, &bufferDeviceAI);
-  };
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
   auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
     return (value + alignment - 1) & ~(alignment - 1);
@@ -6739,28 +6919,21 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-  uint64_t baseAddr = getBufferDeviceAddress(context->logicalDevice, context->shaderBindingTable.buffer);
 
-  // find compute program in current list of compute programs
-  int computeOffset = 0;
-  for (int i = 0; i < context->computePrograms.size(); ++i) {
-    if (context->computePrograms[i] == compute) {
-      computeOffset = i * recordSize;
-      break;
-    }
-  }
+  uint32_t offset = compute->address * recordSize;
+  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
+                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet,
+                                                 context->computeRecordDescriptorSet};
+  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
+                          descriptorSets.size(), descriptorSets.data(), 1, &offset);
 
-  VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr + computeOffset;
-  raygenShaderSbtEntry.stride = recordSize;
-  raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride;   // can only be one.
+  struct PushConstants {
+    uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  } pushConstants;
+  vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                     sizeof(PushConstants), &pushConstants);
 
-  VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
-  VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
-  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
-
-  gprt::vkCmdTraceRays(context->graphicsCommandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
-                       &callableShaderSbtEntry, dims_x, dims_y, dims_z);
+  vkCmdDispatch(context->graphicsCommandBuffer, dims_x, dims_y, dims_z);
 
   if (context->queryRequested)
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);

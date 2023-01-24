@@ -298,9 +298,9 @@ where ARG is "(type_, name)". */
 // We currently recycle ray generation programs to implement a user-side
 // compute program. This allows us to recycle existing SBT record API
 // for compute shader IO
-#ifndef GPRT_COMPUTE_PROGRAM
+#ifndef GPRT_COMPUTE_PROGRAM_OLD
 #ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                                                                     \
+#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID);                                                                                        \
@@ -316,10 +316,38 @@ where ARG is "(type_, name)". */
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID) /* program args and body supplied by user ... */
 #else
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                                                                     \
+#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID) /* program args and body supplied by user ... */
+#endif
+#endif
+
+#ifndef GPRT_COMPUTE_PROGRAM
+#ifdef COMPUTE
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+                                                                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex);                                                                                      \
+                                                                                                                       \
+  [numthreads NumThreads][shader("compute")] void __compute__##progName(uint3 groupThreadID                            \
+                                                                        : SV_GroupThreadID, uint3 groupID              \
+                                                                        : SV_GroupID, uint3 dispatchThreadID           \
+                                                                        : SV_DispatchThreadID, uint groupIndex         \
+                                                                        : SV_GroupIndex) {                             \
+    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), groupThreadID, groupID, dispatchThreadID, groupIndex);   \
+  }                                                                                                                    \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex) /* program args and body supplied by user ... */
+#else
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex) /* program args and body supplied by user ... */
 #endif
 #endif
 
