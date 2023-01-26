@@ -95,9 +95,11 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+if (NOT GPRT_IS_SUBPROJECT)
 option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
 option(GPRT_BUILD_TESTS "Build the Test Code?" OFF)
 option(BUILD_DOC "Build documentation" OFF)
+endif()
 
 add_subdirectory(3rdParty)
 
