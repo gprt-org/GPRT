@@ -97,7 +97,7 @@ ENDIF()
 add_subdirectory(stb_image)
 
 # Find GLFW
-if(GPRT_BUILD_SAMPLES)
+# if(GPRT_BUILD_SAMPLES)
   find_package(glfw3 QUIET)
   set(OpenGL_GL_PREFERENCE "LEGACY")
   #find_package(OpenGL QUIET)
@@ -108,7 +108,7 @@ if(GPRT_BUILD_SAMPLES)
       add_subdirectory(glfw)
     endif()
   endif()
-endif()
+# endif()
 
 # Find mesh generator
 if (GPRT_BUILD_SAMPLES)
