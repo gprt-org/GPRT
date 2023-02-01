@@ -4440,25 +4440,6 @@ struct Context {
       shaderBindingTable.map();
       uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
 
-      // Compute records
-      if (computePrograms.size() > 0) {
-        for (uint32_t idx = 0; idx < computePrograms.size(); ++idx) {
-          size_t recordStride = recordSize;
-          size_t handleStride = handleSize;
-
-          // First, copy handle
-          size_t recordOffset = recordStride * idx;
-          size_t handleOffset = handleStride * idx;
-          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-          // Then, copy params following handle
-          recordOffset = recordOffset + handleSize;
-          uint8_t *params = mapped + recordOffset;
-          Compute *compute = computePrograms[idx];
-          memcpy(params, compute->SBTRecord, compute->recordSize);
-        }
-      }
-
       // Raygen records
       if (raygenPrograms.size() > 0) {
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
