@@ -88,7 +88,7 @@ template <typename T> struct Mesh {
 
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
-    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
+    TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
     geomData->index = gprtBufferGetHandle(indexBuffer);
 
@@ -181,7 +181,7 @@ main(int ac, char **av) {
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
 
   // Parameters for our transform program that'll animate our transforms
-  TransformData *transformData = gprtComputeGetPointer(transformProgram);
+  TransformData *transformData = gprtComputeGetParameters(transformProgram);
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = numInstances;
   transformData->now = 0.f;
@@ -204,11 +204,11 @@ main(int ac, char **av) {
   GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -274,7 +274,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

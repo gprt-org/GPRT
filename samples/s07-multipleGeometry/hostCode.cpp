@@ -72,7 +72,7 @@ template <typename T> struct Mesh {
     vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
     indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
     geometry = gprtGeomCreate(context, geomType);
-    TrianglesGeomData *geomData = gprtGeomGetPointer(geometry);
+    TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
@@ -160,12 +160,12 @@ main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
   rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -230,7 +230,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

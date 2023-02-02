@@ -129,7 +129,7 @@ main(int ac, char **av) {
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, triVertexBuffer, NUM_TRI_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, triIndexBuffer, NUM_TRI_INDICES);
-  TrianglesGeomData *tridata = gprtGeomGetPointer(trianglesGeom);
+  TrianglesGeomData *tridata = gprtGeomGetParameters(trianglesGeom);
   tridata->color = gprtBufferGetHandle<float3>(triColorBuffer);
   tridata->vertex = gprtBufferGetHandle<float3>(triVertexBuffer);
   tridata->index = gprtBufferGetHandle<int3>(triIndexBuffer);
@@ -140,7 +140,7 @@ main(int ac, char **av) {
   GPRTGeomOf<BackgroundData> bgGeom = gprtGeomCreate<BackgroundData>(context, backdropGeomType);
   gprtTrianglesSetVertices(bgGeom, backdropVertexBuffer, NUM_BACKDROP_VERTICES);
   gprtTrianglesSetIndices(bgGeom, backdropIndexBuffer, NUM_BACKDROP_INDICES);
-  BackgroundData *bgdata = gprtGeomGetPointer(bgGeom);
+  BackgroundData *bgdata = gprtGeomGetParameters(bgGeom);
   bgdata->vertex = gprtBufferGetHandle<float3>(backdropVertexBuffer);
   bgdata->index = gprtBufferGetHandle<int3>(backdropIndexBuffer);
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);

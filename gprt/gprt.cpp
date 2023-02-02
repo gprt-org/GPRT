@@ -5842,7 +5842,7 @@ gprtGeomDestroy(GPRTGeom _geometry) {
 }
 
 GPRT_API void *
-gprtGeomGetPointer(GPRTGeom _geometry, int deviceID) {
+gprtGeomGetParameters(GPRTGeom _geometry, int deviceID) {
   LOG_API_CALL();
   Geom *geometry = (Geom *) _geometry;
   return geometry->SBTRecord;
@@ -6061,7 +6061,7 @@ gprtRayGenDestroy(GPRTRayGen _rayGen) {
 }
 
 GPRT_API void *
-gprtRayGenGetPointer(GPRTRayGen _rayGen, int deviceID) {
+gprtRayGenGetParameters(GPRTRayGen _rayGen, int deviceID) {
   LOG_API_CALL();
   RayGen *rayGen = (RayGen *) _rayGen;
   return rayGen->SBTRecord;
@@ -6092,7 +6092,7 @@ gprtComputeDestroy(GPRTCompute _compute) {
 }
 
 GPRT_API void *
-gprtComputeGetPointer(GPRTCompute _compute, int deviceID) {
+gprtComputeGetParameters(GPRTCompute _compute, int deviceID) {
   LOG_API_CALL();
   Compute *compute = (Compute *) _compute;
   return compute->SBTRecord;
@@ -6129,7 +6129,7 @@ gprtMissDestroy(GPRTMiss _miss) {
 }
 
 GPRT_API void *
-gprtMissGetPointer(GPRTMiss _miss, int deviceID) {
+gprtMissGetParameters(GPRTMiss _miss, int deviceID) {
   LOG_API_CALL();
   Miss *miss = (Miss *) _miss;
   return miss->SBTRecord;

@@ -234,12 +234,12 @@ gprtGeomDestroy(GPRTGeomOf<T> geometry) {
   gprtGeomDestroy((GPRTGeom) geometry);
 }
 
-GPRT_API void *gprtGeomGetPointer(GPRTGeom geometry, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtGeomGetParameters(GPRTGeom geometry, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtGeomGetPointer(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtGeomGetPointer((GPRTGeom) geometry, deviceID);
+gprtGeomGetParameters(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtGeomGetParameters((GPRTGeom) geometry, deviceID);
 }
 
 // ==================================================================
@@ -538,12 +538,12 @@ gprtComputeDestroy(GPRTComputeOf<T> compute) {
   gprtComputeDestroy((GPRTCompute) compute);
 }
 
-GPRT_API void *gprtComputeGetPointer(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtComputeGetParameters(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtComputeGetPointer(GPRTComputeOf<T> compute) {
-  return (T *) gprtComputeGetPointer((GPRTCompute) compute);
+gprtComputeGetParameters(GPRTComputeOf<T> compute) {
+  return (T *) gprtComputeGetParameters((GPRTCompute) compute);
 }
 
 GPRT_API GPRTRayGen gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *programName,
@@ -563,12 +563,12 @@ gprtRayGenDestroy(GPRTRayGenOf<T> rayGen) {
   gprtRayGenDestroy((GPRTRayGen) rayGen);
 }
 
-GPRT_API void *gprtRayGenGetPointer(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtRayGenGetParameters(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtRayGenGetPointer(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtRayGenGetPointer((GPRTRayGen) rayGen, deviceID);
+gprtRayGenGetParameters(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtRayGenGetParameters((GPRTRayGen) rayGen, deviceID);
 }
 
 GPRT_API GPRTMiss gprtMissCreate(GPRTContext context, GPRTModule module, const char *programName, size_t recordSize);
@@ -596,12 +596,12 @@ gprtMissDestroy(GPRTMissOf<T> missProg) {
   gprtMissDestroy((GPRTMiss) missProg);
 }
 
-GPRT_API void *gprtMissGetPointer(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtMissGetParameters(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtMissGetPointer(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtMissGetPointer((GPRTMiss) missProg, deviceID);
+gprtMissGetParameters(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtMissGetParameters((GPRTMiss) missProg, deviceID);
 }
 
 // ------------------------------------------------------------------
