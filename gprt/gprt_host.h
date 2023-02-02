@@ -191,7 +191,8 @@ typedef enum {
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
-  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT
+  GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
+  GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
 
 /*! currently supported texture filter modes */
@@ -233,12 +234,12 @@ gprtGeomDestroy(GPRTGeomOf<T> geometry) {
   gprtGeomDestroy((GPRTGeom) geometry);
 }
 
-GPRT_API void *gprtGeomGetPointer(GPRTGeom geometry, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtGeomGetParameters(GPRTGeom geometry, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtGeomGetPointer(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtGeomGetPointer((GPRTGeom) geometry, deviceID);
+gprtGeomGetParameters(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtGeomGetParameters((GPRTGeom) geometry, deviceID);
 }
 
 // ==================================================================
@@ -346,6 +347,144 @@ GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
  */
 GPRT_API int gprtGetMouseButton(GPRTContext context, int button);
 
+/* The unknown key */
+#define GPRT_KEY_UNKNOWN            -1
+
+/* Printable keys */
+#define GPRT_KEY_SPACE              32
+#define GPRT_KEY_APOSTROPHE         39  /* ' */
+#define GPRT_KEY_COMMA              44  /* , */
+#define GPRT_KEY_MINUS              45  /* - */
+#define GPRT_KEY_PERIOD             46  /* . */
+#define GPRT_KEY_SLASH              47  /* / */
+#define GPRT_KEY_0                  48
+#define GPRT_KEY_1                  49
+#define GPRT_KEY_2                  50
+#define GPRT_KEY_3                  51
+#define GPRT_KEY_4                  52
+#define GPRT_KEY_5                  53
+#define GPRT_KEY_6                  54
+#define GPRT_KEY_7                  55
+#define GPRT_KEY_8                  56
+#define GPRT_KEY_9                  57
+#define GPRT_KEY_SEMICOLON          59  /* ; */
+#define GPRT_KEY_EQUAL              61  /* = */
+#define GPRT_KEY_A                  65
+#define GPRT_KEY_B                  66
+#define GPRT_KEY_C                  67
+#define GPRT_KEY_D                  68
+#define GPRT_KEY_E                  69
+#define GPRT_KEY_F                  70
+#define GPRT_KEY_G                  71
+#define GPRT_KEY_H                  72
+#define GPRT_KEY_I                  73
+#define GPRT_KEY_J                  74
+#define GPRT_KEY_K                  75
+#define GPRT_KEY_L                  76
+#define GPRT_KEY_M                  77
+#define GPRT_KEY_N                  78
+#define GPRT_KEY_O                  79
+#define GPRT_KEY_P                  80
+#define GPRT_KEY_Q                  81
+#define GPRT_KEY_R                  82
+#define GPRT_KEY_S                  83
+#define GPRT_KEY_T                  84
+#define GPRT_KEY_U                  85
+#define GPRT_KEY_V                  86
+#define GPRT_KEY_W                  87
+#define GPRT_KEY_X                  88
+#define GPRT_KEY_Y                  89
+#define GPRT_KEY_Z                  90
+#define GPRT_KEY_LEFT_BRACKET       91  /* [ */
+#define GPRT_KEY_BACKSLASH          92  /* \ */
+#define GPRT_KEY_RIGHT_BRACKET      93  /* ] */
+#define GPRT_KEY_GRAVE_ACCENT       96  /* ` */
+#define GPRT_KEY_WORLD_1            161 /* non-US #1 */
+#define GPRT_KEY_WORLD_2            162 /* non-US #2 */
+
+/* Function keys */
+#define GPRT_KEY_ESCAPE             256
+#define GPRT_KEY_ENTER              257
+#define GPRT_KEY_TAB                258
+#define GPRT_KEY_BACKSPACE          259
+#define GPRT_KEY_INSERT             260
+#define GPRT_KEY_DELETE             261
+#define GPRT_KEY_RIGHT              262
+#define GPRT_KEY_LEFT               263
+#define GPRT_KEY_DOWN               264
+#define GPRT_KEY_UP                 265
+#define GPRT_KEY_PAGE_UP            266
+#define GPRT_KEY_PAGE_DOWN          267
+#define GPRT_KEY_HOME               268
+#define GPRT_KEY_END                269
+#define GPRT_KEY_CAPS_LOCK          280
+#define GPRT_KEY_SCROLL_LOCK        281
+#define GPRT_KEY_NUM_LOCK           282
+#define GPRT_KEY_PRINT_SCREEN       283
+#define GPRT_KEY_PAUSE              284
+#define GPRT_KEY_F1                 290
+#define GPRT_KEY_F2                 291
+#define GPRT_KEY_F3                 292
+#define GPRT_KEY_F4                 293
+#define GPRT_KEY_F5                 294
+#define GPRT_KEY_F6                 295
+#define GPRT_KEY_F7                 296
+#define GPRT_KEY_F8                 297
+#define GPRT_KEY_F9                 298
+#define GPRT_KEY_F10                299
+#define GPRT_KEY_F11                300
+#define GPRT_KEY_F12                301
+#define GPRT_KEY_F13                302
+#define GPRT_KEY_F14                303
+#define GPRT_KEY_F15                304
+#define GPRT_KEY_F16                305
+#define GPRT_KEY_F17                306
+#define GPRT_KEY_F18                307
+#define GPRT_KEY_F19                308
+#define GPRT_KEY_F20                309
+#define GPRT_KEY_F21                310
+#define GPRT_KEY_F22                311
+#define GPRT_KEY_F23                312
+#define GPRT_KEY_F24                313
+#define GPRT_KEY_F25                314
+#define GPRT_KEY_KP_0               320
+#define GPRT_KEY_KP_1               321
+#define GPRT_KEY_KP_2               322
+#define GPRT_KEY_KP_3               323
+#define GPRT_KEY_KP_4               324
+#define GPRT_KEY_KP_5               325
+#define GPRT_KEY_KP_6               326
+#define GPRT_KEY_KP_7               327
+#define GPRT_KEY_KP_8               328
+#define GPRT_KEY_KP_9               329
+#define GPRT_KEY_KP_DECIMAL         330
+#define GPRT_KEY_KP_DIVIDE          331
+#define GPRT_KEY_KP_MULTIPLY        332
+#define GPRT_KEY_KP_SUBTRACT        333
+#define GPRT_KEY_KP_ADD             334
+#define GPRT_KEY_KP_ENTER           335
+#define GPRT_KEY_KP_EQUAL           336
+#define GPRT_KEY_LEFT_SHIFT         340
+#define GPRT_KEY_LEFT_CONTROL       341
+#define GPRT_KEY_LEFT_ALT           342
+#define GPRT_KEY_LEFT_SUPER         343
+#define GPRT_KEY_RIGHT_SHIFT        344
+#define GPRT_KEY_RIGHT_CONTROL      345
+#define GPRT_KEY_RIGHT_ALT          346
+#define GPRT_KEY_RIGHT_SUPER        347
+#define GPRT_KEY_MENU               348
+
+#define GPRT_KEY_LAST               GPRT_KEY_MENU
+
+/** If a window was requested, this function returns the last state reported
+ * for the given keyboard button. The returned state is one of GPRT_PRESS or
+ * GPRT_RELEASE.
+ *
+ * If a window was not requested (ie headless), this function will return
+ * GPRT_RELEASE.
+ */
+GPRT_API int gprtGetKey(GPRTContext context, int key);
+
 /** If a window was requested, this function returns the time elapsed since
  * GPRT was initialized.
  *
@@ -399,12 +538,12 @@ gprtComputeDestroy(GPRTComputeOf<T> compute) {
   gprtComputeDestroy((GPRTCompute) compute);
 }
 
-GPRT_API void *gprtComputeGetPointer(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtComputeGetParameters(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtComputeGetPointer(GPRTComputeOf<T> compute) {
-  return (T *) gprtComputeGetPointer((GPRTCompute) compute);
+gprtComputeGetParameters(GPRTComputeOf<T> compute) {
+  return (T *) gprtComputeGetParameters((GPRTCompute) compute);
 }
 
 GPRT_API GPRTRayGen gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *programName,
@@ -424,12 +563,12 @@ gprtRayGenDestroy(GPRTRayGenOf<T> rayGen) {
   gprtRayGenDestroy((GPRTRayGen) rayGen);
 }
 
-GPRT_API void *gprtRayGenGetPointer(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtRayGenGetParameters(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtRayGenGetPointer(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtRayGenGetPointer((GPRTRayGen) rayGen, deviceID);
+gprtRayGenGetParameters(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtRayGenGetParameters((GPRTRayGen) rayGen, deviceID);
 }
 
 GPRT_API GPRTMiss gprtMissCreate(GPRTContext context, GPRTModule module, const char *programName, size_t recordSize);
@@ -457,12 +596,12 @@ gprtMissDestroy(GPRTMissOf<T> missProg) {
   gprtMissDestroy((GPRTMiss) missProg);
 }
 
-GPRT_API void *gprtMissGetPointer(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtMissGetParameters(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtMissGetPointer(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtMissGetPointer((GPRTMiss) missProg, deviceID);
+gprtMissGetParameters(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtMissGetParameters((GPRTMiss) missProg, deviceID);
 }
 
 // ------------------------------------------------------------------
@@ -659,6 +798,43 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule 
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
 }
 
+GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+
+template <typename T>
+void
+gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
+  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, progName);
+}
+
+GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
+                                               GPRTTexture depthAttachment);
+
+template <typename T1, typename T2, typename T3>
+void
+gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTextureOf<T2> colorAttachment,
+                                 GPRTTextureOf<T3> depthAttachment) {
+  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rasterType, (GPRTTexture) colorAttachment,
+                                   (GPRTTexture) depthAttachment);
+}
+
+void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
+                           uint32_t rasterType = 0, uint32_t *instanceCounts = nullptr);
+
+template <typename T>
+void
+gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<T> geomType, uint32_t numGeometry, GPRTGeomOf<T> *geometry,
+                      uint32_t rayType = 0, uint32_t *instanceCounts = nullptr) {
+  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
+}
+
 /**
  * @brief Creates a sampler object for use in sampling textures. Behavior below
  * defines how texture.SampleLevel and texture.SampleGrad operate. The "sampled
@@ -771,6 +947,46 @@ template <typename T>
 void
 gprtTexturePresent(GPRTContext context, GPRTTextureOf<T> texture) {
   gprtTexturePresent(context, (GPRTTexture) texture);
+}
+
+/**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+GPRT_API void gprtTextureSaveImage(GPRTTexture texture, const char *imageName);
+
+/**
+ * @brief This call saves the contents of the given texture to the underlying filesystem.
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The GPRT texture to save
+ * @param imageName The path to the PNG file to store the contents to
+ */
+template <typename T>
+void
+gprtTextureSaveImage(GPRTTextureOf<T> texture, const char *imageName) {
+  gprtTextureSaveImage((GPRTTexture) texture, imageName);
+}
+
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @param texture The texture to be cleared
+ */
+GPRT_API void gprtTextureClear(GPRTTexture texture);
+
+/**
+ * @brief Clears all values of the given texture to 0
+ *
+ * @tparam T The template type of the given texture
+ * @param texture The texture to be cleared
+ */
+template <typename T>
+void
+gprtTextureClear(GPRTTextureOf<T> texture) {
+  gprtTextureClear((GPRTTexture) texture);
 }
 
 /*! Destroys all underlying Vulkan resources for the given texture and frees any

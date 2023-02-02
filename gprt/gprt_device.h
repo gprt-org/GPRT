@@ -36,6 +36,9 @@ struct PushConstants {
 [[vk::push_constant]] PushConstants pc;
 
 // Descriptor binding, then set number.
+// Currently, 0, N is used for textures
+// Then, 1, N is used for record data passed
+// to compute and raster programs.
 [[vk::binding(0, 0)]] SamplerState samplers[];
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
@@ -48,12 +51,16 @@ make_8bit(const float f) {
 }
 
 inline uint32_t
-make_rgba(const float3 color) {
+make_rgba(float3 color) {
+  float gamma = 2.2;
+  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.z) << 16) + (0xffU << 24);
 }
 
 inline uint32_t
-make_bgra(const float3 color) {
+make_bgra(float3 color) {
+  float gamma = 2.2;
+  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) + (0xffU << 24);
 }
 
@@ -291,9 +298,9 @@ where ARG is "(type_, name)". */
 // We currently recycle ray generation programs to implement a user-side
 // compute program. This allows us to recycle existing SBT record API
 // for compute shader IO
-#ifndef GPRT_COMPUTE_PROGRAM
+#ifndef GPRT_COMPUTE_PROGRAM_OLD
 #ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                                                                     \
+#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID);                                                                                        \
@@ -309,9 +316,123 @@ where ARG is "(type_, name)". */
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID) /* program args and body supplied by user ... */
 #else
-#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl)                                                                     \
+#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
                 uint3 GroupID) /* program args and body supplied by user ... */
+#endif
+#endif
+
+#ifndef GPRT_COMPUTE_PROGRAM
+#ifdef COMPUTE
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+                                                                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex);                                                                                      \
+                                                                                                                       \
+  [numthreads NumThreads][shader("compute")] void __compute__##progName(uint3 groupThreadID                            \
+                                                                        : SV_GroupThreadID, uint3 groupID              \
+                                                                        : SV_GroupID, uint3 dispatchThreadID           \
+                                                                        : SV_DispatchThreadID, uint groupIndex         \
+                                                                        : SV_GroupIndex) {                             \
+    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), groupThreadID, groupID, dispatchThreadID, groupIndex);   \
+  }                                                                                                                    \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex) /* program args and body supplied by user ... */
+#else
+#define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+                uint GroupIndex) /* program args and body supplied by user ... */
+#endif
+#endif
+
+static uint32_t _VertexIndex = -1;
+static uint32_t _PrimitiveIndex = -1;
+static float2 _Barycentrics = float2(0.f, 0.f);
+static float4 _Position = float4(0.f, 0.f, 0.f, 0.f);
+
+uint32_t
+VertexIndex() {
+  return _VertexIndex;
+}
+
+uint32_t
+TriangleIndex() {
+  return _PrimitiveIndex;
+}
+
+float2
+Barycentrics() {
+  return _Barycentrics;
+}
+
+float4
+Position() {
+  return _Position;
+}
+
+#ifndef GPRT_VERTEX_PROGRAM
+#ifdef VERTEX
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+  struct progName##VSOutput {                                                                                          \
+    float4 position : SV_POSITION;                                                                                     \
+    float2 barycentrics : TEXCOORD0;                                                                                   \
+  };                                                                                                                   \
+                                                                                                                       \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+                                                                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
+                                                                                                                       \
+  [shader("vertex")] progName##VSOutput __vertex__##progName(uint SVVID : SV_VertexID) {                               \
+    _VertexIndex = SVVID;                                                                                              \
+    _PrimitiveIndex = _VertexIndex % 3;                                                                                \
+    progName##VSOutput output;                                                                                         \
+    output.position = progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                       \
+    output.barycentrics = (((SVVID % 3) == 0)   ? float2(0.f, 0.f)                                                     \
+                           : ((SVVID % 3) == 1) ? float2(1.f, 0.f)                                                     \
+                                                : float2(0.f, 1.f));                                                   \
+    return output;                                                                                                     \
+  }                                                                                                                    \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+#else
+#define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+#endif
+#endif
+
+#ifndef GPRT_PIXEL_PROGRAM
+#ifdef PIXEL
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+                                                                                                                       \
+  /* fwd decl for the kernel func to call */                                                                           \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
+                                                                                                                       \
+  [shader("pixel")] float4 __pixel__##progName(float2 baryWeights                                                      \
+                                               : TEXCOORD0, float4 position                                            \
+                                               : SV_Position, uint32_t PrimitiveID                                     \
+                                               : SV_PrimitiveID)                                                       \
+      : SV_TARGET {                                                                                                    \
+    _Position = position;                                                                                              \
+    _Barycentrics = baryWeights;                                                                                       \
+    _PrimitiveIndex = PrimitiveID;                                                                                     \
+    return progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                                  \
+  }                                                                                                                    \
+                                                                                                                       \
+  /* now the actual device code that the user is writing: */                                                           \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+#else
+#define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
+  /* Dont add entry point decorators, instead treat as just a function. */                                             \
+  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif

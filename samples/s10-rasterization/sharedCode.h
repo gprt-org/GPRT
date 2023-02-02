@@ -22,49 +22,21 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-struct SphereBoundsData {
+// note! HLSL aligns to float4 boundaries!
+struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
+  alignas(16) gprt::Buffer index;    // int3*
+  alignas(16) gprt::Buffer vertex;   // float3*
+  alignas(16) gprt::Buffer color;    // float3*
+
+  alignas(16) float4x4 view;
+  alignas(16) float4x4 proj;
 };
 
-struct SphereBoundsData2 {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
-};
-
-/* variables for the triangle mesh geometry */
-struct SphereGeomData {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-};
-
-struct RayGenData {
-  alignas(16) gprt::Buffer frameBuffer;
-
-  alignas(16) gprt::Accel world;
-
-  struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
-  } camera;
-};
-
-/* variables for the miss program */
-struct MissProgData {
+/* variables for the geometry representing the background */
+struct BackgroundData {
+  alignas(16) gprt::Buffer index;    // int3*
+  alignas(16) gprt::Buffer vertex;   // float3*
   alignas(16) float3 color0;
   alignas(16) float3 color1;
 };
