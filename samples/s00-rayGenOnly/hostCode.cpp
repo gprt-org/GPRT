@@ -76,9 +76,6 @@ main(int ac, char **av) {
   // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
 
-  // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(gprt);
-
   // ------------------------------------------------------------------
   // allocating buffers
   // ------------------------------------------------------------------

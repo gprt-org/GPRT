@@ -3375,13 +3375,16 @@ struct Context {
   VkPipelineCache pipelineCache;
 
   // ray tracing pipeline and layout
-  VkPipeline pipeline = VK_NULL_HANDLE;
-  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  bool raytracingPipelineOutOfDate = true;
+  VkPipeline raytracingPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
 
-  std::vector<Compute *> computePrograms;
   std::vector<RayGen *> raygenPrograms;
   std::vector<Miss *> missPrograms;
   std::vector<GeomType *> geomTypes;
+
+  bool computePipelinesOutOfDate = true;
+  bool rasterPipelinesOutOfDate = true;
 
   std::vector<Accel *> accels;
 
@@ -3400,6 +3403,7 @@ struct Context {
   VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
 
+  // used to determine what descriptor sets need rebuilding
   uint32_t previousNumSamplers = 0;
   uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
@@ -3424,6 +3428,7 @@ struct Context {
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
+
 
   uint32_t numRayTypes = 1;
 
@@ -4356,10 +4361,10 @@ struct Context {
     if (surface)
       vkDestroySurfaceKHR(instance, surface, nullptr);
 
-    if (pipelineLayout)
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-    if (pipeline)
-      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+    if (raytracingPipelineLayout)
+      vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+    if (raytracingPipeline)
+      vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
 
     if (fillInstanceDataStage.layout)
       vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
@@ -4406,7 +4411,7 @@ struct Context {
       const uint32_t sbtSize = groupCount * handleSize;
 
       std::vector<uint8_t> shaderHandleStorage(sbtSize);
-      VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize,
+      VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
                                                              shaderHandleStorage.data());
       if (err)
         GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
@@ -4685,6 +4690,12 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumSamplers = poolSize.descriptorCount;
     }
@@ -4785,6 +4796,12 @@ struct Context {
 
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
+
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
 
       // Finally, keep track of if the texture count here changes
       previousNumTexture1Ds = Texture::texture1Ds.size();
@@ -4887,6 +4904,12 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumTexture2Ds = Texture::texture2Ds.size();
     }
@@ -4988,11 +5011,18 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumTexture3Ds = Texture::texture3Ds.size();
     }
 
-    // If the number of records has changed, we need to make a new descriptor pool
+    // If the number of raster records has changed, we need to make a new buffer of 
+    // raster program records
     if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
       rasterRecordBuffer->destroy();
       delete rasterRecordBuffer;
@@ -5047,11 +5077,15 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
+      // We're only updating an existing descriptor set here, so we don't 
+      // need to mark our raster pipelines as "outdated" from this.
+
       // Finally, keep track of if the record count here changes
       previousNumRasterRecords = Geom::geoms.size();
     }
 
-    // If the number of records has changed, we need to make a new descriptor pool
+    // If the number of compute records has changed, we need to make a new buffer of 
+    // compute records
     if (computeRecordBuffer && previousNumComputeRecords != Compute::computes.size()) {
       computeRecordBuffer->destroy();
       delete computeRecordBuffer;
@@ -5106,184 +5140,194 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
+      // We're only updating an existing descriptor set here, so we don't 
+      // need to mark our compute pipelines as "outdated" from this.
+
       // Finally, keep track of if the record count here changes
       previousNumComputeRecords = Compute::computes.size();
     }
 
-    // Build the ray tracing pipeline
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                                   VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                                   VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    // Build / update the ray tracing pipeline if required
+    if (raytracingPipelineOutOfDate) {
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
-    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {
-        samplerDescriptorSetLayout,
-        texture1DDescriptorSetLayout,
-        texture2DDescriptorSetLayout,
-        texture3DDescriptorSetLayout,
-    };
-    pipelineLayoutCI.setLayoutCount = layouts.size();
-    pipelineLayoutCI.pSetLayouts = layouts.data();
+    
+      VkPushConstantRange pushConstantRange = {};
+      pushConstantRange.size = 128;
+      pushConstantRange.offset = 0;
+      pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                    VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
-    pipelineLayoutCI.pushConstantRangeCount = 1;
-    pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+      VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+      pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      std::vector<VkDescriptorSetLayout> layouts = {
+          samplerDescriptorSetLayout,
+          texture1DDescriptorSetLayout,
+          texture2DDescriptorSetLayout,
+          texture3DDescriptorSetLayout,
+      };
+      pipelineLayoutCI.setLayoutCount = layouts.size();
+      pipelineLayoutCI.pSetLayouts = layouts.data();
 
-    if (pipelineLayout != VK_NULL_HANDLE) {
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-      pipelineLayout = VK_NULL_HANDLE;
-    }
-    VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+      pipelineLayoutCI.pushConstantRangeCount = 1;
+      pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 
-    /*
-      Setup ray tracing shader groups
-    */
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    shaderGroups.clear();
-
-    // Ray generation groups
-    {
-      for (auto raygen : raygenPrograms) {
-        shaderStages.push_back(raygen->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
+      if (raytracingPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+        raytracingPipelineLayout = VK_NULL_HANDLE;
       }
-    }
+      VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &raytracingPipelineLayout));
 
-    // Miss group
-    {
-      for (auto miss : missPrograms) {
-        shaderStages.push_back(miss->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
+      /*
+        Setup ray tracing shader groups
+      */
+      std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+      shaderGroups.clear();
+
+      // Ray generation groups
+      {
+        for (auto raygen : raygenPrograms) {
+          shaderStages.push_back(raygen->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
       }
-    }
 
-    // Hit groups
+      // Miss group
+      {
+        for (auto miss : missPrograms) {
+          shaderStages.push_back(miss->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
+      }
 
-    // Go over all TLAS by order they were created
-    for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-      Accel *tlas = accels[tlasID];
-      if (!tlas)
-        continue;
-      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-        // Iterate over all BLAS stored in the TLAS
-        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-        for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
-          Accel *blas = instanceAccel->instances[blasID];
-          // Handle different BLAS types...
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-            TriangleAccel *triAccel = (TriangleAccel *) blas;
-            // Add a record for every geometry-raytype permutation
-            for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-              auto &geom = triAccel->geometries[geomID];
-              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+      // Hit groups
 
-                // init all to unused
-                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+      // Go over all TLAS by order they were created
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+        Accel *tlas = accels[tlasID];
+        if (!tlas)
+          continue;
+        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+          // Iterate over all BLAS stored in the TLAS
+          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+            Accel *blas = instanceAccel->instances[blasID];
+            // Handle different BLAS types...
+            if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+              TriangleAccel *triAccel = (TriangleAccel *) blas;
+              // Add a record for every geometry-raytype permutation
+              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                auto &geom = triAccel->geometries[geomID];
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                  shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                  shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
 
-                // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  // init all to unused
+                  shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                  // populate hit group programs using geometry type
+                  if (geom->geomType->closestHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                    shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->anyHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                    shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->intersectionShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                    shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+                  shaderGroups.push_back(shaderGroup);
                 }
-
-                if (geom->geomType->anyHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-
-                if (geom->geomType->intersectionShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-                shaderGroups.push_back(shaderGroup);
               }
-            }
-          } else if (blas->getType() == GPRT_AABB_ACCEL) {
-            AABBAccel *aabbAccel = (AABBAccel *) blas;
-            // Add a record for every geometry-raytype permutation
-            for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
-              auto &geom = aabbAccel->geometries[geomID];
-              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            } else if (blas->getType() == GPRT_AABB_ACCEL) {
+              AABBAccel *aabbAccel = (AABBAccel *) blas;
+              // Add a record for every geometry-raytype permutation
+              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                auto &geom = aabbAccel->geometries[geomID];
+                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                  shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                  shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
 
-                // init all to unused
-                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+                  // init all to unused
+                  shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
-                // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  // populate hit group programs using geometry type
+                  if (geom->geomType->closestHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                    shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->anyHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                    shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->intersectionShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                    shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+                  shaderGroups.push_back(shaderGroup);
                 }
-
-                if (geom->geomType->anyHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-
-                if (geom->geomType->intersectionShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-                shaderGroups.push_back(shaderGroup);
               }
+            } else {
+              GPRT_RAISE("Unaccounted for BLAS type!");
             }
-          } else {
-            GPRT_RAISE("Unaccounted for BLAS type!");
           }
         }
       }
-    }
 
-    if (shaderStages.size() > 0) {
-      /*
-        Create the ray tracing pipeline
-      */
-      VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
-      rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-      rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-      rayTracingPipelineCI.pStages = shaderStages.data();
-      rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
-      rayTracingPipelineCI.pGroups = shaderGroups.data();
-      rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
-      rayTracingPipelineCI.layout = pipelineLayout;
+      if (shaderStages.size() > 0) {
+        /*
+          Create the ray tracing pipeline
+        */
+        VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
+        rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+        rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+        rayTracingPipelineCI.pStages = shaderStages.data();
+        rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
+        rayTracingPipelineCI.pGroups = shaderGroups.data();
+        rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
+        rayTracingPipelineCI.layout = raytracingPipelineLayout;
 
-      if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(logicalDevice, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
+        if (raytracingPipeline != VK_NULL_HANDLE) {
+          vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+          raytracingPipeline = VK_NULL_HANDLE;
+        }
+        VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
+                                                        &rayTracingPipelineCI, nullptr, &raytracingPipeline);
+        if (err) {
+          GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
+        }
       }
-      VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
-                                                       &rayTracingPipelineCI, nullptr, &pipeline);
-      if (err) {
-        GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
-      }
+
+      // Mark our ray tracing pipeline as "updated".
+      raytracingPipelineOutOfDate = false;
     }
   }
 
@@ -6046,6 +6090,9 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
 
   context->raygenPrograms.push_back(raygen);
 
+  // Creating a raygen program requires rebuilding a RT pipeline.
+  context->raytracingPipelineOutOfDate = true;
+
   LOG("raygen created...");
   return (GPRTRayGen) raygen;
 }
@@ -6057,6 +6104,9 @@ gprtRayGenDestroy(GPRTRayGen _rayGen) {
   rayGen->destroy();
   delete rayGen;
   rayGen = nullptr;
+
+  // todo, remove from context->raygenPrograms, rebuild pipelines
+
   LOG("raygen destroyed...");
 }
 
@@ -6075,7 +6125,8 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
 
   Compute *compute = new Compute(context->logicalDevice, module, programName, recordSize);
 
-  context->computePrograms.push_back(compute);
+  // Notify context that we need to build this compute pipeline
+  context->computePipelinesOutOfDate = true;
 
   LOG("compute created...");
   return (GPRTCompute) compute;
@@ -6108,6 +6159,9 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
 
   context->missPrograms.push_back(missProg);
 
+  // Creating a miss program requires rebuilding a RT pipeline.
+  context->raytracingPipelineOutOfDate = true;
+
   LOG("miss program created...");
   return (GPRTMiss) missProg;
 }
@@ -6125,6 +6179,8 @@ gprtMissDestroy(GPRTMiss _miss) {
   missProg->destroy();
   delete missProg;
   missProg = nullptr;
+
+  // todo, update context->missPrograms list... rebuild pipelines
   LOG("miss program destroyed...");
 }
 
@@ -6597,14 +6653,6 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
     texture->unmap();
 }
 
-GPRT_API void
-gprtBuildPipeline(GPRTContext _context) {
-  LOG_API_CALL();
-  Context *context = (Context *) _context;
-  context->buildPipeline();
-  LOG("programs built...");
-}
-
 GPRT_API GPRTAccel
 gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
@@ -6640,6 +6688,12 @@ gprtInstanceAccelCreate(GPRTContext _context, size_t numAccels, GPRTAccel *array
       new InstanceAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
                         context->graphicsQueue, numAccels, arrayOfAccels);
   context->accels.push_back(accel);
+
+  // Creating an instance acceleration structure will introduce geom records into
+  // the SBT. Therefore, we need to rebuild the pipeline after this.
+
+  context->raytracingPipelineOutOfDate = true;
+
   return (GPRTAccel) accel;
 }
 
@@ -6724,6 +6778,7 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
+  context->buildPipeline();
   context->buildSBT();
 }
 
@@ -6756,19 +6811,19 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
                                                  context->texture2DDescriptorSet, context->texture3DDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
+                          context->raytracingPipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->pipeline);
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->raytracingPipeline);
 
   struct PushConstants {
     uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   } pushConstants;
-  vkCmdPushConstants(context->graphicsCommandBuffer, context->pipelineLayout,
+  vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                          VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                          VK_SHADER_STAGE_RAYGEN_BIT_KHR,

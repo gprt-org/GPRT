@@ -146,11 +146,6 @@ main(int ac, char **av) {
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
   bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################

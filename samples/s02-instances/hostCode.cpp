@@ -160,10 +160,6 @@ main(int ac, char **av) {
   // we go to trace our rays.
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

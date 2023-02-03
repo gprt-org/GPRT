@@ -169,10 +169,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build *SBT* required to trace the groups
-  // ##################################################################
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

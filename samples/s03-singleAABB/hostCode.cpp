@@ -124,10 +124,6 @@ main(int ac, char **av) {
 
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

@@ -291,11 +291,6 @@ gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, size_t c
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
-/* Builds the ray tracing pipeline over the raytracing programs.
-  This must be called after any acceleration structures are created.
-*/
-GPRT_API void gprtBuildPipeline(GPRTContext context);
-
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags flags GPRT_IF_CPP(= GPRT_SBT_ALL));
 
 /** Tells the GPRT to create a window when once the context is made.

@@ -2,10 +2,6 @@
 
 GPRT_VERTEX_PROGRAM(backgroundVertex, (BackgroundData, record)) {
   uint32_t vertexID = VertexIndex();
-
-  if (vertexID == 0) {
-    printf("record color 0 : %f %f %f \n", record.color0.x, record.color0.y, record.color0.z);
-  }
   float3 position = gprt::load<float3>(record.vertex, vertexID);
   return float4(position, 1.f);
 }
@@ -24,11 +20,6 @@ GPRT_VERTEX_PROGRAM(simpleVertex, (TrianglesGeomData, record)) {
   float4 position = float4(gprt::load<float3>(record.vertex, vertexID), 1.f);
   position = mul(view, position);
   position = mul(proj, position);
-
-  if (vertexID == 0) {
-    printf("pos 0 : %f %f %f %f \n", position.x, position.y, position.z, position.w);
-  }
-
   return position;
 }
 

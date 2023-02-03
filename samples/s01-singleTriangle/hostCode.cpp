@@ -146,15 +146,10 @@ main(int ac, char **av) {
   rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
-  // build the pipeline and shader binding table
+  // build the shader binding table
   // ##################################################################
 
-  // We must build the pipeline after all geometry instances are created.
-  // The pipeline contains programs for each geometry that might be hit by
-  // a ray.
-  gprtBuildPipeline(context);
-
-  // Next, the shader binding table is used to assign parameters to our ray
+  // The shader binding table is used to assign parameters to our ray
   // generation and miss programs. We also use the shader binding table to
   // map parameters to geometry depending on the ray type and instance.
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);

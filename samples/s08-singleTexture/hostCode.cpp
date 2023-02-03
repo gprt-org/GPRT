@@ -147,9 +147,6 @@ main(int ac, char **av) {
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
                         GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)};
 
-  // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(context);
-
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
@@ -178,7 +175,6 @@ main(int ac, char **av) {
   transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = samplers.size();
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context, transformProgram, samplers.size());
 
@@ -205,7 +201,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

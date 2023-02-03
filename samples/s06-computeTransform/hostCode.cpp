@@ -144,11 +144,6 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Note, we'll need to call this again after creating our acceleration
-  // structures, as acceleration structures will introduce new shader
-  // binding table records to the pipeline.
-  gprtBuildPipeline(context);
-
   // ------------------------------------------------------------------
   // bottom level mesh instances
   // ------------------------------------------------------------------
@@ -212,12 +207,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build *SBT* required to trace the groups
-  // ##################################################################
-
-  // re-build the pipeline to account for newly introduced geometry
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
