@@ -5512,6 +5512,16 @@ gprtWindowShouldClose(GPRTContext _context) {
 }
 
 GPRT_API void
+gprtSetWindowTitle(GPRTContext _context, const char *title) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  if (!requestedFeatures.window)
+    return;
+
+  glfwSetWindowTitle(context->window, title);
+}
+
+GPRT_API void
 gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
   LOG_API_CALL();
   Context *context = (Context *) _context;

@@ -308,6 +308,14 @@ GPRT_API void gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, c
  */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
+/** If a window was requested, this function sets the title in the top bar of 
+ * the window to the given text.
+ *
+ * If a window was not requested (ie headless), this function does nothing
+ */
+GPRT_API void gprtSetWindowTitle(GPRTContext context, const char *title);
+
+
 /** If a window was requested, this function returns the position of the cursor
  * in screen coordinates relative to the upper left corner.
  *
