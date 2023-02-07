@@ -62,6 +62,10 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+// For user interface
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -76,7 +80,7 @@ static struct RequestedFeatures {
     std::string title;
   } windowProperties;
 
-    /*! returns whether logging is enabled */
+  /*! returns whether logging is enabled */
   inline static bool logging() {
 #ifdef NDEBUG
     return false;
@@ -85,7 +89,6 @@ static struct RequestedFeatures {
 #endif
   }
 } requestedFeatures;
-
 
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
@@ -151,19 +154,19 @@ gprtRaise_impl(std::string str) {
 #define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
 #endif
 
-#define LOG_INFO(message)                                                                                                   \
-  if (RequestedFeatures::logging())                                                                                              \
+#define LOG_INFO(message)                                                                                              \
+  if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
-#define LOG_WARNING(message)                                                                                                   \
-  if (RequestedFeatures::logging())                                                                                              \
+#define LOG_WARNING(message)                                                                                           \
+  if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_YELLOW << "#gprt warn:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
-#define LOG_ERROR(message)                                                                                                   \
-  {\
-    if (RequestedFeatures::logging())                                                                                              \
-    std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;  \
-    GPRT_RAISE(message) \
+#define LOG_ERROR(message)                                                                                             \
+  {                                                                                                                    \
+    if (RequestedFeatures::logging())                                                                                  \
+      std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
+    GPRT_RAISE(message)                                                                                                \
   }
 
 std::string
@@ -1072,11 +1075,11 @@ struct Texture {
     // Shouldn't happen, but doesn't hurt to double check.
     if ((usageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0)
       LOG_ERROR("image needs transfer src usage bit for texture mipmap "
-                 "generation! \n");
+                "generation! \n");
 
     if ((usageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
       LOG_ERROR("image needs transfer dst usage bit for texture mipmap "
-                 "generation! \n");
+                "generation! \n");
 
     VkResult err;
     VkCommandBufferBeginInfo cmdBufInfo{};
@@ -2102,13 +2105,13 @@ struct GeomType : public SBTEntry {
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;               // Optional
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;               // Optional
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;                              // Optional
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;                              // Optional
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -2488,8 +2491,8 @@ struct TriangleAccel : public Accel {
                                                 &accelerationStructure);
       if (err)
         LOG_ERROR("failed to create acceleration structure for triangle accel "
-                   "build! : \n" +
-                   errorString(err));
+                  "build! : \n" +
+                  errorString(err));
     }
 
     if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
@@ -2702,8 +2705,8 @@ struct AABBAccel : public Accel {
                                                 &accelerationStructure);
       if (err)
         LOG_ERROR("failed to create acceleration structure for AABB accel "
-                   "build! : \n" +
-                   errorString(err));
+                  "build! : \n" +
+                  errorString(err));
     }
 
     if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
@@ -3165,8 +3168,8 @@ struct InstanceAccel : public Accel {
                                                 &accelerationStructure);
       if (err)
         LOG_ERROR("failed to create acceleration structure for instance accel "
-                   "build! : \n" +
-                   errorString(err));
+                  "build! : \n" +
+                  errorString(err));
     }
 
     if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
@@ -3322,6 +3325,15 @@ struct Context {
   VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
+  struct ImGuiData {
+    uint32_t width = -1;
+    uint32_t height = -1;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
+    Texture *colorAttachment = nullptr;
+    Texture *depthAttachment = nullptr;
+  } imgui;
+
   // Physical device (GPU) that Vulkan will use
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
@@ -3424,6 +3436,8 @@ struct Context {
   VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
 
+  VkDescriptorPool imguiPool = VK_NULL_HANDLE;
+
   // used to determine what descriptor sets need rebuilding
   uint32_t previousNumSamplers = 0;
   uint32_t previousNumTexture1Ds = 0;
@@ -3449,7 +3463,6 @@ struct Context {
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer shaderBindingTable;
-
 
   uint32_t numRayTypes = 1;
 
@@ -3743,7 +3756,8 @@ struct Context {
         /* Explain why we aren't using this device */
         for (const char *enabledExtension : enabledDeviceExtensions) {
           if (!extensionSupported(enabledExtension, supportedExtensions)) {
-            LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
+            LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension
+                                                                             << "\" is not present.");
           }
         }
       }
@@ -4285,6 +4299,43 @@ struct Context {
 
       VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
     }
+
+    // Init imgui
+    if (requestedFeatures.window) {
+      // 1: create descriptor pool for IMGUI
+      // the size of the pool is very oversize, but it's copied from imgui demo itself.
+      VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+                                           {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+      VkDescriptorPoolCreateInfo pool_info = {};
+      pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      pool_info.maxSets = 1000;
+      pool_info.poolSizeCount = std::size(pool_sizes);
+      pool_info.pPoolSizes = pool_sizes;
+
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &pool_info, nullptr, &imguiPool));
+
+      // 2: initialize imgui library
+
+      // this initializes the core structures of imgui
+      ImGui::CreateContext();
+
+      // this initializes imgui for SDL
+      ImGui_ImplGlfw_InitForVulkan(window, true);
+
+      // Call new frame here to initialize some internal imgui data
+      ImGui_ImplGlfw_NewFrame();
+    }
   };
 
   void destroy() {
@@ -4356,6 +4407,16 @@ struct Context {
       vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
     if (computeRecordDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
+    if (imguiPool) {
+      vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
+      ImGui_ImplVulkan_Shutdown();
+    }
+    if (imgui.renderPass) {
+      vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+    }
+    if (imgui.frameBuffer) {
+      vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+    }
 
     if (imageAvailableSemaphore)
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
@@ -4641,7 +4702,7 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4745,7 +4806,7 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4854,7 +4915,7 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4963,7 +5024,7 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -5043,7 +5104,7 @@ struct Context {
       previousNumTexture3Ds = Texture::texture3Ds.size();
     }
 
-    // If the number of raster records has changed, we need to make a new buffer of 
+    // If the number of raster records has changed, we need to make a new buffer of
     // raster program records
     if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
       rasterRecordBuffer->destroy();
@@ -5101,14 +5162,14 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
-      // We're only updating an existing descriptor set here, so we don't 
+      // We're only updating an existing descriptor set here, so we don't
       // need to mark our raster pipelines as "outdated" from this.
 
       // Finally, keep track of if the record count here changes
       previousNumRasterRecords = Geom::geoms.size();
     }
 
-    // If the number of compute records has changed, we need to make a new buffer of 
+    // If the number of compute records has changed, we need to make a new buffer of
     // compute records
     if (computeRecordBuffer && previousNumComputeRecords != Compute::computes.size()) {
       computeRecordBuffer->destroy();
@@ -5166,7 +5227,7 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
-      // We're only updating an existing descriptor set here, so we don't 
+      // We're only updating an existing descriptor set here, so we don't
       // need to mark our compute pipelines as "outdated" from this.
 
       // Finally, keep track of if the record count here changes
@@ -5176,13 +5237,13 @@ struct Context {
     // Build / update the ray tracing pipeline if required
     if (raytracingPipelineOutOfDate) {
       LOG_INFO("Building ray tracing pipeline");
-    
+
       VkPushConstantRange pushConstantRange = {};
       pushConstantRange.size = 128;
       pushConstantRange.offset = 0;
       pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                                    VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                                     VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
       VkPipelineLayoutCreateInfo pipelineLayoutCI{};
       pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -5346,7 +5407,7 @@ struct Context {
           raytracingPipeline = VK_NULL_HANDLE;
         }
         VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
-                                                        &rayTracingPipelineCI, nullptr, &raytracingPipeline);
+                                                         &rayTracingPipelineCI, nullptr, &raytracingPipeline);
         if (err) {
           LOG_ERROR("failed to create ray tracing pipeline! : \n" + errorString(err));
         }
@@ -5489,6 +5550,270 @@ struct Context {
 
     endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
   }
+
+  // For ImGui
+  void setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
+    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
+      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
+    } else {
+      imgui.width = colorTexture->width;
+      imgui.height = colorTexture->height;
+    }
+
+    imgui.colorAttachment = colorTexture;
+    imgui.depthAttachment = depthTexture;
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = colorTexture->format;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    // clear here says to clear the values to a constant at start.
+    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
+    // save rasterized fragments to memory
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    // not currently using a stencil
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // Initial and final layouts of the texture
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthTexture->format;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.attachmentCount = attachments.size();
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
+
+    VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
+
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = imgui.renderPass;
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.pAttachments = attachmentViews;
+    framebufferInfo.width = imgui.width;
+    framebufferInfo.height = imgui.height;
+    framebufferInfo.layers = 1;
+
+    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &imgui.frameBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create framebuffer!");
+    }
+
+    // this initializes imgui for Vulkan
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = instance;
+    init_info.PhysicalDevice = physicalDevice;
+    init_info.Device = logicalDevice;
+    init_info.Queue = graphicsQueue;
+    init_info.DescriptorPool = imguiPool;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = 2;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+    ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
+
+    // execute a gpu command to upload imgui font textures
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
+    ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
+    VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;
+    submitInfo.pWaitDstStageMask = nullptr;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;
+
+    VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
+
+    // clear font textures from cpu data
+    ImGui_ImplVulkan_DestroyFontUploadObjects();
+  }
+
+  void rasterizeGui() {
+    ImGui::Render();
+    ImDrawData *draw_data = ImGui::GetDrawData();
+
+    VkResult err;
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    VkRenderPassBeginInfo renderPassBeginInfo = {};
+    renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassBeginInfo.pNext = nullptr;
+    renderPassBeginInfo.renderPass = imgui.renderPass;
+    renderPassBeginInfo.renderArea.offset.x = 0;
+    renderPassBeginInfo.renderArea.offset.y = 0;
+    renderPassBeginInfo.renderArea.extent.width = imgui.width;
+    renderPassBeginInfo.renderArea.extent.height = imgui.height;
+    renderPassBeginInfo.clearValueCount = 0;
+    renderPassBeginInfo.pClearValues = nullptr;
+    renderPassBeginInfo.framebuffer = imgui.frameBuffer;
+
+    err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
+
+    // Transition our attachments into optimal attachment formats
+    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
+                                          imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
+                                          imgui.depthAttachment->layout,
+                                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+    // This will clear the color and depth attachment
+    vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    // Record dear imgui primitives into command buffer
+    ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
+
+    // if (imgui.pipeline == VK_NULL_HANDLE) {
+    //   geometryType->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+    //                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+    //                                     rasterRecordDescriptorSetLayout);
+    // }
+
+    // // Bind the rendering pipeline
+    // // todo, if pipeline doesn't exist, create it.
+    // vkCmdBindPipeline(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                   geometryType->raster[rasterType].pipeline);
+
+    // VkViewport viewport{};
+    // viewport.x = 0.0f;
+    // viewport.y = 0.0f;
+    // viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
+    // viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
+    // viewport.minDepth = 0.0f;
+    // viewport.maxDepth = 1.0f;
+    // vkCmdSetViewport(graphicsCommandBuffer, 0, 1, &viewport);
+
+    // VkRect2D scissor{};
+    // scissor.offset = {0, 0};
+    // scissor.extent.width = geometryType->raster[rasterType].width;
+    // scissor.extent.height = geometryType->raster[rasterType].height;
+    // vkCmdSetScissor(graphicsCommandBuffer, 0, 1, &scissor);
+
+    // auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+    //   return (value + alignment - 1) & ~(alignment - 1);
+    // };
+
+    // const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
+    // const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+    // const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+    // const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
+
+    // // for the moment, just assume the max group size
+    // const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+
+    // for (uint32_t i = 0; i < numGeometry; ++i) {
+    //   GeomType *geomType = geometry[i]->geomType;
+
+    //   if (geomType->getKind() == GPRT_TRIANGLES) {
+    //     TriangleGeom *geom = (TriangleGeom *) geometry[i];
+    //     VkDeviceSize offsets[1] = {0};
+
+    //     uint32_t instanceCount = 1;
+    //     if (instanceCounts != nullptr) {
+    //       instanceCount = instanceCounts[i];
+    //     }
+
+    //     std::vector<VkDescriptorSet> descriptorSets = {samplerDescriptorSet, texture1DDescriptorSet,
+    //                                                    texture2DDescriptorSet, texture3DDescriptorSet,
+    //                                                    rasterRecordDescriptorSet};
+
+    //     uint32_t offset = geom->address * recordSize;
+    //     vkCmdBindDescriptorSets(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                             geomType->raster[rasterType].pipelineLayout, 0, descriptorSets.size(),
+    //                             descriptorSets.data(), 1, &offset);
+    //     vkCmdBindIndexBuffer(graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+    //     vkCmdDrawIndexed(graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
+    //   }
+    // }
+
+    vkCmdEndRenderPass(graphicsCommandBuffer);
+
+    // At the end of the renderpass, we'll transition the layout back to it's previous layout
+    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                          imgui.colorAttachment->layout,
+                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                          imgui.depthAttachment->layout,
+                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+    err = vkEndCommandBuffer(graphicsCommandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(graphicsQueue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
 };
 
 GPRT_API void
@@ -5508,6 +5833,11 @@ gprtWindowShouldClose(GPRTContext _context) {
     return true;
 
   glfwPollEvents();
+
+  // Start the Dear ImGui frame
+  // ImGui_ImplVulkan_NewFrame(); // I'm not entirely convinced this is needed?
+  ImGui_ImplGlfw_NewFrame();   // if GLFW isn't available this might be odd...
+
   return glfwWindowShouldClose(context->window);
 }
 
@@ -5541,7 +5871,7 @@ gprtGetMouseButton(GPRTContext _context, int button) {
   return glfwGetMouseButton(context->window, button);
 }
 
-GPRT_API int 
+GPRT_API int
 gprtGetKey(GPRTContext _context, int key) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
@@ -5848,6 +6178,20 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
+GPRT_API void
+gprtGuiSetRasterAttachments(GPRTContext _context, GPRTTexture _colorAttachment, GPRTTexture _depthAttachment) {
+  Context *context = (Context *) _context;
+  Texture *colorAttachment = (Texture *) _colorAttachment;
+  Texture *depthAttachment = (Texture *) _depthAttachment;
+  context->setRasterAttachments(colorAttachment, depthAttachment);
+}
+
+GPRT_API void
+gprtGuiRasterize(GPRTContext _context) {
+  Context *context = (Context *) _context;
+  context->rasterizeGui();
+}
+
 GPRT_API GPRTContext
 gprtContextCreate(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   LOG_API_CALL();
@@ -5930,6 +6274,41 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   Context *context = (Context *) _context;
   GeomType *geometryType = (GeomType *) _geomType;
   Geom **geometry = (Geom **) _geometry;
+
+  // Before we rasterize any geometry, we need to temporarily remove our framebuffer attachments from
+  // the list of textures in our texture array.
+  {
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
+    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
+    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
+
+    VkDescriptorImageInfo placeholder;
+    placeholder.imageView = context->defaultTexture2D->imageView;
+    placeholder.imageLayout = context->defaultTexture2D->layout;
+
+    writeDescriptorSets[0] = {};
+    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[0].dstBinding = 0;
+    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[0].descriptorCount = 1;
+    writeDescriptorSets[0].pBufferInfo = 0;
+    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[0].pImageInfo = &placeholder;
+
+    writeDescriptorSets[1] = {};
+    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[1].dstBinding = 0;
+    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[1].descriptorCount = 1;
+    writeDescriptorSets[1].pBufferInfo = 0;
+    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[1].pImageInfo = &placeholder;
+
+    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                           writeDescriptorSets.data(), 0, nullptr);
+  }
 
   VkResult err;
 
@@ -6062,6 +6441,44 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+
+  // Now, add the attachment textures back to our list of textures
+  {
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
+    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
+    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
+
+    VkDescriptorImageInfo colorAttachment;
+    colorAttachment.imageView = geometryType->raster[rasterType].colorAttachment->imageView;
+    colorAttachment.imageLayout = geometryType->raster[rasterType].colorAttachment->layout;
+
+    writeDescriptorSets[0] = {};
+    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[0].dstBinding = 0;
+    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[0].descriptorCount = 1;
+    writeDescriptorSets[0].pBufferInfo = 0;
+    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[0].pImageInfo = &colorAttachment;
+
+    VkDescriptorImageInfo depthAttachment;
+    depthAttachment.imageView = geometryType->raster[rasterType].depthAttachment->imageView;
+    depthAttachment.imageLayout = geometryType->raster[rasterType].depthAttachment->layout;
+
+    writeDescriptorSets[1] = {};
+    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[1].dstBinding = 0;
+    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[1].descriptorCount = 1;
+    writeDescriptorSets[1].pBufferInfo = 0;
+    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[1].pImageInfo = &depthAttachment;
+
+    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                           writeDescriptorSets.data(), 0, nullptr);
+  }
 }
 
 // ==================================================================
@@ -6119,7 +6536,7 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
 
   // Creating a raygen program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
-  
+
   return (GPRTRayGen) raygen;
 }
 
@@ -6821,7 +7238,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->raytracingPipeline);
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                    context->raytracingPipeline);
 
   struct PushConstants {
     uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};

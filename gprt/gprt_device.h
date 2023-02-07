@@ -39,6 +39,8 @@ struct PushConstants {
 // Currently, 0, N is used for textures
 // Then, 1, N is used for record data passed
 // to compute and raster programs.
+//
+// Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
 [[vk::binding(0, 0)]] SamplerState samplers[];
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
@@ -123,6 +125,12 @@ typedef uint64_t2 Sampler;
 SamplerState
 getSamplerHandle(gprt::Sampler sampler) {
   return samplers[sampler.x];
+}
+
+SamplerState
+getDefaultSampler() {
+  // We assume that there is a default sampler at address 0 here
+  return samplers[0];
 }
 
 void
