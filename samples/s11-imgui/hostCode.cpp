@@ -294,12 +294,21 @@ main(int ac, char **av) {
   gprtBufferDestroy(backdropVertexBuffer);
   gprtBufferDestroy(backdropIndexBuffer);
 
+  gprtBufferDestroy(guiVertexBuffer);
+  gprtBufferDestroy(guiIndexBuffer);
+
   gprtTextureDestroy(colorAttachment);
   gprtTextureDestroy(depthAttachment);
 
+  gprtTextureDestroy(guiColorAttachment);
+  gprtTextureDestroy(guiDepthAttachment);
+
   gprtGeomDestroy(bgGeom);
   gprtGeomDestroy(trianglesGeom);
+  gprtGeomDestroy(guiGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomTypeDestroy(backdropGeomType);
+  gprtGeomTypeDestroy(guiGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 
