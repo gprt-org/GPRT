@@ -954,6 +954,22 @@ gprtTextureGetPointer(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtTextureGetPointer((GPRTTexture) texture, deviceID);
 }
 
+GPRT_API void gprtTextureMap(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
+
+template <typename T>
+void
+gprtTextureMap(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtTextureMap((GPRTTexture) texture, deviceID);
+}
+
+GPRT_API void gprtTextureUnmap(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
+
+template <typename T>
+void
+gprtTextureUnmap(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtTextureUnmap((GPRTTexture) texture, deviceID);
+}
+
 GPRT_API gprt::Texture gprtTextureGetHandle(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>

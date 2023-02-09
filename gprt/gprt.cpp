@@ -6877,6 +6877,20 @@ gprtTextureClear(GPRTTexture _texture) {
 }
 
 GPRT_API void
+gprtTextureMap(GPRTTexture _texture, int deviceID) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+  texture->map();
+}
+
+GPRT_API void
+gprtTextureUnmap(GPRTTexture _texture, int deviceID) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+  texture->unmap();
+}
+
+GPRT_API void
 gprtTextureDestroy(GPRTTexture _texture) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
