@@ -111,7 +111,7 @@ add_subdirectory(stb_image)
 # endif()
 
 # Find Imgui
-add_library(imgui 
+add_library(imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.h
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.cpp
 
@@ -123,7 +123,8 @@ add_library(imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_vulkan.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp)
 
-target_include_directories(imgui PUBLIC 
+target_include_directories(imgui PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
   ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include
