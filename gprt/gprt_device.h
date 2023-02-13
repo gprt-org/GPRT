@@ -82,9 +82,16 @@ typedef uint64_t2 Buffer;
 
 template <typename T>
 T
+load(in Buffer buffer) {
+  return vk::RawBufferLoad<T>(buffer.x);
+}
+
+template <typename T>
+T
 load(in Buffer buffer, uint64_t index) {
   return vk::RawBufferLoad<T>(buffer.x + index * sizeof(T));
 }
+
 template <typename T>
 void
 store(in Buffer buffer, uint64_t index, in T value) {
