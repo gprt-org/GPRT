@@ -110,11 +110,11 @@ main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -129,7 +129,7 @@ main(int ac, char **av) {
 
   // Here, we additionally set the vertex and index parameters of our goemetry
   // so that we can access these buffers when a ray hits the mesh
-  TrianglesGeomData *triangleData = gprtGeomGetPointer(trianglesGeom);
+  TrianglesGeomData *triangleData = gprtGeomGetParameters(trianglesGeom);
   triangleData->vertex = gprtBufferGetHandle(vertexBuffer);
   triangleData->index = gprtBufferGetHandle(indexBuffer);
 
@@ -160,10 +160,6 @@ main(int ac, char **av) {
   // we go to trace our rays.
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################
@@ -221,7 +217,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

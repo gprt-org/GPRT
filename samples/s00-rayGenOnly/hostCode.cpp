@@ -76,9 +76,6 @@ main(int ac, char **av) {
   // the "gprt" context
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(gprt, module, "simpleRayGen");
 
-  // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(gprt);
-
   // ------------------------------------------------------------------
   // allocating buffers
   // ------------------------------------------------------------------
@@ -92,7 +89,7 @@ main(int ac, char **av) {
   // build the shader binding table, used by rays to map geometry,
   // instances and ray types to GPU kernels
   // ------------------------------------------------------------------
-  RayGenData *data = gprtRayGenGetPointer(rayGen);
+  RayGenData *data = gprtRayGenGetParameters(rayGen);
   data->color0 = float3(0.1f, 0.1f, 0.1f);
   data->color1 = float3(0.0f, 0.0f, 0.0f);
   data->frameBuffer = gprtBufferGetHandle(frameBuffer);

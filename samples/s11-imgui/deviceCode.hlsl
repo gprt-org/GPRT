@@ -13,6 +13,19 @@ GPRT_PIXEL_PROGRAM(backgroundPixel, (BackgroundData, record)) {
   return float4(color, 1.0f);
 }
 
+GPRT_VERTEX_PROGRAM(GUIVertex, (GUIData, record)) {
+  uint32_t vertexID = VertexIndex();
+  float3 position = gprt::load<float3>(record.vertex, vertexID);
+  return float4(position, 1.f);
+}
+
+GPRT_PIXEL_PROGRAM(GUIPixel, (GUIData, record)) {
+  float2 uv = Position().xy / record.resolution;  
+  Texture2D texture = gprt::getTexture2DHandle(record.texture);
+  SamplerState sampler = gprt::getDefaultSampler();
+  return pow(texture.Sample(sampler, uv), 2.2);
+}
+
 GPRT_VERTEX_PROGRAM(simpleVertex, (TrianglesGeomData, record)) {
   uint32_t vertexID = VertexIndex();
   float4x4 view = record.view;

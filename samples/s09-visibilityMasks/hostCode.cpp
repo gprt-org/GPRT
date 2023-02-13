@@ -140,7 +140,7 @@ main(int ac, char **av) {
   // set the parameters for those kernels
   // ##################################################################
 
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
 
   // Setup pixel frame buffer
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
@@ -151,7 +151,7 @@ main(int ac, char **av) {
   rayGenData->lightColor = lightColor;
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -165,7 +165,7 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
   GPRTAccel floorAccel = gprtTrianglesAccelCreate(context, 1, &floorGeom);
   gprtAccelBuild(context, floorAccel);
-  TrianglesGeomData *floorData = gprtGeomGetPointer(floorGeom);
+  TrianglesGeomData *floorData = gprtGeomGetParameters(floorGeom);
 
   // The floor will have a brown-ish color to it
   floorData->color = float4(153.f / 255.f, 121.f / 255.f, 80.f / 255.f, 1.f);
@@ -180,7 +180,7 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
   GPRTAccel wallAccel = gprtTrianglesAccelCreate(context, 1, &wallGeom);
   gprtAccelBuild(context, wallAccel);
-  TrianglesGeomData *wallData = gprtGeomGetPointer(wallGeom);
+  TrianglesGeomData *wallData = gprtGeomGetParameters(wallGeom);
 
   // The wall has an off-white color
   wallData->color = float4(230.f / 255.f, 225.f / 255.f, 221.f / 255.f, 1.f);
@@ -196,7 +196,7 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
   GPRTAccel windowAccel = gprtTrianglesAccelCreate(context, 1, &windowGeom);
   gprtAccelBuild(context, windowAccel);
-  TrianglesGeomData *windowData = gprtGeomGetPointer(windowGeom);
+  TrianglesGeomData *windowData = gprtGeomGetParameters(windowGeom);
 
   // The window has a blue-ish color, and an alpha transparency of 50%.
   windowData->color = float4(199.f / 255.f, 227.f / 255.f, 225.f / 255.f, 0.5f);
@@ -242,11 +242,6 @@ main(int ac, char **av) {
   // Set the accel handle
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -304,7 +299,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

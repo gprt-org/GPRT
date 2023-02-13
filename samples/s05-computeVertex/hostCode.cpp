@@ -90,11 +90,6 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Note, we'll need to call this again after creating our acceleration
-  // structures, as acceleration structures will introduce new shader
-  // binding table records to the pipeline.
-  gprtBuildPipeline(context);
-
   // ##################################################################
   // set the parameters for our triangle mesh and compute kernel
   // ##################################################################
@@ -115,14 +110,14 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, numTriangles);
 
   // Parameters for the geometry when a ray hits it.
-  TrianglesGeomData *geomData = gprtGeomGetPointer(trianglesGeom);
+  TrianglesGeomData *geomData = gprtGeomGetParameters(trianglesGeom);
   geomData->vertex = gprtBufferGetHandle(vertexBuffer);
   geomData->index = gprtBufferGetHandle(indexBuffer);
   geomData->now = 0.f;
   geomData->gridSize = GRID_SIDE_LENGTH;
 
   // Parameters for our vertex program that'll animate our vertices
-  TrianglesGeomData *vertexData = gprtComputeGetPointer(vertexProgram);
+  TrianglesGeomData *vertexData = gprtComputeGetParameters(vertexProgram);
   vertexData->vertex = gprtBufferGetHandle(vertexBuffer);
   vertexData->index = gprtBufferGetHandle(indexBuffer);
   vertexData->now = 0.f;
@@ -150,11 +145,11 @@ main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -162,8 +157,6 @@ main(int ac, char **av) {
   // build *SBT* required to trace the groups
   // ##################################################################
 
-  // re-build the pipeline to account for newly introduced geometry
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -220,7 +213,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = (RayGenData *) gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = (RayGenData *) gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;

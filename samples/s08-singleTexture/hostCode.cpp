@@ -147,9 +147,6 @@ main(int ac, char **av) {
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
                         GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)};
 
-  // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(context);
-
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
@@ -162,7 +159,7 @@ main(int ac, char **av) {
   gprtTrianglesSetVertices(plane, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(plane, indexBuffer, NUM_INDICES);
 
-  TrianglesGeomData *planeData = gprtGeomGetPointer(plane);
+  TrianglesGeomData *planeData = gprtGeomGetParameters(plane);
   planeData->index = gprtBufferGetHandle(indexBuffer);
   planeData->vertex = gprtBufferGetHandle(vertexBuffer);
   planeData->texcoord = gprtBufferGetHandle(texcoordBuffer);
@@ -174,11 +171,10 @@ main(int ac, char **av) {
 
   GPRTBufferOf<float4x4> transformBuffer = gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
 
-  TransformData *transformData = gprtComputeGetPointer(transformProgram);
+  TransformData *transformData = gprtComputeGetParameters(transformProgram);
   transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = samplers.size();
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context, transformProgram, samplers.size());
 
@@ -196,16 +192,15 @@ main(int ac, char **av) {
   // ------------------------------------------------------------------
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
-  RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
   raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
   raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################
@@ -261,7 +256,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
@@ -272,7 +267,7 @@ main(int ac, char **av) {
     }
 
     // Animate transforms
-    TransformData *transformData = gprtComputeGetPointer(transformProgram);
+    TransformData *transformData = gprtComputeGetParameters(transformProgram);
     transformData->now = .5 * gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, instances.size());
@@ -280,7 +275,7 @@ main(int ac, char **av) {
     gprtAccelBuild(context, trianglesTLAS);
     raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
-    TrianglesGeomData *planeMeshData = gprtGeomGetPointer(plane);
+    TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);
     planeMeshData->now = gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
 

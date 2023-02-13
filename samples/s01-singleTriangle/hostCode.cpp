@@ -103,11 +103,11 @@ main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
-  RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
   // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetPointer(miss);
+  MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
@@ -146,15 +146,10 @@ main(int ac, char **av) {
   rayGenData->world = gprtAccelGetHandle(world);
 
   // ##################################################################
-  // build the pipeline and shader binding table
+  // build the shader binding table
   // ##################################################################
 
-  // We must build the pipeline after all geometry instances are created.
-  // The pipeline contains programs for each geometry that might be hit by
-  // a ray.
-  gprtBuildPipeline(context);
-
-  // Next, the shader binding table is used to assign parameters to our ray
+  // The shader binding table is used to assign parameters to our ray
   // generation and miss programs. We also use the shader binding table to
   // map parameters to geometry depending on the ray type and instance.
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
@@ -214,7 +209,7 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetPointer(rayGen);
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
       raygenData->camera.pos = camera_pos;
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
