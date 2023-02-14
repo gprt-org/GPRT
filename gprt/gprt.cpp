@@ -3703,6 +3703,7 @@ struct Context {
     };
 
     // Ray tracing related extensions required
+
     enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
@@ -3717,6 +3718,9 @@ struct Context {
     enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
 
     enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    // required for vulkan memory model stuff
+    enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
 
     // Required by VK_KHR_spirv_1_4
     enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
@@ -3908,12 +3912,19 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
+    memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    memoryModelFeatures.vulkanMemoryModel = VK_TRUE;
+    memoryModelFeatures.vulkanMemoryModelDeviceScope = VK_TRUE;
+    memoryModelFeatures.vulkanMemoryModelAvailabilityVisibilityChains = VK_TRUE;
+
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
     descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
     descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+    descriptorIndexingFeatures.pNext = &memoryModelFeatures;
 
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
