@@ -237,11 +237,29 @@ where ARG is "(type_, name)". */
 #endif
 #endif
 
+static bool _ignoreHit = false;
+static bool _acceptHitAndEndSearch = false;
+
+namespace gprt {
+  // There's a bug with a couple vendors where calling these functions
+  // inside another function can cause bugs when writing to the ray payload.
+  // They must be called in the main body of the anyhit entrypoint. 
+  // These act as a temporary workaround until driver bugs are fixed...
+
+  void ignoreHit() {
+    _ignoreHit = true;
+  }
+
+  void acceptHitAndEndSearch() {
+    _ignoreHit = true;
+  }
+};
+
 #ifndef GPRT_ANY_HIT_PROGRAM
 #ifdef ANYHIT
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
                 in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                               \
                                                                                                                        \
   [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
@@ -251,15 +269,17 @@ where ARG is "(type_, name)". */
                                                in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                               \
     progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
              RAW(NAME_EXPAND AttributeDecl));                                                                          \
+    if (_ignoreHit) IgnoreHit();                                                                                       \
+    if (_acceptHitAndEndSearch) AcceptHitAndEndSearch();                                                               \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
                 in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
                 in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #endif
 #endif
