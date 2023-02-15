@@ -4464,7 +4464,7 @@ struct Context {
 
   ~Context(){};
 
-  void buildSBT() {
+  void buildSBT(GPRTBuildSBTFlags flags) {
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -4643,7 +4643,7 @@ struct Context {
     }
 
     // Update geometry record data in the record buffer for raster programs
-    {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RASTER) != 0) {
       rasterRecordBuffer->map();
       uint8_t *mapped = ((uint8_t *) (rasterRecordBuffer->mapped));
       for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
@@ -4655,7 +4655,7 @@ struct Context {
     }
 
     // Update compute record data in the record buffer for compute programs
-    {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_COMPUTE) != 0) {
       computeRecordBuffer->map();
       uint8_t *mapped = ((uint8_t *) (computeRecordBuffer->mapped));
       for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
@@ -7213,7 +7213,7 @@ gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   context->buildPipeline();
-  context->buildSBT();
+  context->buildSBT(flags);
 }
 
 GPRT_API void
