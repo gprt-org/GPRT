@@ -146,7 +146,8 @@ main(int ac, char **av) {
   // Then, we create a transform buffer, one transform per instance.
   // These transforms are defined at the top of our program, in the "transforms"
   // array referenced by the last parameter here.
-  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
+  GPRTBufferOf<float3x4> transformBuffer =
+      gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, (float3x4 *) transforms);
 
   // Finally, we create a top level acceleration structure here.
   GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);

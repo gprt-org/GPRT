@@ -45,6 +45,7 @@ struct PushConstants {
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
 [[vk::binding(0, 3)]] Texture3D texture3Ds[];
+[[vk::binding(0, 4)]] RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -241,26 +242,28 @@ static bool _ignoreHit = false;
 static bool _acceptHitAndEndSearch = false;
 
 namespace gprt {
-  // There's a bug with a couple vendors where calling these functions
-  // inside another function can cause bugs when writing to the ray payload.
-  // They must be called in the main body of the anyhit entrypoint. 
-  // These act as a temporary workaround until driver bugs are fixed...
+// There's a bug with a couple vendors where calling these functions
+// inside another function can cause bugs when writing to the ray payload.
+// They must be called in the main body of the anyhit entrypoint.
+// These act as a temporary workaround until driver bugs are fixed...
 
-  void ignoreHit() {
-    _ignoreHit = true;
-  }
+void
+ignoreHit() {
+  _ignoreHit = true;
+}
 
-  void acceptHitAndEndSearch() {
-    _ignoreHit = true;
-  }
-};
+void
+acceptHitAndEndSearch() {
+  _ignoreHit = true;
+}
+};   // namespace gprt
 
 #ifndef GPRT_ANY_HIT_PROGRAM
 #ifdef ANYHIT
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* fwd decl for the kernel func to call */                                                                           \
   inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                               \
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                        \
                                                                                                                        \
   [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
                                                                             RAW(TYPE_EXPAND RecordDecl));              \
@@ -269,18 +272,20 @@ namespace gprt {
                                                in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                               \
     progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
              RAW(NAME_EXPAND AttributeDecl));                                                                          \
-    if (_ignoreHit) IgnoreHit();                                                                                       \
-    if (_acceptHitAndEndSearch) AcceptHitAndEndSearch();                                                               \
+    if (_ignoreHit)                                                                                                    \
+      IgnoreHit();                                                                                                     \
+    if (_acceptHitAndEndSearch)                                                                                        \
+      AcceptHitAndEndSearch();                                                                                         \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
   inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -361,7 +366,7 @@ namespace gprt {
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
@@ -419,7 +424,7 @@ Position() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -447,7 +452,7 @@ Position() {
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \

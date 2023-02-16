@@ -1060,7 +1060,7 @@ GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_
 
 template <typename T>
 GPRTBufferOf<T>
-gprtHostBufferCreate(GPRTContext context, size_t count, const void *init GPRT_IF_CPP(= nullptr)) {
+gprtHostBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtHostBufferCreate(context, sizeof(T), count, init);
 }
 
@@ -1072,7 +1072,7 @@ GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, siz
 
 template <typename T>
 GPRTBufferOf<T>
-gprtDeviceBufferCreate(GPRTContext context, size_t count, const void *init GPRT_IF_CPP(= nullptr)) {
+gprtDeviceBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init);
 }
 
@@ -1084,7 +1084,7 @@ GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, siz
 
 template <typename T>
 GPRTBufferOf<T>
-gprtSharedBufferCreate(GPRTContext context, size_t count, const void *init GPRT_IF_CPP(= nullptr)) {
+gprtSharedBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init);
 }
 

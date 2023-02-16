@@ -243,6 +243,7 @@ main(int ac, char **av) {
   gprtGeomDestroy(bgGeom);
   gprtGeomDestroy(trianglesGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomTypeDestroy(backdropGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 
