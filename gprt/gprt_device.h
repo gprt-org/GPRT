@@ -111,6 +111,11 @@ getAccelHandle(Accel accel) {
   return getAccelHandle(accel.x);
 }
 
+RWByteAddressBuffer
+getBufferHandle(Buffer buffer) {
+  return buffers[buffer.y];
+}
+
 typedef uint64_t2 Texture;
 
 Texture1D
