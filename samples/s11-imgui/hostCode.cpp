@@ -183,7 +183,7 @@ main(int ac, char **av) {
   guiData->texture = gprtTextureGetHandle(guiColorAttachment);
   guiData->resolution = float2(fbSize.x, fbSize.y);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -240,7 +240,7 @@ main(int ac, char **av) {
       tridata->view = lookAtMatrix;
       tridata->proj = perspectiveMatrix;
 
-      gprtBuildShaderBindingTable(context);
+      gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
     }
 
     // Draw our background and triangle

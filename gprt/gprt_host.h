@@ -146,13 +146,13 @@ struct Sampler {
 typedef struct _GPRTLaunchParams *GPRTLaunchParams, *GPRTParams, *GPRTGlobals;
 
 typedef enum {
-  GPRT_SBT_HITGROUP = 0x1,
+  GPRT_SBT_HITGROUP = 1,
   GPRT_SBT_GEOM = GPRT_SBT_HITGROUP,
-  GPRT_SBT_RAYGEN = 0x2,
-  GPRT_SBT_MISSPROG = 0x4,
-  GPRT_SBT_COMPUTE = 0x8,
-  GPRT_SBT_RASTER = 0x16,
-  GPRT_SBT_ALL = 0x31
+  GPRT_SBT_RAYGEN = 2,
+  GPRT_SBT_MISS = 4,
+  GPRT_SBT_COMPUTE = 8,
+  GPRT_SBT_RASTER = 16,
+  GPRT_SBT_ALL = 31
 } GPRTBuildSBTFlags;
 
 /*! enum that specifies the different possible memory layouts for

@@ -280,7 +280,7 @@ main(int ac, char **av) {
     gprtAccelBuild(context, world);
 
     rayGenData->world = gprtAccelGetHandle(world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
+    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
     // Note! we don't need to rebuild the pipeline here, since no geometry was
     // made or destroyed, only updated.

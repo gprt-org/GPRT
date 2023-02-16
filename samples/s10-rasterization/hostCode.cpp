@@ -146,7 +146,7 @@ main(int ac, char **av) {
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
   bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -200,7 +200,7 @@ main(int ac, char **av) {
       tridata->view = lookAtMatrix;
       tridata->proj = perspectiveMatrix;
 
-      gprtBuildShaderBindingTable(context);
+      gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
     }
 
     gprtTextureClear(depthAttachment);

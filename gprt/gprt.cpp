@@ -3462,7 +3462,9 @@ struct Context {
   VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-  Buffer shaderBindingTable;
+  Buffer raygenTable;
+  Buffer missTable;
+  Buffer hitgroupTable;
 
   uint32_t numRayTypes = 1;
 
@@ -4459,7 +4461,10 @@ struct Context {
     if (fillInstanceDataStage.module)
       vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
 
-    shaderBindingTable.destroy();
+    raygenTable.destroy();
+    missTable.destroy();
+    hitgroupTable.destroy();
+
     vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
@@ -4515,24 +4520,52 @@ struct Context {
       // std::cout<<"Todo, get some smarter memory allocation working..."
       // <<std::endl;
 
+      // allocate / resize ray generation table
       size_t numRayGens = raygenPrograms.size();
+      if (raygenTable.size != recordSize * numRayGens) {
+        raygenTable.destroy();
+      }
+      if (raygenTable.buffer == VK_NULL_HANDLE) {
+        raygenTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+                             memoryUsageFlags, recordSize * numRayGens);
+      }
+
       size_t numMissProgs = missPrograms.size();
+      if (missTable.size != recordSize * numMissProgs) {
+        missTable.destroy();
+      }
+      if (missTable.buffer == VK_NULL_HANDLE && missPrograms.size() > 0) {
+        missTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+                           memoryUsageFlags, recordSize * numMissProgs);
+      }
+
       size_t numHitRecords = getNumHitRecords();
+      if (hitgroupTable.size != recordSize * numHitRecords) {
+        hitgroupTable.destroy();
+      }
+      if (hitgroupTable.buffer == VK_NULL_HANDLE && numHitRecords > 0) {
+        hitgroupTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+                               memoryUsageFlags, recordSize * numHitRecords);
+      }
 
       size_t numRecords = numRayGens + numMissProgs + numHitRecords;
 
-      if (shaderBindingTable.size != recordSize * numRecords) {
-        shaderBindingTable.destroy();
-      }
-      if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
-        shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-                                    memoryUsageFlags, recordSize * numRecords);
-      }
-      shaderBindingTable.map();
-      uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
+      // if (shaderBindingTable.size != recordSize * numRecords) {
+      //   shaderBindingTable.destroy();
+      // }
+      // if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
+      //   shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+      //                               memoryUsageFlags, recordSize * numRecords);
+      // }
+
+      // shaderBindingTable.map();
+      // uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
 
       // Raygen records
-      if (raygenPrograms.size() > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygenPrograms.size() > 0) {
+        raygenTable.map();
+        uint8_t *mapped = ((uint8_t *) (raygenTable.mapped));
+
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
@@ -4548,16 +4581,20 @@ struct Context {
           RayGen *raygen = raygenPrograms[idx];
           memcpy(params, raygen->SBTRecord, raygen->recordSize);
         }
+        raygenTable.unmap();
       }
 
       // Miss records
-      if (missPrograms.size() > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && missPrograms.size() > 0) {
+        missTable.map();
+        uint8_t *mapped = ((uint8_t *) (missTable.mapped));
+
         for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx + recordStride * numRayGens;
+          size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
           size_t handleOffset = handleStride * idx + handleStride * numRayGens;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
@@ -4567,10 +4604,15 @@ struct Context {
           Miss *miss = missPrograms[idx];
           memcpy(params, miss->SBTRecord, miss->recordSize);
         }
+
+        missTable.unmap();
       }
 
       // Hit records
-      if (numHitRecords > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_HITGROUP) != 0 && numHitRecords > 0) {
+        hitgroupTable.map();
+        uint8_t *mapped = ((uint8_t *) (hitgroupTable.mapped));
+
         // Go over all TLAS by order they were created
         for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
           Accel *tlas = accels[tlasID];
@@ -4600,8 +4642,9 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numRayGens + numMissProgs);
+                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                    // +
+                    // recordStride * (numRayGens + numMissProgs);
                     size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
                                           handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -4629,8 +4672,8 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numRayGens + numMissProgs);
+                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                    // + recordStride * (numRayGens + numMissProgs);
                     size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
                                           handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
@@ -4650,6 +4693,7 @@ struct Context {
             }
           }
         }
+        hitgroupTable.unmap();
       }
     }
 
@@ -7293,7 +7337,12 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-  uint64_t baseAddr = getBufferDeviceAddress(context->logicalDevice, context->shaderBindingTable.buffer);
+  uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable.buffer);
+  uint64_t missBaseAddr =
+      (context->missTable.buffer) ? getBufferDeviceAddress(context->logicalDevice, context->missTable.buffer) : 0;
+  uint64_t hitgroupBaseAddr = (context->hitgroupTable.buffer)
+                                  ? getBufferDeviceAddress(context->logicalDevice, context->hitgroupTable.buffer)
+                                  : 0;
 
   // find raygen in current list of raygens
   int raygenOffset = 0;
@@ -7305,7 +7354,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   }
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset;
+  raygenShaderSbtEntry.deviceAddress = raygenBaseAddr;   // baseAddr + raygenOffset;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride;   // for raygen, can only be one. this needs to
                                                              // be the same as stride.
@@ -7313,15 +7362,15 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size();
+    missShaderSbtEntry.deviceAddress = missBaseAddr;   // baseAddr + recordSize * context->raygenPrograms.size();
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
-    hitShaderSbtEntry.deviceAddress =
-        baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
+    hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
+    // baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
