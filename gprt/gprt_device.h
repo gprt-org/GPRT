@@ -101,6 +101,30 @@ store(in Buffer buffer, uint64_t index, in T value) {
   vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
 }
 
+float
+atomicMin32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value < asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+float
+atomicMax32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value > asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
 // x stores pointer, y stores type
 typedef uint64_t2 Accel;
 
@@ -166,7 +190,6 @@ amdkludge() {
     vk::RawBufferStore<int>(0, stubstruct.tmp);
   }
 }
-
 };   // namespace gprt
 
 /*

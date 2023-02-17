@@ -5400,7 +5400,7 @@ struct Context {
       writeDescriptorSets[0].dstArrayElement = 0;
       writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
-      writeDescriptorSets[0].pBufferInfo = 0;
+      writeDescriptorSets[0].pImageInfo = 0;
       writeDescriptorSets[0].dstSet = bufferDescriptorSet;
       writeDescriptorSets[0].pBufferInfo = bufferDescriptors.data();
 
