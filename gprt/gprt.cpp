@@ -80,6 +80,8 @@ static struct RequestedFeatures {
     std::string title;
   } windowProperties;
 
+  size_t numRayTypes = 1;
+
   /*! returns whether logging is enabled */
   inline static bool logging() {
 #ifdef NDEBUG
@@ -3576,7 +3578,7 @@ struct Context {
   Buffer *missTable = nullptr;
   Buffer *hitgroupTable = nullptr;
 
-  uint32_t numRayTypes = 1;
+  // uint32_t numRayTypes = 1;
 
   // struct InternalStages {
   //   // for copying transforms into the instance buffer
@@ -3617,7 +3619,7 @@ struct Context {
       }
     }
 
-    int numHitRecords = totalGeometries * numRayTypes;
+    int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
     return numHitRecords;
   }
 
@@ -4788,7 +4790,7 @@ struct Context {
                 for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
                   auto &geom = triAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -4796,11 +4798,13 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                    size_t recordOffset =
+                        recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset);
                     // +
                     // recordStride * (numRayGens + numMissProgs);
-                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numRayGens + numMissProgs);
+                    size_t handleOffset =
+                        handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
+                        handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -4818,7 +4822,7 @@ struct Context {
                 for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
                   auto &geom = aabbAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -4826,10 +4830,12 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset);
+                    size_t recordOffset =
+                        recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset);
                     // + recordStride * (numRayGens + numMissProgs);
-                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numRayGens + numMissProgs);
+                    size_t handleOffset =
+                        handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
+                        handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -5633,7 +5639,7 @@ struct Context {
               // Add a record for every geometry-raytype permutation
               for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
                 auto &geom = triAccel->geometries[geomID];
-                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                   VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
                   shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
                   shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
@@ -5667,7 +5673,7 @@ struct Context {
               // Add a record for every geometry-raytype permutation
               for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
                 auto &geom = aabbAccel->geometries[geomID];
-                for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                   VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
                   shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
                   shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
@@ -5748,7 +5754,7 @@ struct Context {
       for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
         if (!GeomType::geomTypes[i])
           continue;
-        for (uint32_t rasterType = 0; rasterType < numRayTypes; ++rasterType) {
+        for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
           geomTypes[i]->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
                                             texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                             bufferDescriptorSetLayout, rasterRecordDescriptorSetLayout);
@@ -6165,6 +6171,12 @@ gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *tit
   requestedFeatures.windowProperties.title = std::string(title);
 }
 
+GPRT_API void
+gprtRequestRayTypeCount(size_t rayTypeCount) {
+  LOG_API_CALL();
+  requestedFeatures.numRayTypes = rayTypeCount;
+}
+
 GPRT_API bool
 gprtWindowShouldClose(GPRTContext _context) {
   LOG_API_CALL();
@@ -6552,14 +6564,14 @@ GPRT_API void
 gprtContextSetRayTypeCount(GPRTContext _context, size_t numRayTypes) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->numRayTypes = numRayTypes;
+  requestedFeatures.numRayTypes = numRayTypes;
 }
 
 GPRT_API size_t
 gprtContextGetRayTypeCount(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  return context->numRayTypes;
+  return requestedFeatures.numRayTypes;
 }
 
 GPRT_API GPRTModule
@@ -6971,10 +6983,10 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
 
   switch (kind) {
   case GPRT_TRIANGLES:
-    geomType = new TriangleGeomType(context->logicalDevice, context->numRayTypes, recordSize);
+    geomType = new TriangleGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
     break;
   case GPRT_AABBS:
-    geomType = new AABBGeomType(context->logicalDevice, context->numRayTypes, recordSize);
+    geomType = new AABBGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
     break;
   default:
     GPRT_NOTIMPLEMENTED;
@@ -7534,7 +7546,8 @@ GPRT_API void
 gprtAccelBuild(GPRTContext _context, GPRTAccel _accel) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
-  accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels, context->numRayTypes);
+  accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
+               requestedFeatures.numRayTypes);
 }
 
 GPRT_API void

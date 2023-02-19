@@ -531,6 +531,11 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  */
 GPRT_API void gprtGuiRasterize(GPRTContext context);
 
+/*! set number of ray types to be used; this should be
+  done before any programs, pipelines, geometries, etc get
+  created */
+GPRT_API void gprtRequestRayTypeCount(size_t numRayTypes);
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
@@ -550,14 +555,6 @@ GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=
                                        int numDevices GPRT_IF_CPP(= 1));
 
 GPRT_API void gprtContextDestroy(GPRTContext context);
-
-/*! set number of ray types to be used in this context; this should be
-  done before any programs, pipelines, geometries, etc get
-  created */
-GPRT_API void gprtContextSetRayTypeCount(GPRTContext context, size_t numRayTypes);
-
-/*! returns the number of ray types used in this context */
-GPRT_API size_t gprtContextGetRayTypeCount(GPRTContext context);
 
 GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *programName,
                                        size_t recordSize);
