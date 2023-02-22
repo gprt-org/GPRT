@@ -101,6 +101,9 @@ store(in Buffer buffer, uint64_t index, in T value) {
   vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
 }
 
+// note, below  atomics are translated from
+// here: https://github.com/treecode/Bonsai/blob/master/runtime/profiling/derived_atomic_functions.h
+
 float
 atomicMin32f(in Buffer buffer, uint32_t index, float value) {
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
@@ -122,6 +125,19 @@ atomicMax32f(in Buffer buffer, uint32_t index, float value) {
     if (ret_i == old)
       break;
   }
+  return asfloat(ret_i);
+}
+
+float
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+  uint old, newint;
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  do {
+    old = ret_i;
+    newint = asuint(asfloat(old) + value);
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+  } while (ret_i != old);
+
   return asfloat(ret_i);
 }
 
@@ -168,6 +184,12 @@ SamplerState
 getDefaultSampler() {
   // We assume that there is a default sampler at address 0 here
   return samplers[0];
+}
+
+uint32_t
+getNumRayTypes() {
+  // for now, we map PC 0 to ray type count
+  return uint32_t(pc.r[0]);
 }
 
 void
@@ -360,34 +382,6 @@ acceptHitAndEndSearch() {
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl,                                                                   \
                 inout RAW(TYPE_NAME_EXPAND) PayloadDecl) /* program args and body supplied by user ... */
-#endif
-#endif
-
-// We currently recycle ray generation programs to implement a user-side
-// compute program. This allows us to recycle existing SBT record API
-// for compute shader IO
-#ifndef GPRT_COMPUTE_PROGRAM_OLD
-#ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
-  /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID);                                                                                        \
-                                                                                                                       \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
-                                                                                                                       \
-  [shader("raygeneration")] void __compute__##progName() {                                                             \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), 0, DispatchRaysIndex(), uint3(0, 0, 0), uint3(0, 0, 0)); \
-  }                                                                                                                    \
-                                                                                                                       \
-  /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID) /* program args and body supplied by user ... */
-#else
-#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
-  /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID) /* program args and body supplied by user ... */
 #endif
 #endif
 

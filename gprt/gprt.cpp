@@ -80,7 +80,7 @@ static struct RequestedFeatures {
     std::string title;
   } windowProperties;
 
-  size_t numRayTypes = 1;
+  uint32_t numRayTypes = 1;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -7610,7 +7610,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
                     context->raytracingPipeline);
 
   struct PushConstants {
-    uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t pad[16] = {requestedFeatures.numRayTypes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   } pushConstants;
   vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
