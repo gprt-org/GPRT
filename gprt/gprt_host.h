@@ -1085,6 +1085,25 @@ gprtSharedBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_
   return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init);
 }
 
+/**
+ * @brief Clears all values of the given buffer to 0
+ *
+ * @param buffer The buffer to be cleared
+ */
+GPRT_API void gprtBufferClear(GPRTBuffer buffer);
+
+/**
+ * @brief Clears all values of the given buffer to 0
+ *
+ * @tparam T The template type of the given buffer
+ * @param buffer The buffer to be cleared
+ */
+template <typename T>
+void
+gprtBufferClear(GPRTBufferOf<T> buffer) {
+  gprtBufferClear((GPRTBuffer) buffer);
+}
+
 /*! Destroys all underlying Vulkan resources for the given buffer and frees any
   underlying memory*/
 GPRT_API void gprtBufferDestroy(GPRTBuffer buffer);

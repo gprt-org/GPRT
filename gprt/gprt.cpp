@@ -532,6 +532,18 @@ struct Buffer {
     }
   }
 
+  /* Sets all bytes to 0 */
+  void clear() {
+    if (hostVisible) {
+      if (!mapped)
+        map();
+      memset(mapped, 0, size);
+    } else {
+      map();
+      memset(mapped, 0, size);
+      unmap();
+    }
+  }
   /* Default Constructor */
   Buffer(){};
 
@@ -7349,6 +7361,13 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
     buffer->invalidate();
   }
   return (GPRTBuffer) buffer;
+}
+
+GPRT_API void
+gprtBufferClear(GPRTBuffer _buffer) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  buffer->clear();
 }
 
 GPRT_API void
