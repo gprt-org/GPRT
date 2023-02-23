@@ -5729,7 +5729,7 @@ struct Context {
         VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
                                                          &rayTracingPipelineCI, nullptr, &raytracingPipeline);
         if (err) {
-          LOG_ERROR("failed to create ray tracing pipeline! : \n" + errorString(err));
+          LOG_ERROR("failed to create ray tracing pipeline! Are all entrypoint names correct? \n" + errorString(err));
         }
       }
 

@@ -556,13 +556,13 @@ GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=
 
 GPRT_API void gprtContextDestroy(GPRTContext context);
 
-GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *programName,
+GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint,
                                        size_t recordSize);
 
 template <typename T>
 GPRTComputeOf<T>
-gprtComputeCreate(GPRTContext context, GPRTModule module, const char *programName) {
-  return (GPRTComputeOf<T>) gprtComputeCreate(context, module, programName, sizeof(T));
+gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTComputeOf<T>) gprtComputeCreate(context, module, entrypoint, sizeof(T));
 }
 
 GPRT_API void gprtComputeDestroy(GPRTCompute compute);
@@ -581,13 +581,12 @@ gprtComputeGetParameters(GPRTComputeOf<T> compute) {
   return (T *) gprtComputeGetParameters((GPRTCompute) compute);
 }
 
-GPRT_API GPRTRayGen gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *programName,
-                                     size_t recordSize);
+GPRT_API GPRTRayGen gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
 
 template <typename T>
 GPRTRayGenOf<T>
-gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *programName) {
-  return (GPRTRayGenOf<T>) gprtRayGenCreate(context, module, programName, sizeof(T));
+gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTRayGenOf<T>) gprtRayGenCreate(context, module, entrypoint, sizeof(T));
 }
 
 GPRT_API void gprtRayGenDestroy(GPRTRayGen rayGen);
@@ -606,12 +605,12 @@ gprtRayGenGetParameters(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtRayGenGetParameters((GPRTRayGen) rayGen, deviceID);
 }
 
-GPRT_API GPRTMiss gprtMissCreate(GPRTContext context, GPRTModule module, const char *programName, size_t recordSize);
+GPRT_API GPRTMiss gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
 
 template <typename T>
 GPRTMissOf<T>
-gprtMissCreate(GPRTContext context, GPRTModule module, const char *programName) {
-  return (GPRTMissOf<T>) gprtMissCreate(context, module, programName, sizeof(T));
+gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTMissOf<T>) gprtMissCreate(context, module, entrypoint, sizeof(T));
 }
 
 /*! sets the given miss program for the given ray type */
@@ -809,44 +808,45 @@ gprtGeomTypeDestroy(GPRTGeomTypeOf<T> geomType) {
   gprtGeomTypeDestroy((GPRTGeomType) geomType);
 }
 
-GPRT_API void gprtGeomTypeSetClosestHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetClosestHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
 
 template <typename T>
 void
-gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetClosestHitProg((GPRTGeomType) type, rayType, module, progName);
+gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetClosestHitProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
-GPRT_API void gprtGeomTypeSetAnyHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetAnyHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
 
 template <typename T>
 void
-gprtGeomTypeSetAnyHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetAnyHitProg((GPRTGeomType) type, rayType, module, progName);
+gprtGeomTypeSetAnyHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetAnyHitProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
-GPRT_API void gprtGeomTypeSetIntersectionProg(GPRTGeomType type, int rayType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetIntersectionProg(GPRTGeomType type, int rayType, GPRTModule module,
+                                              const char *entrypoint);
 
 template <typename T>
 void
-gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, progName);
+gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
-GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
 
 template <typename T>
 void
-gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, progName);
+gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, entrypoint);
 }
 
-GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *progName);
+GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
 
 template <typename T>
 void
-gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *progName) {
-  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, progName);
+gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, entrypoint);
 }
 
 GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
