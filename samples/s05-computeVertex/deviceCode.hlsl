@@ -68,8 +68,8 @@ GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record), (1, 1, 1)) {
   gprt::store(record.vertex, index.z, v2);
 }
 
-struct Payload {
-  float3 color;
+struct [raypayload] Payload {
+  float3 color : read(caller) : write(closesthit, miss);
 };
 
 GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record)) {

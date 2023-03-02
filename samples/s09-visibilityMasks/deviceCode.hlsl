@@ -22,10 +22,10 @@
 
 #include "sharedCode.h"
 
-struct Payload {
-  float4 color;
-  float3 normal;
-  float hitT;
+struct [raypayload] Payload {
+  float4 color  : read(caller) : write(closesthit, miss);
+  float3 normal : read(caller) : write(closesthit, miss);
+  float hitT    : read(caller) : write(closesthit, miss);
 };
 
 float4

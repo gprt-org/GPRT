@@ -72,8 +72,9 @@ function(embed_devicecode)
       -enable-16bit-types
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
+      -enable-payload-qualifiers
       -HV 2021
-      -T lib_6_3
+      -T lib_6_7
       -I ${GPRT_INCLUDE_DIR}
       -D GPRT_DEVICE
       -D ${ENTRY_POINT_TYPE}

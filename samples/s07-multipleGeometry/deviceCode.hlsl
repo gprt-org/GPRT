@@ -22,8 +22,8 @@
 
 #include "sharedCode.h"
 
-struct Payload {
-  float3 color;
+struct [raypayload] Payload {
+  float3 color : read(caller) : write(closesthit, miss);
 };
 
 GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {

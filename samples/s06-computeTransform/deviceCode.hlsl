@@ -54,8 +54,8 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   gprt::store(record.transforms, transformID * 3 + 2, transformc);
 }
 
-struct Payload {
-  float3 color;
+struct [raypayload] Payload {
+  float3 color : read(caller) : write(closesthit, miss);
 };
 
 GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record)) {
