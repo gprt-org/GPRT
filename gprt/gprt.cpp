@@ -2462,10 +2462,10 @@ struct Accel {
   VkCommandBuffer commandBuffer;
   VkQueue queue;
   VkDeviceAddress address = 0;
-  VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
+  VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE; 
 
   Buffer *accelBuffer = nullptr;
-  Buffer *scratchBuffer = nullptr;
+  Buffer *scratchBuffer = nullptr; // Can we make this static? That way, all trees could share the scratch...
 
   Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue) {
     this->physicalDevice = physicalDevice;
@@ -7562,7 +7562,7 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool minimizeMemory) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
   accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,

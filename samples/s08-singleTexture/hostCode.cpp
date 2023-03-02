@@ -184,8 +184,8 @@ main(int ac, char **av) {
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
   gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
-  gprtAccelBuild(context, trianglesBLAS);
-  gprtAccelBuild(context, trianglesTLAS);
+  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ------------------------------------------------------------------
   // Setup the ray generation and miss programs
@@ -272,7 +272,7 @@ main(int ac, char **av) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, instances.size());
 
-    gprtAccelBuild(context, trianglesTLAS);
+    gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
     raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
     TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);

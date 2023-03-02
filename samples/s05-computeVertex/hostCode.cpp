@@ -132,10 +132,10 @@ main(int ac, char **av) {
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
+  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -228,12 +228,12 @@ main(int ac, char **av) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
 
-    // Now that the vertices have moved, we need to rebuild our bottom level tree
-    gprtAccelBuild(context, trianglesAccel);
+    // Now that the vertices have moved, we need to update our bottom level tree
+    gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
     // And since the bottom level tree is part of the top level tree, we need
-    // to rebuild the top level tree as well
-    gprtAccelBuild(context, world);
+    // to update the top level tree as well
+    gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
     // Assign the updated tree handle to our ray generation program's record
     rayGenData->world = gprtAccelGetHandle(world);

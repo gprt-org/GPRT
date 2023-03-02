@@ -94,7 +94,7 @@ template <typename T> struct Mesh {
 
     // Build the bottom level acceleration structure
     accel = gprtTrianglesAccelCreate(context, 1, &geometry);
-    gprtAccelBuild(context, accel);
+    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   };
 
   void cleanupMesh() {
@@ -189,7 +189,7 @@ main(int ac, char **av) {
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -277,7 +277,7 @@ main(int ac, char **av) {
     transformData->now = float(gprtGetTime(context));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, numInstances);
-    gprtAccelBuild(context, world);
+    gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
 
     rayGenData->world = gprtAccelGetHandle(world);
     gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);

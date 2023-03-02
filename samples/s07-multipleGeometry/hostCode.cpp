@@ -149,8 +149,8 @@ main(int ac, char **av) {
                                                       floorMesh.geometry};
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
-  gprtAccelBuild(context, trianglesBLAS);
-  gprtAccelBuild(context, trianglesTLAS);
+  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // ##################################################################
   // set the parameters for our kernels

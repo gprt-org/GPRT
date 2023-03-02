@@ -131,14 +131,14 @@ main(int ac, char **av) {
   // This first acceleration structure level is called a bottom level
   // acceleration structure, or a BLAS.
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
+  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // We can then make multiple "instances", or copies, of that BLAS in
   // a top level acceleration structure, or a TLAS. (we'll cover this later.)
   // Rays can only be traced into TLAS, so for now we just make one BLAS
   // instance.
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when

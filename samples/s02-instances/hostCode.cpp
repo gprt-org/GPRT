@@ -135,7 +135,7 @@ main(int ac, char **av) {
 
   // Place that single cube mesh in a bottom level acceleration structure
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
+  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // We will now create three instances of that cube mesh. On the gpu,
   // we will use the "instance ID" to determine what color each cube should be.
@@ -154,7 +154,7 @@ main(int ac, char **av) {
   // Similar to how we set the vertex and index buffers on triangle primitives,
   // we set the transforms buffer here for instance primitives
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when

@@ -164,7 +164,7 @@ main(int ac, char **av) {
   gprtTrianglesSetVertices(floorGeom, floorVertexBuffer, NUM_FLOOR_VERTICES);
   gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
   GPRTAccel floorAccel = gprtTrianglesAccelCreate(context, 1, &floorGeom);
-  gprtAccelBuild(context, floorAccel);
+  gprtAccelBuild(context, floorAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *floorData = gprtGeomGetParameters(floorGeom);
 
   // The floor will have a brown-ish color to it
@@ -179,7 +179,7 @@ main(int ac, char **av) {
   gprtTrianglesSetVertices(wallGeom, wallVertexBuffer, NUM_WALL_VERTICES);
   gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
   GPRTAccel wallAccel = gprtTrianglesAccelCreate(context, 1, &wallGeom);
-  gprtAccelBuild(context, wallAccel);
+  gprtAccelBuild(context, wallAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *wallData = gprtGeomGetParameters(wallGeom);
 
   // The wall has an off-white color
@@ -195,7 +195,7 @@ main(int ac, char **av) {
   gprtTrianglesSetVertices(windowGeom, windowVertexBuffer, NUM_WINDOW_VERTICES);
   gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
   GPRTAccel windowAccel = gprtTrianglesAccelCreate(context, 1, &windowGeom);
-  gprtAccelBuild(context, windowAccel);
+  gprtAccelBuild(context, windowAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *windowData = gprtGeomGetParameters(windowGeom);
 
   // The window has a blue-ish color, and an alpha transparency of 50%.
@@ -237,7 +237,7 @@ main(int ac, char **av) {
   gprtInstanceAccelSetVisibilityMasks(world, masksBuffer);
 
   // Now that our instance acceleration structure is setup, build it.
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Set the accel handle
   rayGenData->world = gprtAccelGetHandle(world);
