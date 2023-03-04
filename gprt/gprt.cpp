@@ -2403,6 +2403,12 @@ struct Accel {
 struct TriangleAccel : public Accel {
   std::vector<TriangleGeom *> geometries;
 
+  // caching these for fast tree updates
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos;
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
+  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
+  std::vector<uint32_t> maxPrimitiveCounts;
+
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
@@ -2420,10 +2426,10 @@ struct TriangleAccel : public Accel {
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory) {
     VkResult err;
 
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs(geometries.size());
-    std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries(geometries.size());
-    std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    maxPrimitiveCounts.resize(geometries.size());
     for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
       auto &geom = accelerationStructureGeometries[gid];
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -2639,9 +2645,156 @@ struct TriangleAccel : public Accel {
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+    
+    VkResult err;    
+
+    // Get size info
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+    accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    accelerationStructureBuildGeometryInfo.flags = flags;
+    accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+
+    VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+    accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                               &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                               &accelerationStructureBuildSizesInfo);
+
+    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    if (!accelBuffer) {
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               // means we can use this buffer as a means of storing an acceleration
+                               // structure
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                   // means we can get this buffer's address with
+                                   // vkGetBufferDeviceAddress
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                               // means that this memory is stored directly on the device
+                               //  (rather than the host, or in a special host/device section)
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &accelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create acceleration structure for triangle accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+      scratchBuffer->destroy();
+      delete (scratchBuffer);
+      scratchBuffer = nullptr;
+    }
+
+    if (!scratchBuffer) {
+      scratchBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                     // Is this required? If not, remove this...
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode unsupported!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
   }
 
   void destroy() {
@@ -2667,6 +2820,12 @@ struct TriangleAccel : public Accel {
 struct AABBAccel : public Accel {
   std::vector<AABBGeom *> geometries;
 
+  // Caching these for fast tree updates
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos; 
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
+  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
+  std::vector<uint32_t> maxPrimitiveCounts;
+  
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
@@ -2684,10 +2843,10 @@ struct AABBAccel : public Accel {
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory) {
     VkResult err;
 
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs(geometries.size());
-    std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries(geometries.size());
-    std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    maxPrimitiveCounts.resize(geometries.size());
 
     for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
       auto &geom = accelerationStructureGeometries[gid];
@@ -2879,9 +3038,155 @@ struct AABBAccel : public Accel {
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+
+    VkResult err;
+
+    // Get size info
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+    accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    accelerationStructureBuildGeometryInfo.flags = flags;
+    accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+
+    VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+    accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                               &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                               &accelerationStructureBuildSizesInfo);
+
+    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    if (!accelBuffer) {
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               // means we can use this buffer as a means of storing an acceleration
+                               // structure
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                   // means we can get this buffer's address with
+                                   // vkGetBufferDeviceAddress
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                               // means that this memory is stored directly on the device
+                               //  (rather than the host, or in a special host/device section)
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &accelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create acceleration structure for AABB accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+      scratchBuffer->destroy();
+      delete (scratchBuffer);
+      scratchBuffer = nullptr;
+    }
+
+    if (!scratchBuffer) {
+      scratchBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                     // Is this required? If not, remove this...
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode unsupported!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for AABB accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
   }
 
   void destroy() {
@@ -3406,9 +3711,363 @@ struct InstanceAccel : public Accel {
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {LOG_ERROR("Previous build mode must support updates!");}
+
+
+
+    VkResult err;
+
+    // Compute the instance offset for the SBT record.
+    //   The instance shader binding table record offset is the total number
+    //   of geometries referenced by all instances up until this instance tree
+    //   multiplied by the number of ray types.
+    uint64_t instanceShaderBindingTableRecordOffset = 0;
+    for (uint32_t i = 0; i < accels.size(); ++i) {
+      if (accels[i] == this)
+        break;
+      if (accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel *instanceAccel = (InstanceAccel *) accels[i];
+        size_t numGeometry = instanceAccel->getNumGeometries();
+        instanceShaderBindingTableRecordOffset += numGeometry * numRayTypes;
+      }
+    }
+    instanceOffset = instanceShaderBindingTableRecordOffset;
+
+    uint64_t referencesAddress;
+    // No instance addressed provided, so we need to supply our own.
+    if (references.buffer == nullptr) {
+      // delete if not big enough
+      if (accelAddressesBuffer && accelAddressesBuffer->size != numInstances * sizeof(uint64_t)) {
+        accelAddressesBuffer->destroy();
+        delete accelAddressesBuffer;
+        accelAddressesBuffer = nullptr;
+      }
+
+      // make buffer if not made yet
+      if (accelAddressesBuffer == nullptr) {
+        accelAddressesBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
+                                          // I guess I need this to use these buffers as input to tree builds?
+                                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                              // means we can get this buffer's address with
+                                              // vkGetBufferDeviceAddress
+                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                              // means we can use this buffer as a storage buffer
+                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                          // means that this memory is stored directly on the device
+                                          //  (rather than the host, or in a special host/device section)
+                                          // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
+                                          // on AMD)
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
+                                          sizeof(uint64_t) * numInstances);
+      }
+
+      // transfer over addresses
+      std::vector<uint64_t> addresses(numInstances);
+      for (uint32_t i = 0; i < numInstances; ++i)
+        addresses[i] = this->instances[i]->address;
+      accelAddressesBuffer->map();
+      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
+      accelAddressesBuffer->unmap();
+      referencesAddress = accelAddressesBuffer->deviceAddress;
+    }
+    // Instance acceleration structure references provided by the user
+    else {
+      referencesAddress = references.buffer->deviceAddress;
+    }
+
+    // If the visibility mask address is -1, we assume a mask of 0xFF
+    uint64_t visibilityMasksAddress = -1;
+    if (visibilityMasks.buffer != nullptr) {
+      visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
+    }
+
+    // No instance offsets provided, so we need to supply our own.
+    uint64_t instanceOffsetsAddress;
+    if (offsets.buffer == nullptr) {
+      // delete if not big enough
+      if (instanceOffsetsBuffer && instanceOffsetsBuffer->size != numInstances * sizeof(uint64_t)) {
+        instanceOffsetsBuffer->destroy();
+        delete instanceOffsetsBuffer;
+        instanceOffsetsBuffer = nullptr;
+      }
+
+      // make buffer if not made yet
+      if (instanceOffsetsBuffer == nullptr) {
+        instanceOffsetsBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
+                                           // I guess I need this to use these buffers as input to tree builds?
+                                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                               // means we can get this buffer's address with
+                                               // vkGetBufferDeviceAddress
+                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                               // means we can use this buffer as a storage buffer
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                           // means that this memory is stored directly on the device
+                                           // (rather than the host, or in a special host/device section)
+                                           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
+                                           // on AMD)
+                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
+                                           sizeof(uint64_t) * numInstances);
+      }
+
+      // transfer over offsets
+      std::vector<int32_t> blasOffsets(numInstances);
+      int offset = 0;
+      for (uint32_t i = 0; i < numInstances; ++i) {
+        blasOffsets[i] = offset;
+
+        if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) {
+          TriangleAccel *triAccel = (TriangleAccel *) this->instances[i];
+          offset += triAccel->geometries.size() * numRayTypes;
+        } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
+          AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
+          offset += aabbAccel->geometries.size() * numRayTypes;
+        } else {
+          LOG_ERROR("Error, unknown instance type");
+        }
+      }
+      instanceOffsetsBuffer->map();
+      memcpy(instanceOffsetsBuffer->mapped, blasOffsets.data(), sizeof(int32_t) * numInstances);
+      instanceOffsetsBuffer->unmap();
+      instanceOffsetsAddress = instanceOffsetsBuffer->deviceAddress;
+    }
+    // Instance acceleration structure references provided by the user
+    else {
+      instanceOffsetsAddress = offsets.buffer->deviceAddress;
+    }
+
+    // No instance addressed provided, so we assume identity.
+    uint64_t transformBufferAddress;
+    if (transforms.buffer == nullptr) {
+      transformBufferAddress = -1;
+    } else {
+      transformBufferAddress = transforms.buffer->deviceAddress;
+    }
+
+    // Use a compute shader to copy transforms into instances buffer
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    struct PushConstants {
+      uint64_t instanceBufferAddr;
+      uint64_t transformBufferAddr;
+      uint64_t accelReferencesAddr;
+      uint64_t instanceShaderBindingTableRecordOffset;
+      uint64_t transformOffset;
+      uint64_t transformStride;
+      uint64_t instanceOffsetsBufferAddr;
+      uint64_t instanceVisibilityMasksBufferAddr;
+      uint64_t pad[16 - 8];
+    } pushConstants;
+
+    pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
+    pushConstants.transformBufferAddr = transformBufferAddress;
+    pushConstants.accelReferencesAddr = referencesAddress;
+    pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
+    pushConstants.transformOffset = transforms.offset;
+    pushConstants.transformStride = transforms.stride;
+    pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+    pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    vkCmdPushConstants(commandBuffer, internalStages["gprtFillInstanceData"].layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(PushConstants), &pushConstants);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["gprtFillInstanceData"].pipeline);
+    // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+    // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+    vkCmdDispatch(commandBuffer, numInstances, 1, 1);
+    err = vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+    accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    accelerationStructureGeometry.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    accelerationStructureGeometry.geometry.instances.arrayOfPointers = VK_FALSE;
+    accelerationStructureGeometry.geometry.instances.data.deviceAddress = instancesBuffer->deviceAddress;
+
+    // Get size info
+    /*
+    The pSrcAccelerationStructure, dstAccelerationStructure, and mode members of
+    pBuildInfo are ignored. Any VkDeviceOrHostAddressKHR members of pBuildInfo
+    are ignored by this command, except that the hostAddress member of
+    VkAccelerationStructureGeometryTrianglesDataKHR::transformData will be
+    examined to check if it is NULL.*
+    */
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+    accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    accelerationStructureBuildGeometryInfo.geometryCount = 1;
+    accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+
+    uint32_t primitive_count = numInstances;
+
+    VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+    accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                               &accelerationStructureBuildGeometryInfo, &primitive_count,
+                                               &accelerationStructureBuildSizesInfo);
+
+    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    if (!accelBuffer) {
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               // means we can use this buffer as a means of storing an acceleration
+                               // structure
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                   // means we can get this buffer's address with
+                                   // vkGetBufferDeviceAddress
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                               // means that this memory is stored directly on the device
+                               //  (rather than the host, or in a special host/device section)
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &accelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create acceleration structure for instance accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+      scratchBuffer->destroy();
+      delete (scratchBuffer);
+      scratchBuffer = nullptr;
+    }
+
+    if (!scratchBuffer) {
+      scratchBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                     // Is this required? If not, remove this...
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode unsupported!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
+    accelerationStructureBuildRangeInfo.primitiveCount = numInstances;
+    accelerationStructureBuildRangeInfo.primitiveOffset = 0;
+    accelerationStructureBuildRangeInfo.firstVertex = 0;
+    accelerationStructureBuildRangeInfo.transformOffset = 0;
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs = {
+        &accelerationStructureBuildRangeInfo};
+
+    // VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for instance accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
+
+    // VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueWaitIdle(queue);
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
   }
 
   void destroy() {

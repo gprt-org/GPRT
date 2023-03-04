@@ -228,8 +228,10 @@ main(int ac, char **av) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
 
-    // Now that the vertices have moved, we need to update our bottom level tree
-    gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+    // Now that the vertices have moved, we need to update our bottom level tree.
+    // Note, updates should only be used when primitive counts are unchanged and 
+    // movement is relatively small.  
+    gprtAccelUpdate(context, trianglesAccel);
 
     // And since the bottom level tree is part of the top level tree, we need
     // to update the top level tree as well
