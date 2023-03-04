@@ -2630,7 +2630,7 @@ struct AABBAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  AABBAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
+  AABBAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator, VkCommandBuffer commandBuffer, VkQueue queue,
             size_t numGeometries, AABBGeom *geometries)
       : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->geometries.resize(numGeometries);
@@ -7404,7 +7404,7 @@ GPRT_API GPRTAccel
 gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  AABBAccel *accel = new AABBAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+  AABBAccel *accel = new AABBAccel(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                                    context->graphicsQueue, numGeometries, (AABBGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel);
   return (GPRTAccel) accel;
