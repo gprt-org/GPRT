@@ -2377,6 +2377,8 @@ struct Accel {
   VkQueue queue;
   VkDeviceAddress address = 0;
   VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE; 
+  GPRTBuildMode buildMode = GPRT_BUILD_MODE_UNINITIALIZED;
+  bool minimizeMemory = false;
 
   Buffer *accelBuffer = nullptr;
   Buffer *scratchBuffer = nullptr; // Can we make this static? That way, all trees could share the scratch...
@@ -2391,7 +2393,9 @@ struct Accel {
 
   ~Accel(){};
 
-  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
+  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory){};
+  virtual void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
+  virtual void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
   virtual void destroy(){};
   virtual AccelType getType() { return GPRT_UNKNOWN_ACCEL; }
 };
@@ -2413,7 +2417,7 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -2538,7 +2542,27 @@ struct TriangleAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode not recognized!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
@@ -2602,6 +2626,16 @@ struct TriangleAccel : public Accel {
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  }
+
+  void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
   }
 
   void destroy() {
@@ -2641,7 +2675,7 @@ struct AABBAccel : public Accel {
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory) {
     VkResult err;
 
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
@@ -2756,7 +2790,27 @@ struct AABBAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode not recognized!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
@@ -2806,6 +2860,16 @@ struct AABBAccel : public Accel {
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  }
+
+  void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
   }
 
   void destroy() {
@@ -2954,7 +3018,7 @@ struct InstanceAccel : public Accel {
 
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool minimizeMemory) {
     VkResult err;
 
     // Compute the instance offset for the SBT record.
@@ -3229,7 +3293,27 @@ struct InstanceAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | 
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    else {LOG_ERROR("build mode not recognized!");}
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = 1;
@@ -3297,6 +3381,16 @@ struct InstanceAccel : public Accel {
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  }
+
+  void compact(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
   }
 
   void destroy() {
@@ -7503,12 +7597,23 @@ gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool 
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
   accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
+               requestedFeatures.numRayTypes, mode, minimizeMemory);
+}
+
+GPRT_API void gprtAccelUpdate(GPRTContext _context, GPRTAccel _accel)
+{
+  Accel *accel = (Accel *) _accel;
+  Context *context = (Context *) _context;
+  accel->update({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
                requestedFeatures.numRayTypes);
 }
 
-GPRT_API void
-gprtAccelRefit(GPRTContext _context, GPRTAccel accel) {
-  GPRT_NOTIMPLEMENTED;
+GPRT_API void gprtAccelCompact(GPRTContext _context, GPRTAccel _accel)
+{
+  Accel *accel = (Accel *) _accel;
+  Context *context = (Context *) _context;
+  accel->compact({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
+               requestedFeatures.numRayTypes);
 }
 
 GPRT_API gprt::Accel
