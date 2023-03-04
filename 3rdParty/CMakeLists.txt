@@ -93,6 +93,9 @@ ELSE()
   message(STATUS ${Vulkan_LIBRARY})
 ENDIF()
 
+# Find Vulkan Memory Allocator
+add_subdirectory(vma)
+
 # Find STB Image
 add_subdirectory(stb_image)
 

@@ -67,6 +67,11 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+// For advanced vulkan memory allocation
+#define VMA_VULKAN_VERSION 1002000 // Vulkan 1.2
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
  * platforms.
@@ -327,6 +332,7 @@ struct Buffer {
   static std::vector<Buffer *> buffers;
 
   VkDevice device;
+  VmaAllocator allocator;
   VkPhysicalDeviceMemoryProperties memoryProperties;
   VkCommandBuffer commandBuffer;
   VkQueue queue;
@@ -334,14 +340,10 @@ struct Buffer {
   /** @brief Usage flags to be filled by external source at buffer creation */
   VkBufferUsageFlags usageFlags;
 
-  /** @brief Memory property flags to be filled by external source at buffer
-   * creation */
-  VkMemoryPropertyFlags memoryPropertyFlags;
-
   bool hostVisible;
 
   VkBuffer buffer = VK_NULL_HANDLE;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
+  VmaAllocation allocation;
   VkDeviceAddress deviceAddress = 0;
 
   // Some operations require buffers to be in a separate array.
@@ -350,11 +352,10 @@ struct Buffer {
 
   struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VmaAllocation allocation;
   } stagingBuffer;
 
   VkDeviceSize size = 0;
-  VkDeviceSize alignment = 0;
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
@@ -362,7 +363,10 @@ struct Buffer {
       if (mapped)
         return VK_SUCCESS;
       else
-        return vkMapMemory(device, memory, offset, size, 0, &mapped);
+      {
+        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        return vmaMapMemory(allocator, allocation, &mapped);
+      }
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
@@ -404,15 +408,18 @@ struct Buffer {
       // todo, transfer device data to host
       if (mapped)
         return VK_SUCCESS;
-      else
-        return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
+      else {
+        vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+        return vmaMapMemory(allocator, stagingBuffer.allocation, &mapped);
+      }
     }
   }
 
   void unmap() {
     if (hostVisible) {
       if (mapped) {
-        vkUnmapMemory(device, memory);
+        vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaUnmapMemory(allocator, allocation);
         mapped = nullptr;
       }
     } else {
@@ -455,50 +462,27 @@ struct Buffer {
 
       // todo, transfer device data to device
       if (mapped) {
-        vkUnmapMemory(device, stagingBuffer.memory);
+        vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+        vmaUnmapMemory(allocator, stagingBuffer.allocation);
         mapped = nullptr;
       }
     }
   }
 
-  // VkResult bind(VkDeviceSize offset = 0)
-  // {
-  //   return vkBindBufferMemory(device, buffer, memory, offset);
-  // }
-
-  // void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset
-  // = 0)
-  // {
-  //   descriptor.offset = offset;
-  //   descriptor.buffer = buffer;
-  //   descriptor.range = size;
-  // }
-
-  // void copyTo(void* data, VkDeviceSize size)
-  // {
-  //   assert(mapped);
-  //   memcpy(mapped, data, size);
-  // }
-
-  /*! Guarantees that the host's writes are available to the device */
-  VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
-    VkMappedMemoryRange mappedRange = {};
-    mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mappedRange.memory = memory;
-    mappedRange.offset = offset;
-    mappedRange.size = size;
-    return vkFlushMappedMemoryRanges(device, 1, &mappedRange);
+  void flush () {
+    if (hostVisible) {
+      vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+    } else {
+      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+    }
   }
 
-  /*! Guarantees that the buffer is written to by any pending device operations
-   */
-  VkResult invalidate(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
-    VkMappedMemoryRange mappedRange = {};
-    mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mappedRange.memory = memory;
-    mappedRange.offset = offset;
-    mappedRange.size = size;
-    return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
+  void invalidate() {
+    if (hostVisible) {
+      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+    } else {
+      vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+    }
   }
 
   VkDeviceAddress getDeviceAddress() {
@@ -515,20 +499,13 @@ struct Buffer {
     Buffer::buffers[virtualAddress] = nullptr;
 
     if (buffer) {
-      vkDestroyBuffer(device, buffer, nullptr);
+      vmaDestroyBuffer(allocator, buffer, allocation);
       buffer = VK_NULL_HANDLE;
     }
-    if (memory) {
-      vkFreeMemory(device, memory, nullptr);
-      memory = VK_NULL_HANDLE;
-    }
     if (stagingBuffer.buffer) {
-      vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      vmaDestroyBuffer(allocator, buffer, stagingBuffer.allocation);
+      // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
-    }
-    if (stagingBuffer.memory) {
-      vkFreeMemory(device, stagingBuffer.memory, nullptr);
-      stagingBuffer.memory = VK_NULL_HANDLE;
     }
   }
 
@@ -549,7 +526,7 @@ struct Buffer {
 
   ~Buffer(){};
 
-  Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer _commandBuffer, VkQueue _queue,
+  Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator, VkCommandBuffer _commandBuffer, VkQueue _queue,
          VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size,
          void *data = nullptr) {
 
@@ -569,7 +546,7 @@ struct Buffer {
     }
 
     device = logicalDevice;
-    memoryPropertyFlags = _memoryPropertyFlags;
+    allocator = _allocator;
     usageFlags = _usageFlags;
     size = _size;
     commandBuffer = _commandBuffer;
@@ -578,45 +555,29 @@ struct Buffer {
     // Check if the buffer can be mapped to a host pointer.
     // If the buffer isn't host visible, this is buffer and requires
     // an additional staging buffer...
-    if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
+    if ((_memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
       hostVisible = true;
     else
       hostVisible = false;
-
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-
-    auto getMemoryType = [this](uint32_t typeBits, VkMemoryPropertyFlags properties,
-                                VkBool32 *memTypeFound = nullptr) -> uint32_t {
-      // memory type bits is a bitmask and contains one bit set for every
-      // supported memory type. Bit i is set if and only if the memory type i in
-      // the memory properties is supported.
-      for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
-        if ((typeBits & 1) == 1) {
-          if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            if (memTypeFound) {
-              *memTypeFound = true;
-            }
-            return i;
-          }
-        }
-        typeBits >>= 1;
-      }
-
-      if (memTypeFound) {
-        *memTypeFound = false;
-        return 0;
-      } else {
-        LOG_ERROR("Could not find a matching memory type");
-      }
-      return -1;
-    };
 
     // Create the buffer handle
     VkBufferCreateInfo bufferCreateInfo{};
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.usage = usageFlags;
     bufferCreateInfo.size = size;
-    VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
+    
+    VmaAllocationCreateInfo allocInfo = {};
+    if (hostVisible) {
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO; 
+      allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    }
+    else {
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; 
+    }
+
+    VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+
+    // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
 
     if (!hostVisible) {
       const VkBufferUsageFlags bufferUsageFlags =
@@ -630,70 +591,22 @@ struct Buffer {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
-      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
-    }
+      // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
-    // Create the memory backing up the buffer handle
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
-    VkMemoryAllocateInfo memAllocInfo{};
-    memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memAllocInfo.allocationSize = memReqs.size;
-    // Find a memory type index that fits the properties of the buffer
-    memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-    // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
-    // need to enable the appropriate flag during allocation
-    VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
-    if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-      allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
-      allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
-      memAllocInfo.pNext = &allocFlagsInfo;
-    }
-    VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
-    alignment = memReqs.alignment;
-
-    // Attach the memory to the buffer object
-    VkResult err = vkBindBufferMemory(device, buffer, memory, /* offset */ 0);
-    if (err)
-      LOG_ERROR("failed to bind buffer memory! : \n" + errorString(err));
-
-    if (!hostVisible) {
-      const VkMemoryPropertyFlags memoryPropertyFlags =
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
-                                                  // vkMapMemory
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
-                                                  // "invalidate"  not needed
-
-      // Create the memory backing up the staging buffer handle
-      VkMemoryRequirements memReqs;
-      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
-      VkMemoryAllocateInfo memAllocInfo{};
-      memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-      memAllocInfo.allocationSize = memReqs.size;
-      // Find a memory type index that fits the properties of the buffer
-      memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-
-      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
-
-      // Attach the memory to the buffer object
-      VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
-      if (err)
-        LOG_ERROR("failed to bind staging buffer memory! : \n" + errorString(err));
+      VmaAllocationCreateInfo allocInfo = {};
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO; 
+      allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
     // copy over the data
     if (data != nullptr) {
-      VK_CHECK_RESULT(map());
+      map();
       memcpy(mapped, data, size);
-      if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
-        flush();
       unmap();
     }
-
-    //// Initialize a default descriptor that covers the whole buffer size
-    // setupDescriptor();
-
+    
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
       deviceAddress = getDeviceAddress();
@@ -2459,6 +2372,7 @@ typedef enum {
 struct Accel {
   VkPhysicalDevice physicalDevice;
   VkDevice logicalDevice;
+  VmaAllocator allocator;
   VkCommandBuffer commandBuffer;
   VkQueue queue;
   VkDeviceAddress address = 0;
@@ -2467,9 +2381,10 @@ struct Accel {
   Buffer *accelBuffer = nullptr;
   Buffer *scratchBuffer = nullptr; // Can we make this static? That way, all trees could share the scratch...
 
-  Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue) {
+  Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator, VkCommandBuffer commandBuffer, VkQueue queue) {
     this->physicalDevice = physicalDevice;
     this->logicalDevice = logicalDevice;
+    this->allocator = allocator;
     this->commandBuffer = commandBuffer;
     this->queue = queue;
   };
@@ -2487,9 +2402,9 @@ struct TriangleAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  TriangleAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
+  TriangleAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator, VkCommandBuffer commandBuffer, VkQueue queue,
                 size_t numGeometries, TriangleGeom *geometries)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
@@ -2571,7 +2486,7 @@ struct TriangleAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -2606,7 +2521,7 @@ struct TriangleAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -2717,7 +2632,7 @@ struct AABBAccel : public Accel {
 
   AABBAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
             size_t numGeometries, AABBGeom *geometries)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
@@ -2789,7 +2704,7 @@ struct AABBAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -2824,7 +2739,7 @@ struct AABBAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -2953,9 +2868,9 @@ struct InstanceAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
+  InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator, VkCommandBuffer commandBuffer, VkQueue queue,
                 size_t numInstances, GPRTAccel *instances)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->numInstances = numInstances;
 
     if (instances) {
@@ -2978,7 +2893,7 @@ struct InstanceAccel : public Accel {
       this->numGeometries = numGeometry;
     }
 
-    instancesBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+    instancesBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                  // I guess I need this to use these buffers as input to tree builds?
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                      // means we can get this buffer's address with
@@ -3070,7 +2985,7 @@ struct InstanceAccel : public Accel {
 
       // make buffer if not made yet
       if (accelAddressesBuffer == nullptr) {
-        accelAddressesBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+        accelAddressesBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                           // I guess I need this to use these buffers as input to tree builds?
                                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                               // means we can get this buffer's address with
@@ -3118,7 +3033,7 @@ struct InstanceAccel : public Accel {
 
       // make buffer if not made yet
       if (instanceOffsetsBuffer == nullptr) {
-        instanceOffsetsBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+        instanceOffsetsBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                            // I guess I need this to use these buffers as input to tree builds?
                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                                // means we can get this buffer's address with
@@ -3262,7 +3177,7 @@ struct InstanceAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -3297,7 +3212,7 @@ struct InstanceAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -3464,6 +3379,9 @@ struct Context {
   VkPhysicalDeviceFeatures deviceFeatures;
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
+
+  // For handling vulkan memory allocation  
+  VmaAllocator allocator;
 
   /** @brief Queue family properties of the chosen physical device */
   std::vector<VkQueueFamilyProperties> queueFamilyProperties;
@@ -4116,6 +4034,23 @@ struct Context {
       LOG_ERROR("Could not create logical devices : \n" + errorString(err));
     }
 
+    // Create vulkan memory allocator
+    VmaVulkanFunctions vulkanFunctions = {};
+    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+    
+    VmaAllocatorCreateInfo allocatorCreateInfo = {};
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+    allocatorCreateInfo.physicalDevice = physicalDevice;
+    allocatorCreateInfo.device = logicalDevice;
+    allocatorCreateInfo.instance = instance;
+    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+    allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    err = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
+    if (err) {
+      LOG_ERROR("Could not create vulkan memory allocator : \n" + errorString(err));
+    }
+
     // Get the ray tracing and acceleration structure related function pointers
     // required by this sample
     gprt::vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
@@ -4365,7 +4300,7 @@ struct Context {
           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
           // means we can use this buffer as a storage buffer resource
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-      defaultBuffer = new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+      defaultBuffer = new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                                  memoryUsageFlags, 1);
     }
 
@@ -4631,6 +4566,9 @@ struct Context {
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+    
+    vmaDestroyAllocator(allocator);
+
     vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
@@ -4690,7 +4628,7 @@ struct Context {
         raygenTable = nullptr;
       }
       if (!raygenTable && raygenPrograms.size() > 0) {
-        raygenTable = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+        raygenTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
                                  memoryUsageFlags, recordSize * numRayGens);
       }
 
@@ -4701,7 +4639,7 @@ struct Context {
         missTable = nullptr;
       }
       if (!missTable && missPrograms.size() > 0) {
-        missTable = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+        missTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
                                memoryUsageFlags, recordSize * numMissProgs);
       }
 
@@ -4712,7 +4650,7 @@ struct Context {
         hitgroupTable = nullptr;
       }
       if (!hitgroupTable && numHitRecords > 0) {
-        hitgroupTable = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+        hitgroupTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
                                    memoryUsageFlags, recordSize * numHitRecords);
       }
 
@@ -5472,7 +5410,7 @@ struct Context {
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
       rasterRecordBuffer =
-          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+          new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                      memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()));
 
       // Uniform buffer descriptors for each geometry's record
@@ -5539,7 +5477,7 @@ struct Context {
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
       computeRecordBuffer =
-          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+          new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                      memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()));
 
       // Uniform buffer descriptors for each geometry's record
@@ -7279,7 +7217,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
                                               // not needed
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                               context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   // Pin the buffer to the host
@@ -7312,7 +7250,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                               context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   if (init) {
@@ -7348,7 +7286,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
                                                // access
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                               context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   // Pin the buffer to the host
@@ -7358,7 +7296,6 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
     void *mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
     buffer->flush();
-    buffer->invalidate();
   }
   return (GPRTBuffer) buffer;
 }
@@ -7478,7 +7415,7 @@ gprtTrianglesAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *a
   LOG_API_CALL();
   Context *context = (Context *) _context;
   TriangleAccel *accel =
-      new TriangleAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+      new TriangleAccel(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                         context->graphicsQueue, numGeometries, (TriangleGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel);
   return (GPRTAccel) accel;
@@ -7495,7 +7432,7 @@ gprtInstanceAccelCreate(GPRTContext _context, size_t numAccels, GPRTAccel *array
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel =
-      new InstanceAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
+      new InstanceAccel(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
                         context->graphicsQueue, numAccels, arrayOfAccels);
   context->accels.push_back(accel);
 

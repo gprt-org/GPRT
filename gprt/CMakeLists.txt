@@ -66,6 +66,7 @@ target_link_libraries(gprt
     gprtDeviceCode
     glfw
     stb_image
+    vma
     imgui
     Threads::Threads
     ${OPENGL_gl_LIBRARY}
