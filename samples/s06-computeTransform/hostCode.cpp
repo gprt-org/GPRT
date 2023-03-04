@@ -201,6 +201,7 @@ main(int ac, char **av) {
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -272,18 +273,12 @@ main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // update time to move instance transforms. Then, rebuild only instance
+    // update time to move instance transforms. Then, update only instance
     // accel.
     transformData->now = float(gprtGetTime(context));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, numInstances);
-    gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
-
-    rayGenData->world = gprtAccelGetHandle(world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
-
-    // Note! we don't need to rebuild the pipeline here, since no geometry was
-    // made or destroyed, only updated.
+    gprtAccelUpdate(context, world);
 
     // Now, trace rays
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);

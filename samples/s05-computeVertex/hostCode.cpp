@@ -148,6 +148,9 @@ main(int ac, char **av) {
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
+  // Assign the tree handle to our ray generation program's record
+  rayGenData->world = gprtAccelGetHandle(world);
+
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -235,14 +238,7 @@ main(int ac, char **av) {
 
     // And since the bottom level tree is part of the top level tree, we need
     // to update the top level tree as well
-    gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
-
-    // Assign the updated tree handle to our ray generation program's record
-    rayGenData->world = gprtAccelGetHandle(world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
-
-    // Note! we don't need to rebuild the pipeline here, since no geometry was
-    // made or destroyed, only updated.
+    gprtAccelUpdate(context, world);
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);

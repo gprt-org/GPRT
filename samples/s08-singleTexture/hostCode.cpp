@@ -271,10 +271,8 @@ main(int ac, char **av) {
     transformData->now = .5 * gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, instances.size());
-
-    gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
-    raygenData->world = gprtAccelGetHandle(trianglesTLAS);
-
+    gprtAccelUpdate(context, trianglesTLAS);
+    
     TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);
     planeMeshData->now = gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
