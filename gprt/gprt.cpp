@@ -2630,6 +2630,12 @@ struct TriangleAccel : public Accel {
     // update last used build modes
     this->buildMode = mode;
     this->minimizeMemory = minimizeMemory;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
@@ -2864,6 +2870,12 @@ struct AABBAccel : public Accel {
     // update last used build modes
     this->buildMode = mode;
     this->minimizeMemory = minimizeMemory;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
@@ -3385,6 +3397,12 @@ struct InstanceAccel : public Accel {
     // update last used build modes
     this->buildMode = mode;
     this->minimizeMemory = minimizeMemory;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
   }
 
   void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
