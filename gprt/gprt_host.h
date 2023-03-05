@@ -820,11 +820,15 @@ GPRT_API void gprtAccelDestroy(GPRTAccel accel);
  *   Trace is a bit slower than 3. Good for high level-of-detail dynamic objects that are expected
  *   to be hit by a significant number of rays. 
  * 
+ * @param allowCompaction Enables the tree to be compacted with gprtAccelCompact, potentially 
+ * significantly reducing its memory footprint. Enabling this feature may take more time and
+ * memory than a normal build, and so should only be used when the compaction feature is needed.
+ * 
  * @param minimizeMemory Sacrifices build and trace performance to reduce memory consumption. Enable only 
  * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing 
  * for memory consumption as much as possible.
  */
-GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool minimizeMemory = false);
+GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false, bool minimizeMemory = false);
 
 /**
  * @brief Updates the structure of a tree to account for changes to the underlying primitives.
