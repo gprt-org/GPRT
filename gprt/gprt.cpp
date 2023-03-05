@@ -70,7 +70,7 @@
 // For advanced vulkan memory allocation
 #define VMA_VULKAN_VERSION 1002000 // Vulkan 1.2
 #define VMA_IMPLEMENTATION
-#include "vk_mem_alloc.h"
+#include "vma/vk_mem_alloc.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
