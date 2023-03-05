@@ -3390,6 +3390,154 @@ struct AABBAccel : public Accel {
     if (!allowCompaction) {LOG_ERROR("Tree must have previously been built with compaction allowed.");}
     if (isCompact) return; // tree is already compact.
 
+    VkResult err;
+
+    VkDeviceSize compactedSize;
+
+    // get size for compacted structure.
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for aabb accel query compaction size! : \n" + errorString(err));
+      
+      // reset the query so we can use it again
+      vkCmdResetQueryPool(commandBuffer, compactedSizeQueryPool, 0, 1);
+
+      gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure, 
+        VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, compactedSizeQueryPool, 0);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for aabb accel query compaction size! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for aabb accel query compaction size! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for aabb accel query compaction size! : \n" + errorString(err));
+
+      uint64_t buffer[1] = {0};
+      err = vkGetQueryPoolResults (
+        logicalDevice, compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize), buffer, sizeof(VkDeviceSize), 
+        VK_QUERY_RESULT_WAIT_BIT 
+      );
+      compactedSize = buffer[0];
+
+      if (err)
+        LOG_ERROR("failed to get query pool results for aabb accel query compaction size! : \n" + errorString(err));
+    }
+
+    // allocate compact buffer and compact acceleration structure
+    if (compactBuffer && compactBuffer->size != compactedSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (!compactBuffer) {
+      compactBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               // means we can use this buffer as a means of storing an acceleration
+                               // structure
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                   // means we can get this buffer's address with
+                                   // vkGetBufferDeviceAddress
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                               // means that this memory is stored directly on the device
+                               //  (rather than the host, or in a special host/device section)
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               compactedSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = compactedSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &compactAccelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create compact acceleration structure for aabb accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    // Copy over the compacted acceleration structure 
+    VkCopyAccelerationStructureInfoKHR copyAccelerationStructureInfo{};
+    copyAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copyAccelerationStructureInfo.src = accelerationStructure;
+    copyAccelerationStructureInfo.dst = compactAccelerationStructure;
+    copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    copyAccelerationStructureInfo.pNext = nullptr;
+
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for aabb accel compaction! : \n" + errorString(err));
+      
+      gprt::vkCmdCopyAccelerationStructure(
+        commandBuffer,
+        &copyAccelerationStructureInfo
+      );
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for aabb accel compaction! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for aabb accel compaction! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for aabb accel compaction! : \n" + errorString(err));
+    }
+
+    // free the original tree and buffer
+    {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    // get compact address
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = compactAccelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
 
     // mark that the tree is now compact
     isCompact = true;
@@ -4178,6 +4326,155 @@ struct InstanceAccel : public Accel {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {LOG_ERROR("Tree not previously built!");}
     if (!allowCompaction) {LOG_ERROR("Tree must have previously been built with compaction allowed.");}
     if (isCompact) return; // tree is already compact.
+
+    VkResult err;
+
+    VkDeviceSize compactedSize;
+
+    // get size for compacted structure.
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for instance accel query compaction size! : \n" + errorString(err));
+      
+      // reset the query so we can use it again
+      vkCmdResetQueryPool(commandBuffer, compactedSizeQueryPool, 0, 1);
+
+      gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure, 
+        VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, compactedSizeQueryPool, 0);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for instance accel query compaction size! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel query compaction size! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel query compaction size! : \n" + errorString(err));
+
+      uint64_t buffer[1] = {0};
+      err = vkGetQueryPoolResults (
+        logicalDevice, compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize), buffer, sizeof(VkDeviceSize), 
+        VK_QUERY_RESULT_WAIT_BIT 
+      );
+      compactedSize = buffer[0];
+
+      if (err)
+        LOG_ERROR("failed to get query pool results for instance accel query compaction size! : \n" + errorString(err));
+    }
+
+    // allocate compact buffer and compact acceleration structure
+    if (compactBuffer && compactBuffer->size != compactedSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (!compactBuffer) {
+      compactBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               // means we can use this buffer as a means of storing an acceleration
+                               // structure
+                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                   // means we can get this buffer's address with
+                                   // vkGetBufferDeviceAddress
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                               // means that this memory is stored directly on the device
+                               //  (rather than the host, or in a special host/device section)
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                               compactedSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.size = compactedSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &compactAccelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create compact acceleration structure for instance accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    // Copy over the compacted acceleration structure 
+    VkCopyAccelerationStructureInfoKHR copyAccelerationStructureInfo{};
+    copyAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copyAccelerationStructureInfo.src = accelerationStructure;
+    copyAccelerationStructureInfo.dst = compactAccelerationStructure;
+    copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    copyAccelerationStructureInfo.pNext = nullptr;
+
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for instance accel compaction! : \n" + errorString(err));
+      
+      gprt::vkCmdCopyAccelerationStructure(
+        commandBuffer,
+        &copyAccelerationStructureInfo
+      );
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for instance accel compaction! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel compaction! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel compaction! : \n" + errorString(err));
+    }
+
+    // free the original tree and buffer
+    {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    // get compact address
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = compactAccelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
 
     // mark that the tree is now compact
     isCompact = true;
