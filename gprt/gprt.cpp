@@ -503,10 +503,12 @@ struct Buffer {
 
     if (buffer) {
       vmaDestroyBuffer(allocator, buffer, allocation);
+      // vkDestroyBuffer(device, buffer, nullptr);
       buffer = VK_NULL_HANDLE;
     }
     if (stagingBuffer.buffer) {
-      vmaDestroyBuffer(allocator, buffer, stagingBuffer.allocation);
+      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
     }
@@ -2762,6 +2764,7 @@ struct TriangleAccel : public Accel {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.srcAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
@@ -2980,6 +2983,11 @@ struct TriangleAccel : public Accel {
       accelBuffer->destroy();
       delete accelBuffer;
       accelBuffer = nullptr;
+    }
+
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
     }
 
     if (compactBuffer) {
@@ -3327,7 +3335,8 @@ struct AABBAccel : public Accel {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-    accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
+    accelerationBuildGeometryInfo.srcAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.dstAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
@@ -3396,6 +3405,11 @@ struct AABBAccel : public Accel {
       accelBuffer->destroy();
       delete accelBuffer;
       accelBuffer = nullptr;
+    }
+
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
     }
 
     if (compactBuffer) {
@@ -4100,6 +4114,7 @@ struct InstanceAccel : public Accel {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.srcAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure = (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = 1;
     accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
@@ -4178,6 +4193,11 @@ struct InstanceAccel : public Accel {
       accelBuffer->destroy();
       delete accelBuffer;
       accelBuffer = nullptr;
+    }
+
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
     }
 
     if (compactBuffer) {
