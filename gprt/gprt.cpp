@@ -3762,7 +3762,7 @@ struct InstanceAccel : public Accel {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
-    accelerationStructureBuildGeometryInfo.pGeometries = nullptr; // = &accelerationStructureGeometry;
+    accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
     uint32_t primitive_count = numInstances;
 
@@ -4047,7 +4047,7 @@ struct InstanceAccel : public Accel {
         accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
       }
       accelerationStructureBuildGeometryInfo.geometryCount = 1;
-      accelerationStructureBuildGeometryInfo.pGeometries = nullptr; // = &accelerationStructureGeometry;
+      accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
       uint32_t primitive_count = numInstances;
 
