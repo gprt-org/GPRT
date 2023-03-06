@@ -2899,7 +2899,7 @@ struct TriangleAccel : public Accel {
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
       accelerationStructureCreateInfo.size = compactedSize;
       accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
@@ -3469,7 +3469,7 @@ struct AABBAccel : public Accel {
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
       accelerationStructureCreateInfo.size = compactedSize;
       accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
@@ -4406,7 +4406,7 @@ struct InstanceAccel : public Accel {
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-      accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
       accelerationStructureCreateInfo.size = compactedSize;
       accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
