@@ -1629,10 +1629,10 @@ struct Compute : public SBTEntry {
     computePipelineCreateInfo.flags = 0;
     computePipelineCreateInfo.stage = shaderStage;
 
-    if (vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("failed to create compute pipeline!");
-    };
+    VkResult err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
+    if (err) {
+      LOG_ERROR("failed to create compute pipeline! Are all entrypoint names correct? \n" + errorString(err));
+    }
   }
 
   void destroy() {
