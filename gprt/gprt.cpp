@@ -2513,7 +2513,6 @@ struct TriangleAccel : public Accel {
     
     // If previously compacted, free those resources up.
     if (compactBuffer) {
-      // Destroy old accel handle too
       gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
       compactAccelerationStructure = VK_NULL_HANDLE;
       compactBuffer->destroy();
@@ -2521,8 +2520,8 @@ struct TriangleAccel : public Accel {
       compactBuffer = nullptr;
     }
 
-    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
-      // Destroy old accel handle too
+    // Destroy old accel handle
+    if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
       accelerationStructure = VK_NULL_HANDLE;
       accelBuffer->destroy();
@@ -2558,7 +2557,7 @@ struct TriangleAccel : public Accel {
                   errorString(err));
     }
 
-    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+    if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -2721,7 +2720,7 @@ struct TriangleAccel : public Accel {
                                                 &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
                                                 &accelerationStructureBuildSizesInfo);
 
-      if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+      if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
         scratchBuffer->destroy();
         delete (scratchBuffer);
         scratchBuffer = nullptr;
@@ -3098,7 +3097,6 @@ struct AABBAccel : public Accel {
 
     // If previously compacted, free those resources up.
     if (compactBuffer) {
-      // Destroy old accel handle too
       gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
       compactAccelerationStructure = VK_NULL_HANDLE;
       compactBuffer->destroy();
@@ -3106,8 +3104,7 @@ struct AABBAccel : public Accel {
       compactBuffer = nullptr;
     }
 
-    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
-      // Destroy old accel handle too
+    if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
       accelerationStructure = VK_NULL_HANDLE;
       accelBuffer->destroy();
@@ -3143,7 +3140,7 @@ struct AABBAccel : public Accel {
                   errorString(err));
     }
 
-    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+    if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -3292,7 +3289,7 @@ struct AABBAccel : public Accel {
                                                 &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
                                                 &accelerationStructureBuildSizesInfo);
 
-      if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+      if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
         scratchBuffer->destroy();
         delete (scratchBuffer);
         scratchBuffer = nullptr;
