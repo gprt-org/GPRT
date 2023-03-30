@@ -875,6 +875,8 @@ GPRT_API void gprtAccelUpdate(GPRTContext context, GPRTAccel accel);
 */
 GPRT_API void gprtAccelCompact(GPRTContext context, GPRTAccel accel);
 
+GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0));
+
 GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
 GPRT_API GPRTGeomType gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind, size_t recordSize);
@@ -1198,6 +1200,8 @@ void
 gprtBufferDestroy(GPRTBufferOf<T> buffer) {
   gprtBufferDestroy((GPRTBuffer) buffer);
 }
+
+GPRT_API size_t gprtBufferGetSize(GPRTBuffer _buffer, int deviceID GPRT_IF_CPP(= 0));
 
 /*! returns the device pointer of the given pointer for the given
   device ID. For host-pinned or managed memory buffers (where the

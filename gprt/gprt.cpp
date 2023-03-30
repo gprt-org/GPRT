@@ -526,6 +526,11 @@ struct Buffer {
       unmap();
     }
   }
+  
+  size_t getSize() {
+    return (size_t) size;
+  }
+
   /* Default Constructor */
   Buffer(){};
 
@@ -2406,6 +2411,7 @@ struct Accel {
   virtual void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
   virtual void compact(VkQueryPool compactedSizeQueryPool){};
   virtual void destroy(){};
+  virtual size_t getSize(){return -1;};
   virtual AccelType getType() { return GPRT_UNKNOWN_ACCEL; }
 };
 
@@ -2428,6 +2434,14 @@ struct TriangleAccel : public Accel {
   ~TriangleAccel(){};
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
+
+  size_t getSize(){ 
+    size_t size = 0;
+    if (accelBuffer) size += accelBuffer->getSize();
+    if (compactBuffer) size += compactBuffer->getSize();
+    if (scratchBuffer) size += scratchBuffer->getSize();
+    return size;  
+  };
 
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
@@ -3022,6 +3036,14 @@ struct AABBAccel : public Accel {
   ~AABBAccel(){};
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
+
+  size_t getSize(){ 
+    size_t size = 0;
+    if (accelBuffer) size += accelBuffer->getSize();
+    if (compactBuffer) size += compactBuffer->getSize();
+    if (scratchBuffer) size += scratchBuffer->getSize();
+    return size;
+  };
 
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
@@ -3701,6 +3723,8 @@ struct InstanceAccel : public Accel {
   }
 
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
+
+  size_t getSize(){ throw std::runtime_error("Error, not implemeted!");};
 
   void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
@@ -8526,6 +8550,13 @@ gprtBufferDestroy(GPRTBuffer _buffer) {
   buffer = nullptr;
 }
 
+GPRT_API size_t 
+gprtBufferGetSize(GPRTBuffer _buffer, int deviceID) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  return buffer->getSize();
+}
+
 GPRT_API void *
 gprtBufferGetPointer(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
@@ -8729,6 +8760,11 @@ GPRT_API void gprtAccelCompact(GPRTContext _context, GPRTAccel _accel)
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
   accel->compact(context->compactedSizeQueryPool);
+}
+
+GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID) {
+  Accel *accel = (Accel *) _accel;
+  return accel->getSize();
 }
 
 GPRT_API gprt::Accel
