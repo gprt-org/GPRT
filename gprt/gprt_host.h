@@ -1203,6 +1203,12 @@ gprtBufferDestroy(GPRTBufferOf<T> buffer) {
 
 GPRT_API size_t gprtBufferGetSize(GPRTBuffer _buffer, int deviceID GPRT_IF_CPP(= 0));
 
+template <typename T>
+size_t
+gprtBufferGetSize(GPRTBufferOf<T> buffer) {
+  return gprtBufferGetSize((GPRTBuffer) buffer);
+}
+
 /*! returns the device pointer of the given pointer for the given
   device ID. For host-pinned or managed memory buffers (where the
   buffer is shared across all devices) this pointer should be the
