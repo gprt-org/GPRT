@@ -4992,6 +4992,12 @@ struct Context {
       enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
+    if (requestedFeatures.raytracingInvocationReordering) {
+      // If the device will be expected to reorder rays for locality purposes,
+      // we need to request the device extension to enable this.
+      enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+    }
+
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
     enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 #endif
