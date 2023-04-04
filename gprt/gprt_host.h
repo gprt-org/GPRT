@@ -302,6 +302,11 @@ gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, size_t c
 
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags flags GPRT_IF_CPP(= GPRT_SBT_ALL));
 
+/** Tells GPRT to request the appropriate extensions to enable explicit ray reordering to improve locality.
+ *  Note, this feature is currently an NVIDIA exclusive, and is based on shader execution reordering (SER). 
+ */
+GPRT_API void gprtRequestInvocationReordering();
+
 /** Tells the GPRT to create a window when once the context is made.
  * @param initialWidth The width of the window in screen coordinates
  * @param initialHeight The height of the window in screen coordinates

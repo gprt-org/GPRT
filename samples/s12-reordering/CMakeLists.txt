@@ -20,16 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(s00-rayGenOnly)
-add_subdirectory(s01-singleTriangle)
-add_subdirectory(s02-instances)
-add_subdirectory(s03-singleAABB)
-add_subdirectory(s04-computeAABBs)
-add_subdirectory(s05-computeVertex)
-add_subdirectory(s06-computeTransform)
-add_subdirectory(s07-multipleGeometry)
-add_subdirectory(s08-singleTexture)
-add_subdirectory(s09-visibilityMasks)
-add_subdirectory(s10-rasterization)
-add_subdirectory(s11-imgui)
-add_subdirectory(s12-reordering)
+embed_devicecode(
+  OUTPUT_TARGET
+    s12_deviceCode
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
+
+add_executable(s12_reordering hostCode.cpp)
+target_link_libraries(s12_reordering
+  PRIVATE
+    s12_deviceCode
+    gprt::gprt
+    generator
+)

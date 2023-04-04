@@ -85,6 +85,9 @@ static struct RequestedFeatures {
     std::string title;
   } windowProperties;
 
+  /** For shader execution reordering on NVIDIA */
+  bool raytracingInvocationReordering = false;
+
   uint32_t numRayTypes = 1;
 
   /*! returns whether logging is enabled */
@@ -7353,6 +7356,12 @@ gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *tit
   requestedFeatures.windowProperties.initialWidth = initialWidth;
   requestedFeatures.windowProperties.initialHeight = initialHeight;
   requestedFeatures.windowProperties.title = std::string(title);
+}
+
+GPRT_API void 
+gprtRequestInvocationReordering() {
+  LOG_API_CALL();
+  requestedFeatures.raytracingInvocationReordering = true;
 }
 
 GPRT_API void
