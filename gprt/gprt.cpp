@@ -8578,6 +8578,26 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID) {
   buffer->unmap();
 }
 
+GPRT_API void 
+gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination, 
+           size_t srcOffset, size_t dstOffset, size_t size, 
+           int srcDeviceID, int dstDeviceID) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Buffer *destination = (Buffer *) _destination;
+  Buffer *source = (Buffer *) _source;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  VkBufferCopy region;
+  region.srcOffset = srcOffset;
+  region.dstOffset = dstOffset;
+  region.size = size;
+  vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+}
+
 GPRT_API gprt::Buffer
 gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();

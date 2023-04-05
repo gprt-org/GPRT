@@ -1244,6 +1244,14 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
 }
 
+GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst, size_t srcOffset, size_t dstOffset, size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtBufferCopy(GPRTContext context, GPRTBufferOf<T1> src, GPRTBufferOf<T2> dst, size_t srcOffset, size_t dstOffset, size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
+  gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, size, srcDeviceID, dstDeviceID);
+}
+
 GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
