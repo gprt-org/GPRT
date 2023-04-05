@@ -5177,13 +5177,18 @@ struct Context {
     //   // Else we use the same queue
     //   queueFamilyIndices.transfer = queueFamilyIndices.graphics;
     // }
-
+ 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV reorderProperties = {};
+    reorderProperties.rayTracingInvocationReorderReorderingHint = VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_NV;
+    reorderProperties.pNext = nullptr;
+
     VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
     memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
     memoryModelFeatures.vulkanMemoryModel = VK_TRUE;
     memoryModelFeatures.vulkanMemoryModelDeviceScope = VK_TRUE;
     memoryModelFeatures.vulkanMemoryModelAvailabilityVisibilityChains = VK_TRUE;
+    memoryModelFeatures.pNext = (requestedFeatures.raytracingInvocationReordering) ? &reorderProperties : nullptr;
 
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
     descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
