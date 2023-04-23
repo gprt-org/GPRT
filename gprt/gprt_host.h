@@ -179,9 +179,9 @@ typedef enum {
 } GPRTGeomKind;
 
 typedef enum {
-  GPRT_BUILD_MODE_UNINITIALIZED, 
-  GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, 
-  GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE, 
+  GPRT_BUILD_MODE_UNINITIALIZED,
+  GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE,
+  GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE,
   GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE,
   GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE,
 } GPRTBuildMode;
@@ -795,84 +795,85 @@ gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBufferOf<T> mas
 GPRT_API void gprtAccelDestroy(GPRTAccel accel);
 
 /**
- * @brief Builds the given acceleration structure so that it can be used on the 
- * device for ray tracing.  
+ * @brief Builds the given acceleration structure so that it can be used on the
+ * device for ray tracing.
  *
  * @param context The GPRT context
- * @param accel The acceleration structure to build. 
- * @param mode The build mode to use when constructing the acceleration structure. 
+ * @param accel The acceleration structure to build.
+ * @param mode The build mode to use when constructing the acceleration structure.
  * 1. GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE
- *   Fastest possible build, but slower trace than 3 or 4. Good for fully-dynamic geometry like 
+ *   Fastest possible build, but slower trace than 3 or 4. Good for fully-dynamic geometry like
  *   particles, destruction, changing prim counts, or moving wildly (explosions) where per-frame
  *   rebuild is required.
- * 
+ *
  * 2. GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE
- *   Slightly slower build than 1, but allows very fast update. Good for lower level-of-detail 
- *   dynamic objects that are unlikely to be hit by too many rays but still need to be refitted 
+ *   Slightly slower build than 1, but allows very fast update. Good for lower level-of-detail
+ *   dynamic objects that are unlikely to be hit by too many rays but still need to be refitted
  *   per frame to be correct.
- * 
+ *
  * 3. GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE
- *   Fastest possible trace, but disallows updates. Slower to build than 1 or 2. This is a good 
+ *   Fastest possible trace, but disallows updates. Slower to build than 1 or 2. This is a good
  *   default choice for static geometry.
- * 
+ *
  * 4. GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE
  *   Fastest trace possible while still allowing for updates. Updates are slightly slower than 2.
  *   Trace is a bit slower than 3. Good for high level-of-detail dynamic objects that are expected
- *   to be hit by a significant number of rays. 
- * 
- * @param allowCompaction Enables the tree to be compacted with gprtAccelCompact, potentially 
+ *   to be hit by a significant number of rays.
+ *
+ * @param allowCompaction Enables the tree to be compacted with gprtAccelCompact, potentially
  * significantly reducing its memory footprint. Enabling this feature may take more time and
  * memory than a normal build, and so should only be used when the compaction feature is needed.
- * 
- * @param minimizeMemory Sacrifices build and trace performance to reduce memory consumption. Enable only 
- * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing 
+ *
+ * @param minimizeMemory Sacrifices build and trace performance to reduce memory consumption. Enable only
+ * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing
  * for memory consumption as much as possible.
  */
-GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false, bool minimizeMemory = false);
+GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false,
+                             bool minimizeMemory = false);
 
 /**
  * @brief Updates the structure of a tree to account for changes to the underlying primitives.
- * Updating is much faster than building, but degrades the accel's effectiveness as a spatial 
+ * Updating is much faster than building, but degrades the accel's effectiveness as a spatial
  * data structure (eg, by updating tree bounding boxes while preserving original tree topology).
  *
  * As a general rule, only dynamic objects should be considered for update.
  * Lean towards rebuilding instance accels over updating, especially when instance transforms change
- * significantly from frame to frame.  
- *  
+ * significantly from frame to frame.
+ *
  * Example: grass waving in the wind -> update
  * Example: a mesh exploding -> don't update, instead rebuild.
- * Example: Skinned characters -> if modeled in t-pose, then every update will assume that feet are 
- * close together. It might be better in this case to build multiple acceleration structures up-front, 
+ * Example: Skinned characters -> if modeled in t-pose, then every update will assume that feet are
+ * close together. It might be better in this case to build multiple acceleration structures up-front,
  * then use the closest match as a source for refit.
- * 
+ *
  * @param context The GPRT context
- * @param accel The acceleration structure to update. 
- * 
- * @note An accel must have been previously built with mode GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE or 
+ * @param accel The acceleration structure to update.
+ *
+ * @note An accel must have been previously built with mode GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE or
  * GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE.
-*/
+ */
 GPRT_API void gprtAccelUpdate(GPRTContext context, GPRTAccel accel);
 
 /**
  * @brief Compaction is a fast way to potentially reclaim a significant amount of memory from a tree.
- * There are no performance downsides when tracing rays against compacted acceleration structures. 
- * 
+ * There are no performance downsides when tracing rays against compacted acceleration structures.
+ *
  * For static geometry, compaction is generally a good idea.
- * 
- * For updatable geometry, it makes sense to compact accels that have a long lifetime (compaction and update 
+ *
+ * For updatable geometry, it makes sense to compact accels that have a long lifetime (compaction and update
  * are not mutually exclusive!)
- * 
+ *
  * For fully dynamic geometry that's rebuilt every frame (as opposed to updated), there's generally no
  * benefit to be had from compacting an accel.
- * 
- * One reason to not use compaction might be to exploit the guarantee of accel storage requirements 
- * increasing monotonically with primitive count - this does not hold true in the context of compaction.  
- * 
+ *
+ * One reason to not use compaction might be to exploit the guarantee of accel storage requirements
+ * increasing monotonically with primitive count - this does not hold true in the context of compaction.
+ *
  * @param context The GPRT context
- * @param accel The acceleration structure to compact. 
- * 
+ * @param accel The acceleration structure to compact.
+ *
  * @note An accel must have been previously built with "allowCompaction" set to "true".
-*/
+ */
 GPRT_API void gprtAccelCompact(GPRTContext context, GPRTAccel accel);
 
 GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0));
@@ -1244,11 +1245,13 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
 }
 
-GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst, size_t srcOffset, size_t dstOffset, size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0));
+GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst, size_t srcOffset, size_t dstOffset,
+                             size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtBufferCopy(GPRTContext context, GPRTBufferOf<T1> src, GPRTBufferOf<T2> dst, size_t srcOffset, size_t dstOffset, size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
+gprtBufferCopy(GPRTContext context, GPRTBufferOf<T1> src, GPRTBufferOf<T2> dst, size_t srcOffset, size_t dstOffset,
+               size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
   gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, size, srcDeviceID, dstDeviceID);
 }
 
