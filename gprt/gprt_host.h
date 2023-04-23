@@ -1255,6 +1255,41 @@ gprtBufferCopy(GPRTContext context, GPRTBufferOf<T1> src, GPRTBufferOf<T2> dst, 
   gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, size, srcDeviceID, dstDeviceID);
 }
 
+/**
+ * @brief Sorts the input "unsorted" buffer using a GPU-parallel radix sorter, sorting the results into "sorted".
+ * Radix sort requires a temporary "scratch" space
+ *
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
+ *
+ * @param context The GPRT context
+ * @param unsorted A buffer of 32-bit unsigned integers
+ * @param sorted A buffer of equal size to "unsorted" to hold the sorted values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer unsorted, GPRTBuffer sorted,
+                             GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Sorts the input "unsorted" buffer using a GPU-parallel radix sorter, sorting the results into "sorted".
+ * Radix sort requires a temporary "scratch" space
+ *
+ * @param context The GPRT context
+ * @param unsorted A buffer of 32-bit unsigned integers
+ * @param sorted A buffer of equal size to "unsorted" to hold the sorted values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2>
+void
+gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> unsorted, GPRTBufferOf<T1> sorted,
+               GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferSort(context, (GPRTBuffer) unsorted, (GPRTBuffer) sorted, scratch);
+}
+
 GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
