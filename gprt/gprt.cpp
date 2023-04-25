@@ -8637,7 +8637,7 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID) {
 
 GPRT_API void
 gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination, size_t srcOffset, size_t dstOffset,
-               size_t size, int srcDeviceID, int dstDeviceID) {
+               size_t size, size_t count, int srcDeviceID, int dstDeviceID) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Buffer *destination = (Buffer *) _destination;
@@ -8648,7 +8648,7 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   VkBufferCopy region;
   region.srcOffset = srcOffset;
   region.dstOffset = dstOffset;
-  region.size = size;
+  region.size = size * count;
   vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
 
   context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
