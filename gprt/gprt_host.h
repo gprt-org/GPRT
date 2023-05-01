@@ -1286,7 +1286,7 @@ gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, int 
  * @param context The GPRT context
  * @param src The source buffer to copy elements from
  * @param dst The destination buffer to copy elements into
- * @param srcOffset The first element locaiton to copy from
+ * @param srcOffset The first element location to copy from
  * @param dstOffset The first element location to copy into
  * @param size The size of an individual element in the buffer
  * @param count The total number of elements to copy
@@ -1304,7 +1304,7 @@ GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst
  * @param context The GPRT context
  * @param src The source buffer to copy elements from
  * @param dst The destination buffer to copy elements into
- * @param srcOffset The first element locaiton to copy from
+ * @param srcOffset The first element location to copy from
  * @param dstOffset The first element location to copy into
  * @param count The total number of elements to copy
  */

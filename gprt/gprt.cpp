@@ -8646,9 +8646,9 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
 
   VkBufferCopy region;
-  region.srcOffset = srcOffset;
-  region.dstOffset = dstOffset;
-  region.size = size * count;
+  region.srcOffset = srcOffset * size;
+  region.dstOffset = dstOffset * size;
+  region.size = count * size;
   vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
 
   context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
