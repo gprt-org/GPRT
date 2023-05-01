@@ -1202,8 +1202,21 @@ gprtBufferDestroy(GPRTBufferOf<T> buffer) {
   gprtBufferDestroy((GPRTBuffer) buffer);
 }
 
-GPRT_API size_t gprtBufferGetSize(GPRTBuffer _buffer, int deviceID GPRT_IF_CPP(= 0));
+/***
+ * @brief Returns the size of the given buffer
+ *
+ * @param buffer The buffer to measure
+ * @return The size of the buffer in bytes
+*/
+GPRT_API size_t gprtBufferGetSize(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
+/***
+ * @brief Returns the size of the given buffer
+ *
+ * @tparam T The template type of the given buffer
+ * @param buffer The buffer to measure
+ * @return The size of the buffer in bytes
+*/
 template <typename T>
 size_t
 gprtBufferGetSize(GPRTBufferOf<T> buffer) {
@@ -1253,12 +1266,14 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
  * @param buffer The buffer to resize
  * @param size The size of an individual element in the buffer
  * @param count The total number of elements contained in the buffer.
+ * @param preserveContents If true, preserves the contents of the buffer when resized
  *
  * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
- * and rebuild the shader binding table.
+ * and rebuild the shader binding table. When preserving contents, a device copy is executed from an old buffer to a new buffer. 
+ * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
  */
 GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t size, size_t count,
-                               int deviceID GPRT_IF_CPP(= 0));
+                               bool preserveContents, int deviceID GPRT_IF_CPP(= 0));
 
 /***
  * @brief Resizes the buffer so that it contains \p count elements, where each element is "sizeof(T)" bytes. If the
@@ -1269,14 +1284,16 @@ GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t si
  * @param context The GPRT context
  * @param buffer The buffer to resize
  * @param count The total number of elements contained in the buffer.
+ * @param preserveContents If true, preserves the contents of the buffer when resized
  *
  * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
- * and rebuild the shader binding table.
+ * and rebuild the shader binding table.  When preserving contents, a device copy is executed from an old buffer to a new buffer. 
+ * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
  */
 template <typename T>
 void
-gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtBufferResize(context, (GPRTBuffer) buffer, sizeof(T), count, deviceID);
+gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, bool preserveContents, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtBufferResize(context, (GPRTBuffer) buffer, sizeof(T), count, preserveContents, deviceID);
 }
 
 /***
