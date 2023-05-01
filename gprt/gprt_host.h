@@ -1202,8 +1202,21 @@ gprtBufferDestroy(GPRTBufferOf<T> buffer) {
   gprtBufferDestroy((GPRTBuffer) buffer);
 }
 
-GPRT_API size_t gprtBufferGetSize(GPRTBuffer _buffer, int deviceID GPRT_IF_CPP(= 0));
+/***
+ * @brief Returns the size of the given buffer
+ *
+ * @param buffer The buffer to measure
+ * @return The size of the buffer in bytes
+*/
+GPRT_API size_t gprtBufferGetSize(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
+/***
+ * @brief Returns the size of the given buffer
+ *
+ * @tparam T The template type of the given buffer
+ * @param buffer The buffer to measure
+ * @return The size of the buffer in bytes
+*/
 template <typename T>
 size_t
 gprtBufferGetSize(GPRTBufferOf<T> buffer) {
@@ -1245,14 +1258,79 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
 }
 
-GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst, size_t srcOffset, size_t dstOffset,
-                             size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0));
+/***
+ * @brief Resizes the buffer so that it contains \p count elements, where each element is \p size bytes. If the buffer
+ * is already the correct size, this function has no effect.
+ *
+ * @param context The GPRT context
+ * @param buffer The buffer to resize
+ * @param size The size of an individual element in the buffer
+ * @param count The total number of elements contained in the buffer.
+ * @param preserveContents If true, preserves the contents of the buffer when resized
+ *
+ * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
+ * and rebuild the shader binding table. When preserving contents, a device copy is executed from an old buffer to a new buffer. 
+ * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
+ */
+GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t size, size_t count,
+                               bool preserveContents, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T1, typename T2>
+/***
+ * @brief Resizes the buffer so that it contains \p count elements, where each element is "sizeof(T)" bytes. If the
+ * buffer is already the correct size, this function has no effect.
+ *
+ * @tparam T The template type of the given buffer
+ *
+ * @param context The GPRT context
+ * @param buffer The buffer to resize
+ * @param count The total number of elements contained in the buffer.
+ * @param preserveContents If true, preserves the contents of the buffer when resized
+ *
+ * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
+ * and rebuild the shader binding table.  When preserving contents, a device copy is executed from an old buffer to a new buffer. 
+ * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
+ */
+template <typename T>
 void
-gprtBufferCopy(GPRTContext context, GPRTBufferOf<T1> src, GPRTBufferOf<T2> dst, size_t srcOffset, size_t dstOffset,
-               size_t size, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
-  gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, size, srcDeviceID, dstDeviceID);
+gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, bool preserveContents, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtBufferResize(context, (GPRTBuffer) buffer, sizeof(T), count, preserveContents, deviceID);
+}
+
+/***
+ * @brief Copies the \p count elements of each \p size bytes from \p src into \p dst , reading from \p srcOffset and
+ * writing to \p dstOffset .
+ *
+ * @param context The GPRT context
+ * @param src The source buffer to copy elements from
+ * @param dst The destination buffer to copy elements into
+ * @param srcOffset The first element location to copy from
+ * @param dstOffset The first element location to copy into
+ * @param size The size of an individual element in the buffer
+ * @param count The total number of elements to copy
+ */
+GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst, size_t srcOffset, size_t dstOffset,
+                             size_t size, size_t count, int srcDeviceID GPRT_IF_CPP(= 0),
+                             int dstDeviceID GPRT_IF_CPP(= 0));
+
+/***
+ * @brief Copies the \p count elements of each \p size bytes from \p src into \p dst , reading from \p srcOffset and
+ * writing to \p dstOffset .
+ *
+ * @tparam T The template type of the given buffer
+ *
+ * @param context The GPRT context
+ * @param src The source buffer to copy elements from
+ * @param dst The destination buffer to copy elements into
+ * @param srcOffset The first element location to copy from
+ * @param dstOffset The first element location to copy into
+ * @param count The total number of elements to copy
+ */
+template <typename T>
+void
+gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, size_t srcOffset, size_t dstOffset,
+               size_t count, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
+  gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, sizeof(T), count, srcDeviceID,
+                 dstDeviceID);
 }
 
 /**

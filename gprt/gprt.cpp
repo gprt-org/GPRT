@@ -471,6 +471,7 @@ struct Buffer {
     }
   }
 
+  // flushes from host to device
   void flush() {
     if (hostVisible) {
       vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
@@ -479,12 +480,10 @@ struct Buffer {
     }
   }
 
+  // invalidates from device back to host
   void invalidate() {
-    if (hostVisible) {
-      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-    } else {
-      vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-    }
+    // device never directly writes to staging buffer
+    vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
   }
 
   VkDeviceAddress getDeviceAddress() {
@@ -499,6 +498,8 @@ struct Buffer {
   void destroy() {
     // Free sampler slot for use by subsequently made buffers
     Buffer::buffers[virtualAddress] = nullptr;
+
+    unmap();
 
     if (buffer) {
       vmaDestroyBuffer(allocator, buffer, allocation);
@@ -524,6 +525,230 @@ struct Buffer {
       memset(mapped, 0, size);
       unmap();
     }
+  }
+
+  void resize(size_t bytes, bool preserveContents) {
+    // If the size is already okay, do nothing
+    if (size == bytes) return;
+
+    if (hostVisible) {
+      // if we are host visible, we need to create a new buffer before releasing the 
+      // previous one to preserve values...
+
+      if (preserveContents) {
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+
+        VkBuffer newBuffer;
+        VmaAllocation newAllocation;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
+
+        // Copy contents from old to new 
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;     
+        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;   
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        
+        // Free old buffer 
+        vmaUnmapMemory(allocator, allocation);
+        vmaDestroyBuffer(allocator, buffer, allocation);
+
+        // Assign new buffer
+        buffer = newBuffer;
+        allocation = newAllocation;
+        size = bytes;
+        deviceAddress = getDeviceAddress();
+        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaMapMemory(allocator, allocation, &mapped);
+      } else {
+        // Not preserving contents, we can delete old host buffer before making new one
+        
+        // Free old buffer 
+        vmaUnmapMemory(allocator, allocation);
+        vmaDestroyBuffer(allocator, buffer, allocation);
+
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        vmaMapMemory(allocator, allocation, &mapped);
+        size = bytes;
+        deviceAddress = getDeviceAddress();
+      }
+
+    } else {
+      // if we are device visible, we can use the staging buffer to temporarily hold previous values, and free 
+      // the old buffer before creating a new buffer. 
+      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+      
+      // Copy existing contents into staging buffer
+      if (preserveContents) {
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;     
+        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+      }
+
+      // Release old device buffer
+      vmaDestroyBuffer(allocator, buffer, allocation);
+
+      {
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+      }
+
+
+      if (preserveContents)
+      {
+        // Copy contents from old staging buffer to new buffer
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;     
+        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;   
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+      }
+
+      size = bytes;
+      deviceAddress = getDeviceAddress();
+
+      // Release old staging buffer
+      if (mapped) {
+        vmaUnmapMemory(allocator, stagingBuffer.allocation);
+      }
+      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      {
+        // Create the new staging buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+      }
+
+      // if buffer was previously mapped, restore mapped state
+      if (mapped) {
+        mapped = false;
+        map();
+      }
+    }
+
   }
 
   size_t getSize() { return (size_t) size; }
@@ -8637,7 +8862,7 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID) {
 
 GPRT_API void
 gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination, size_t srcOffset, size_t dstOffset,
-               size_t size, int srcDeviceID, int dstDeviceID) {
+               size_t size, size_t count, int srcDeviceID, int dstDeviceID) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Buffer *destination = (Buffer *) _destination;
@@ -8646,12 +8871,19 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
 
   VkBufferCopy region;
-  region.srcOffset = srcOffset;
-  region.dstOffset = dstOffset;
-  region.size = size;
+  region.srcOffset = srcOffset * size;
+  region.dstOffset = dstOffset * size;
+  region.size = count * size;
   vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
 
   context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+}
+
+void gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t count, bool preserveContents, int deviceID) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Buffer *buffer = (Buffer *) _buffer;
+  buffer->resize(size * count, preserveContents);
 }
 
 GPRT_API gprt::Buffer
