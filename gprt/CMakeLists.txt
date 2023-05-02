@@ -29,10 +29,20 @@ include(cmake/embed_devicecode.cmake)
 embed_devicecode(
   OUTPUT_TARGET
     gprtDeviceCode
-  ENTRY_POINTS
-    gprtFillInstanceData
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
+)
+
+embed_devicecode(
+  OUTPUT_TARGET
+    sortDeviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sort.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/sort.hlsl
 )
 
 target_sources(gprt PRIVATE
@@ -64,6 +74,7 @@ target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
     gprtDeviceCode
+    sortDeviceCode
     glfw
     stb_image
     vma
