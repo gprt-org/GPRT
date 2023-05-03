@@ -24,8 +24,10 @@
 #define FFX_HLSL
 #include "sort.h"
 
-[[vk::binding(0, 0)]] ConstantBuffer<FFX_ParallelSortCB>	CBuffer		: register(b0);					// Constant buffer
-[[vk::binding(0, 1)]] cbuffer SetupIndirectCB							: register(b1)					// Setup Indirect Constant buffer
+// [[vk::binding(/*binding*/, /*set*/)]] 
+
+[[vk::binding(0, 0)]] ConstantBuffer<FFX_ParallelSortCB>	CBuffer;					// Constant buffer
+[[vk::binding(0, 1)]] cbuffer SetupIndirectCB											// Setup Indirect Constant buffer
 {
 	uint32_t NumKeysIndex;
 	uint32_t MaxThreadGroups;
@@ -35,29 +37,29 @@ struct RootConstantData {
 	uint32_t CShiftBit;
 };
 
-#ifdef VK_Const
 	[[vk::push_constant]] RootConstantData rootConstData;												// Store the shift bit directly in the root signature
-#else
-	ConstantBuffer<RootConstantData> rootConstData	: register(b2);										// Store the shift bit directly in the root signature
-#endif // VK_Const
+// #ifdef VK_Const
+// #else
+	// ConstantBuffer<RootConstantData> rootConstData;										// Store the shift bit directly in the root signature
+// #endif // VK_Const
 
-[[vk::binding(0, 2)]] RWStructuredBuffer<uint>	SrcBuffer		: register(u0, space0);					// The unsorted keys or scan data
-[[vk::binding(2, 2)]] RWStructuredBuffer<uint>	SrcPayload		: register(u0, space1);					// The payload data
+[[vk::binding(0, 2)]] RWStructuredBuffer<uint>	SrcBuffer		;					// The unsorted keys or scan data
+[[vk::binding(2, 2)]] RWStructuredBuffer<uint>	SrcPayload		;					// The payload data
 				 
-[[vk::binding(0, 4)]] RWStructuredBuffer<uint>	SumTable		: register(u0, space2);					// The sum table we will write sums to
-[[vk::binding(1, 4)]] RWStructuredBuffer<uint>	ReduceTable		: register(u0, space3);					// The reduced sum table we will write sums to
+[[vk::binding(0, 4)]] RWStructuredBuffer<uint>	SumTable		;					// The sum table we will write sums to
+[[vk::binding(1, 4)]] RWStructuredBuffer<uint>	ReduceTable		;					// The reduced sum table we will write sums to
 				 
-[[vk::binding(1, 2)]] RWStructuredBuffer<uint>	DstBuffer		: register(u0, space4);					// The sorted keys or prefixed data
-[[vk::binding(3, 2)]] RWStructuredBuffer<uint>	DstPayload		: register(u0, space5);					// the sorted payload data
+[[vk::binding(1, 2)]] RWStructuredBuffer<uint>	DstBuffer		;					// The sorted keys or prefixed data
+[[vk::binding(3, 2)]] RWStructuredBuffer<uint>	DstPayload		;					// the sorted payload data
 				 
-[[vk::binding(0, 3)]] RWStructuredBuffer<uint>	ScanSrc			: register(u0, space6);					// Source for Scan Data
-[[vk::binding(1, 3)]] RWStructuredBuffer<uint>	ScanDst			: register(u0, space7);					// Destination for Scan Data
-[[vk::binding(2, 3)]] RWStructuredBuffer<uint>	ScanScratch		: register(u0, space8);					// Scratch data for Scan
+[[vk::binding(0, 3)]] RWStructuredBuffer<uint>	ScanSrc			;					// Source for Scan Data
+[[vk::binding(1, 3)]] RWStructuredBuffer<uint>	ScanDst			;					// Destination for Scan Data
+[[vk::binding(2, 3)]] RWStructuredBuffer<uint>	ScanScratch		;					// Scratch data for Scan
 				 
-[[vk::binding(0, 5)]] RWStructuredBuffer<uint>	NumKeysBuffer	: register(u0, space9);					// Number of keys to sort for indirect execution
-[[vk::binding(1, 5)]] RWStructuredBuffer<FFX_ParallelSortCB>	CBufferUAV	: register(u0, space10);	// UAV for constant buffer parameters for indirect execution
-[[vk::binding(2, 5)]] RWStructuredBuffer<uint>	CountScatterArgs: register(u0, space11);				// Count and Scatter Args for indirect execution
-[[vk::binding(3, 5)]] RWStructuredBuffer<uint>	ReduceScanArgs	: register(u0, space12);				// Reduce and Scan Args for indirect execution
+[[vk::binding(0, 5)]] RWStructuredBuffer<uint>	NumKeysBuffer	;					// Number of keys to sort for indirect execution
+[[vk::binding(1, 5)]] RWStructuredBuffer<FFX_ParallelSortCB>	CBufferUAV	;	// UAV for constant buffer parameters for indirect execution
+[[vk::binding(2, 5)]] RWStructuredBuffer<uint>	CountScatterArgs;				// Count and Scatter Args for indirect execution
+[[vk::binding(3, 5)]] RWStructuredBuffer<uint>	ReduceScanArgs	;				// Reduce and Scan Args for indirect execution
 
 groupshared uint32_t gs_FFX_PARALLELSORT_LDSSums[FFX_PARALLELSORT_THREADGROUP_SIZE];
 uint32_t FFX_ParallelSort_ThreadgroupReduce(uint32_t localSum, uint32_t localID)

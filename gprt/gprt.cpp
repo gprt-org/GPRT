@@ -5041,6 +5041,9 @@ struct Context {
     VkDescriptorSet         m_SortDescriptorSetScanSets[2];
     VkDescriptorSet         m_SortDescriptorSetScratch;
     VkDescriptorSet         m_SortDescriptorSetIndirect;
+
+    VkDescriptorPool sbopool = VK_NULL_HANDLE;
+    VkDescriptorPool ubopool = VK_NULL_HANDLE;
   } ;
   SortStages sortStages;
   Module *radixSortModule = nullptr;
@@ -7318,7 +7321,31 @@ struct Context {
   void setupSortStages(Module *module) {
     // currently not using cache.
     VkPipelineCache cache = VK_NULL_HANDLE;
-    
+
+    VkDescriptorPoolSize sbopoolSize;
+    sbopoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    sbopoolSize.descriptorCount = 6;
+
+    VkDescriptorPoolCreateInfo sbodescriptorPoolInfo{};
+    sbodescriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    sbodescriptorPoolInfo.poolSizeCount = 1;
+    sbodescriptorPoolInfo.pPoolSizes = &sbopoolSize;
+    sbodescriptorPoolInfo.maxSets = 6;   // just one descriptor set for now.
+    sbodescriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &sbodescriptorPoolInfo, nullptr, &sortStages.sbopool));
+
+    VkDescriptorPoolSize ubopoolSize;
+    ubopoolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubopoolSize.descriptorCount = 2;
+
+    VkDescriptorPoolCreateInfo ubodescriptorPoolInfo{};
+    ubodescriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    ubodescriptorPoolInfo.poolSizeCount = 1;
+    ubodescriptorPoolInfo.pPoolSizes = &ubopoolSize;
+    ubodescriptorPoolInfo.maxSets = 2;   // just one descriptor set for now.
+    ubodescriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &ubodescriptorPoolInfo, nullptr, &sortStages.ubopool));
+
     sortStages.Count.entryPoint = "Count";
     sortStages.CountReduce.entryPoint = "CountReduce";
     sortStages.Scan.entryPoint = "Scan";
@@ -7359,6 +7386,16 @@ struct Context {
         { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // CountScatterArgs (indirect)
         { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr }   // ReduceScanArgs (indirect)
     };
+
+    auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = pool;
+      descriptorSetAllocateInfo.pSetLayouts = &layout;
+      descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = nullptr;
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet));
+    };
     
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     descriptor_set_layout_create_info.pNext = nullptr;
@@ -7366,53 +7403,40 @@ struct Context {
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_0;
     descriptor_set_layout_create_info.bindingCount = 1;
     VkResult vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutConstants);
-    assert(vkResult == VK_SUCCESS);
-    // bool bDescriptorAlloc = true;
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstants, &m_SortDescriptorSetConstants[0]);
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstants, &m_SortDescriptorSetConstants[1]);
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstants, &m_SortDescriptorSetConstants[2]);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.ubopool, sortStages.m_SortDescriptorSetLayoutConstants, &sortStages.m_SortDescriptorSetConstants);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_1;
     descriptor_set_layout_create_info.bindingCount = 1;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutConstantsIndirect);
-    assert(vkResult == VK_SUCCESS);
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstantsIndirect, &m_SortDescriptorSetConstantsIndirect[0]);
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstantsIndirect, &m_SortDescriptorSetConstantsIndirect[1]);
-    // bDescriptorAlloc &= m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutConstantsIndirect, &m_SortDescriptorSetConstantsIndirect[2]);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.ubopool, sortStages.m_SortDescriptorSetLayoutConstantsIndirect, &sortStages.m_SortDescriptorSetConstantsIndirect);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
     descriptor_set_layout_create_info.bindingCount = 4;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutInputOutputs);
-    assert(vkResult == VK_SUCCESS);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutInputOutputs, &m_SortDescriptorSetInputOutput[0]);
-    // assert(bDescriptorAlloc == true);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutInputOutputs, &m_SortDescriptorSetInputOutput[1]);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[0]);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[1]);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
     descriptor_set_layout_create_info.bindingCount = 3;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScan);
-    assert(vkResult == VK_SUCCESS);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutScan, &m_SortDescriptorSetScanSets[0]);
-    // assert(bDescriptorAlloc == true);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutScan, &m_SortDescriptorSetScanSets[1]);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[0]);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[1]);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
     descriptor_set_layout_create_info.bindingCount = 2;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScratch);
-    assert(vkResult == VK_SUCCESS);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutScratch, &m_SortDescriptorSetScratch);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScratch, &sortStages.m_SortDescriptorSetScratch);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_Indirect;
     descriptor_set_layout_create_info.bindingCount = 4;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutIndirect);
-    assert(vkResult == VK_SUCCESS);
-    // bDescriptorAlloc = m_pResourceViewHeaps->AllocDescriptor(m_SortDescriptorSetLayoutIndirect, &m_SortDescriptorSetIndirect);
-    // assert(bDescriptorAlloc == true);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutIndirect, &sortStages.m_SortDescriptorSetIndirect);
     
     // Create constant range representing our static constant
     VkPushConstantRange constant_range;
