@@ -42,6 +42,8 @@ struct FFX_ParallelSortCB
     uint32_t NumThreadGroupsWithAdditionalBlocks;
     uint32_t NumReduceThreadgroupPerBin;
     uint32_t NumScanValues;
+
+    uint32_t CShiftBit;
 };
 
 #ifndef GPRT_DEVICE

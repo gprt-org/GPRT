@@ -20,6 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(t00-bufferCopy)
-add_subdirectory(t01-bufferResize)
-add_subdirectory(t02-bufferSort)
+add_executable(t02_bufferSort hostCode.cpp)
+target_link_libraries(t02_bufferSort
+  PRIVATE gprt::gprt
+)

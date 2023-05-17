@@ -5024,26 +5024,20 @@ struct Context {
     Stage Scan;
     Stage ScanAdd;
     Stage Scatter;
-    Stage SetupIndirectParameters;
+    Stage ScatterPayload;
 
     // For now, copied over from sample
-    VkDescriptorSetLayout   m_SortDescriptorSetLayoutConstants;
-    VkDescriptorSet         m_SortDescriptorSetConstants;
-    VkDescriptorSetLayout   m_SortDescriptorSetLayoutConstantsIndirect;
-    VkDescriptorSet         m_SortDescriptorSetConstantsIndirect;
-
     VkDescriptorSetLayout   m_SortDescriptorSetLayoutInputOutputs;
     VkDescriptorSetLayout   m_SortDescriptorSetLayoutScan;
     VkDescriptorSetLayout   m_SortDescriptorSetLayoutScratch;
-    VkDescriptorSetLayout   m_SortDescriptorSetLayoutIndirect;
-
+    
     VkDescriptorSet         m_SortDescriptorSetInputOutput[2];
     VkDescriptorSet         m_SortDescriptorSetScanSets[2];
     VkDescriptorSet         m_SortDescriptorSetScratch;
-    VkDescriptorSet         m_SortDescriptorSetIndirect;
 
-    VkDescriptorPool sbopool = VK_NULL_HANDLE;
-    VkDescriptorPool ubopool = VK_NULL_HANDLE;
+    VkPipelineLayout layout;
+    
+    VkDescriptorPool pool = VK_NULL_HANDLE;
   } ;
   SortStages sortStages;
   Module *radixSortModule = nullptr;
@@ -7322,46 +7316,25 @@ struct Context {
     // currently not using cache.
     VkPipelineCache cache = VK_NULL_HANDLE;
 
-    VkDescriptorPoolSize sbopoolSize;
-    sbopoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    sbopoolSize.descriptorCount = 6;
+    VkDescriptorPoolSize poolSize;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 5;
 
-    VkDescriptorPoolCreateInfo sbodescriptorPoolInfo{};
-    sbodescriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    sbodescriptorPoolInfo.poolSizeCount = 1;
-    sbodescriptorPoolInfo.pPoolSizes = &sbopoolSize;
-    sbodescriptorPoolInfo.maxSets = 6;   // just one descriptor set for now.
-    sbodescriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &sbodescriptorPoolInfo, nullptr, &sortStages.sbopool));
-
-    VkDescriptorPoolSize ubopoolSize;
-    ubopoolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubopoolSize.descriptorCount = 2;
-
-    VkDescriptorPoolCreateInfo ubodescriptorPoolInfo{};
-    ubodescriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ubodescriptorPoolInfo.poolSizeCount = 1;
-    ubodescriptorPoolInfo.pPoolSizes = &ubopoolSize;
-    ubodescriptorPoolInfo.maxSets = 2;   // just one descriptor set for now.
-    ubodescriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &ubodescriptorPoolInfo, nullptr, &sortStages.ubopool));
+    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolInfo.poolSizeCount = 1;
+    descriptorPoolInfo.pPoolSizes = &poolSize;
+    descriptorPoolInfo.maxSets = 5; 
+    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
 
     sortStages.Count.entryPoint = "Count";
     sortStages.CountReduce.entryPoint = "CountReduce";
     sortStages.Scan.entryPoint = "Scan";
     sortStages.ScanAdd.entryPoint = "ScanAdd";
     sortStages.Scatter.entryPoint = "Scatter";
-    sortStages.SetupIndirectParameters.entryPoint = "SetupIndirectParameters";
 
     // Create binding for Radix sort passes
-    VkDescriptorSetLayoutBinding layout_bindings_set_0[] = {
-        { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr }   // Constant buffer table
-    };
-
-    VkDescriptorSetLayoutBinding layout_bindings_set_1[] = {
-        { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr }   // Constant buffer to setup indirect params (indirect)
-    };
-
     VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // SrcBuffer (sort)
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // DstBuffer (sort)
@@ -7380,13 +7353,6 @@ struct Context {
         { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // Scratch (reduced)
     };
 
-    VkDescriptorSetLayoutBinding layout_bindings_set_Indirect[] = {
-        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // NumKeys (indirect)
-        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // CBufferUAV (indirect)
-        { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // CountScatterArgs (indirect)
-        { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr }   // ReduceScanArgs (indirect)
-    };
-
     auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
       VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
       descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -7396,74 +7362,51 @@ struct Context {
       descriptorSetAllocateInfo.pNext = nullptr;
       VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet));
     };
+
+    VkResult vkResult;
     
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     descriptor_set_layout_create_info.pNext = nullptr;
     descriptor_set_layout_create_info.flags = 0;
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_0;
-    descriptor_set_layout_create_info.bindingCount = 1;
-    VkResult vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutConstants);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.ubopool, sortStages.m_SortDescriptorSetLayoutConstants, &sortStages.m_SortDescriptorSetConstants);
-
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_1;
-    descriptor_set_layout_create_info.bindingCount = 1;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutConstantsIndirect);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.ubopool, sortStages.m_SortDescriptorSetLayoutConstantsIndirect, &sortStages.m_SortDescriptorSetConstantsIndirect);
-
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
     descriptor_set_layout_create_info.bindingCount = 4;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutInputOutputs);
     VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[0]);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[1]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[1]);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
     descriptor_set_layout_create_info.bindingCount = 3;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScan);
     VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[0]);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[1]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[1]);
 
     descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
     descriptor_set_layout_create_info.bindingCount = 2;
     vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScratch);
     VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutScratch, &sortStages.m_SortDescriptorSetScratch);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch, &sortStages.m_SortDescriptorSetScratch);
 
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Indirect;
-    descriptor_set_layout_create_info.bindingCount = 4;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutIndirect);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.sbopool, sortStages.m_SortDescriptorSetLayoutIndirect, &sortStages.m_SortDescriptorSetIndirect);
-    
     // Create constant range representing our static constant
     VkPushConstantRange constant_range;
     constant_range.stageFlags = VK_SHADER_STAGE_ALL;
     constant_range.offset = 0;
-    constant_range.size = 4;
+    constant_range.size = sizeof(FFX_ParallelSortCB);
 
     // Create the pipeline layout (Root signature)
     VkPipelineLayoutCreateInfo layout_create_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     layout_create_info.pNext = nullptr;
     layout_create_info.flags = 0;
-    layout_create_info.setLayoutCount = 6;
-    VkDescriptorSetLayout layouts[] = { sortStages.m_SortDescriptorSetLayoutConstants, sortStages.m_SortDescriptorSetLayoutConstantsIndirect, sortStages.m_SortDescriptorSetLayoutInputOutputs, 
-                                        sortStages.m_SortDescriptorSetLayoutScan, sortStages.m_SortDescriptorSetLayoutScratch, sortStages.m_SortDescriptorSetLayoutIndirect };
+    layout_create_info.setLayoutCount = 3;
+    VkDescriptorSetLayout layouts[] = { sortStages.m_SortDescriptorSetLayoutInputOutputs, sortStages.m_SortDescriptorSetLayoutScan, 
+                                        sortStages.m_SortDescriptorSetLayoutScratch };
     layout_create_info.pSetLayouts = layouts;
     layout_create_info.pushConstantRangeCount = 1;
     layout_create_info.pPushConstantRanges = &constant_range;
 
-    VkResult bCreatePipelineLayout = vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.Count.layout);
+    VkResult bCreatePipelineLayout = vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
     assert(bCreatePipelineLayout == VK_SUCCESS);
-
-    // All these other stages share the same root signature
-    sortStages.CountReduce.layout = sortStages.Count.layout;
-    sortStages.Scan.layout = sortStages.Count.layout;
-    sortStages.ScanAdd.layout = sortStages.Count.layout;
-    sortStages.Scatter.layout = sortStages.Count.layout;
-    sortStages.SetupIndirectParameters.layout = sortStages.Count.layout;
 
     {
       VkResult err = VK_SUCCESS;
@@ -7485,7 +7428,7 @@ struct Context {
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.Count.layout;
+      computePipelineCreateInfo.layout = sortStages.layout;
       computePipelineCreateInfo.flags = 0;
       computePipelineCreateInfo.stage = shaderStage;
 
@@ -7517,7 +7460,7 @@ struct Context {
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.CountReduce.layout;
+      computePipelineCreateInfo.layout = sortStages.layout;
       computePipelineCreateInfo.flags = 0;
       computePipelineCreateInfo.stage = shaderStage;
 
@@ -7549,7 +7492,7 @@ struct Context {
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.Scan.layout;
+      computePipelineCreateInfo.layout = sortStages.layout;
       computePipelineCreateInfo.flags = 0;
       computePipelineCreateInfo.stage = shaderStage;
 
@@ -7581,7 +7524,7 @@ struct Context {
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.ScanAdd.layout;
+      computePipelineCreateInfo.layout = sortStages.layout;
       computePipelineCreateInfo.flags = 0;
       computePipelineCreateInfo.stage = shaderStage;
 
@@ -7613,7 +7556,7 @@ struct Context {
 
       VkComputePipelineCreateInfo computePipelineCreateInfo = {};
       computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.Scatter.layout;
+      computePipelineCreateInfo.layout = sortStages.layout;
       computePipelineCreateInfo.flags = 0;
       computePipelineCreateInfo.stage = shaderStage;
 
@@ -7625,37 +7568,6 @@ struct Context {
       }
     }
 
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.SetupIndirectParameters.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.SetupIndirectParameters.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.SetupIndirectParameters.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.SetupIndirectParameters.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                    &sortStages.SetupIndirectParameters.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
     // todo, destroy the above stuff
   }
 
@@ -9264,6 +9176,204 @@ void gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, siz
   Context *context = (Context *) _context;
   Buffer *buffer = (Buffer *) _buffer;
   buffer->resize(size * count, preserveContents);
+}
+
+GPRT_API void gprtBufferSort(GPRTContext _context, GPRTBuffer _buffer, GPRTBuffer _scratch) 
+{
+  LOG_API_CALL();
+  
+  Context *context = (Context *) _context;
+  Buffer *buffer = (Buffer *) _buffer;
+  Buffer *scratch = (Buffer *) _scratch;
+
+  uint32_t numKeys = buffer->getSize() / sizeof(uint32_t);
+  uint32_t maxNumThreadgroups = 800;
+  FFX_ParallelSortCB  constantBufferData = { 0 };
+
+  // Allocate the scratch buffers needed for radix sort
+  uint32_t scratchBufferSize;
+  uint32_t reducedScratchBufferSize;
+  FFX_ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
+
+  std::cout<<"Scratch buffer size " << scratchBufferSize << std::endl;
+  // todo, need to know how much source and destination scan will take...
+  std::cout<<"Reduced scratch buffer size " << reducedScratchBufferSize << std::endl;
+
+  scratch->resize(buffer->size + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
+
+  uint32_t NumThreadgroupsToRun;
+  uint32_t NumReducedThreadgroupsToRun;
+  FFX_ParallelSort_SetConstantAndDispatchData(numKeys, maxNumThreadgroups, constantBufferData, NumThreadgroupsToRun, NumReducedThreadgroupsToRun);
+
+  // Buffers to ping-pong between when writing out sorted values
+  // Keeping track here for transitions
+  VkBuffer* ReadBufferInfo(&buffer->buffer), * WriteBufferInfo(&scratch->buffer);
+  // VkBuffer* ReadPayloadBufferInfo(&m_DstPayloadBuffers[0]), * WritePayloadBufferInfo(&m_DstPayloadBuffers[1]);
+  bool bHasPayload = false; // set to true when ready for key value sorting
+
+  auto BindUAVBuffer = [&](VkBuffer* pBuffer, uint32_t* Offsets, VkDescriptorSet& DescriptorSet, uint32_t Binding/*=0*/, uint32_t Count/*=1*/)
+  {
+      std::vector<VkDescriptorBufferInfo> bufferInfos;
+      for (uint32_t i = 0; i < Count; i++)
+      {
+          VkDescriptorBufferInfo bufferInfo;
+          bufferInfo.buffer = pBuffer[i];
+          bufferInfo.offset = Offsets[i];
+          bufferInfo.range = VK_WHOLE_SIZE;
+          bufferInfos.push_back(bufferInfo);
+      }
+
+      VkWriteDescriptorSet write_set = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+      write_set.pNext = nullptr;
+      write_set.dstSet = DescriptorSet;
+      write_set.dstBinding = Binding;
+      write_set.dstArrayElement = 0;
+      write_set.descriptorCount = Count;
+      write_set.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      write_set.pImageInfo = nullptr;
+      write_set.pBufferInfo = bufferInfos.data();
+      write_set.pTexelBufferView = nullptr;
+
+      vkUpdateDescriptorSets(context->logicalDevice, 1, &write_set, 0, nullptr);
+  };
+
+  // Do binding setups
+  {
+    VkBuffer BufferMaps[4];
+    uint32_t Offsets1[4] = {0,0,0,0};
+
+    // Map inputs/outputs
+    BufferMaps[0] = buffer->buffer;
+    BufferMaps[1] = scratch->buffer;
+    // BufferMaps[2] = m_DstPayloadBuffers[0];
+    // BufferMaps[3] = m_DstPayloadBuffers[1];
+    // BindUAVBuffer(BufferMaps, context->sortStages.m_SortDescriptorSetInputOutput[0], 0, 4);
+    BindUAVBuffer(BufferMaps, Offsets1, context->sortStages.m_SortDescriptorSetInputOutput[0], 0, 2);
+
+    BufferMaps[0] = scratch->buffer;
+    BufferMaps[1] = buffer->buffer;
+    // BufferMaps[2] = m_DstPayloadBuffers[1];
+    // BufferMaps[3] = m_DstPayloadBuffers[0];
+    // BindUAVBuffer(BufferMaps, context->sortStages.m_SortDescriptorSetInputOutput[1], 0, 4);
+    BindUAVBuffer(BufferMaps, Offsets1, context->sortStages.m_SortDescriptorSetInputOutput[1], 0, 2);
+
+    // Map scan sets (reduced, scratch)
+    uint32_t Offsets2[4] = {buffer->size + scratchBufferSize,buffer->size + scratchBufferSize,0,0};
+    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
+    BufferMaps[2] = scratch->buffer;
+    BindUAVBuffer(BufferMaps, Offsets2, context->sortStages.m_SortDescriptorSetScanSets[0], 0, 3);
+
+    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
+    BufferMaps[2] = scratch->buffer;
+    uint32_t Offsets3[4] = {buffer->size,buffer->size, buffer->size + scratchBufferSize,0};
+    BindUAVBuffer(BufferMaps, Offsets3, context->sortStages.m_SortDescriptorSetScanSets[1], 0, 3);
+
+    // Map Scratch areas (fixed)
+    BufferMaps[0] = scratch->buffer;
+    BufferMaps[1] = scratch->buffer;
+    uint32_t Offsets4[4] = {buffer->size,buffer->size+scratchBufferSize,0,0};
+    BindUAVBuffer(BufferMaps, Offsets4, context->sortStages.m_SortDescriptorSetScratch, 0, 2);
+  }
+
+  // Transition barrier
+  auto BufferTransition = [](VkBuffer buffer, VkAccessFlags before, VkAccessFlags after, uint32_t size)
+  {
+      VkBufferMemoryBarrier bufferBarrier = {};
+      bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      bufferBarrier.srcAccessMask = before;
+      bufferBarrier.dstAccessMask = after;
+      bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      bufferBarrier.buffer = buffer;
+      bufferBarrier.size = size;
+
+      return bufferBarrier;
+  };
+
+  VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // Bind the scratch descriptor sets
+  vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1, &context->sortStages.m_SortDescriptorSetScratch, 0, nullptr);
+
+  // Push the data into the constant buffer and bind
+  vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0, sizeof(FFX_ParallelSortCB), &constantBufferData);
+
+
+  // Perform Radix Sort (currently only support 32-bit key/payload sorting
+  uint32_t inputSet = 0;
+  VkBufferMemoryBarrier Barriers[3];
+  for (uint32_t Shift = 0; Shift < 32u; Shift += FFX_PARALLELSORT_SORT_BITS_PER_PASS)
+  {
+    // Update the bit shift
+    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, sizeof(FFX_ParallelSortCB) - 4, 4, &Shift);
+  //     vkCmdPushConstants(commandList, m_SortPipelineLayout, VK_SHADER_STAGE_ALL, 0, 4, &Shift);
+
+    // Bind input/output for this pass
+    vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 0, 1, &context->sortStages.m_SortDescriptorSetInputOutput[inputSet], 0, nullptr);
+
+    // Sort Count
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Count.pipeline);
+      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    }
+
+    // UAV barrier on the sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratch->size);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+          
+    // Sort Reduce
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.CountReduce.pipeline);
+      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+                  
+    }
+    // UAV barrier on the reduced sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratch->size);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+
+    // Sort Scan
+    {
+      // First do scan prefix of reduced values
+      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1, &context->sortStages.m_SortDescriptorSetScanSets[0], 0, nullptr);
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Scan.pipeline);
+      assert(NumReducedThreadgroupsToRun < FFX_PARALLELSORT_ELEMENTS_PER_THREAD * FFX_PARALLELSORT_THREADGROUP_SIZE && "Need to account for bigger reduced histogram scan");
+      vkCmdDispatch(commandList, 1, 1, 1);
+
+      // UAV barrier on the reduced sum table
+      Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratch->size);
+      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+              
+      // Next do scan prefix on the histogram with partial sums that we just did
+      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1, &context->sortStages.m_SortDescriptorSetScanSets[1], 0, nullptr);
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.ScanAdd.pipeline);
+      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+    }
+
+    // UAV barrier on the sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratch->size);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+          
+    // Sort Scatter
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, bHasPayload ? context->sortStages.ScatterPayload.pipeline : context->sortStages.Scatter.pipeline);
+      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    }
+          
+    // Finish doing everything and barrier for the next pass
+    int numBarriers = 0;
+    Barriers[numBarriers++] = BufferTransition(*WriteBufferInfo, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, buffer->size /*sizeof(uint32_t) * NumKeys[2]*/);
+  //     if (bHasPayload)
+  //         Barriers[numBarriers++] = BufferTransition(*WritePayloadBufferInfo, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, sizeof(uint32_t) * NumKeys[2]);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, numBarriers, Barriers, 0, nullptr);
+          
+    // Swap read/write sources
+    std::swap(ReadBufferInfo, WriteBufferInfo);
+    // if (bHasPayload)
+    //     std::swap(ReadPayloadBufferInfo, WritePayloadBufferInfo);
+    inputSet = !inputSet;
+  }
+
+  context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
 }
 
 GPRT_API gprt::Buffer
