@@ -6089,6 +6089,8 @@ struct Context {
       vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
     if (fillInstanceDataStage.module)
       vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
+    
+    destroySortStages();
 
     if (raygenTable) {
       raygenTable->destroy();
@@ -7393,7 +7395,7 @@ struct Context {
     VkPushConstantRange constant_range;
     constant_range.stageFlags = VK_SHADER_STAGE_ALL;
     constant_range.offset = 0;
-    constant_range.size = sizeof(FFX_ParallelSortCB);
+    constant_range.size = sizeof(ParallelSortCB);
 
     // Create the pipeline layout (Root signature)
     VkPipelineLayoutCreateInfo layout_create_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -7602,6 +7604,47 @@ struct Context {
     }
 
     // todo, destroy the above stuff
+  }
+
+  void destroySortStages() {
+    vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
+    sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
+    sortStages.Scatter.pipeline = VK_NULL_HANDLE;
+    sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
+    sortStages.Scan.pipeline = VK_NULL_HANDLE;
+    sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
+    sortStages.Count.pipeline = VK_NULL_HANDLE;
+
+    vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
+    sortStages.ScatterPayload.module = VK_NULL_HANDLE;
+    sortStages.Scatter.module = VK_NULL_HANDLE;
+    sortStages.ScanAdd.module = VK_NULL_HANDLE;
+    sortStages.Scan.module = VK_NULL_HANDLE;
+    sortStages.CountReduce.module = VK_NULL_HANDLE;
+    sortStages.Count.module = VK_NULL_HANDLE;
+
+    vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
+    sortStages.layout = VK_NULL_HANDLE;
+
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
+
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
+
+    vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
   }
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
@@ -9230,12 +9273,12 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
 
   uint32_t numKeys = keys->getSize() / sizeof(uint32_t);
   uint32_t maxNumThreadgroups = 800;
-  FFX_ParallelSortCB  constantBufferData = { 0 };
+  ParallelSortCB  constantBufferData = { 0 };
 
   // Allocate the scratch buffers needed for radix sort
   uint64_t scratchBufferSize;
   uint64_t reducedScratchBufferSize;
-  FFX_ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
+  ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
 
   scratch->resize(keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
   size_t valuesOffset = keys->size;
@@ -9244,7 +9287,7 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
 
   uint32_t NumThreadgroupsToRun;
   uint32_t NumReducedThreadgroupsToRun;
-  FFX_ParallelSort_SetConstantAndDispatchData(numKeys, maxNumThreadgroups, constantBufferData, NumThreadgroupsToRun, NumReducedThreadgroupsToRun);
+  ParallelSort_SetConstantAndDispatchData(numKeys, maxNumThreadgroups, constantBufferData, NumThreadgroupsToRun, NumReducedThreadgroupsToRun);
 
   auto BindUAVBuffer = [&](VkBuffer* pBuffer, VkDeviceSize * Offsets, VkDescriptorSet& DescriptorSet, uint32_t Binding/*=0*/, uint32_t Count/*=1*/)
   {
@@ -9339,15 +9382,15 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
   vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1, &context->sortStages.m_SortDescriptorSetScratch, 0, nullptr);
 
   // Push the data into the constant buffer and bind
-  vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0, sizeof(FFX_ParallelSortCB), &constantBufferData);
+  vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0, sizeof(ParallelSortCB), &constantBufferData);
 
   // Perform Radix Sort (currently only support 32-bit key/payload sorting
   uint32_t inputSet = 0;
   VkBufferMemoryBarrier Barriers[3];
-  for (uint64_t Shift = 0; Shift < 32u; Shift += FFX_PARALLELSORT_SORT_BITS_PER_PASS)
+  for (uint64_t Shift = 0; Shift < 32u; Shift += PARALLELSORT_SORT_BITS_PER_PASS)
   {
     // Update the bit shift
-    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, sizeof(FFX_ParallelSortCB) - 4, 4, &Shift);
+    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, sizeof(ParallelSortCB) - 4, 4, &Shift);
   //     vkCmdPushConstants(commandList, m_SortPipelineLayout, VK_SHADER_STAGE_ALL, 0, 4, &Shift);
 
     // Bind input/output for this pass
@@ -9378,7 +9421,7 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
       // First do scan prefix of reduced values
       vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1, &context->sortStages.m_SortDescriptorSetScanSets[0], 0, nullptr);
       vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Scan.pipeline);
-      assert(NumReducedThreadgroupsToRun < FFX_PARALLELSORT_ELEMENTS_PER_THREAD * FFX_PARALLELSORT_THREADGROUP_SIZE && "Need to account for bigger reduced histogram scan");
+      assert(NumReducedThreadgroupsToRun < PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE && "Need to account for bigger reduced histogram scan");
       vkCmdDispatch(commandList, 1, 1, 1);
 
       // UAV barrier on the reduced sum table
