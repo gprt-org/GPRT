@@ -42,7 +42,20 @@
 [[vk::binding(2, 1)]] RWStructuredBuffer<uint>	ScanScratch		;					// Scratch data for Scan
 				 
 
+groupshared uint32_t gs_FFX_PARALLELSORT_LDSKeys[FFX_PARALLELSORT_THREADGROUP_SIZE];
+groupshared uint32_t gs_FFX_PARALLELSORT_LDSVals[FFX_PARALLELSORT_THREADGROUP_SIZE];
+
 groupshared uint32_t gs_FFX_PARALLELSORT_LDSSums[FFX_PARALLELSORT_THREADGROUP_SIZE];
+groupshared uint32_t gs_FFX_PARALLELSORT_Histogram[FFX_PARALLELSORT_THREADGROUP_SIZE * FFX_PARALLELSORT_SORT_BIN_COUNT];
+groupshared int32_t gs_FFX_PARALLELSORT_LDS[FFX_PARALLELSORT_ELEMENTS_PER_THREAD][FFX_PARALLELSORT_THREADGROUP_SIZE];
+
+// Offset cache to avoid loading the offsets all the time
+groupshared uint32_t gs_FFX_PARALLELSORT_BinOffsetCache[FFX_PARALLELSORT_THREADGROUP_SIZE];
+// Local histogram for offset calculations
+groupshared uint32_t gs_FFX_PARALLELSORT_LocalHistogram[FFX_PARALLELSORT_SORT_BIN_COUNT];
+// Scratch area for algorithm
+groupshared uint32_t gs_FFX_PARALLELSORT_LDSScratch[FFX_PARALLELSORT_THREADGROUP_SIZE];
+
 uint32_t FFX_ParallelSort_ThreadgroupReduce(uint32_t localSum, uint32_t localID)
 {
 	// Do wave local reduce
@@ -95,7 +108,6 @@ uint32_t FFX_ParallelSort_BlockScanPrefix(uint32_t localSum, uint32_t localID)
 }
 
 // FPS Count
-groupshared uint32_t gs_FFX_PARALLELSORT_Histogram[FFX_PARALLELSORT_THREADGROUP_SIZE * FFX_PARALLELSORT_SORT_BIN_COUNT];
 [numthreads(FFX_PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void __compute__Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
@@ -199,7 +211,6 @@ void __compute__CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupI
 }
 
 // FPS Scan
-groupshared int32_t gs_FFX_PARALLELSORT_LDS[FFX_PARALLELSORT_ELEMENTS_PER_THREAD][FFX_PARALLELSORT_THREADGROUP_SIZE];
 [numthreads(FFX_PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void __compute__Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
@@ -341,12 +352,6 @@ void __compute__ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 }
 
 // FPS Scatter
-// Offset cache to avoid loading the offsets all the time
-groupshared uint32_t gs_FFX_PARALLELSORT_BinOffsetCache[FFX_PARALLELSORT_THREADGROUP_SIZE];
-// Local histogram for offset calculations
-groupshared uint32_t gs_FFX_PARALLELSORT_LocalHistogram[FFX_PARALLELSORT_SORT_BIN_COUNT];
-// Scratch area for algorithm
-groupshared uint32_t gs_FFX_PARALLELSORT_LDSScratch[FFX_PARALLELSORT_THREADGROUP_SIZE];
 [numthreads(FFX_PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
@@ -431,9 +436,9 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 				uint32_t keyOffset = (localSum >> (bitKey * 8)) & 0xff;
 
 				// Re-arrange the keys (store, sync, load)
-				gs_FFX_PARALLELSORT_LDSSums[keyOffset] = localKey;
+				gs_FFX_PARALLELSORT_LDSKeys[keyOffset] = localKey;
 				GroupMemoryBarrierWithGroupSync();
-				localKey = gs_FFX_PARALLELSORT_LDSSums[localID];
+				localKey = gs_FFX_PARALLELSORT_LDSKeys[localID];
 
 				// Wait for everyone to catch up
 				GroupMemoryBarrierWithGroupSync();
@@ -485,6 +490,7 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 	}
 }
 
+[numthreads(FFX_PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	uint32_t ShiftBit = rootConstData.CShiftBit;
@@ -540,7 +546,7 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 				gs_FFX_PARALLELSORT_LocalHistogram[localID] = 0;
 
 			uint32_t localKey = (DataIndex < rootConstData.NumKeys ? srcKeys[i] : 0xffffffff);
-			uint32_t localValue = (DataIndex < rootConstData.NumKeys ? srcValues[i] : 0);
+			uint32_t localValue = (DataIndex < rootConstData.NumKeys ? srcValues[i] : 0xffffffff);
 
 			// Sort the keys locally in LDS
 			for (uint32_t bitShift = 0; bitShift < FFX_PARALLELSORT_SORT_BITS_PER_PASS; bitShift += 2)
@@ -575,18 +581,12 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 				// Calculate target offset
 				uint32_t keyOffset = (localSum >> (bitKey * 8)) & 0xff;
 
-				// Re-arrange the keys (store, sync, load)
-				gs_FFX_PARALLELSORT_LDSSums[keyOffset] = localKey;
+				// Re-arrange the keys and vals (store, sync, load)
+				gs_FFX_PARALLELSORT_LDSKeys[keyOffset] = localKey;
+				gs_FFX_PARALLELSORT_LDSVals[keyOffset] = localValue;
 				GroupMemoryBarrierWithGroupSync();
-				localKey = gs_FFX_PARALLELSORT_LDSSums[localID];
-
-				// Wait for everyone to catch up
-				GroupMemoryBarrierWithGroupSync();
-
-				// Re-arrange the values if we have them (store, sync, load)
-				gs_FFX_PARALLELSORT_LDSSums[keyOffset] = localValue;
-				GroupMemoryBarrierWithGroupSync();
-				localValue = gs_FFX_PARALLELSORT_LDSSums[localID];
+				localKey = gs_FFX_PARALLELSORT_LDSKeys[localID];
+				localValue = gs_FFX_PARALLELSORT_LDSVals[localID];
 
 				// Wait for everyone to catch up
 				GroupMemoryBarrierWithGroupSync();

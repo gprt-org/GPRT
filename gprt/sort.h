@@ -37,7 +37,7 @@
 struct FFX_ParallelSortCB
 {
     uint32_t NumKeys;
-    int32_t  NumBlocksPerThreadGroup;
+    uint32_t  NumBlocksPerThreadGroup;
     uint32_t NumThreadGroups;
     uint32_t NumThreadGroupsWithAdditionalBlocks;
     uint32_t NumReduceThreadgroupPerBin;
@@ -47,11 +47,11 @@ struct FFX_ParallelSortCB
 };
 
 #ifndef GPRT_DEVICE
-	void FFX_ParallelSort_CalculateScratchResourceSize(uint32_t MaxNumKeys, uint32_t& ScratchBufferSize, uint32_t& ReduceScratchBufferSize)
+	void FFX_ParallelSort_CalculateScratchResourceSize(uint32_t MaxNumKeys, uint64_t& ScratchBufferSize, uint64_t& ReduceScratchBufferSize)
 	{
-		uint32_t BlockSize = FFX_PARALLELSORT_ELEMENTS_PER_THREAD * FFX_PARALLELSORT_THREADGROUP_SIZE;
-		uint32_t NumBlocks = (MaxNumKeys + BlockSize - 1) / BlockSize;
-		uint32_t NumReducedBlocks = (NumBlocks + BlockSize - 1) / BlockSize;
+		uint64_t BlockSize = FFX_PARALLELSORT_ELEMENTS_PER_THREAD * FFX_PARALLELSORT_THREADGROUP_SIZE;
+		uint64_t NumBlocks = (MaxNumKeys + BlockSize - 1) / BlockSize;
+		uint64_t NumReducedBlocks = (NumBlocks + BlockSize - 1) / BlockSize;
 
 		ScratchBufferSize = FFX_PARALLELSORT_SORT_BIN_COUNT * NumBlocks * sizeof(uint32_t);
 		ReduceScratchBufferSize = FFX_PARALLELSORT_SORT_BIN_COUNT * NumReducedBlocks * sizeof(uint32_t);

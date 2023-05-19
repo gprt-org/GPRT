@@ -1337,8 +1337,6 @@ gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, si
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
  *
- * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
- * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
  * @param buffer A buffer of 32-bit unsigned integers
@@ -1351,6 +1349,9 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
 /**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
+ * 
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
  * @param buffer A buffer of 32-bit unsigned integers
@@ -1362,6 +1363,40 @@ template <typename T1, typename T2>
 void
 gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
   gprtBufferSort(context, (GPRTBuffer) buffer, (GPRTBuffer) scratch);
+}
+
+/**
+ * @brief Sorts the input key-value pairs by key using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ *
+ * @param context The GPRT context
+ * @param keys A buffer of 32-bit unsigned integer keys
+ * @param values A buffer of 32-bit values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Sorts the input buffer using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ * 
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T3 The template type of the scratch buffer (uint8_t is assumed)
+ *
+ * @param context The GPRT context
+ * @param keys A buffer of 32-bit unsigned integer keys
+ * @param values A buffer of 32-bit values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2, typename T3>
+void
+gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values, GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferSortPayload(context, (GPRTBuffer) keys, (GPRTBuffer) values, (GPRTBuffer) scratch);
 }
 
 GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
