@@ -535,10 +535,11 @@ struct Buffer {
 
   void resize(size_t bytes, bool preserveContents) {
     // If the size is already okay, do nothing
-    if (size == bytes) return;
+    if (size == bytes)
+      return;
 
     if (hostVisible) {
-      // if we are host visible, we need to create a new buffer before releasing the 
+      // if we are host visible, we need to create a new buffer before releasing the
       // previous one to preserve values...
 
       if (preserveContents) {
@@ -556,7 +557,7 @@ struct Buffer {
         VmaAllocation newAllocation;
         VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
 
-        // Copy contents from old to new 
+        // Copy contents from old to new
         VkResult err;
         VkCommandBufferBeginInfo cmdBufInfo{};
         cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -578,12 +579,12 @@ struct Buffer {
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;     
-        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
         submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;   
+        submitInfo.pSignalSemaphores = nullptr;
 
         err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
         if (err)
@@ -592,8 +593,8 @@ struct Buffer {
         err = vkQueueWaitIdle(queue);
         if (err)
           LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
-        
-        // Free old buffer 
+
+        // Free old buffer
         vmaUnmapMemory(allocator, allocation);
         vmaDestroyBuffer(allocator, buffer, allocation);
 
@@ -606,8 +607,8 @@ struct Buffer {
         vmaMapMemory(allocator, allocation, &mapped);
       } else {
         // Not preserving contents, we can delete old host buffer before making new one
-        
-        // Free old buffer 
+
+        // Free old buffer
         vmaUnmapMemory(allocator, allocation);
         vmaDestroyBuffer(allocator, buffer, allocation);
 
@@ -628,10 +629,10 @@ struct Buffer {
       }
 
     } else {
-      // if we are device visible, we can use the staging buffer to temporarily hold previous values, and free 
-      // the old buffer before creating a new buffer. 
+      // if we are device visible, we can use the staging buffer to temporarily hold previous values, and free
+      // the old buffer before creating a new buffer.
       vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-      
+
       // Copy existing contents into staging buffer
       if (preserveContents) {
         VkResult err;
@@ -655,8 +656,8 @@ struct Buffer {
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;     
-        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
         submitInfo.signalSemaphoreCount = 0;
@@ -686,9 +687,7 @@ struct Buffer {
         VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
       }
 
-
-      if (preserveContents)
-      {
+      if (preserveContents) {
         // Copy contents from old staging buffer to new buffer
         VkResult err;
         VkCommandBufferBeginInfo cmdBufInfo{};
@@ -711,12 +710,12 @@ struct Buffer {
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;     
-        submitInfo.pWaitDstStageMask = nullptr;   
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
         submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;   
+        submitInfo.pSignalSemaphores = nullptr;
 
         err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
         if (err)
@@ -745,16 +744,16 @@ struct Buffer {
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+                                        &stagingBuffer.allocation, nullptr));
       }
 
       // if buffer was previously mapped, restore mapped state
       if (mapped) {
-        mapped = false;
+        mapped = nullptr;
         map();
       }
     }
-
   }
 
   size_t getSize() { return (size_t) size; }
@@ -9247,7 +9246,9 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
 }
 
-void gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t count, bool preserveContents, int deviceID) {
+void
+gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t count, bool preserveContents,
+                 int deviceID) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Buffer *buffer = (Buffer *) _buffer;
