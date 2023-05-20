@@ -23,6 +23,8 @@
 embed_devicecode(
   OUTPUT_TARGET
     s01_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
