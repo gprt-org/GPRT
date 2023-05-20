@@ -368,13 +368,11 @@ struct Buffer {
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
+    if (mapped) return VK_SUCCESS;
+
     if (hostVisible) {
-      if (mapped)
-        return VK_SUCCESS;
-      else {
-        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-        return vmaMapMemory(allocator, allocation, &mapped);
-      }
+      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(allocator, allocation, &mapped);
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
@@ -398,12 +396,12 @@ struct Buffer {
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.pWaitSemaphores = nullptr;
+      submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
       submitInfo.pCommandBuffers = &commandBuffer;
       submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      submitInfo.pSignalSemaphores = nullptr;
 
       err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
@@ -413,17 +411,14 @@ struct Buffer {
       if (err)
         LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      // todo, transfer device data to host
-      if (mapped)
-        return VK_SUCCESS;
-      else {
-        vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-        return vmaMapMemory(allocator, stagingBuffer.allocation, &mapped);
-      }
+      vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(allocator, stagingBuffer.allocation, &mapped);
     }
   }
 
   void unmap() {
+    if (!mapped) return;
+    
     if (hostVisible) {
       if (mapped) {
         vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
@@ -453,12 +448,12 @@ struct Buffer {
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.pWaitSemaphores = nullptr;
+      submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
       submitInfo.pCommandBuffers = &commandBuffer;
       submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      submitInfo.pSignalSemaphores = nullptr;
 
       err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
@@ -468,12 +463,9 @@ struct Buffer {
       if (err)
         LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      // todo, transfer device data to device
-      if (mapped) {
-        vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-        vmaUnmapMemory(allocator, stagingBuffer.allocation);
-        mapped = nullptr;
-      }
+      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      vmaUnmapMemory(allocator, stagingBuffer.allocation);
+      mapped = nullptr;
     }
   }
 
