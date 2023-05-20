@@ -1140,36 +1140,36 @@ gprtTextureDestroy(GPRTTextureOf<T> texture) {
 
 /*! Creates a buffer that uses memory located on the host; that memory is
 accessible to all devices, but is slower to access on device.  */
-GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count,
+GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
                                          const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTBufferOf<T>
-gprtHostBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
+gprtHostBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtHostBufferCreate(context, sizeof(T), count, init);
 }
 
 /*! Creates a buffer that uses memory located on the device; that memory is
 accessible only to the device, and requires mapping and unmapping to access
 on the host. */
-GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count,
+GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
                                            const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTBufferOf<T>
-gprtDeviceBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
+gprtDeviceBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init);
 }
 
 /*! Creates a buffer that uses memory located on the device; that memory is
 accessible to all devices, but is slower to access on the host, and is typically
 limited in size depending on resizable BAR availability. */
-GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count,
+GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
                                            const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTBufferOf<T>
-gprtSharedBufferCreate(GPRTContext context, size_t count, const T *init GPRT_IF_CPP(= nullptr)) {
+gprtSharedBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
   return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init);
 }
 
@@ -1331,6 +1331,72 @@ gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, si
                size_t count, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
   gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, sizeof(T), count, srcDeviceID,
                  dstDeviceID);
+}
+
+/**
+ * @brief Sorts the input buffer using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ *
+ *
+ * @param context The GPRT context
+ * @param buffer A buffer of 32-bit unsigned integers
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Sorts the input buffer using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ * 
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
+ *
+ * @param context The GPRT context
+ * @param buffer A buffer of 32-bit unsigned integers
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2>
+void
+gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferSort(context, (GPRTBuffer) buffer, (GPRTBuffer) scratch);
+}
+
+/**
+ * @brief Sorts the input key-value pairs by key using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ *
+ * @param context The GPRT context
+ * @param keys A buffer of 32-bit unsigned integer keys
+ * @param values A buffer of 32-bit values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Sorts the input buffer using a GPU-parallel radix sorter.
+ * Radix sort requires a temporary "scratch" space
+ * 
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T3 The template type of the scratch buffer (uint8_t is assumed)
+ *
+ * @param context The GPRT context
+ * @param keys A buffer of 32-bit unsigned integer keys
+ * @param values A buffer of 32-bit values
+ * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2, typename T3>
+void
+gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values, GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferSortPayload(context, (GPRTBuffer) keys, (GPRTBuffer) values, (GPRTBuffer) scratch);
 }
 
 GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));

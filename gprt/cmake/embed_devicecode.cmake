@@ -41,7 +41,7 @@ function(embed_devicecode)
   # processes arguments given to a function, and defines a set of variables
   #   which hold the values of the respective options
   set(oneArgs OUTPUT_TARGET)
-  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES EMBEDDED_SYMBOL_NAMES ENTRY_POINTS)
+  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES HEADERS EMBEDDED_SYMBOL_NAMES ENTRY_POINTS)
   cmake_parse_arguments(EMBED_DEVICECODE "" "${oneArgs}" "${multiArgs}" ${ARGN})
 
   unset(EMBED_DEVICECODE_OUTPUTS)
@@ -63,7 +63,6 @@ function(embed_devicecode)
 
     list(GET ENTRY_POINT_TYPES ${idx} ENTRY_POINT_TYPE)
 
-    
     # Compile hlsl to SPIRV
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
@@ -87,7 +86,7 @@ function(embed_devicecode)
       -fcgl
       ${EMBED_DEVICECODE_SOURCES}
       -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv
-      DEPENDS ${EMBED_DEVICECODE_SOURCES} ${GPRT_INCLUDE_DIR}/gprt_device.h ${GPRT_INCLUDE_DIR}/gprt.h
+      DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt_device.h ${GPRT_INCLUDE_DIR}/gprt.h
     )
 
     list(APPEND EMBED_DEVICECODE_OUTPUTS ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv)

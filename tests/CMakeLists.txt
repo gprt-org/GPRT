@@ -22,3 +22,4 @@
 
 add_subdirectory(t00-bufferCopy)
 add_subdirectory(t01-bufferResize)
+add_subdirectory(t02-bufferSort)
