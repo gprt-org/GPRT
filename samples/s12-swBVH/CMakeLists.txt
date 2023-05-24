@@ -29,9 +29,19 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
+embed_devicecode(
+  OUTPUT_TARGET
+    lbvhDeviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/lbvh.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/lbvh.hlsl
+)
+
 add_executable(s12_swBVH hostCode.cpp)
 target_link_libraries(s12_swBVH
   PRIVATE
     s12_deviceCode
+    lbvhDeviceCode
     gprt::gprt
 )
