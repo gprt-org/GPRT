@@ -22,25 +22,24 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-struct LBVHNode
-{
-  alignas(16) float3 aabbMin;
-  alignas(16) float3 aabbMax;
-  alignas(8) int left;
-  alignas(8) int right;
-  alignas(8) int parent;
-  alignas(8) int leaf;
-};
-
 struct LBVHData {
-  alignas(16) float3 aabbMin;
-  alignas(16) float3 aabbMax;
+  // Note, user must currently set global aabb before construction. 
+  alignas(16) gprt::Buffer aabbs;
+  alignas(8) uint32_t numPrims;
+
+  alignas(16) gprt::Buffer positions;
+  alignas(16) gprt::Buffer edges;
+  alignas(16) gprt::Buffer triangles;
+
   alignas(16) gprt::Buffer centroids;
   alignas(16) gprt::Buffer mortonCodes;
-  alignas(16) gprt::Buffer inner;
-  alignas(16) gprt::Buffer leaves;
-  alignas(16) gprt::Buffer primRanges;
-  alignas(8) uint32_t numCentroids;
+  alignas(16) gprt::Buffer ids;
+  
+  // Nodes is numPrims-1 + numPrims in size. 
+  // The "numPrims-1" section contains inner nodes
+  // The "numPrims" section contains leaves
+
+  // Notes is numPrims-1 + numPrims long. Each node is an int4. 
+  // "X" is left, "Y" is right, "Z" is parent, and "W" is leaf or -1 if internal node.
+  alignas(16) gprt::Buffer nodes;
 };
