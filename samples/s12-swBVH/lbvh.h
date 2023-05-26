@@ -31,7 +31,6 @@ struct LBVHData {
   alignas(16) gprt::Buffer edges;
   alignas(16) gprt::Buffer triangles;
 
-  alignas(16) gprt::Buffer centroids;
   alignas(16) gprt::Buffer mortonCodes;
   alignas(16) gprt::Buffer ids;
   

@@ -135,6 +135,23 @@ void getTriangleBounds(gprt::Buffer triangles, gprt::Buffer positions, uint prim
   aabbMax = float3(max(p1.x,max(p2.x,p3.x)),max(p1.y,max(p2.y,p3.y)),max(p1.z,max(p2.z,p3.z)));
 }
 
+float3 getEdgeCentroid(gprt::Buffer edges, gprt::Buffer positions, uint primID) 
+{
+  uint2 edge = gprt::load<uint2>(edges, primID);
+  float3 p1 = gprt::load<float3>(positions, edge.x);
+  float3 p2 = gprt::load<float3>(positions, edge.y);
+  return (p1 + p2) / 2.f;
+}
+
+float3 getTriangleCentroid(gprt::Buffer triangles, gprt::Buffer positions, uint primID) 
+{
+  uint3 tri = gprt::load<uint3>(triangles, primID);
+  float3 p1 = gprt::load<float3>(positions, tri.x);
+  float3 p2 = gprt::load<float3>(positions, tri.y);
+  float3 p3 = gprt::load<float3>(positions, tri.z);
+  return (p1 + p2 + p3) / 3.f;
+}
+
 void storeNode(gprt::Buffer buffer, int address, int4 node) {
   gprt::store<int4>(buffer, address, node);
 }
@@ -177,6 +194,7 @@ int loadNodeLeaf(gprt::Buffer buffer, int address) {
 
 GPRT_COMPUTE_PROGRAM(ComputePointBounds, (LBVHData, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
   getPointBounds(record.positions, primID, aabbMin, aabbMax);
   gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
@@ -187,9 +205,36 @@ GPRT_COMPUTE_PROGRAM(ComputePointBounds, (LBVHData, record), (1,1,1)) {
   gprt::atomicMax32f(record.aabbs, 5, aabbMax.z);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeMortonCodes, (LBVHData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (LBVHData, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
-  float3 pt = gprt::load<float3>(record.centroids, primID);
+  if (primID >= record.numPrims) return;
+  float3 aabbMin, aabbMax;
+  getEdgeBounds(record.edges, record.positions, primID, aabbMin, aabbMax);
+  gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
+  gprt::atomicMin32f(record.aabbs, 1, aabbMin.y);
+  gprt::atomicMin32f(record.aabbs, 2, aabbMin.z);
+  gprt::atomicMax32f(record.aabbs, 3, aabbMax.x);
+  gprt::atomicMax32f(record.aabbs, 4, aabbMax.y);
+  gprt::atomicMax32f(record.aabbs, 5, aabbMax.z);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (LBVHData, record), (1,1,1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 aabbMin, aabbMax;
+  getEdgeBounds(record.triangles, record.positions, primID, aabbMin, aabbMax);
+  gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
+  gprt::atomicMin32f(record.aabbs, 1, aabbMin.y);
+  gprt::atomicMin32f(record.aabbs, 2, aabbMin.z);
+  gprt::atomicMax32f(record.aabbs, 3, aabbMax.x);
+  gprt::atomicMax32f(record.aabbs, 4, aabbMax.y);
+  gprt::atomicMax32f(record.aabbs, 5, aabbMax.z);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputePointMortonCodes, (LBVHData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 pt = gprt::load<float3>(record.positions, primID);
   float3 aabbMin = gprt::load<float3>(record.aabbs, 0);
   float3 aabbMax = gprt::load<float3>(record.aabbs, 1);
 
@@ -202,9 +247,41 @@ GPRT_COMPUTE_PROGRAM(ComputeMortonCodes, (LBVHData, record), (1, 1, 1)) {
   gprt::store<uint>(record.mortonCodes, primID, code);
 }
 
-// Launch for numPrims-1 + numPrims threads
+GPRT_COMPUTE_PROGRAM(ComputeEdgeMortonCodes, (LBVHData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 pt = getEdgeCentroid(record.edges, record.positions, primID);
+  float3 aabbMin = gprt::load<float3>(record.aabbs, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabbs, 1);
+
+  pt = (pt - aabbMin) / (aabbMax - aabbMin);
+
+  // Quantize to 10 bit
+  pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+  
+  uint code = morton_encode3D(pt.x, pt.y, pt.z);
+  gprt::store<uint>(record.mortonCodes, primID, code);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 pt = getTriangleCentroid(record.triangles, record.positions, primID);
+  float3 aabbMin = gprt::load<float3>(record.aabbs, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabbs, 1);
+
+  pt = (pt - aabbMin) / (aabbMax - aabbMin);
+
+  // Quantize to 10 bit
+  pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+  
+  uint code = morton_encode3D(pt.x, pt.y, pt.z);
+  gprt::store<uint>(record.mortonCodes, primID, code);
+}
+
 GPRT_COMPUTE_PROGRAM(MakeNodes, (LBVHData, record), (1, 1, 1)) {
   int nodeID = DispatchThreadID.x;
+  if (nodeID >= (record.numPrims-1) + numPrims) return;
   storeNode(record.nodes, nodeID, int4(-1,-1,-1,-1));
 }
 
