@@ -23,22 +23,24 @@
 #include "gprt.h"
 
 struct LBVHData {
-  // Note, user must currently set global aabb before construction. 
-  alignas(16) gprt::Buffer aabbs;
+  // input
   alignas(8) uint32_t numPrims;
-
   alignas(16) gprt::Buffer positions;
   alignas(16) gprt::Buffer edges;
   alignas(16) gprt::Buffer triangles;
 
+  // Morton codes of quantized primitive centroids.
   alignas(16) gprt::Buffer mortonCodes;
+  // Primitive IDs that correspond to sorted morton codes. 
   alignas(16) gprt::Buffer ids;
   
-  // Nodes is numPrims-1 + numPrims in size. 
+  // numPrims-1 + numPrims long. 
   // The "numPrims-1" section contains inner nodes
   // The "numPrims" section contains leaves
-
-  // Notes is numPrims-1 + numPrims long. Each node is an int4. 
+  // Each node is an int4. 
   // "X" is left, "Y" is right, "Z" is parent, and "W" is leaf or -1 if internal node.
   alignas(16) gprt::Buffer nodes;
+
+  // numPrims-1 + numPrims long. Each aabb is a pair of float3.
+  alignas(16) gprt::Buffer aabbs;
 };

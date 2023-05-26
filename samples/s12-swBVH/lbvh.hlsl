@@ -281,7 +281,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) 
 
 GPRT_COMPUTE_PROGRAM(MakeNodes, (LBVHData, record), (1, 1, 1)) {
   int nodeID = DispatchThreadID.x;
-  if (nodeID >= (record.numPrims-1) + numPrims) return;
+  if (nodeID >= (record.numPrims-1) + record.numPrims) return;
   storeNode(record.nodes, nodeID, int4(-1,-1,-1,-1));
 }
 

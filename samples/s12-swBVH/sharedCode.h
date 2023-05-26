@@ -23,37 +23,11 @@
 #include "gprt.h"
 
 /* variables available to all programs */
-
-struct SphereBoundsData {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
-};
-
-struct SphereBoundsData2 {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  alignas(16) gprt::Buffer aabbs;
-};
-
-/* variables for the triangle mesh geometry */
-struct SphereGeomData {
-  /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer radius;   // float *
-};
-
 struct RayGenData {
   alignas(16) gprt::Buffer frameBuffer;
 
-  alignas(16) gprt::Accel world;
+  alignas(8) float iTime;
+  alignas(8) int iFrame;
 
   struct {
     alignas(16) float3 pos;
