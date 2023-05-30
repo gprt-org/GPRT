@@ -243,12 +243,51 @@ gprtGeomDestroy(GPRTGeomOf<T> geometry) {
   gprtGeomDestroy((GPRTGeom) geometry);
 }
 
+/**
+ * @brief Returns a pointer to the parameters section of the record for this geometry, made 
+ * available on the device through the second parameter in GPRT_CLOSEST_HIT_PROGRAM, 
+ * GPRT_ANY_HIT_PROGRAM, GPRT_INTERSECTION_PROGRAM, GPRT_VERTEX_PROGRAM, and/or GPRT_PIXEL_PROGRAM.
+ * Note, call @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param geometry The geometry who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
 GPRT_API void *gprtGeomGetParameters(GPRTGeom geometry, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtGeomGetParameters(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
+/**
+ * @brief Returns a pointer to the parameters section of the record for this geometry, made 
+ * available on the device through the second parameter in GPRT_CLOSEST_HIT_PROGRAM, 
+ * GPRT_ANY_HIT_PROGRAM, GPRT_INTERSECTION_PROGRAM, GPRT_VERTEX_PROGRAM, and/or GPRT_PIXEL_PROGRAM.
+ * Note, call  @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record
+ * @param geometry The geometry who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
+template <typename T> T * gprtGeomGetParameters(GPRTGeomOf<T> geometry, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtGeomGetParameters((GPRTGeom) geometry, deviceID);
+}
+
+/**
+ * @brief Copies the contents of the given parameters into the geometry record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param geometry The geometry who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtGeomTypeCreate.
+*/
+GPRT_API void gprtGeomSetParameters(GPRTGeom geometry, void* parameters, int deviceID GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Copies the contents of the given parameters into the geometry record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param geometry The geometry who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtGeomTypeCreate.
+*/
+template <typename T> void gprtGeomSetParameters(GPRTGeomOf<T> geometry, T* parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtGeomSetParameters((GPRTGeom) geometry, (void*)parameters, deviceID);
 }
 
 // ==================================================================
@@ -564,12 +603,33 @@ GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(=
 
 GPRT_API void gprtContextDestroy(GPRTContext context);
 
+/**
+ * @brief Creates a "compute" handle which describes a compute device program to call and the parameters to 
+ * pass into that compute device program. Compute programs handle data generation and transformation, but 
+ * can also trace rays so long as inline ray tracing is used.
+ * 
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the compute program to run, ie the first parameter following 
+ * GPRT_COMPUTE_PROGRAM in the device code.
+ * @param recordSize The size of the parameters structure that will be passed into that compute program
+*/
 GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint,
                                        size_t recordSize);
 
-template <typename T>
-GPRTComputeOf<T>
-gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+/**
+ * @brief Creates a "compute" handle which describes a compute device program to call and the parameters to 
+ * pass into that compute device program. Compute programs handle data generation and transformation, but 
+ * can also trace rays so long as inline ray tracing is used.
+ * 
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the compute program to run, ie the first parameter following 
+ * GPRT_COMPUTE_PROGRAM in the device code.
+*/
+template <typename T> 
+GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTComputeOf<T>) gprtComputeCreate(context, module, entrypoint, sizeof(T));
 }
 
@@ -581,18 +641,76 @@ gprtComputeDestroy(GPRTComputeOf<T> compute) {
   gprtComputeDestroy((GPRTCompute) compute);
 }
 
+/**
+ * @brief Returns a pointer to the parameters section of the record for this compute program, made 
+ * available on the device through the second parameter in GPRT_COMPUTE_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param compute The compute program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
 GPRT_API void *gprtComputeGetParameters(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtComputeGetParameters(GPRTComputeOf<T> compute) {
+/**
+ * @brief Returns a pointer to the parameters section of the record for this compute program, made 
+ * available on the device through the second parameter in GPRT_COMPUTE_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record
+ * @param compute The compute program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
+template <typename T> T * gprtComputeGetParameters(GPRTComputeOf<T> compute) {
   return (T *) gprtComputeGetParameters((GPRTCompute) compute);
 }
 
+/**
+ * @brief Copies the contents of the given parameters into the compute record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param compute The compute program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtComputeCreate.
+*/
+GPRT_API void gprtComputeSetParameters(GPRTCompute compute, void* parameters, int deviceID GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Copies the contents of the given parameters into the geometry record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param compute The compute program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtComputeCreate.
+*/
+template <typename T> void gprtComputeSetParameters(GPRTComputeOf<T> compute, T* parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtComputeSetParameters((GPRTCompute) compute, (void*)parameters, deviceID);
+}
+
+/**
+ * @brief Creates a "raygen" handle which describes a ray generation device program to call and the parameters to 
+ * pass into that ray generation program. Ray generation programs can trace rays in hardware, and allow for shader
+ * execution reordering for improved performance.
+ * 
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the raygen program to run, ie the first parameter following 
+ * GPRT_RAYGEN_PROGRAM in the device code.
+ * @param recordSize The size of the parameters structure that will be passed into that raygen program
+*/
 GPRT_API GPRTRayGen gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
 
-template <typename T>
-GPRTRayGenOf<T>
+/**
+ * @brief Creates a "raygen" handle which describes a ray generation device program to call and the parameters to 
+ * pass into that ray generation program. Ray generation programs can trace rays in hardware, and allow for shader
+ * execution reordering for improved performance.
+ * 
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the raygen program to run, ie the first parameter following 
+ * GPRT_RAYGEN_PROGRAM in the device code.
+*/
+template <typename T> GPRTRayGenOf<T>
 gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTRayGenOf<T>) gprtRayGenCreate(context, module, entrypoint, sizeof(T));
 }
@@ -605,23 +723,81 @@ gprtRayGenDestroy(GPRTRayGenOf<T> rayGen) {
   gprtRayGenDestroy((GPRTRayGen) rayGen);
 }
 
+/**
+ * @brief Returns a pointer to the parameters section of the record for this ray generation program, made 
+ * available on the device through the second parameter in GPRT_RAYGEN_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param rayGen The ray generation program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
 GPRT_API void *gprtRayGenGetParameters(GPRTRayGen rayGen, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtRayGenGetParameters(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
+/**
+ * @brief Returns a pointer to the parameters section of the record for this ray generation program, made 
+ * available on the device through the second parameter in GPRT_RAYGEN_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record
+ * @param rayGen The ray generation program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
+template <typename T> T * gprtRayGenGetParameters(GPRTRayGenOf<T> rayGen, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtRayGenGetParameters((GPRTRayGen) rayGen, deviceID);
 }
 
+/**
+ * @brief Copies the contents of the given parameters into the raygen record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param rayGen The ray generation program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtRayGenCreate.
+*/
+GPRT_API void gprtRayGenSetParameters(GPRTRayGen rayGen, void* parameters, int deviceID GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Copies the contents of the given parameters into the geometry record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param rayGen The ray generation program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtRayGenCreate.
+*/
+template <typename T> void gprtRayGenSetParameters(GPRTRayGenOf<T> rayGen, T* parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtRayGenSetParameters((GPRTRayGen) rayGen, (void*)parameters, deviceID);
+}
+
+/**
+ * @brief Creates a "miss" handle that describes a miss device program and the parameters to pass into that miss program.
+ * Miss programs are called when traced rays do not hit any primitives. Which miss program is called currently depends on 
+ * order of miss creation, and which "miss" index is used when tracing a ray on the device.
+ * 
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the miss program to run, ie the first parameter following 
+ * GPRT_MISS_PROGRAM in the device code.
+ * @param recordSize The size of the parameters structure that will be passed into that miss program
+*/
 GPRT_API GPRTMiss gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
 
+/**
+ * @brief Creates a "miss" handle that describes a miss device program and the parameters to pass into that miss program.
+ * Miss programs are called when traced rays do not hit any primitives. Which miss program is called currently depends on 
+ * order of miss creation, and which "miss" index is used when tracing a ray on the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param context The GPRT context
+ * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.  
+ * @param entrypoint The name of the miss program to run, ie the first parameter following 
+ * GPRT_MISS_PROGRAM in the device code.
+*/
 template <typename T>
 GPRTMissOf<T>
 gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTMissOf<T>) gprtMissCreate(context, module, entrypoint, sizeof(T));
 }
 
-/*! sets the given miss program for the given ray type */
 GPRT_API void gprtMissSet(GPRTContext context, int rayType, GPRTMiss missProgToUse);
 
 template <typename T>
@@ -637,13 +813,50 @@ void
 gprtMissDestroy(GPRTMissOf<T> missProg) {
   gprtMissDestroy((GPRTMiss) missProg);
 }
-
+/**
+ * @brief Returns a pointer to the parameters section of the record for this miss program, made 
+ * available on the device through the second parameter in GPRT_MISS_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param missProg The miss program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
 GPRT_API void *gprtMissGetParameters(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtMissGetParameters(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
+/**
+ * @brief Returns a pointer to the parameters section of the record for this miss program, made 
+ * available on the device through the second parameter in GPRT_MISS_PROGRAM. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record
+ * @param missProg The miss program who's record pointer is to be returned.
+ * @returns a pointer to the parameters section of the record. 
+*/
+template <typename T> T * gprtMissGetParameters(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtMissGetParameters((GPRTMiss) missProg, deviceID);
+}
+
+/**
+ * @brief Copies the contents of the given parameters into the miss record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @param miss The miss program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtMissCreate.
+*/
+GPRT_API void gprtMissSetParameters(GPRTMiss miss, void* parameters, int deviceID GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Copies the contents of the given parameters into the geometry record. Note, call 
+ * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
+ * 
+ * @tparam T The type of the parameters structure stored in the record.
+ * @param miss The miss program who's record to assign the parameters to.
+ * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes, 
+ * as specified by @ref gprtMissCreate.
+*/
+template <typename T> void gprtMissSetParameters(GPRTMissOf<T> miss, T* parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtMissSetParameters((GPRTMiss) miss, (void*)parameters, deviceID);
 }
 
 // ------------------------------------------------------------------
@@ -880,8 +1093,23 @@ GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0)
 
 GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
+/**
+ * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during 
+ * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * 
+ * @param context The GPRT context
+ * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
+ * @param recordSize The size of the parameters structure that will be passed into the device programs
+*/
 GPRT_API GPRTGeomType gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind, size_t recordSize);
 
+/**
+ * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during 
+ * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * @tparam T The template type of the parameters structure that will be passed into the device programs
+ * @param context The GPRT context
+ * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
+*/
 template <typename T>
 GPRTGeomTypeOf<T>
 gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind) {

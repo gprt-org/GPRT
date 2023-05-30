@@ -29,9 +29,12 @@ struct LBVHData {
   alignas(16) gprt::Buffer edges;
   alignas(16) gprt::Buffer triangles;
 
-  // Morton codes of quantized primitive centroids.
+  // Morton codes of quantized primitive centroids
+  // One uint32_t per primitive
   alignas(16) gprt::Buffer mortonCodes;
+
   // Primitive IDs that correspond to sorted morton codes. 
+  // One uint32_t per primitive
   alignas(16) gprt::Buffer ids;
   
   // numPrims-1 + numPrims long. 

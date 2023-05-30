@@ -368,3 +368,63 @@ GPRT_COMPUTE_PROGRAM(BuildPointHierarchy, (LBVHData, record), (1, 1, 1)) {
     next = loadNodeParent(record.nodes, next);   
   }
 }
+
+GPRT_COMPUTE_PROGRAM(BuildEdgeHierarchy, (LBVHData, record), (1, 1, 1)) {
+  int index = DispatchThreadID.x;
+  uint numPrims = record.numPrims;
+  if (index >= numPrims) return;
+
+  float3 aabbMin, aabbMax;
+  uint id = gprt::load<uint>(record.ids, index);
+  getEdgeBounds(record.edges, record.positions, id, aabbMin, aabbMax);
+
+  // Leaf's bounding box
+  int leafAddr = index + (record.numPrims - 1);
+  gprt::store<float3>(record.aabbs, leafAddr * 2 + 0, aabbMin);
+  gprt::store<float3>(record.aabbs, leafAddr * 2 + 1, aabbMax);
+
+  // Leaf's object
+  storeNodeLeaf(record.nodes, leafAddr, id);
+  
+  // Atomically combine child bounding boxes and update parents
+  int next = loadNodeParent(record.nodes, leafAddr);
+  while (next >= 0) {
+    gprt::atomicMin32f(record.aabbs, next * 6 + 0, aabbMin.x);
+    gprt::atomicMin32f(record.aabbs, next * 6 + 1, aabbMin.y);
+    gprt::atomicMin32f(record.aabbs, next * 6 + 2, aabbMin.z);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 3, aabbMax.x);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 4, aabbMax.y);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 5, aabbMax.z);
+    next = loadNodeParent(record.nodes, next);   
+  }
+}
+
+GPRT_COMPUTE_PROGRAM(BuildTriangleHierarchy, (LBVHData, record), (1, 1, 1)) {
+  int index = DispatchThreadID.x;
+  uint numPrims = record.numPrims;
+  if (index >= numPrims) return;
+
+  float3 aabbMin, aabbMax;
+  uint id = gprt::load<uint>(record.ids, index);
+  getTriangleBounds(record.triangles, record.positions, id, aabbMin, aabbMax);
+
+  // Leaf's bounding box
+  int leafAddr = index + (record.numPrims - 1);
+  gprt::store<float3>(record.aabbs, leafAddr * 2 + 0, aabbMin);
+  gprt::store<float3>(record.aabbs, leafAddr * 2 + 1, aabbMax);
+
+  // Leaf's object
+  storeNodeLeaf(record.nodes, leafAddr, id);
+  
+  // Atomically combine child bounding boxes and update parents
+  int next = loadNodeParent(record.nodes, leafAddr);
+  while (next >= 0) {
+    gprt::atomicMin32f(record.aabbs, next * 6 + 0, aabbMin.x);
+    gprt::atomicMin32f(record.aabbs, next * 6 + 1, aabbMin.y);
+    gprt::atomicMin32f(record.aabbs, next * 6 + 2, aabbMin.z);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 3, aabbMax.x);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 4, aabbMax.y);
+    gprt::atomicMax32f(record.aabbs, next * 6 + 5, aabbMax.z);
+    next = loadNodeParent(record.nodes, next);   
+  }
+}

@@ -44,4 +44,5 @@ target_link_libraries(s12_swBVH
     s12_deviceCode
     lbvhDeviceCode
     gprt::gprt
+    generator
 )

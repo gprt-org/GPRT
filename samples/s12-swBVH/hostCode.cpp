@@ -28,6 +28,11 @@
 
 // our shared data structures between host and device
 #include "sharedCode.h"
+#include "lbvh.h"
+
+// for generating meshes
+#include <generator.hpp>
+using namespace generator;
 
 #define LOG(message)                                                                                                   \
   std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
@@ -39,9 +44,45 @@
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s12_deviceCode;
+extern GPRTProgram lbvhDeviceCode;
+
+// A class we'll use to quickly generate meshes and bottom level trees
+template <typename T> struct Mesh {
+  std::vector<float3> vertices;
+  std::vector<uint3> indices;
+  GPRTBufferOf<float3> vertexBuffer;
+  GPRTBufferOf<uint3> indexBuffer;
+  Mesh(){};
+  Mesh(GPRTContext context, T generator) {
+    // Use the generator to generate vertices and indices
+    auto vertGenerator = generator.vertices();
+    auto triGenerator = generator.triangles();
+    while (!vertGenerator.done()) {
+      auto vertex = vertGenerator.generate();
+      auto position = vertex.position;
+      vertices.push_back(float3(position[0], position[1], position[2]));
+      vertGenerator.next();
+    }
+    while (!triGenerator.done()) {
+      Triangle triangle = triGenerator.generate();
+      auto vertices = triangle.vertices;
+      indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
+      triGenerator.next();
+    }
+
+    // Upload those to the device
+    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
+    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
+  };
+
+  void cleanup() {
+    gprtBufferDestroy(vertexBuffer);
+    gprtBufferDestroy(indexBuffer);
+  };
+};
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const int2 fbSize = {1920, 1080};
 
 // final image output
 const char *outFileName = "s12-swBVH.png";
@@ -55,19 +96,55 @@ float cosFovy = 0.66f;
 #include <iostream>
 int
 main(int ac, char **av) {
-  // In this example, we'll use a compute shader to generate a set of
-  // procedural axis aligned bounding boxes in parallel on the GPU. Each
-  // AABB will contain a single sphere.
+  // In this example, we'll use compute shaders to build a sofware-traversable 
+  // acceleration structure in parallel on the GPU. We'll use this tree for custom
+  // tree traversal, namely a closest point on triangle query to compute a 
+  // signed distance field.
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s12_deviceCode);
+  GPRTModule lbvhModule = gprtModuleCreate(context, lbvhDeviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
+
+  // -------------------------------------------------------
+  // set up LBVH programs for a triangle-based SW tree. We
+  // will use this SW tree for closest-point-on-triangle queries
+  // -------------------------------------------------------
+
+  GPRTComputeOf<LBVHData> computeBounds = gprtComputeCreate<LBVHData>(context, lbvhModule, "ComputeTriangleBounds");
+  GPRTComputeOf<LBVHData> computeCodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "ComputeTriangleMortonCodes");
+  GPRTComputeOf<LBVHData> makeNodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "MakeNodes");
+  GPRTComputeOf<LBVHData> splitNodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "SplitNodes");
+  GPRTComputeOf<LBVHData> buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvhModule, "BuildTriangleHierarchy");
+
+  // Triangle mesh we'll build the SW BVH over
+  Mesh<TeapotMesh> mesh(context, TeapotMesh{12});
+
+  LBVHData lbvhParams = {};
+  
+  // Input to LBVH construction
+  lbvhParams.numPrims = mesh.indices.size();
+  lbvhParams.triangles = gprtBufferGetHandle(mesh.indexBuffer);
+  lbvhParams.positions = gprtBufferGetHandle(mesh.vertexBuffer);
+
+  // Output / intermediate buffers
+  GPRTBufferOf<uint32_t> mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
+  GPRTBufferOf<uint32_t> ids = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
+  // one leaf per prim, then n-1 internal nodes
+  GPRTBufferOf<int4> nodes = gprtDeviceBufferCreate<int4>(context, 2 * lbvhParams.numPrims - 1);
+  GPRTBufferOf<float3> aabbs = gprtDeviceBufferCreate<float3>(context, 2 * (2 * lbvhParams.numPrims - 1));
+
+  gprtComputeSetParameters(computeBounds,  &lbvhParams);
+  gprtComputeSetParameters(computeCodes,   &lbvhParams);
+  gprtComputeSetParameters(makeNodes,      &lbvhParams);
+  gprtComputeSetParameters(splitNodes,     &lbvhParams);
+  gprtComputeSetParameters(buildHierarchy, &lbvhParams);
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -181,6 +258,13 @@ main(int ac, char **av) {
 
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
+
+  mesh.cleanup();
+  gprtComputeDestroy(computeBounds);
+  gprtComputeDestroy(computeCodes);
+  gprtComputeDestroy(makeNodes);
+  gprtComputeDestroy(splitNodes);
+  gprtComputeDestroy(buildHierarchy);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

@@ -22,16 +22,6 @@
 
 #include "sharedCode.h"
 
-
-float3x3 setCamera(float3 ro, float3 ta, float cr)
-{
-    float3 cw = normalize(ta - ro);
-    float3 cp = float3(sin(cr), cos(cr), 0.0f);
-    float3 cu = normalize(cross(cw, cp));
-    float3 cv = cross(cu, cw);
-    return float3x3(float3(cu), float3(cv), float3(cw));
-}
-
 // A bounding box, I think.
 // https://iquilezles.org/articles/boxfunctions
 float2 iBox(float3 ro, float3 rd, float3 rad)
@@ -147,9 +137,13 @@ float2 interiorMap(float3 pos)
     return float2(-smin(param_4, param_5, param_6), f(param_7));
 }
 
+// x is the distance, y is the material type
 float2 map(float3 pos, float cuttingPlane)
 {
+    // 
     float2 res = float2(-interiorMap(pos).x, 2.0f);
+
+    // This clips the above result to the given plane
     res = opD(res, float2(-sdPlane(pos.xzx - cuttingPlane.xxx), 3.0f));
     return res;
 }
@@ -268,7 +262,7 @@ float3 render(float3 ro, float3 rd, float cuttingPlane, inout bool isInterior, i
         if (m > 2.5f) {
             isInterior = true;
         } else if (m > 1.5f) {
-                col = colorscale(f(pos));
+            col = colorscale(f(pos));
         } else {
             isInterior = false;
         }
