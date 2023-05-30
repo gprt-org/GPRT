@@ -8440,6 +8440,13 @@ gprtGeomGetParameters(GPRTGeom _geometry, int deviceID) {
   return geometry->SBTRecord;
 }
 
+GPRT_API void
+gprtGeomSetParameters(GPRTGeom _geometry, void* parameters, int deviceID) {
+  LOG_API_CALL();
+  Geom *geometry = (Geom *) _geometry;
+  memcpy(geometry->SBTRecord, parameters, geometry->recordSize);
+}
+
 void
 gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry,
                       uint32_t rasterType, uint32_t *instanceCounts) {
@@ -8726,6 +8733,13 @@ gprtRayGenGetParameters(GPRTRayGen _rayGen, int deviceID) {
   return rayGen->SBTRecord;
 }
 
+GPRT_API void
+gprtRayGenSetParameters(GPRTRayGen _rayGen, void* parameters, int deviceID) {
+  LOG_API_CALL();
+  RayGen *rayGen = (RayGen *) _rayGen;
+  memcpy(rayGen->SBTRecord, parameters, rayGen->recordSize);
+}
+
 GPRT_API GPRTCompute
 gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programName, size_t recordSize) {
   LOG_API_CALL();
@@ -8754,6 +8768,13 @@ gprtComputeGetParameters(GPRTCompute _compute, int deviceID) {
   LOG_API_CALL();
   Compute *compute = (Compute *) _compute;
   return compute->SBTRecord;
+}
+
+GPRT_API void
+gprtComputeSetParameters(GPRTCompute _compute, void* parameters, int deviceID) {
+  LOG_API_CALL();
+  Compute *compute = (Compute *) _compute;
+  memcpy(compute->SBTRecord, parameters, compute->recordSize);
 }
 
 GPRT_API GPRTMiss
@@ -8794,6 +8815,13 @@ gprtMissGetParameters(GPRTMiss _miss, int deviceID) {
   LOG_API_CALL();
   Miss *miss = (Miss *) _miss;
   return miss->SBTRecord;
+}
+
+GPRT_API void
+gprtMissSetParameters(GPRTMiss _miss, void* parameters, int deviceID) {
+  LOG_API_CALL();
+  Miss *miss = (Miss *) _miss;
+  memcpy(miss->SBTRecord, parameters, miss->recordSize);
 }
 
 GPRT_API GPRTGeomType
