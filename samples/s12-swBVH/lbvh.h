@@ -24,7 +24,10 @@
 
 struct LBVHData {
   // input
-  alignas(8) uint32_t numPrims;
+  alignas(4) uint32_t numPrims;
+  alignas(4) uint32_t numNodes;
+  alignas(4) uint32_t numInner;
+  alignas(4) uint32_t tmp;
   alignas(16) gprt::Buffer positions;
   alignas(16) gprt::Buffer edges;
   alignas(16) gprt::Buffer triangles;

@@ -51,15 +51,15 @@ int delta(uint num_codes, uint i, uint j, uint i_code, uint j_code) {
     return -1;
   uint xord = i_code ^ j_code;
   if (xord == 0)
-    return firstbithigh(i ^ j) + 32;
+    return (31 - firstbithigh(i ^ j)) + 32;
   else
-    return firstbithigh(xord);
+    return (31 - firstbithigh(xord));
 }
 
 // Find node range that an inner node overlaps
 int2 determine_range(
   gprt::Buffer morton_codes,
-  int num_codes, int i, out int split) {
+  int num_codes, int i, inout int split) {
   // Determine direction of the range (+1 or -1)
   uint ch = gprt::load<uint>(morton_codes, i - 1);
   uint ci = gprt::load<uint>(morton_codes, i + 0);
@@ -245,6 +245,7 @@ GPRT_COMPUTE_PROGRAM(ComputePointMortonCodes, (LBVHData, record), (1, 1, 1)) {
   
   uint code = morton_encode3D(pt.x, pt.y, pt.z);
   gprt::store<uint>(record.mortonCodes, primID, code);
+  gprt::store<uint>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeEdgeMortonCodes, (LBVHData, record), (1, 1, 1)) {
@@ -261,6 +262,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeMortonCodes, (LBVHData, record), (1, 1, 1)) {
   
   uint code = morton_encode3D(pt.x, pt.y, pt.z);
   gprt::store<uint>(record.mortonCodes, primID, code);
+  gprt::store<uint>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) {
@@ -277,22 +279,22 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) 
   
   uint code = morton_encode3D(pt.x, pt.y, pt.z);
   gprt::store<uint>(record.mortonCodes, primID, code);
+  gprt::store<uint>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(MakeNodes, (LBVHData, record), (1, 1, 1)) {
   int nodeID = DispatchThreadID.x;
-  if (nodeID >= (record.numPrims-1) + record.numPrims) return;
+  if (nodeID >= record.numNodes) return;
   storeNode(record.nodes, nodeID, int4(-1,-1,-1,-1));
 }
 
 GPRT_COMPUTE_PROGRAM(SplitNodes, (LBVHData, record), (1, 1, 1)) {
   int num_leaves = record.numPrims;
   int num_codes = record.numPrims;
-  int num_inner = num_leaves - 1;
   gprt::Buffer morton_codes = record.mortonCodes;
   int index = DispatchThreadID.x;
 
-  if (index < num_inner)
+  if (index < record.numInner)
   {
     // NOTE: This is [first..last], not [first..last)!!
     int split = -1;
@@ -307,9 +309,9 @@ GPRT_COMPUTE_PROGRAM(SplitNodes, (LBVHData, record), (1, 1, 1)) {
     {
       // left child is leaf
       // inner[index].left = num_inner + left;
-      storeNodeLeft(record.nodes, index, num_inner + left);
+      storeNodeLeft(record.nodes, index, record.numInner + left);
       // leaves[left].parent = index;
-      storeNodeParent(record.nodes, left + (record.numPrims - 1), index);
+      storeNodeParent(record.nodes, record.numInner + left, index);
     }
     else
     {
@@ -324,9 +326,9 @@ GPRT_COMPUTE_PROGRAM(SplitNodes, (LBVHData, record), (1, 1, 1)) {
     {
       // right child is leaf
       // inner[index].right = num_inner + right;
-      storeNodeRight(record.nodes, index, num_inner + right);
+      storeNodeRight(record.nodes, index, record.numInner + right);
       // leaves[right].parent = index;
-      storeNodeParent(record.nodes, right + (record.numPrims - 1), index);
+      storeNodeParent(record.nodes, record.numInner + right, index);
     }
     else
     {

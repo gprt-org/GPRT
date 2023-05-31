@@ -1621,9 +1621,7 @@ GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBu
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-template <typename T1, typename T2, typename T3>
-void
-gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values, GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
+template <typename T1, typename T2, typename T3> void gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values, GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
   gprtBufferSortPayload(context, (GPRTBuffer) keys, (GPRTBuffer) values, (GPRTBuffer) scratch);
 }
 

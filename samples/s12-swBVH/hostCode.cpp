@@ -26,6 +26,8 @@
 // public GPRT API
 #include <gprt.h>
 
+#include <iomanip>
+
 // our shared data structures between host and device
 #include "sharedCode.h"
 #include "lbvh.h"
@@ -124,27 +126,63 @@ main(int ac, char **av) {
   GPRTComputeOf<LBVHData> buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvhModule, "BuildTriangleHierarchy");
 
   // Triangle mesh we'll build the SW BVH over
-  Mesh<TeapotMesh> mesh(context, TeapotMesh{12});
+  Mesh<TeapotMesh> mesh(context, TeapotMesh{{1}});
 
   LBVHData lbvhParams = {};
+  lbvhParams.numPrims = mesh.indices.size();
+  lbvhParams.numInner = lbvhParams.numPrims - 1;
+  lbvhParams.numNodes = 2 * lbvhParams.numPrims - 1;
   
   // Input to LBVH construction
-  lbvhParams.numPrims = mesh.indices.size();
   lbvhParams.triangles = gprtBufferGetHandle(mesh.indexBuffer);
   lbvhParams.positions = gprtBufferGetHandle(mesh.vertexBuffer);
 
   // Output / intermediate buffers
+  GPRTBufferOf<uint8_t> scratch = gprtDeviceBufferCreate<uint8_t>(context);
   GPRTBufferOf<uint32_t> mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
   GPRTBufferOf<uint32_t> ids = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
-  // one leaf per prim, then n-1 internal nodes
-  GPRTBufferOf<int4> nodes = gprtDeviceBufferCreate<int4>(context, 2 * lbvhParams.numPrims - 1);
-  GPRTBufferOf<float3> aabbs = gprtDeviceBufferCreate<float3>(context, 2 * (2 * lbvhParams.numPrims - 1));
+  GPRTBufferOf<int4> nodes = gprtDeviceBufferCreate<int4>(context, lbvhParams.numNodes);
+  GPRTBufferOf<float3> aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvhParams.numNodes);
+  lbvhParams.mortonCodes = gprtBufferGetHandle(mortonCodes);
+  lbvhParams.ids = gprtBufferGetHandle(ids);
+  lbvhParams.nodes = gprtBufferGetHandle(nodes);
+  lbvhParams.aabbs = gprtBufferGetHandle(aabbs);
+
+  // initialize root AABB
+  gprtBufferMap(aabbs);
+  float3* aabbPtr = gprtBufferGetPointer(aabbs);
+  aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = 1e20f;
+  aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -1e20f;
+  gprtBufferUnmap(aabbs);
 
   gprtComputeSetParameters(computeBounds,  &lbvhParams);
   gprtComputeSetParameters(computeCodes,   &lbvhParams);
   gprtComputeSetParameters(makeNodes,      &lbvhParams);
   gprtComputeSetParameters(splitNodes,     &lbvhParams);
   gprtComputeSetParameters(buildHierarchy, &lbvhParams);
+
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+  gprtComputeLaunch1D(context, computeBounds, lbvhParams.numPrims);
+  gprtComputeLaunch1D(context, computeCodes, lbvhParams.numPrims);
+  gprtBufferSortPayload(context, mortonCodes, ids, scratch);
+  gprtComputeLaunch1D(context, makeNodes, lbvhParams.numNodes);
+  gprtComputeLaunch1D(context, splitNodes, lbvhParams.numInner);
+  gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
+
+  {
+    gprtBufferMap(nodes);
+    gprtBufferMap(aabbs);
+    int4 *nodePtr = gprtBufferGetPointer(nodes);
+    float3 *aabbPtr = gprtBufferGetPointer(aabbs);
+    for (uint32_t i = 0; i < lbvhParams.numNodes; ++i) {
+      std::cout<< std::setw(4) << nodePtr[i].x << " " << std::setw(4) << nodePtr[i].y << " " << std::setw(4) << nodePtr[i].z << " " << std::setw(4) << nodePtr[i].w << " ";
+      std::cout<<"\taabb (" << aabbPtr[i*2+0].x << " " << aabbPtr[i*2+0].y << " " << aabbPtr[i*2+0].z << ")";
+      std::cout<<", (" << aabbPtr[i*2+1].x << " " << aabbPtr[i*2+1].y << " " << aabbPtr[i*2+1].z << ")"<< std::endl;
+    }
+    gprtBufferUnmap(nodes);
+    gprtBufferUnmap(aabbs);
+  }
 
   // -------------------------------------------------------
   // set up ray gen program
