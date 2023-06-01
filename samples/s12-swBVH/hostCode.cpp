@@ -62,7 +62,7 @@ template <typename T> struct Mesh {
     while (!vertGenerator.done()) {
       auto vertex = vertGenerator.generate();
       auto position = vertex.position;
-      vertices.push_back(float3(position[0], position[1], position[2]));
+      vertices.push_back(float3(position[0], position[2], position[1]) * .3f);// + float3(0.f, .5f, 0.f));
       vertGenerator.next();
     }
     while (!triGenerator.done()) {
@@ -84,7 +84,8 @@ template <typename T> struct Mesh {
 };
 
 // initial image resolution
-const int2 fbSize = {1920, 1080};
+// const int2 fbSize = {1400, 460};
+const int2 fbSize = {1024, 1024};
 
 // final image output
 const char *outFileName = "s12-swBVH.png";
@@ -126,7 +127,7 @@ main(int ac, char **av) {
   GPRTComputeOf<LBVHData> buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvhModule, "BuildTriangleHierarchy");
 
   // Triangle mesh we'll build the SW BVH over
-  Mesh<TeapotMesh> mesh(context, TeapotMesh{{1}});
+  Mesh<TeapotMesh> mesh(context, TeapotMesh{});
 
   LBVHData lbvhParams = {};
   lbvhParams.numPrims = mesh.indices.size();
@@ -170,19 +171,19 @@ main(int ac, char **av) {
   gprtComputeLaunch1D(context, splitNodes, lbvhParams.numInner);
   gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
 
-  {
-    gprtBufferMap(nodes);
-    gprtBufferMap(aabbs);
-    int4 *nodePtr = gprtBufferGetPointer(nodes);
-    float3 *aabbPtr = gprtBufferGetPointer(aabbs);
-    for (uint32_t i = 0; i < lbvhParams.numNodes; ++i) {
-      std::cout<< std::setw(4) << nodePtr[i].x << " " << std::setw(4) << nodePtr[i].y << " " << std::setw(4) << nodePtr[i].z << " " << std::setw(4) << nodePtr[i].w << " ";
-      std::cout<<"\taabb (" << aabbPtr[i*2+0].x << " " << aabbPtr[i*2+0].y << " " << aabbPtr[i*2+0].z << ")";
-      std::cout<<", (" << aabbPtr[i*2+1].x << " " << aabbPtr[i*2+1].y << " " << aabbPtr[i*2+1].z << ")"<< std::endl;
-    }
-    gprtBufferUnmap(nodes);
-    gprtBufferUnmap(aabbs);
-  }
+  // {
+  //   gprtBufferMap(nodes);
+  //   gprtBufferMap(aabbs);
+  //   int4 *nodePtr = gprtBufferGetPointer(nodes);
+  //   float3 *aabbPtr = gprtBufferGetPointer(aabbs);
+  //   for (uint32_t i = 0; i < lbvhParams.numNodes; ++i) {
+  //     std::cout<< std::setw(4) << nodePtr[i].x << " " << std::setw(4) << nodePtr[i].y << " " << std::setw(4) << nodePtr[i].z << " " << std::setw(4) << nodePtr[i].w << " ";
+  //     std::cout<<"\taabb (" << aabbPtr[i*2+0].x << " " << aabbPtr[i*2+0].y << " " << aabbPtr[i*2+0].z << ")";
+  //     std::cout<<", (" << aabbPtr[i*2+1].x << " " << aabbPtr[i*2+1].y << " " << aabbPtr[i*2+1].z << ")"<< std::endl;
+  //   }
+  //   gprtBufferUnmap(nodes);
+  //   gprtBufferUnmap(aabbs);
+  // }
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -195,10 +196,16 @@ main(int ac, char **av) {
 
   // Setup pixel frame buffer
   GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferOf<float4> accumBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->accumBuffer = gprtBufferGetHandle(accumBuffer);
+
+  rayGenData->lbvh = lbvhParams;
+
+  rayGenData->cuttingPlane = 0.f;
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
@@ -221,11 +228,12 @@ main(int ac, char **av) {
       lastxpos = xpos;
       lastypos = ypos;
     }
-    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
+    int lstate = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
+    int rstate = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_RIGHT);
 
     // If we click the mouse, we should rotate the camera
     // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame) {
+    if (rstate == GPRT_PRESS || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -264,9 +272,16 @@ main(int ac, char **av) {
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
 
+      iFrame = 0;
+    }
+
+    if (lstate == GPRT_PRESS || firstFrame) {
+      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
+      raygenData->cuttingPlane = (xpos / fbSize.x) * 2.f - 1.0f;
+      iFrame = 0;
     }
     
-    rayGenData->iTime = gprtGetTime(context);
+    rayGenData->iTime = gprtGetTime(context) * .5;
     rayGenData->iFrame = iFrame;
 
     // Use this to upload all set parameters to our ray tracing device

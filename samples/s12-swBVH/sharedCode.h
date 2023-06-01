@@ -21,13 +21,18 @@
 // SOFTWARE.
 
 #include "gprt.h"
+#include "lbvh.h"
 
 /* variables available to all programs */
 struct RayGenData {
   alignas(16) gprt::Buffer frameBuffer;
+  alignas(16) gprt::Buffer accumBuffer;
 
-  alignas(8) float iTime;
-  alignas(8) int iFrame;
+  LBVHData lbvh;
+
+  alignas(4) float iTime;
+  alignas(4) int iFrame;
+  alignas(4) float cuttingPlane;
 
   struct {
     alignas(16) float3 pos;

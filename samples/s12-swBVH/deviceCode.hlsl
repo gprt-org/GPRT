@@ -22,6 +22,8 @@
 
 #include "sharedCode.h"
 
+#include "rng.h"
+
 // A bounding box, I think.
 // https://iquilezles.org/articles/boxfunctions
 float2 iBox(float3 ro, float3 rd, float3 rad)
@@ -118,37 +120,191 @@ float f(float3 pos)
     return float(frac((pos.x * 3.66) + 0.25f) > 0.5f);
 }
 
+float dot2( in float3 v ) { return dot(v,v); }
+float maxcomp( in float2 v ) { return max(v.x,v.y); }
+
+float3 closestTriangle( in float3 v0, in float3 v1, in float3 v2, in float3 p )
+{
+    float3 v10 = v1 - v0; float3 p0 = p - v0;
+    float3 v21 = v2 - v1; float3 p1 = p - v1;
+    float3 v02 = v0 - v2; float3 p2 = p - v2;
+    float3 nor = cross( v10, v02 );
+
+#if 0
+    // method 1, in 3D space
+    if( dot(cross(v10,nor),p0)<0.0 ) return v0 + v10*clamp( dot(p0,v10)/dot2(v10), 0.0, 1.0 );
+    if( dot(cross(v21,nor),p1)<0.0 ) return v1 + v21*clamp( dot(p1,v21)/dot2(v21), 0.0, 1.0 );
+    if( dot(cross(v02,nor),p2)<0.0 ) return v2 + v02*clamp( dot(p2,v02)/dot2(v02), 0.0, 1.0 );
+    return p - nor*dot(nor,p0)/dot2(nor);
+    
+#else    
+    // method 2, in barycentric space
+    float3  q = cross( nor, p0 );
+    float d = 1.0/dot2(nor);
+    float u = d*dot( q, v02 );
+    float v = d*dot( q, v10 );
+    float w = 1.0-u-v;
+    
+         if( u<0.0 ) { w = clamp( dot(p2,v02)/dot2(v02), 0.0, 1.0 ); u = 0.0; v = 1.0-w; }
+    else if( v<0.0 ) { u = clamp( dot(p0,v10)/dot2(v10), 0.0, 1.0 ); v = 0.0; w = 1.0-u; }
+	else if( w<0.0 ) { v = clamp( dot(p1,v21)/dot2(v21), 0.0, 1.0 ); w = 0.0; u = 1.0-v; }
+    
+    return u*v1 + v*v2 + w*v0;
+#endif    
+}
+
+
+float udBox2(float3 aabbMin, float3 aabbMax, float3 p)
+{
+    float3 d = max(max(aabbMin - p, float3(0.f, 0.f, 0.f)), p - aabbMax);
+    return dot(d,d);
+}
+
+float udBox(float3 aabbMin, float3 aabbMax, float3 p)
+{
+    return sqrt(udBox2(aabbMin, aabbMax, p));
+}
+
 // This function returns the negative distance, which we then negate after the fact.
 // We do this because the important difference is that the `map` function returns the
 // exterior difference *without the cutting plane*.
-float2 interiorMap(float3 pos)
+float2 interiorMap(in LBVHData lbvh, float3 pos)
 {
-    float r1 = 0.4;
-    float r2 = 0.19;
-    float k = 16.0f;
-    float3 param = (pos - float3(r1 + (r2 * 0.8), r1 + r2, 0.0f)).yzx;
-    float2 param_1 = float2(r1, r2);
-    float3 param_2 = pos - float3((-r1) - (r2 * 0.8), r1 + r2, 0.0f);
-    float2 param_3 = float2(r1, r2);
-    float param_4 = sdTorus(param, param_1);
-    float param_5 = sdTorus(param_2, param_3);
-    float param_6 = k;
-    float3 param_7 = pos;
-    return float2(-smin(param_4, param_5, param_6), f(param_7));
+    // brute force thing for now
+    // float3 aabbMin = gprt::load<float3>(lbvh.aabbs, 0);
+    // float3 aabbMax = gprt::load<float3>(lbvh.aabbs, 1);
+
+    // float3 p = (pos - aabbMin) / (aabbMax - aabbMin);
+
+    float dist = 1e20f;
+    float s = -1.f;
+
+    uint stack[32];
+    uint stackPtr = 0;
+    stackPtr ++;
+    stack[stackPtr] = 0; // root
+    while (stackPtr > 0)
+    {
+        bool gotoNext = false;
+        int4 node = gprt::load<int4>(lbvh.nodes, stack[stackPtr]);
+        stackPtr = stackPtr - 1;
+
+        // while left and right contain children
+        while (node.x != -1 && node.y != -1) {
+            int4 children[2] = { 
+                gprt::load<int4>(lbvh.nodes, node.x), 
+                gprt::load<int4>(lbvh.nodes, node.y) 
+            };
+
+            float3 leftAABB[2] = {
+                gprt::load<float3>(lbvh.aabbs, 2 * node.x + 0), 
+                gprt::load<float3>(lbvh.aabbs, 2 * node.x + 1), 
+            };
+
+            float3 rightAABB[2] = {
+                gprt::load<float3>(lbvh.aabbs, 2 * node.y + 0), 
+                gprt::load<float3>(lbvh.aabbs, 2 * node.y + 1), 
+            };
+
+            float distL = udBox(leftAABB[0], leftAABB[1], pos); // distance(*((AABB*)(&children[0].bbox)),p);
+            float distR = udBox(rightAABB[0], rightAABB[1], pos); //distance(*((AABB*)(&children[1].bbox)),p);
+
+            if (distL < dist && distR < dist)
+            {
+                if (distL < distR)
+                {
+                    // if (lbvh.tmp) {
+                    //     printf("Left closer, traversing %d, adding %d to stack, stack ptr %d\n", node.w, stackPtr);
+                    // }
+                    stackPtr++;
+                    stack[stackPtr] = node.y;
+                    node = children[0];
+                }
+                else
+                {
+                    stackPtr++;
+                    stack[stackPtr] = node.x;
+                    node = children[1];
+                }
+            }
+            else if (distL < dist)
+                node = children[0];
+            else if (distR < dist)
+                node = children[1];
+            else
+            {
+                gotoNext = true;
+                break;
+            }
+        }
+        if (gotoNext) continue;
+
+        // if (lbvh.tmp) {
+        //     printf("Traversing %d, Stack ptr %d\n", node.w, stackPtr);
+        // }
+        
+        // Traverse leaf
+        int i = node.w;
+        int3 tri = gprt::load<int3>(lbvh.triangles, i);
+        float3 p0 = gprt::load<float3>(lbvh.positions, tri.x); 
+        float3 p1 = gprt::load<float3>(lbvh.positions, tri.y); 
+        float3 p2 = gprt::load<float3>(lbvh.positions, tri.z); 
+
+        float3 pClosest = closestTriangle(p0, p1, p2, pos.xyz);
+        
+        float d = distance(pos, pClosest);
+        if (d < dist) {
+            dist = d;
+
+            // compute sign
+            float3 N = cross(normalize(p1 - p0), normalize(p2 - p0));
+            s = sign(dot(N, normalize(pClosest - pos)));
+        }
+    }
+    return float2(-dist * s, f(pos));
+
+
+    // for (uint i = 0; i < lbvh.numPrims; ++i) {
+    //     int3 tri = gprt::load<int3>(lbvh.triangles, i);
+    //     float3 p0 = .5f * gprt::load<float3>(lbvh.positions, tri.x).xzy + float3(0.f, 0.5f, .0f); 
+    //     float3 p1 = .5f * gprt::load<float3>(lbvh.positions, tri.y).xzy + float3(0.f, 0.5f, .0f); 
+    //     float3 p2 = .5f * gprt::load<float3>(lbvh.positions, tri.z).xzy + float3(0.f, 0.5f, .0f); 
+
+    //     float3 pClosest = closestTriangle(p0, p1, p2, pos.xyz);
+    //     float d = distance(pos, pClosest);
+
+    //     if (d < dist) {
+    //         dist = d;
+
+    //         // compute sign
+    //         float3 N = cross(normalize(p1 - p0), normalize(p2 - p0));
+    //         s = sign(dot(N, normalize(pClosest - pos)));
+    //     }
+    // }
+    // return float2(-dist * s, f(pos));
+
+
+    // float r1 = 0.4;
+    // float r2 = 0.19;
+    // float k = 16.0f;
+    // return float2(-smin(
+    //     sdTorus((pos - float3(r1 + (r2 * 0.8), r1 + r2, 0.0f)).yzx, float2(r1, r2)), 
+    //     sdTorus(pos - float3((-r1) - (r2 * 0.8), r1 + r2, 0.0f), float2(r1, r2)), k), 
+    //     f(pos));
 }
 
 // x is the distance, y is the material type
-float2 map(float3 pos, float cuttingPlane)
+float2 map(in LBVHData lbvh, float3 pos, float cuttingPlane)
 {
     // 
-    float2 res = float2(-interiorMap(pos).x, 2.0f);
+    float2 res = float2(-interiorMap(lbvh, pos).x, 2.0f);
 
     // This clips the above result to the given plane
     res = opD(res, float2(-sdPlane(pos.xzx - cuttingPlane.xxx), 3.0f));
     return res;
 }
 
-float2 castRay(float3 ro, float3 rd, float cuttingPlane)
+float2 castRay(in LBVHData lbvh, float3 ro, float3 rd, float cuttingPlane)
 {
     float2 res = (-1.0f).xx;
 
@@ -171,7 +327,7 @@ float2 castRay(float3 ro, float3 rd, float cuttingPlane)
 
         float t = tmin;
         for (int i = 0; (i < 80) && (t < tmax); i++) {
-            float2 h = map(ro + (rd * t), cuttingPlane);
+            float2 h = map(lbvh, ro + (rd * t), cuttingPlane);
             if (abs(h.x) < (0.00001 * t)) {
                 res = float2(t, h.y);
                 break;
@@ -183,7 +339,7 @@ float2 castRay(float3 ro, float3 rd, float cuttingPlane)
 }
 
 // https://iquilezles.org/articles/normalsSDF
-float3 calcNormal(float3 pos, float cuttingPlane)
+float3 calcNormal(in LBVHData lbvh, float3 pos, float cuttingPlane)
 {
     // inspired by tdhooper and klems - a way to prevent the compiler from inlining map() 4 times
     float3 n = 0.0f.xxx;
@@ -192,7 +348,7 @@ float3 calcNormal(float3 pos, float cuttingPlane)
         float3 e = ((float3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) * 2.0f) - 1.0f.xxx) * 0.577300012111663818359375f;
         float3 param = pos + (e * 0.0005000000237487256526947021484375f);
         float param_1 = cuttingPlane;
-        n += (e * map(param, param_1).x);
+        n += (e * map(lbvh, param, param_1).x);
     }
     return normalize(n);
 }
@@ -202,7 +358,7 @@ float3 colorscale(float x)
     return lerp(float3(1.0f, 1.0f, 0.28), float3(0.02999999932944774627685546875f, 0.0199999995529651641845703125f, 0.20000000298023223876953125f), x.xxx);
 }
 
-float calcAO(float3 pos, float3 nor, float cuttingPlane)
+float calcAO(in LBVHData lbvh, float3 pos, float3 nor, float cuttingPlane)
 {
     float occ = 0.0f;
     float sca = 1.0f;
@@ -212,7 +368,7 @@ float calcAO(float3 pos, float3 nor, float cuttingPlane)
         float3 aopos = (nor * hr) + pos;
         float3 param = aopos;
         float param_1 = cuttingPlane;
-        float dd = map(param, param_1).x;
+        float dd = map(lbvh, param, param_1).x;
         occ += ((-(dd - hr)) * sca);
         sca *= 0.949999988079071044921875f;
     }
@@ -220,7 +376,7 @@ float calcAO(float3 pos, float3 nor, float cuttingPlane)
 }
 
 // https://iquilezles.org/articles/rmshadows
-float calcSoftshadow(float3 ro, float3 rd, float mint, float tmax, float cuttingPlane)
+float calcSoftshadow(in LBVHData lbvh, float3 ro, float3 rd, float mint, float tmax, float cuttingPlane)
 {
     // This affects the shadowing, I think.
     float maxHei = 2.2;
@@ -235,7 +391,7 @@ float calcSoftshadow(float3 ro, float3 rd, float mint, float tmax, float cutting
     {
         float3 param = ro + (rd * t);
         float param_1 = cuttingPlane;
-        float h = map(param, param_1).x;
+        float h = map(lbvh, param, param_1).x;
         float s = clamp((4.0f * h) / t, 0.0f, 1.0f);
         res = min(res, (s * s) * (3.0f - (2.0f * s)));
         t += clamp(h, 0.0199999995529651641845703125f, 0.100000001490116119384765625f);
@@ -248,15 +404,15 @@ float calcSoftshadow(float3 ro, float3 rd, float mint, float tmax, float cutting
 }
 
 
-float3 render(float3 ro, float3 rd, float cuttingPlane, inout bool isInterior, inout float3 pos)
+float3 render(in LBVHData lbvh, float3 ro, float3 rd, float cuttingPlane, inout bool isInterior, inout float3 pos)
 {
     float3 col = 0.9;
-    float2 res = castRay(ro, rd, cuttingPlane);
+    float2 res = castRay(lbvh, ro, rd, cuttingPlane);
     float t = res.x;
     float m = res.y;
     if (m > 0.5f) {
         pos = ro + (rd * t);
-        float3 nor = (m < 1.5) ? float3(0, 1, 0) : calcNormal(pos, cuttingPlane);
+        float3 nor = (m < 1.5) ? float3(0, 1, 0) : calcNormal(lbvh, pos, cuttingPlane);
 
         // material
         if (m > 2.5f) {
@@ -268,13 +424,13 @@ float3 render(float3 ro, float3 rd, float cuttingPlane, inout bool isInterior, i
         }
 
         // lighting
-        float occ = 0.5 + 0.5 * calcAO(pos, nor, cuttingPlane);
+        float occ = 0.5 + 0.5 * calcAO(lbvh, pos, nor, cuttingPlane);
 		float3 lig = normalize(float3(-0.2, 0.4, -0.3));
         float3 hal = normalize(lig - rd);
 		float amb = sqrt(clamp(0.5 + 0.5 * nor.y, 0.0, 1.0));
         float dif = clamp(dot(nor, lig), 0.0, 1.0);
 
-        dif *= 0.2 + 0.8 * calcSoftshadow(pos, lig, 0.2, 2.0, cuttingPlane);
+        dif *= 0.2 + 0.8 * calcSoftshadow(lbvh, pos, lig, 0.2, 2.0, cuttingPlane);
 
 		float spe = pow(clamp(dot(nor, hal), 0.0, 1.0), 16.0)*
                     dif * (0.04 + 0.96 * pow(clamp(1.0 + dot(hal, rd), 0.0, 1.0), 5.0));
@@ -288,50 +444,26 @@ float3 render(float3 ro, float3 rd, float cuttingPlane, inout bool isInterior, i
     return col;
 }
 
-
-// --------------------------------------
-// oldschool rand() from Visual Studio
-// --------------------------------------
-static int seed;
-void srand(int s) {
-    seed = s;
-}
-
-int rand() {
-    seed = (seed * 214013) + 2531011;
-    return (seed >> 16) & 32767;
-}
 // --------------------------------------
 
-// --------------------------------------
-// hash to initialize the random sequence (copied from Hugo Elias)
-// --------------------------------------
-int hash(int n)
+float3 randomOnSphere(inout LCGRand rng)
 {
-    n = (n << 13) ^ n;
-    return (n * (((n * n) * 15731) + 789221)) + 1376312589;
-}
-
-// --------------------------------------
-
-float3 randomOnSphere()
-{
-    float theta = (6.283185 / 32767.0) * float(rand());
-    float u = (2.0 / 32767.0) * float(rand()) - 1.0;
+    float theta = 6.283185 * lcg_randomf(rng);
+    float u = 2.0 * lcg_randomf(rng) - 1.0;
     return float3(float2(cos(theta), sin(theta)) * sqrt(max(0.0f, 1.0f - (u * u))), u);
 }
 
 // WoS! Walk-on-spheres. This the heart of the whole thing. Remarkably concise.
-float march(float3 p)
+float march(in LBVHData lbvh, inout LCGRand rng, float3 p)
 {
     float2 h = 0.0f.xx;
     for (int i = 0; i < 32; i++) {
         float3 param = p;
-        h = interiorMap(param);
+        h = interiorMap(lbvh, param);
         if (h.x < 0.001) {
             break;
         }
-        p = p + h.x * randomOnSphere();
+        p = p + h.x * randomOnSphere(rng);
     }
     return h.y;
 }
@@ -340,6 +472,19 @@ float march(float3 p)
 GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
     uint2 pixelID = DispatchRaysIndex().xy;
     uint2 fbSize = DispatchRaysDimensions().xy;
+
+    LCGRand rng = get_rng(record.iFrame, pixelID, fbSize);
+
+    // if (all(pixelID == uint2(fbSize / 2))) {
+    //     // printf("seed %d\n", seed);
+    // }
+    
+    // printf("ID %d %d Frame %d\n", pixelID.x, pixelID.y, record.iFrame);
+
+    LBVHData lbvh = record.lbvh;
+    if (all(pixelID == (fbSize / 2))) lbvh.tmp = 1;
+    else lbvh.tmp = 0;
+
     float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
     RayDesc rayDesc;
     rayDesc.Origin = record.camera.pos;
@@ -351,29 +496,26 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
     float2 fragCoord = pixelID;
     float2 iResolution = fbSize;
 
-    float cuttingPlane = 0.6 * cos(record.iTime);
-    
-    // init randoms
-    int2 q = int2(fragCoord);
-    srand(hash(q.x + hash(q.y + hash(record.iFrame))));
-    
+    float cuttingPlane = record.cuttingPlane;
+
     // render
     bool isInterior = false;
     float3 pos;
-    float3 col = render(rayDesc.Origin, rayDesc.Direction, cuttingPlane, isInterior, pos);
+    float3 col = render(lbvh, rayDesc.Origin, rayDesc.Direction, cuttingPlane, isInterior, pos);
     if (isInterior)
     {
-        float sum = 0.0f;
-        for (int i = 0; i < 100; i++) {
-            sum += march(pos);
-        }
-        sum /= 100.0f;
+        float sum = march(lbvh, rng, pos);
         col = hsvColorscale(sum);
     }
     bool redraw = true;
 
     col = pow(col, 0.4545);
 
+    int frame = record.iFrame;
     const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-    gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(float4(col, 1.0f)));
+    float4 prev = gprt::load<float4>(record.accumBuffer, fbOfs);
+    float4 newCol = prev * (frame / (frame + 1.f)) + float4(col, 1.0f) * (1.f / (frame + 1.f));
+    gprt::store<float4>(record.accumBuffer, fbOfs, newCol);
+
+    gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(newCol));
 }
