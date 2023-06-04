@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lbvh.h"
+#include "gprt_lbvh.h"
 
 #define FLT_MAX 3.402823466e+38
 #define FLT_MIN 1.175494351e-38
@@ -275,7 +275,10 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) 
   pt = (pt - aabbMin) / (aabbMax - aabbMin);
 
   // Quantize to 10 bit
-  pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+  // pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+
+  // Quantize to 4 bit
+  pt = min(max(pt * 16.f, float3(0.f, 0.f, 0.f)), float3(15.f, 15.f, 15.f));
   
   uint code = morton_encode3D(pt.x, pt.y, pt.z);
   gprt::store<uint>(record.mortonCodes, primID, code);

@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "gprt.h"
-#include "lbvh.h"
+#include "gprt_lbvh.h"
 
 /* variables available to all programs */
 struct RayGenData {

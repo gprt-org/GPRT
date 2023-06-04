@@ -30,11 +30,14 @@
 
 // our shared data structures between host and device
 #include "sharedCode.h"
-#include "lbvh.h"
 
-// for generating meshes
-#include <generator.hpp>
-using namespace generator;
+// The software linear bvh builder included in GPRT. Useful for 
+// scenarios where full control over traversal is required
+#include "gprt_lbvh.h"
+
+// for loading meshes
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 #define LOG(message)                                                                                                   \
   std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
@@ -127,16 +130,92 @@ main(int ac, char **av) {
   GPRTComputeOf<LBVHData> buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvhModule, "BuildTriangleHierarchy");
 
   // Triangle mesh we'll build the SW BVH over
-  Mesh<TeapotMesh> mesh(context, TeapotMesh{});
+
+  std::string inputfile = ASSETS_DIRECTORY "utah_teapot.obj";
+  tinyobj::ObjReaderConfig reader_config;
+  reader_config.mtl_search_path = ASSETS_DIRECTORY "./"; // Path to material files
+  tinyobj::ObjReader reader;
+
+  if (!reader.ParseFromFile(inputfile, reader_config)) {
+    if (!reader.Error().empty()) {
+        std::cerr << "TinyObjReader: " << reader.Error();
+    }
+    exit(1);
+  }
+
+  if (!reader.Warning().empty()) {
+    std::cout << "TinyObjReader: " << reader.Warning();
+  }
+
+  auto& attrib = reader.GetAttrib();
+  auto& shapes = reader.GetShapes();
+
+  std::vector<float3> vertices;
+  std::vector<int3> indices;
+
+  // Loop over shapes
+  for (size_t s = 0; s < shapes.size(); s++) {
+    // Loop over faces(polygon)
+    size_t index_offset = 0;
+    for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
+      size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
+
+      if (fv != 3) throw std::runtime_error("Error, expected only triangle faces");
+
+      // Loop over vertices in the face.
+      for (size_t v = 0; v < fv; v++) {
+        // access to vertex
+        tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+        tinyobj::real_t vx = attrib.vertices[3*size_t(idx.vertex_index)+0];
+        tinyobj::real_t vy = attrib.vertices[3*size_t(idx.vertex_index)+1];
+        tinyobj::real_t vz = attrib.vertices[3*size_t(idx.vertex_index)+2];
+
+        vertices.push_back(float3(vx, vy, vz));
+
+        // // Check if `normal_index` is zero or positive. negative = no normal data
+        // if (idx.normal_index >= 0) {
+        //   tinyobj::real_t nx = attrib.normals[3*size_t(idx.normal_index)+0];
+        //   tinyobj::real_t ny = attrib.normals[3*size_t(idx.normal_index)+1];
+        //   tinyobj::real_t nz = attrib.normals[3*size_t(idx.normal_index)+2];
+        // }
+
+        // // Check if `texcoord_index` is zero or positive. negative = no texcoord data
+        // if (idx.texcoord_index >= 0) {
+        //   tinyobj::real_t tx = attrib.texcoords[2*size_t(idx.texcoord_index)+0];
+        //   tinyobj::real_t ty = attrib.texcoords[2*size_t(idx.texcoord_index)+1];
+        // }
+
+        // Optional: vertex colors
+        // tinyobj::real_t red   = attrib.colors[3*size_t(idx.vertex_index)+0];
+        // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
+        // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
+      }
+      indices.push_back(int3(0 + index_offset, 1 + index_offset, 2 + index_offset));
+      index_offset += fv;
+
+      // per-face material
+      shapes[s].mesh.material_ids[f];
+    }
+  }
+
+  for (uint32_t i = 0; i < indices.size(); ++i) {
+    int3 triangle = indices[i];
+    if (triangle.x < 0 || triangle.x >= vertices.size()) throw std::runtime_error("invalid vertex");
+    if (triangle.y < 0 || triangle.y >= vertices.size()) throw std::runtime_error("invalid vertex");
+    if (triangle.z < 0 || triangle.z >= vertices.size()) throw std::runtime_error("invalid vertex");
+  }
+
 
   LBVHData lbvhParams = {};
-  lbvhParams.numPrims = mesh.indices.size();
+  lbvhParams.numPrims = indices.size();
   lbvhParams.numInner = lbvhParams.numPrims - 1;
   lbvhParams.numNodes = 2 * lbvhParams.numPrims - 1;
   
   // Input to LBVH construction
-  lbvhParams.triangles = gprtBufferGetHandle(mesh.indexBuffer);
-  lbvhParams.positions = gprtBufferGetHandle(mesh.vertexBuffer);
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
+  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, indices.size(), indices.data());
+  lbvhParams.triangles = gprtBufferGetHandle(indexBuffer);
+  lbvhParams.positions = gprtBufferGetHandle(vertexBuffer);
 
   // Output / intermediate buffers
   GPRTBufferOf<uint8_t> scratch = gprtDeviceBufferCreate<uint8_t>(context);
@@ -167,23 +246,43 @@ main(int ac, char **av) {
   gprtComputeLaunch1D(context, computeBounds, lbvhParams.numPrims);
   gprtComputeLaunch1D(context, computeCodes, lbvhParams.numPrims);
   gprtBufferSortPayload(context, mortonCodes, ids, scratch);
+  {
+    gprtBufferMap(mortonCodes);
+    gprtBufferMap(ids);
+    uint32_t *keys = gprtBufferGetPointer(mortonCodes);
+    uint32_t *values = gprtBufferGetPointer(ids);
+
+    for (int i = 0; i < lbvhParams.numPrims; ++i) {
+      if (i > 0 && keys[i] < keys[i - 1]) {
+        std::cout<<keys[i-1]<<std::endl;
+        std::cout<<keys[i]<<std::endl;
+        throw std::runtime_error("Error, keys out of order!");
+      }
+    }
+
+    gprtBufferUnmap(mortonCodes);
+    gprtBufferUnmap(ids);
+  }
+
   gprtComputeLaunch1D(context, makeNodes, lbvhParams.numNodes);
   gprtComputeLaunch1D(context, splitNodes, lbvhParams.numInner);
-  gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
-
   // {
   //   gprtBufferMap(nodes);
-  //   gprtBufferMap(aabbs);
+  //   // gprtBufferMap(aabbs);
   //   int4 *nodePtr = gprtBufferGetPointer(nodes);
-  //   float3 *aabbPtr = gprtBufferGetPointer(aabbs);
+  //   // float3 *aabbPtr = gprtBufferGetPointer(aabbs);
   //   for (uint32_t i = 0; i < lbvhParams.numNodes; ++i) {
   //     std::cout<< std::setw(4) << nodePtr[i].x << " " << std::setw(4) << nodePtr[i].y << " " << std::setw(4) << nodePtr[i].z << " " << std::setw(4) << nodePtr[i].w << " ";
-  //     std::cout<<"\taabb (" << aabbPtr[i*2+0].x << " " << aabbPtr[i*2+0].y << " " << aabbPtr[i*2+0].z << ")";
-  //     std::cout<<", (" << aabbPtr[i*2+1].x << " " << aabbPtr[i*2+1].y << " " << aabbPtr[i*2+1].z << ")"<< std::endl;
+  //     std::cout<<std::endl;
+  //     // std::cout<<"\taabb (" << aabbPtr[i*2+0].x << " " << aabbPtr[i*2+0].y << " " << aabbPtr[i*2+0].z << ")";
+  //     // std::cout<<", (" << aabbPtr[i*2+1].x << " " << aabbPtr[i*2+1].y << " " << aabbPtr[i*2+1].z << ")"<< std::endl;
   //   }
   //   gprtBufferUnmap(nodes);
-  //   gprtBufferUnmap(aabbs);
+  //   // gprtBufferUnmap(aabbs);
   // }
+
+  gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
+
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -312,7 +411,6 @@ main(int ac, char **av) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
 
-  mesh.cleanup();
   gprtComputeDestroy(computeBounds);
   gprtComputeDestroy(computeCodes);
   gprtComputeDestroy(makeNodes);

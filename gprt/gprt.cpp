@@ -9297,14 +9297,26 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
   ParallelSortCB  constantBufferData = { 0 };
 
   // Allocate the scratch buffers needed for radix sort
+  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+    return (value + alignment - 1) & ~(alignment - 1);
+  };
+  int offsetAlignment = context->deviceProperties.limits.minStorageBufferOffsetAlignment;
+
   uint64_t scratchBufferSize;
   uint64_t reducedScratchBufferSize;
   ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
+  scratchBufferSize = alignedSize(scratchBufferSize, offsetAlignment);
+  reducedScratchBufferSize = alignedSize(reducedScratchBufferSize, offsetAlignment);
+  
+  uint64_t keysSize = alignedSize(keys->size, offsetAlignment);
+  uint64_t valuesSize = ((bHasPayload) ? alignedSize(values->size, offsetAlignment) : 0);
+  
 
-  scratch->resize(keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
-  size_t valuesOffset = keys->size;
-  size_t scratchOffset = keys->size + ((bHasPayload) ? values->size : 0);
-  size_t reducedScratchOffset = keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize;
+  scratch->resize(keysSize + valuesSize + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
+  // All offsets must be a multiple of device limit VkPhysicalDeviceLimits::minStorageBufferOffseteAlignment
+  size_t valuesOffset = keysSize;
+  size_t scratchOffset = keysSize + valuesSize;
+  size_t reducedScratchOffset = keysSize + valuesSize + scratchBufferSize;
 
   uint32_t NumThreadgroupsToRun;
   uint32_t NumReducedThreadgroupsToRun;
@@ -9467,13 +9479,13 @@ void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRT
           
     // Finish doing everything and barrier for the next pass
     VkBuffer keysBuffer = (inputSet) ? scratch->buffer : keys->buffer;
-    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keys->size);
+    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keysSize);
     vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
     
     if (bHasPayload) {
       VkBuffer valsBuffer = (inputSet) ? scratch->buffer : values->buffer;
       VkDeviceSize offset = (inputSet) ? valuesOffset : 0;
-      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, values->size);
+      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, valuesSize);
       vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
     }
           

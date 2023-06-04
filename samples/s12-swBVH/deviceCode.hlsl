@@ -117,7 +117,7 @@ float smin(float a, float b, float k)
 // The boundary function
 float f(float3 pos)
 {
-    return float(frac((pos.x * 3.66) + 0.25f) > 0.5f);
+    return float(frac(((pos.z + pos.x) * 3.0) + 0.25f) > 0.6f);
 }
 
 float dot2( in float3 v ) { return dot(v,v); }
@@ -257,7 +257,7 @@ float2 interiorMap(in LBVHData lbvh, float3 pos)
             dist = d;
 
             // compute sign
-            float3 N = cross(normalize(p1 - p0), normalize(p2 - p0));
+            float3 N = -cross(normalize(p1 - p0), normalize(p2 - p0));
             s = sign(dot(N, normalize(pClosest - pos)));
         }
     }
@@ -320,7 +320,9 @@ float2 castRay(in LBVHData lbvh, float3 ro, float3 rd, float cuttingPlane)
     }
 
     // raymarch primitives
-    float2 tb = iBox(ro - float3(0.0f, 0.6, 0.0f), rd, float3(1.2, 0.6, 0.6));
+    float3 aabbMin = gprt::load<float3>(lbvh.aabbs, 0);
+    float3 aabbMax = gprt::load<float3>(lbvh.aabbs, 1);
+    float2 tb = iBox(ro - float3(0.0f, 1.0, 0.0f), rd, float3(2.0, 1.0, 1.0));
     if (tb.x < tb.y && tb.y > 0.f && tb.x < tmax) {
         tmin = max(tb.x, tmin);
         tmax = min(tb.y, tmax);
@@ -457,9 +459,10 @@ float3 randomOnSphere(inout LCGRand rng)
 float march(in LBVHData lbvh, inout LCGRand rng, float3 p)
 {
     float2 h = 0.0f.xx;
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 8; i++) {
         float3 param = p;
         h = interiorMap(lbvh, param);
+        h.x = abs(h.x);
         if (h.x < 0.001) {
             break;
         }
@@ -504,7 +507,10 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
     float3 col = render(lbvh, rayDesc.Origin, rayDesc.Direction, cuttingPlane, isInterior, pos);
     if (isInterior)
     {
-        float sum = march(lbvh, rng, pos);
+        float sum = 0.f;
+        for (int i = 0; i < 10; ++i)
+          sum += march(lbvh, rng, pos);
+        sum /= 10.f;
         col = hsvColorscale(sum);
     }
     bool redraw = true;
