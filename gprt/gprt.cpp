@@ -5038,7 +5038,7 @@ struct Context {
 #ifdef NDEBUG
     return false;
 #else
-    return true;
+    return false;
 #endif
   }
 

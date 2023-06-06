@@ -40,7 +40,12 @@ inline uint morton_encode3D(uint x, uint y, uint z)
   return separate_bits(x) | (separate_bits(y) << 1) | (separate_bits(z) << 2); 
 }
 
-int delta(uint num_codes, uint i, uint j, uint i_code, uint j_code) {
+uint clz(uint x) {
+  if (firstbithigh(x) == -1) return 32;
+  return 31 - firstbithigh(x);
+}
+
+int delta(gprt::Buffer morton_codes, uint num_codes, uint i, uint j) {
   // Karras' delta(i,j) function
   // Denotes the length of the longest common
   // prefix between keys k_i and k_j
@@ -49,55 +54,46 @@ int delta(uint num_codes, uint i, uint j, uint i_code, uint j_code) {
   // delta(i,j) = -1 when j not in [0,n-1]"
   if (j < 0 || j >= num_codes)
     return -1;
+  uint i_code = gprt::load<uint>(morton_codes, i);
+  uint j_code = gprt::load<uint>(morton_codes, j);
   uint xord = i_code ^ j_code;
   if (xord == 0)
-    return (31 - firstbithigh(i ^ j)) + 32;
+    return clz(i ^ j) + 32;
   else
-    return (31 - firstbithigh(xord));
+    return clz(xord);
 }
 
 // Find node range that an inner node overlaps
 int2 determine_range(
   gprt::Buffer morton_codes,
   int num_codes, int i, inout int split) {
+
   // Determine direction of the range (+1 or -1)
-  uint ch = gprt::load<uint>(morton_codes, i - 1);
-  uint ci = gprt::load<uint>(morton_codes, i + 0);
-  uint cj = gprt::load<uint>(morton_codes, i + 1);
-  int d = delta(num_codes, i, i + 1, ci, cj) >= delta(num_codes, i, i - 1, ci, ch) ? 1 : -1;
+  int d = delta(morton_codes, num_codes, i, i + 1) >= delta(morton_codes, num_codes, i, i - 1) ? 1 : -1;
 
   // Compute upper bound for the length of the range
-  uint cd = gprt::load<uint>(morton_codes, i - d);
-  int delta_min = delta(num_codes, i, i - d, ci, cd);
+  int delta_min = delta(morton_codes, num_codes, i, i - d);
   int l_max = 2;
-  uint cub = gprt::load<uint>(morton_codes, i + l_max * d);
-  while (delta(num_codes, i, i + l_max * d, ci, cub) > delta_min)
-  {
+  while (delta(morton_codes, num_codes, i, i + l_max * d) > delta_min)
     l_max *= 2;
-    cub = gprt::load<uint>(morton_codes, i + l_max * d);
-  }
 
   // Find the other end using binary search
   int l = 0;
   for (int t = l_max >> 1; t >= 1; t >>= 1)
-  {
-    uint clb = gprt::load<uint>(morton_codes, i + (l + t) * d);
-    if (delta(num_codes, i, i + (l + t) * d, ci, clb) > delta_min)
+    if (delta(morton_codes, num_codes, i, i + (l + t) * d) > delta_min)
       l += t;
-  }
 
   int j = i + l * d;
-  cj = gprt::load<uint>(morton_codes, j);
 
   // Find the split position using binary search
-  int delta_node = delta(num_codes, i, j, ci, cj);
+  int delta_node = delta(morton_codes, num_codes, i, j);
   int s = 0;
   float divf = 2.f;
   int t = ceil(l / divf);
   for(; t >= 1; divf *= 2.f, t = ceil(l / divf))
   {
     uint cs = gprt::load<uint>(morton_codes, i + (s + t) * d);
-    if (delta(num_codes, i, i + (s + t) * d, ci, cs) > delta_node)
+    if (delta(morton_codes, num_codes, i, i + (s + t) * d) > delta_node)
       s += t;
   }
 
@@ -197,12 +193,13 @@ GPRT_COMPUTE_PROGRAM(ComputePointBounds, (LBVHData, record), (1,1,1)) {
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
   getPointBounds(record.positions, primID, aabbMin, aabbMax);
-  gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
-  gprt::atomicMin32f(record.aabbs, 1, aabbMin.y);
-  gprt::atomicMin32f(record.aabbs, 2, aabbMin.z);
-  gprt::atomicMax32f(record.aabbs, 3, aabbMax.x);
-  gprt::atomicMax32f(record.aabbs, 4, aabbMax.y);
-  gprt::atomicMax32f(record.aabbs, 5, aabbMax.z);
+
+  aabbMin.x = gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
+  aabbMin.y = gprt::atomicMin32f(record.aabbs, 1, aabbMin.y);
+  aabbMin.z = gprt::atomicMin32f(record.aabbs, 2, aabbMin.z);
+  aabbMax.x = gprt::atomicMax32f(record.aabbs, 3, aabbMax.x);
+  aabbMax.y = gprt::atomicMax32f(record.aabbs, 4, aabbMax.y);
+  aabbMax.z = gprt::atomicMax32f(record.aabbs, 5, aabbMax.z);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (LBVHData, record), (1,1,1)) {
@@ -222,7 +219,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (LBVHData, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
-  getEdgeBounds(record.triangles, record.positions, primID, aabbMin, aabbMax);
+  getTriangleBounds(record.triangles, record.positions, primID, aabbMin, aabbMax);
   gprt::atomicMin32f(record.aabbs, 0, aabbMin.x);
   gprt::atomicMin32f(record.aabbs, 1, aabbMin.y);
   gprt::atomicMin32f(record.aabbs, 2, aabbMin.z);

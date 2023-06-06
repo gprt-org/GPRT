@@ -55,9 +55,17 @@ struct LBVHData {
 #ifndef GPRT_DEVICE
 extern GPRTProgram lbvhDeviceCode;
 
+typedef enum {
+    GPRT_LBVH_POINTS = 1,
+    GPRT_LBVH_EDGES = 2,
+    GPRT_LBVH_TRIANGLES = 4
+} GPRTLBVHType;
+
 struct GPRTLBVH {
-    LBVHData params;
+    LBVHData handle;
     GPRTModule module;
+
+    GPRTLBVHType type;
 
     GPRTBufferOf<uint32_t> mortonCodes;
     GPRTBufferOf<uint32_t> ids;
@@ -67,7 +75,11 @@ struct GPRTLBVH {
     GPRTBufferOf<uint8_t> scratch;
 
     GPRTComputeOf<LBVHData> computePointBounds;
+    GPRTComputeOf<LBVHData> computeEdgeBounds;
+    GPRTComputeOf<LBVHData> computeTriangleBounds;
     GPRTComputeOf<LBVHData> computePointMortonCodes;
+    GPRTComputeOf<LBVHData> computeEdgeMortonCodes;
+    GPRTComputeOf<LBVHData> computeTriangleMortonCodes;
     GPRTComputeOf<LBVHData> makeNodes;
     GPRTComputeOf<LBVHData> splitNodes;
     GPRTComputeOf<LBVHData> buildHierarchy;
@@ -76,6 +88,7 @@ struct GPRTLBVH {
 inline 
 GPRTLBVH gprtPointsLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, size_t count) {
     GPRTLBVH lbvh;
+    lbvh.type = GPRT_LBVH_POINTS;
     lbvh.module = gprtModuleCreate(context, lbvhDeviceCode);
 
     lbvh.computePointBounds = gprtComputeCreate<LBVHData>(context, lbvh.module, "ComputePointBounds");
@@ -83,35 +96,98 @@ GPRTLBVH gprtPointsLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices
     lbvh.makeNodes = gprtComputeCreate<LBVHData>(context, lbvh.module, "MakeNodes");
     lbvh.splitNodes = gprtComputeCreate<LBVHData>(context, lbvh.module, "SplitNodes");
     lbvh.buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvh.module, "BuildPointHierarchy");
+    
+    lbvh.handle.numPrims = count;
+    lbvh.handle.numNodes = lbvh.handle.numPrims * 2 - 1;
+    lbvh.handle.numInner = lbvh.handle.numPrims - 1;
+    lbvh.handle.positions = gprtBufferGetHandle(vertices);
 
-    lbvh.params.numPrims = count;
-    lbvh.params.numNodes = lbvh.params.numPrims * 2 - 1;
-    lbvh.params.numInner = lbvh.params.numPrims - 1;
-    lbvh.params.positions = gprtBufferGetHandle(vertices);
-
-    lbvh.mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvh.params.numPrims);
-    lbvh.ids = gprtDeviceBufferCreate<uint32_t>(context, lbvh.params.numPrims);
-    lbvh.nodes = gprtDeviceBufferCreate<int4>(context, lbvh.params.numNodes);
-    lbvh.aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvh.params.numNodes);
+    lbvh.mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvh.handle.numPrims);
+    lbvh.ids = gprtDeviceBufferCreate<uint32_t>(context, lbvh.handle.numPrims);
+    lbvh.nodes = gprtDeviceBufferCreate<int4>(context, lbvh.handle.numNodes);
+    lbvh.aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvh.handle.numNodes);
     lbvh.scratch = gprtDeviceBufferCreate<uint8_t>(context);
 
-    gprtComputeSetParameters(lbvh.computePointBounds, &lbvh.params);
-    gprtComputeSetParameters(lbvh.computePointMortonCodes, &lbvh.params);
-    gprtComputeSetParameters(lbvh.makeNodes, &lbvh.params);
-    gprtComputeSetParameters(lbvh.splitNodes, &lbvh.params);
-    gprtComputeSetParameters(lbvh.buildHierarchy, &lbvh.params);
+    lbvh.handle.mortonCodes = gprtBufferGetHandle(lbvh.mortonCodes);
+    lbvh.handle.ids = gprtBufferGetHandle(lbvh.ids);
+    lbvh.handle.nodes = gprtBufferGetHandle(lbvh.nodes);
+    lbvh.handle.aabbs = gprtBufferGetHandle(lbvh.aabbs);
+
+    gprtComputeSetParameters(lbvh.computePointBounds, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.computePointMortonCodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.makeNodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.splitNodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.buildHierarchy, &lbvh.handle);
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
     return lbvh;
 }
 
+inline 
+GPRTLBVH gprtTriangleLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, GPRTBufferOf<uint3> indices, size_t count) {
+    GPRTLBVH lbvh;
+    lbvh.type = GPRT_LBVH_TRIANGLES;
+    lbvh.module = gprtModuleCreate(context, lbvhDeviceCode);
+
+    lbvh.computeTriangleBounds = gprtComputeCreate<LBVHData>(context, lbvh.module, "ComputeTriangleBounds");
+    lbvh.computeTriangleMortonCodes = gprtComputeCreate<LBVHData>(context, lbvh.module, "ComputeTriangleMortonCodes");
+    lbvh.makeNodes = gprtComputeCreate<LBVHData>(context, lbvh.module, "MakeNodes");
+    lbvh.splitNodes = gprtComputeCreate<LBVHData>(context, lbvh.module, "SplitNodes");
+    lbvh.buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvh.module, "BuildTriangleHierarchy");
+
+    lbvh.handle.numPrims = count;
+    lbvh.handle.numNodes = lbvh.handle.numPrims * 2 - 1;
+    lbvh.handle.numInner = lbvh.handle.numPrims - 1;
+    lbvh.handle.positions = gprtBufferGetHandle(vertices);
+    lbvh.handle.triangles = gprtBufferGetHandle(indices);
+
+    lbvh.mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvh.handle.numPrims);
+    lbvh.ids = gprtDeviceBufferCreate<uint32_t>(context, lbvh.handle.numPrims);
+    lbvh.nodes = gprtDeviceBufferCreate<int4>(context, lbvh.handle.numNodes);
+    lbvh.aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvh.handle.numNodes);
+    lbvh.scratch = gprtDeviceBufferCreate<uint8_t>(context);
+
+    lbvh.handle.mortonCodes = gprtBufferGetHandle(lbvh.mortonCodes);
+    lbvh.handle.ids = gprtBufferGetHandle(lbvh.ids);
+    lbvh.handle.nodes = gprtBufferGetHandle(lbvh.nodes);
+    lbvh.handle.aabbs = gprtBufferGetHandle(lbvh.aabbs);
+    
+    gprtComputeSetParameters(lbvh.computeTriangleBounds, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.computeTriangleMortonCodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.makeNodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.splitNodes, &lbvh.handle);
+    gprtComputeSetParameters(lbvh.buildHierarchy, &lbvh.handle);
+
+    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+    return lbvh;
+}
+
+#include <limits.h>
+#include <intrin.h>
+#include <cassert>
 inline void gprtLBVHBuild(GPRTContext context, GPRTLBVH &lbvh) {
-    gprtComputeLaunch1D(context, lbvh.computePointBounds, lbvh.params.numPrims);
-    gprtComputeLaunch1D(context, lbvh.computePointMortonCodes, lbvh.params.numPrims);
+    typedef uint32_t uint;
+
+    // initialize root AABB
+    gprtBufferMap(lbvh.aabbs);
+    float3* aabbPtr = gprtBufferGetPointer(lbvh.aabbs);
+    aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
+    aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
+    gprtBufferUnmap(lbvh.aabbs);
+
+    if (lbvh.type == GPRT_LBVH_POINTS) {
+        gprtComputeLaunch1D(context, lbvh.computePointBounds, lbvh.handle.numPrims);
+        gprtComputeLaunch1D(context, lbvh.computePointMortonCodes, lbvh.handle.numPrims);
+    } else if (lbvh.type == GPRT_LBVH_TRIANGLES) {
+        gprtComputeLaunch1D(context, lbvh.computeTriangleBounds, lbvh.handle.numPrims);
+        gprtComputeLaunch1D(context, lbvh.computeTriangleMortonCodes, lbvh.handle.numPrims);
+    }
     gprtBufferSortPayload(context, lbvh.mortonCodes, lbvh.ids, lbvh.scratch);
-    gprtComputeLaunch1D(context, lbvh.makeNodes, lbvh.params.numNodes);
-    gprtComputeLaunch1D(context, lbvh.splitNodes, lbvh.params.numInner);
+    gprtComputeLaunch1D(context, lbvh.makeNodes, lbvh.handle.numNodes);
+    gprtComputeLaunch1D(context, lbvh.splitNodes, lbvh.handle.numInner);
+    gprtComputeLaunch1D(context, lbvh.buildHierarchy, lbvh.handle.numPrims);
 }
 
 inline void gprtLBVHDestroy(GPRTLBVH &lbvh) {

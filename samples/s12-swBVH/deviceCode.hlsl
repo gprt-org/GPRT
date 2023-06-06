@@ -508,9 +508,9 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
     if (isInterior)
     {
         float sum = 0.f;
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < 1; ++i)
           sum += march(lbvh, rng, pos);
-        sum /= 10.f;
+        sum /= 1.f;
         col = hsvColorscale(sum);
     }
     bool redraw = true;

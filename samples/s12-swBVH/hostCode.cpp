@@ -122,15 +122,8 @@ main(int ac, char **av) {
   // set up LBVH programs for a triangle-based SW tree. We
   // will use this SW tree for closest-point-on-triangle queries
   // -------------------------------------------------------
-
-  GPRTComputeOf<LBVHData> computeBounds = gprtComputeCreate<LBVHData>(context, lbvhModule, "ComputeTriangleBounds");
-  GPRTComputeOf<LBVHData> computeCodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "ComputeTriangleMortonCodes");
-  GPRTComputeOf<LBVHData> makeNodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "MakeNodes");
-  GPRTComputeOf<LBVHData> splitNodes = gprtComputeCreate<LBVHData>(context, lbvhModule, "SplitNodes");
-  GPRTComputeOf<LBVHData> buildHierarchy = gprtComputeCreate<LBVHData>(context, lbvhModule, "BuildTriangleHierarchy");
-
+  
   // Triangle mesh we'll build the SW BVH over
-
   std::string inputfile = ASSETS_DIRECTORY "utah_teapot.obj";
   tinyobj::ObjReaderConfig reader_config;
   reader_config.mtl_search_path = ASSETS_DIRECTORY "./"; // Path to material files
@@ -151,7 +144,7 @@ main(int ac, char **av) {
   auto& shapes = reader.GetShapes();
 
   std::vector<float3> vertices;
-  std::vector<int3> indices;
+  std::vector<uint3> indices;
 
   // Loop over shapes
   for (size_t s = 0; s < shapes.size(); s++) {
@@ -190,7 +183,7 @@ main(int ac, char **av) {
         // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
         // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
       }
-      indices.push_back(int3(0 + index_offset, 1 + index_offset, 2 + index_offset));
+      indices.push_back(uint3(0 + index_offset, 1 + index_offset, 2 + index_offset));
       index_offset += fv;
 
       // per-face material
@@ -199,73 +192,76 @@ main(int ac, char **av) {
   }
 
   for (uint32_t i = 0; i < indices.size(); ++i) {
-    int3 triangle = indices[i];
+    uint3 triangle = indices[i];
     if (triangle.x < 0 || triangle.x >= vertices.size()) throw std::runtime_error("invalid vertex");
     if (triangle.y < 0 || triangle.y >= vertices.size()) throw std::runtime_error("invalid vertex");
     if (triangle.z < 0 || triangle.z >= vertices.size()) throw std::runtime_error("invalid vertex");
   }
 
-
-  LBVHData lbvhParams = {};
-  lbvhParams.numPrims = indices.size();
-  lbvhParams.numInner = lbvhParams.numPrims - 1;
-  lbvhParams.numNodes = 2 * lbvhParams.numPrims - 1;
-  
-  // Input to LBVH construction
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, indices.size(), indices.data());
-  lbvhParams.triangles = gprtBufferGetHandle(indexBuffer);
-  lbvhParams.positions = gprtBufferGetHandle(vertexBuffer);
+  GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());  
+  GPRTLBVH lbvh = gprtTriangleLBVHCreate(context, vertexBuffer, indexBuffer, indices.size());
+  gprtLBVHBuild(context, lbvh);
 
-  // Output / intermediate buffers
-  GPRTBufferOf<uint8_t> scratch = gprtDeviceBufferCreate<uint8_t>(context);
-  GPRTBufferOf<uint32_t> mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
-  GPRTBufferOf<uint32_t> ids = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
-  GPRTBufferOf<int4> nodes = gprtDeviceBufferCreate<int4>(context, lbvhParams.numNodes);
-  GPRTBufferOf<float3> aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvhParams.numNodes);
-  lbvhParams.mortonCodes = gprtBufferGetHandle(mortonCodes);
-  lbvhParams.ids = gprtBufferGetHandle(ids);
-  lbvhParams.nodes = gprtBufferGetHandle(nodes);
-  lbvhParams.aabbs = gprtBufferGetHandle(aabbs);
+  // LBVHData lbvhParams = {};
+  // lbvhParams.numPrims = indices.size();
+  // lbvhParams.numInner = lbvhParams.numPrims - 1;
+  // lbvhParams.numNodes = 2 * lbvhParams.numPrims - 1;
+  
+  // // Input to LBVH construction
+  
+  // lbvhParams.triangles = gprtBufferGetHandle(indexBuffer);
+  // lbvhParams.positions = gprtBufferGetHandle(vertexBuffer);
 
-  // initialize root AABB
-  gprtBufferMap(aabbs);
-  float3* aabbPtr = gprtBufferGetPointer(aabbs);
-  aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = 1e20f;
-  aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -1e20f;
-  gprtBufferUnmap(aabbs);
+  // // Output / intermediate buffers
+  // GPRTBufferOf<uint8_t> scratch = gprtDeviceBufferCreate<uint8_t>(context);
+  // GPRTBufferOf<uint32_t> mortonCodes = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
+  // GPRTBufferOf<uint32_t> ids = gprtDeviceBufferCreate<uint32_t>(context, lbvhParams.numPrims);
+  // GPRTBufferOf<int4> nodes = gprtDeviceBufferCreate<int4>(context, lbvhParams.numNodes);
+  // GPRTBufferOf<float3> aabbs = gprtDeviceBufferCreate<float3>(context, 2 * lbvhParams.numNodes);
+  // lbvhParams.mortonCodes = gprtBufferGetHandle(mortonCodes);
+  // lbvhParams.ids = gprtBufferGetHandle(ids);
+  // lbvhParams.nodes = gprtBufferGetHandle(nodes);
+  // lbvhParams.aabbs = gprtBufferGetHandle(aabbs);
 
-  gprtComputeSetParameters(computeBounds,  &lbvhParams);
-  gprtComputeSetParameters(computeCodes,   &lbvhParams);
-  gprtComputeSetParameters(makeNodes,      &lbvhParams);
-  gprtComputeSetParameters(splitNodes,     &lbvhParams);
-  gprtComputeSetParameters(buildHierarchy, &lbvhParams);
+  // // initialize root AABB
+  // gprtBufferMap(aabbs);
+  // float3* aabbPtr = gprtBufferGetPointer(aabbs);
+  // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = 1e20f;
+  // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -1e20f;
+  // gprtBufferUnmap(aabbs);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+  // gprtComputeSetParameters(computeBounds,  &lbvhParams);
+  // gprtComputeSetParameters(computeCodes,   &lbvhParams);
+  // gprtComputeSetParameters(makeNodes,      &lbvhParams);
+  // gprtComputeSetParameters(splitNodes,     &lbvhParams);
+  // gprtComputeSetParameters(buildHierarchy, &lbvhParams);
 
-  gprtComputeLaunch1D(context, computeBounds, lbvhParams.numPrims);
-  gprtComputeLaunch1D(context, computeCodes, lbvhParams.numPrims);
-  gprtBufferSortPayload(context, mortonCodes, ids, scratch);
-  {
-    gprtBufferMap(mortonCodes);
-    gprtBufferMap(ids);
-    uint32_t *keys = gprtBufferGetPointer(mortonCodes);
-    uint32_t *values = gprtBufferGetPointer(ids);
+  // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
-    for (int i = 0; i < lbvhParams.numPrims; ++i) {
-      if (i > 0 && keys[i] < keys[i - 1]) {
-        std::cout<<keys[i-1]<<std::endl;
-        std::cout<<keys[i]<<std::endl;
-        throw std::runtime_error("Error, keys out of order!");
-      }
-    }
+  // gprtComputeLaunch1D(context, computeBounds, lbvhParams.numPrims);
+  // gprtComputeLaunch1D(context, computeCodes, lbvhParams.numPrims);
+  // gprtBufferSortPayload(context, mortonCodes, ids, scratch);
+  // {
+  //   gprtBufferMap(mortonCodes);
+  //   gprtBufferMap(ids);
+  //   uint32_t *keys = gprtBufferGetPointer(mortonCodes);
+  //   uint32_t *values = gprtBufferGetPointer(ids);
 
-    gprtBufferUnmap(mortonCodes);
-    gprtBufferUnmap(ids);
-  }
+  //   for (int i = 0; i < lbvhParams.numPrims; ++i) {
+  //     if (i > 0 && keys[i] < keys[i - 1]) {
+  //       std::cout<<keys[i-1]<<std::endl;
+  //       std::cout<<keys[i]<<std::endl;
+  //       throw std::runtime_error("Error, keys out of order!");
+  //     }
+  //   }
 
-  gprtComputeLaunch1D(context, makeNodes, lbvhParams.numNodes);
-  gprtComputeLaunch1D(context, splitNodes, lbvhParams.numInner);
+  //   gprtBufferUnmap(mortonCodes);
+  //   gprtBufferUnmap(ids);
+  // }
+
+  // gprtComputeLaunch1D(context, makeNodes, lbvhParams.numNodes);
+  // gprtComputeLaunch1D(context, splitNodes, lbvhParams.numInner);
   // {
   //   gprtBufferMap(nodes);
   //   // gprtBufferMap(aabbs);
@@ -281,7 +277,7 @@ main(int ac, char **av) {
   //   // gprtBufferUnmap(aabbs);
   // }
 
-  gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
+  // gprtComputeLaunch1D(context, buildHierarchy, lbvhParams.numPrims);
 
 
   // -------------------------------------------------------
@@ -302,7 +298,7 @@ main(int ac, char **av) {
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
   rayGenData->accumBuffer = gprtBufferGetHandle(accumBuffer);
 
-  rayGenData->lbvh = lbvhParams;
+  rayGenData->lbvh = lbvh.handle;
 
   rayGenData->cuttingPlane = 0.f;
 
@@ -410,12 +406,6 @@ main(int ac, char **av) {
 
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
-
-  gprtComputeDestroy(computeBounds);
-  gprtComputeDestroy(computeCodes);
-  gprtComputeDestroy(makeNodes);
-  gprtComputeDestroy(splitNodes);
-  gprtComputeDestroy(buildHierarchy);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 
