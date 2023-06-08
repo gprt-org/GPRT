@@ -30,6 +30,7 @@ embed_devicecode(
 )
 
 add_executable(s00_rayGenOnly hostCode.cpp)
+
 target_link_libraries(s00_rayGenOnly
   PRIVATE
     s00_deviceCode

@@ -22,11 +22,10 @@
 
 #include "gprt.h"
 
-// note! HLSL aligns to float4 boundaries!
+// note! HLSL aligns to 16-byte boundaries!
 struct RayGenData {
   // pointers are represented using uint64_t
-  alignas(16) gprt::Buffer frameBuffer;
-
   alignas(16) float3 color0;   // note the 16 byte alignment (not 12 byte) here
   alignas(16) float3 color1;   // note the 16 byte alignment (not 12 byte) here
+  alignas(16) gprt::Buffer frameBuffer;
 };
