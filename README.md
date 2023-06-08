@@ -4,6 +4,8 @@
 
 # GPRT (General Purpose Raytracing Toolkit)
 
+![Sample "Attribute Aware RBFs" images](docs/source/images/papers/vis2023.jpg)
+
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 
 ## Dependencies
