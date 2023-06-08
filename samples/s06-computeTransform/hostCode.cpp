@@ -94,7 +94,8 @@ template <typename T> struct Mesh {
 
     // Build the bottom level acceleration structure
     accel = gprtTrianglesAccelCreate(context, 1, &geometry);
-    gprtAccelBuild(context, accel);
+    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/true);
+    // gprtAccelCompact(context, accel);
   };
 
   void cleanupMesh() {
@@ -144,11 +145,6 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Note, we'll need to call this again after creating our acceleration
-  // structures, as acceleration structures will introduce new shader
-  // binding table records to the pipeline.
-  gprtBuildPipeline(context);
-
   // ------------------------------------------------------------------
   // bottom level mesh instances
   // ------------------------------------------------------------------
@@ -194,7 +190,7 @@ main(int ac, char **av) {
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -206,18 +202,13 @@ main(int ac, char **av) {
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build *SBT* required to trace the groups
-  // ##################################################################
-
-  // re-build the pipeline to account for newly introduced geometry
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -283,18 +274,12 @@ main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // update time to move instance transforms. Then, rebuild only instance
+    // update time to move instance transforms. Then, update only instance
     // accel.
     transformData->now = float(gprtGetTime(context));
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, numInstances);
-    gprtAccelBuild(context, world);
-
-    rayGenData->world = gprtAccelGetHandle(world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
-
-    // Note! we don't need to rebuild the pipeline here, since no geometry was
-    // made or destroyed, only updated.
+    gprtAccelUpdate(context, world);
 
     // Now, trace rays
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);

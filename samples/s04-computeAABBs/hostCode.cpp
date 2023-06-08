@@ -101,11 +101,6 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
-  // Note, we'll need to call this again after creating our acceleration
-  // structures, as acceleration structures will introduce new shader
-  // binding table records to the pipeline.
-  gprtBuildPipeline(context);
-
   // ##################################################################
   // set the parameters for our compute kernel
   // ##################################################################
@@ -138,10 +133,10 @@ main(int ac, char **av) {
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
-  gprtAccelBuild(context, aabbAccel);
+  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -160,12 +155,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-
-  // re-build the pipeline to account for newly introduced geometry
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################

@@ -93,6 +93,9 @@ ELSE()
   message(STATUS ${Vulkan_LIBRARY})
 ENDIF()
 
+# Find Vulkan Memory Allocator
+add_subdirectory(vma)
+
 # Find STB Image
 add_subdirectory(stb_image)
 
@@ -109,6 +112,29 @@ add_subdirectory(stb_image)
     endif()
   endif()
 # endif()
+
+# Find Imgui
+add_library(imgui
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.cpp
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_demo.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_draw.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_widgets.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_tables.cpp
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_vulkan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp)
+
+target_include_directories(imgui PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
+  ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include
+  ${Vulkan_INCLUDE_DIR}
+)
+
+target_link_libraries(${VULKAN_LIBRARY} glfw)
 
 # Find mesh generator
 if (GPRT_BUILD_SAMPLES)

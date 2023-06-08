@@ -29,6 +29,9 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
+// The framework we'll use to create a user interface
+#include "imgui.h"
+
 #define LOG(message)                                                                                                   \
   std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
@@ -38,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s10_deviceCode;
+extern GPRTProgram s11_deviceCode;
 
 // Vertices are the points that define our triangles
 const int NUM_TRI_VERTICES = 3;
@@ -72,11 +75,23 @@ float3 backdropVertices[NUM_BACKDROP_VERTICES] = {
 const int NUM_BACKDROP_INDICES = 2;
 int3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 
+// These vertices and indices are used to define two triangles
+// that will act as our overlaying GUI
+const int NUM_GUI_VERTICES = 4;
+float3 guiVertices[NUM_GUI_VERTICES] = {
+    {-1.f, -1.f, 0.f},
+    {+1.f, -1.f, 0.f},
+    {-1.f, +1.f, 0.f},
+    {+1.f, +1.f, 0.f},
+};
+
+const int NUM_GUI_INDICES = 2;
+int3 guiIndices[NUM_GUI_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s10-rasterization.png";
+const char *outFileName = "s11-imgui.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.f, 0.f, -4.f};
@@ -92,9 +107,9 @@ main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S10 Rasterization");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S11 ImGui");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s11_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -108,6 +123,10 @@ main(int ac, char **av) {
   gprtGeomTypeSetVertexProg(backdropGeomType, 0, module, "backgroundVertex");
   gprtGeomTypeSetPixelProg(backdropGeomType, 0, module, "backgroundPixel");
 
+  GPRTGeomTypeOf<GUIData> guiGeomType = gprtGeomTypeCreate<GUIData>(context, GPRT_TRIANGLES);
+  gprtGeomTypeSetVertexProg(guiGeomType, 0, module, "GUIVertex");
+  gprtGeomTypeSetPixelProg(guiGeomType, 0, module, "GUIPixel");
+
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
@@ -115,12 +134,19 @@ main(int ac, char **av) {
   // Setup pixel frame buffer
   GPRTTextureOf<uint32_t> colorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
-
   GPRTTextureOf<float> depthAttachment = gprtDeviceTextureCreate<float>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
-
   gprtGeomTypeSetRasterAttachments(backdropGeomType, 0, colorAttachment, depthAttachment);
   gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorAttachment, depthAttachment);
+  gprtGeomTypeSetRasterAttachments(guiGeomType, 0, colorAttachment, depthAttachment);
+
+  // This is new, setup GUI frame buffer. We'll rasterize the GUI to this texture, then composite the GUI on top of the
+  // rendered scene.
+  GPRTTextureOf<uint32_t> guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
+  GPRTTextureOf<float> guiDepthAttachment = gprtDeviceTextureCreate<float>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
+  gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   LOG("building geometries ...");
   GPRTBufferOf<float3> triVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triVertices);
@@ -146,6 +172,17 @@ main(int ac, char **av) {
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
   bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 
+  GPRTBufferOf<float3> guiVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_GUI_VERTICES, guiVertices);
+  GPRTBufferOf<int3> guiIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_GUI_INDICES, guiIndices);
+  GPRTGeomOf<GUIData> guiGeom = gprtGeomCreate<GUIData>(context, guiGeomType);
+  gprtTrianglesSetVertices(guiGeom, guiVertexBuffer, NUM_GUI_VERTICES);
+  gprtTrianglesSetIndices(guiGeom, guiIndexBuffer, NUM_GUI_INDICES);
+  GUIData *guiData = gprtGeomGetParameters(guiGeom);
+  guiData->vertex = gprtBufferGetHandle<float3>(guiVertexBuffer);
+  guiData->index = gprtBufferGetHandle<int3>(guiIndexBuffer);
+  guiData->texture = gprtTextureGetHandle(guiColorAttachment);
+  guiData->resolution = float2(fbSize.x, fbSize.y);
+
   gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
 
   // ##################################################################
@@ -158,6 +195,9 @@ main(int ac, char **av) {
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
   do {
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::NewFrame();
+
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
@@ -170,7 +210,7 @@ main(int ac, char **av) {
 
     // If we click the mouse, we should rotate the camera
     // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame) {
+    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -203,6 +243,7 @@ main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
     }
 
+    // Draw our background and triangle
     gprtTextureClear(depthAttachment);
     gprtTextureClear(colorAttachment);
 
@@ -212,6 +253,22 @@ main(int ac, char **av) {
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
     gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data());
+    gprtTextureClear(depthAttachment);
+
+    // Set our ImGui state
+    bool show_demo_window = true;
+    if (show_demo_window)
+      ImGui::ShowDemoWindow(&show_demo_window);
+    ImGui::EndFrame();
+
+    // Rasterize our gui
+    gprtTextureClear(guiDepthAttachment);
+    gprtTextureClear(guiColorAttachment);
+    gprtGuiRasterize(context);
+
+    // Finally, composite the gui onto the screen.
+    std::vector<GPRTGeomOf<GUIData>> drawList3 = {guiGeom};
+    gprtGeomTypeRasterize(context, guiGeomType, drawList3.size(), drawList3.data());
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);
@@ -237,13 +294,21 @@ main(int ac, char **av) {
   gprtBufferDestroy(backdropVertexBuffer);
   gprtBufferDestroy(backdropIndexBuffer);
 
+  gprtBufferDestroy(guiVertexBuffer);
+  gprtBufferDestroy(guiIndexBuffer);
+
   gprtTextureDestroy(colorAttachment);
   gprtTextureDestroy(depthAttachment);
 
+  gprtTextureDestroy(guiColorAttachment);
+  gprtTextureDestroy(guiDepthAttachment);
+
   gprtGeomDestroy(bgGeom);
   gprtGeomDestroy(trianglesGeom);
+  gprtGeomDestroy(guiGeom);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtGeomTypeDestroy(backdropGeomType);
+  gprtGeomTypeDestroy(guiGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

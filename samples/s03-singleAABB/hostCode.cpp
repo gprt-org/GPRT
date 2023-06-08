@@ -116,18 +116,14 @@ main(int ac, char **av) {
 
   // Note, we must create an "AABB" accel rather than a triangles accel.
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
-  gprtAccelBuild(context, aabbAccel);
+  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // triangle and AABB accels can be combined in a top level tree
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

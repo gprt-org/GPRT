@@ -55,3 +55,5 @@ sudo apt install xorg-dev libxinerama-dev libglu1-mesa-dev freeglut3-dev mesa-co
 ```
 
 along with the [Vulkan SDK](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started_ubuntu.html).
+
+Note: if using Ubuntu 22 with Wayland (or other distros for that matter), the above x11 dev packages still work via xwayland.

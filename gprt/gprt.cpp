@@ -62,25 +62,50 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+// For user interface
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
+// For advanced vulkan memory allocation
+#define VMA_VULKAN_VERSION 1002000   // Vulkan 1.2
+#define VMA_IMPLEMENTATION
+#include "vma/vk_mem_alloc.h"
+
+// For FFX radix sort
+#include "sort.h"
+
+/** @brief A collection of features that are requested to support before
+ * creating a GPRT context. These features might not be available on all
+ * platforms.
+ */
+static struct RequestedFeatures {
+  /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
+  bool window = false;
+  struct Window {
+    uint32_t initialWidth;
+    uint32_t initialHeight;
+    std::string title;
+  } windowProperties;
+
+  uint32_t numRayTypes = 1;
+
+  /*! returns whether logging is enabled */
+  inline static bool logging() {
+#ifdef NDEBUG
+    return false;
+#else
+    return true;
+#endif
+  }
+} requestedFeatures;
+
 #if defined(_MSC_VER)
 //&& !defined(__PRETTY_FUNCTION__)
 #define __PRETTY_FUNCTION__ __FUNCTION__
 #endif
 
-#if 1
-#define LOG_API_CALL() /* ignore */
-#else
-#define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
-#endif
-
-#define LOG(message)                                                                                                   \
-  if (Context::logging())                                                                                              \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt: " << message << GPRT_TERMINAL_DEFAULT << std::endl
-
-#define LOG_OK(message)                                                                                                \
-  if (Context::logging())                                                                                              \
-  std::cout << GPRT_TERMINAL_BLUE << "#gprt: " << message << GPRT_TERMINAL_DEFAULT << std::endl
-
+// For error handling
 namespace detail {
 inline static std::string
 backtrace() {
@@ -132,6 +157,27 @@ gprtRaise_impl(std::string str) {
     std::cerr << std::string(__PRETTY_FUNCTION__) << " not implemented" << std::endl;                                  \
     assert(false);                                                                                                     \
   };
+
+#if 1
+#define LOG_API_CALL() /* ignore */
+#else
+#define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
+#endif
+
+#define LOG_INFO(message)                                                                                              \
+  if (RequestedFeatures::logging())                                                                                    \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
+
+#define LOG_WARNING(message)                                                                                           \
+  if (RequestedFeatures::logging())                                                                                    \
+  std::cout << GPRT_TERMINAL_YELLOW << "#gprt warn:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
+
+#define LOG_ERROR(message)                                                                                             \
+  {                                                                                                                    \
+    if (RequestedFeatures::logging())                                                                                  \
+      std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
+    GPRT_RAISE(message)                                                                                                \
+  }
 
 std::string
 errorString(VkResult errorCode) {
@@ -228,6 +274,9 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 // (bounds programs, transform programs...)
 extern std::map<std::string, std::vector<uint8_t>> gprtDeviceCode;
 
+extern std::map<std::string, std::vector<uint8_t>> sortDeviceCode;
+
+
 // forward declarations...
 struct Geom;
 struct GeomType;
@@ -243,10 +292,13 @@ PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructure;
 PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizes;
 PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddress;
 PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructures;
+PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructure;
 PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructures;
+PFN_vkCopyAccelerationStructureKHR vkCopyAccelerationStructure;
 PFN_vkCmdTraceRaysKHR vkCmdTraceRays;
 PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandles;
 PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelines;
+PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresProperties;
 
 PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
@@ -286,7 +338,10 @@ struct Module {
 };
 
 struct Buffer {
+  static std::vector<Buffer *> buffers;
+
   VkDevice device;
+  VmaAllocator allocator;
   VkPhysicalDeviceMemoryProperties memoryProperties;
   VkCommandBuffer commandBuffer;
   VkQueue queue;
@@ -294,38 +349,37 @@ struct Buffer {
   /** @brief Usage flags to be filled by external source at buffer creation */
   VkBufferUsageFlags usageFlags;
 
-  /** @brief Memory property flags to be filled by external source at buffer
-   * creation */
-  VkMemoryPropertyFlags memoryPropertyFlags;
-
   bool hostVisible;
 
   VkBuffer buffer = VK_NULL_HANDLE;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  VkDeviceAddress address = 0;
+  VmaAllocation allocation;
+  VkDeviceAddress deviceAddress = 0;
+
+  // Some operations require buffers to be in a separate array.
+  // Instead, we make our own virtual "sampler address space".
+  VkDeviceAddress virtualAddress = -1;
 
   struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VmaAllocation allocation;
   } stagingBuffer;
 
   VkDeviceSize size = 0;
-  VkDeviceSize alignment = 0;
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
+    if (mapped) return VK_SUCCESS;
+
     if (hostVisible) {
-      if (mapped)
-        return VK_SUCCESS;
-      else
-        return vkMapMemory(device, memory, offset, size, 0, &mapped);
+      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(allocator, allocation, &mapped);
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       if (err)
-        GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
@@ -336,39 +390,39 @@ struct Buffer {
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
-        GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.pWaitSemaphores = nullptr;
+      submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
       submitInfo.pCommandBuffers = &commandBuffer;
       submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      submitInfo.pSignalSemaphores = nullptr;
 
       err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
-        GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
       if (err)
-        GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      // todo, transfer device data to host
-      if (mapped)
-        return VK_SUCCESS;
-      else
-        return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
+      vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(allocator, stagingBuffer.allocation, &mapped);
     }
   }
 
   void unmap() {
+    if (!mapped) return;
+    
     if (hostVisible) {
       if (mapped) {
-        vkUnmapMemory(device, memory);
+        vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaUnmapMemory(allocator, allocation);
         mapped = nullptr;
       }
     } else {
@@ -377,7 +431,7 @@ struct Buffer {
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       if (err)
-        GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
@@ -388,73 +442,46 @@ struct Buffer {
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
-        GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.pWaitSemaphores = nullptr;
+      submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
       submitInfo.pCommandBuffers = &commandBuffer;
       submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      submitInfo.pSignalSemaphores = nullptr;
 
       err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
-        GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
       if (err)
-        GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      // todo, transfer device data to device
-      if (mapped) {
-        vkUnmapMemory(device, stagingBuffer.memory);
-        mapped = nullptr;
-      }
+      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      vmaUnmapMemory(allocator, stagingBuffer.allocation);
+      mapped = nullptr;
     }
   }
 
-  // VkResult bind(VkDeviceSize offset = 0)
-  // {
-  //   return vkBindBufferMemory(device, buffer, memory, offset);
-  // }
-
-  // void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset
-  // = 0)
-  // {
-  //   descriptor.offset = offset;
-  //   descriptor.buffer = buffer;
-  //   descriptor.range = size;
-  // }
-
-  // void copyTo(void* data, VkDeviceSize size)
-  // {
-  //   assert(mapped);
-  //   memcpy(mapped, data, size);
-  // }
-
-  /*! Guarantees that the host's writes are available to the device */
-  VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
-    VkMappedMemoryRange mappedRange = {};
-    mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mappedRange.memory = memory;
-    mappedRange.offset = offset;
-    mappedRange.size = size;
-    return vkFlushMappedMemoryRanges(device, 1, &mappedRange);
+  // flushes from host to device
+  void flush() {
+    if (hostVisible) {
+      vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+    } else {
+      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+    }
   }
 
-  /*! Guarantees that the buffer is written to by any pending device operations
-   */
-  VkResult invalidate(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
-    VkMappedMemoryRange mappedRange = {};
-    mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    mappedRange.memory = memory;
-    mappedRange.offset = offset;
-    mappedRange.size = size;
-    return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
+  // invalidates from device back to host
+  void invalidate() {
+    // device never directly writes to staging buffer
+    vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
   }
 
   VkDeviceAddress getDeviceAddress() {
@@ -467,34 +494,288 @@ struct Buffer {
 
   /*! Calls vkDestroy on the buffer, and frees underlying memory */
   void destroy() {
+    // Free sampler slot for use by subsequently made buffers
+    Buffer::buffers[virtualAddress] = nullptr;
+
+    unmap();
+
     if (buffer) {
-      vkDestroyBuffer(device, buffer, nullptr);
+      vmaDestroyBuffer(allocator, buffer, allocation);
+      // vkDestroyBuffer(device, buffer, nullptr);
       buffer = VK_NULL_HANDLE;
     }
-    if (memory) {
-      vkFreeMemory(device, memory, nullptr);
-      memory = VK_NULL_HANDLE;
-    }
     if (stagingBuffer.buffer) {
-      vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
     }
-    if (stagingBuffer.memory) {
-      vkFreeMemory(device, stagingBuffer.memory, nullptr);
-      stagingBuffer.memory = VK_NULL_HANDLE;
+  }
+
+  /* Sets all bytes to 0 */
+  void clear() {
+    if (hostVisible) {
+      if (!mapped)
+        map();
+      memset(mapped, 0, size);
+    } else {
+      map();
+      memset(mapped, 0, size);
+      unmap();
     }
   }
+
+  void resize(size_t bytes, bool preserveContents) {
+    // If the size is already okay, do nothing
+    if (size == bytes)
+      return;
+
+    if (hostVisible) {
+      // if we are host visible, we need to create a new buffer before releasing the
+      // previous one to preserve values...
+
+      if (preserveContents) {
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+
+        VkBuffer newBuffer;
+        VmaAllocation newAllocation;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
+
+        // Copy contents from old to new
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+
+        // Free old buffer
+        vmaUnmapMemory(allocator, allocation);
+        vmaDestroyBuffer(allocator, buffer, allocation);
+
+        // Assign new buffer
+        buffer = newBuffer;
+        allocation = newAllocation;
+        size = bytes;
+        deviceAddress = getDeviceAddress();
+        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaMapMemory(allocator, allocation, &mapped);
+      } else {
+        // Not preserving contents, we can delete old host buffer before making new one
+
+        // Free old buffer
+        vmaUnmapMemory(allocator, allocation);
+        vmaDestroyBuffer(allocator, buffer, allocation);
+
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        vmaMapMemory(allocator, allocation, &mapped);
+        size = bytes;
+        deviceAddress = getDeviceAddress();
+      }
+
+    } else {
+      // if we are device visible, we can use the staging buffer to temporarily hold previous values, and free
+      // the old buffer before creating a new buffer.
+      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+
+      // Copy existing contents into staging buffer
+      if (preserveContents) {
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+      }
+
+      // Release old device buffer
+      vmaDestroyBuffer(allocator, buffer, allocation);
+
+      {
+        // Create the new buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+      }
+
+      if (preserveContents) {
+        // Copy contents from old staging buffer to new buffer
+        VkResult err;
+        VkCommandBufferBeginInfo cmdBufInfo{};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        if (err)
+          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+
+        VkBufferCopy region;
+        region.srcOffset = 0;
+        region.dstOffset = 0;
+        region.size = std::min(size, bytes);
+        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+
+        err = vkEndCommandBuffer(commandBuffer);
+        if (err)
+          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
+
+        VkSubmitInfo submitInfo;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pNext = NULL;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pSignalSemaphores = nullptr;
+
+        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (err)
+          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
+
+        err = vkQueueWaitIdle(queue);
+        if (err)
+          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+      }
+
+      size = bytes;
+      deviceAddress = getDeviceAddress();
+
+      // Release old staging buffer
+      if (mapped) {
+        vmaUnmapMemory(allocator, stagingBuffer.allocation);
+      }
+      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      {
+        // Create the new staging buffer handle
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.usage = usageFlags;
+        bufferCreateInfo.size = bytes;
+
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+                                        &stagingBuffer.allocation, nullptr));
+      }
+
+      // if buffer was previously mapped, restore mapped state
+      if (mapped) {
+        mapped = nullptr;
+        map();
+      }
+    }
+  }
+
+  size_t getSize() { return (size_t) size; }
 
   /* Default Constructor */
   Buffer(){};
 
   ~Buffer(){};
 
-  Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer _commandBuffer, VkQueue _queue,
-         VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size,
-         void *data = nullptr) {
+  Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator,
+         VkCommandBuffer _commandBuffer, VkQueue _queue, VkBufferUsageFlags _usageFlags,
+         VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, void *data = nullptr) {
+
+    // Hunt for an existing free virtual address for this buffer
+    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
+      if (Buffer::buffers[i] == nullptr) {
+        Buffer::buffers[i] = this;
+        virtualAddress = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current buffer list, allocate a new
+    // one
+    if (virtualAddress == -1) {
+      Buffer::buffers.push_back(this);
+      virtualAddress = buffers.size() - 1;
+    }
+
     device = logicalDevice;
-    memoryPropertyFlags = _memoryPropertyFlags;
+    allocator = _allocator;
     usageFlags = _usageFlags;
     size = _size;
     commandBuffer = _commandBuffer;
@@ -503,44 +784,28 @@ struct Buffer {
     // Check if the buffer can be mapped to a host pointer.
     // If the buffer isn't host visible, this is buffer and requires
     // an additional staging buffer...
-    if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
+    if ((_memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
       hostVisible = true;
     else
       hostVisible = false;
-
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-
-    auto getMemoryType = [this](uint32_t typeBits, VkMemoryPropertyFlags properties,
-                                VkBool32 *memTypeFound = nullptr) -> uint32_t {
-      // memory type bits is a bitmask and contains one bit set for every
-      // supported memory type. Bit i is set if and only if the memory type i in
-      // the memory properties is supported.
-      for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
-        if ((typeBits & 1) == 1) {
-          if ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            if (memTypeFound) {
-              *memTypeFound = true;
-            }
-            return i;
-          }
-        }
-        typeBits >>= 1;
-      }
-
-      if (memTypeFound) {
-        *memTypeFound = false;
-        return 0;
-      } else {
-        GPRT_RAISE("Could not find a matching memory type");
-      }
-    };
 
     // Create the buffer handle
     VkBufferCreateInfo bufferCreateInfo{};
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.usage = usageFlags;
     bufferCreateInfo.size = size;
-    VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
+
+    VmaAllocationCreateInfo allocInfo = {};
+    if (hostVisible) {
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+      allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    } else {
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    }
+
+    VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+
+    // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
 
     if (!hostVisible) {
       const VkBufferUsageFlags bufferUsageFlags =
@@ -554,75 +819,30 @@ struct Buffer {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
-      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
-    }
+      // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
-    // Create the memory backing up the buffer handle
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(logicalDevice, buffer, &memReqs);
-    VkMemoryAllocateInfo memAllocInfo{};
-    memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memAllocInfo.allocationSize = memReqs.size;
-    // Find a memory type index that fits the properties of the buffer
-    memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-    // If the buffer has VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT set we also
-    // need to enable the appropriate flag during allocation
-    VkMemoryAllocateFlagsInfoKHR allocFlagsInfo{};
-    if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-      allocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO_KHR;
-      allocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR;
-      memAllocInfo.pNext = &allocFlagsInfo;
-    }
-    VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
-    alignment = memReqs.alignment;
-
-    // Attach the memory to the buffer object
-    VkResult err = vkBindBufferMemory(device, buffer, memory, /* offset */ 0);
-    if (err)
-      GPRT_RAISE("failed to bind buffer memory! : \n" + errorString(err));
-
-    if (!hostVisible) {
-      const VkMemoryPropertyFlags memoryPropertyFlags =
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
-                                                  // vkMapMemory
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
-                                                  // "invalidate"  not needed
-
-      // Create the memory backing up the staging buffer handle
-      VkMemoryRequirements memReqs;
-      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
-      VkMemoryAllocateInfo memAllocInfo{};
-      memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-      memAllocInfo.allocationSize = memReqs.size;
-      // Find a memory type index that fits the properties of the buffer
-      memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
-
-      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
-
-      // Attach the memory to the buffer object
-      VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
-      if (err)
-        GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
+      VmaAllocationCreateInfo allocInfo = {};
+      allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+      allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+                                      &stagingBuffer.allocation, nullptr));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
     // copy over the data
     if (data != nullptr) {
-      VK_CHECK_RESULT(map());
+      map();
       memcpy(mapped, data, size);
-      if ((memoryPropertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
-        flush();
       unmap();
     }
 
-    //// Initialize a default descriptor that covers the whole buffer size
-    // setupDescriptor();
-
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
-      address = getDeviceAddress();
+      deviceAddress = getDeviceAddress();
   }
 };
+
+std::vector<Buffer *> Buffer::buffers;
 
 inline size_t
 gprtFormatGetSize(GPRTFormat format) {
@@ -834,7 +1054,7 @@ struct Texture {
       // VkCommandBufferBeginInfo cmdBufInfo{};
       // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       // err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-      // if (err) GPRT_RAISE("failed to begin command buffer for texture map! :
+      // if (err) LOG_ERROR("failed to begin command buffer for texture map! :
       // \n" + errorString(err));
 
       // // transition device to a transfer source format
@@ -866,7 +1086,7 @@ struct Texture {
       // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
       // err = vkEndCommandBuffer(commandBuffer);
-      // if (err) GPRT_RAISE("failed to end command buffer for texture map! :
+      // if (err) LOG_ERROR("failed to end command buffer for texture map! :
       // \n" + errorString(err));
 
       // VkSubmitInfo submitInfo;
@@ -882,11 +1102,11 @@ struct Texture {
       // submitInfo.pSignalSemaphores =
       // nullptr;//&writeImageSemaphoreHandleList[currentImageIndex]}; err =
       // vkQueueSubmit(queue, 1, &submitInfo, nullptr); if (err)
-      // GPRT_RAISE("failed to submit to queue for texture map! : \n" +
+      // LOG_ERROR("failed to submit to queue for texture map! : \n" +
       // errorString(err));
 
       // err = vkQueueWaitIdle(queue);
-      // if (err) GPRT_RAISE("failed to wait for queue idle for texture map! :
+      // if (err) LOG_ERROR("failed to wait for queue idle for texture map! :
       // \n" + errorString(err));
 
       // todo, transfer device data to host
@@ -912,7 +1132,7 @@ struct Texture {
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       if (err)
-        GPRT_RAISE("failed to begin command buffer for texture map! : \n" + errorString(err));
+        LOG_ERROR("failed to begin command buffer for texture map! : \n" + errorString(err));
 
       // transition device to a transfer destination format
       setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -943,7 +1163,7 @@ struct Texture {
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
-        GPRT_RAISE("failed to end command buffer for texture map! : \n" + errorString(err));
+        LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
 
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -958,11 +1178,11 @@ struct Texture {
 
       err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
       if (err)
-        GPRT_RAISE("failed to submit to queue for texture map! : \n" + errorString(err));
+        LOG_ERROR("failed to submit to queue for texture map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
       if (err)
-        GPRT_RAISE("failed to wait for queue idle for texture map! : \n" + errorString(err));
+        LOG_ERROR("failed to wait for queue idle for texture map! : \n" + errorString(err));
 
       // todo, transfer device data to device
       if (mapped) {
@@ -979,7 +1199,7 @@ struct Texture {
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
     if (err)
-      GPRT_RAISE("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
 
     // Move to a destination optimal format
     setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1007,7 +1227,7 @@ struct Texture {
 
     err = vkEndCommandBuffer(commandBuffer);
     if (err)
-      GPRT_RAISE("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
     VkSubmitInfo submitInfo;
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1022,11 +1242,11 @@ struct Texture {
 
     err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
     if (err)
-      GPRT_RAISE("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
     if (err)
-      GPRT_RAISE("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
   }
 
   void generateMipmap() {
@@ -1037,19 +1257,19 @@ struct Texture {
     // double check we have the right usage flags...
     // Shouldn't happen, but doesn't hurt to double check.
     if ((usageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0)
-      GPRT_RAISE("image needs transfer src usage bit for texture mipmap "
-                 "generation! \n");
+      LOG_ERROR("image needs transfer src usage bit for texture mipmap "
+                "generation! \n");
 
     if ((usageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
-      GPRT_RAISE("image needs transfer dst usage bit for texture mipmap "
-                 "generation! \n");
+      LOG_ERROR("image needs transfer dst usage bit for texture mipmap "
+                "generation! \n");
 
     VkResult err;
     VkCommandBufferBeginInfo cmdBufInfo{};
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
     if (err)
-      GPRT_RAISE("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
 
     // transition device to a transfer destination format
     setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1139,7 +1359,7 @@ struct Texture {
 
     err = vkEndCommandBuffer(commandBuffer);
     if (err)
-      GPRT_RAISE("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
     VkSubmitInfo submitInfo;
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1154,11 +1374,11 @@ struct Texture {
 
     err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
     if (err)
-      GPRT_RAISE("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
     if (err)
-      GPRT_RAISE("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
   }
 
   Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer _commandBuffer, VkQueue _queue,
@@ -1239,8 +1459,9 @@ struct Texture {
         *memTypeFound = false;
         return 0;
       } else {
-        GPRT_RAISE("Could not find a matching memory type");
+        LOG_ERROR("Could not find a matching memory type");
       }
+      return -1;
     };
 
     // Create the image handle
@@ -1343,7 +1564,7 @@ struct Texture {
       // Attach the memory to the buffer object
       VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
       if (err)
-        GPRT_RAISE("failed to bind staging buffer memory! : \n" + errorString(err));
+        LOG_ERROR("failed to bind staging buffer memory! : \n" + errorString(err));
     }
 
     // We need to transition the image into a known layout
@@ -1353,7 +1574,7 @@ struct Texture {
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
       err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
       if (err)
-        GPRT_RAISE("failed to begin command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
       setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
@@ -1361,7 +1582,7 @@ struct Texture {
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
-        GPRT_RAISE("failed to end command buffer for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
       VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1376,11 +1597,11 @@ struct Texture {
 
       err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
       if (err)
-        GPRT_RAISE("failed to submit to queue for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
       err = vkQueueWaitIdle(queue);
       if (err)
-        GPRT_RAISE("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
     }
 
     // Now we need an image view
@@ -1480,7 +1701,7 @@ struct Sampler {
         break;
       }
     }
-    // If we cant find a free spot in the current texture list, allocate a new
+    // If we cant find a free spot in the current sampler list, allocate a new
     // one
     if (address == -1) {
       samplers.push_back(this);
@@ -1560,8 +1781,8 @@ struct Compute : public SBTEntry {
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      computes.push_back(this);
-      address = computes.size() - 1;
+      Compute::computes.push_back(this);
+      address = Compute::computes.size() - 1;
     }
 
     entryPoint = std::string("__compute__") + std::string(_entryPoint);
@@ -1591,7 +1812,19 @@ struct Compute : public SBTEntry {
                      VkDescriptorSetLayout texture1DDescriptorSetLayout,
                      VkDescriptorSetLayout texture2DDescriptorSetLayout,
                      VkDescriptorSetLayout texture3DDescriptorSetLayout,
-                     VkDescriptorSetLayout recordDescriptorSetLayout) {
+                     VkDescriptorSetLayout bufferDescriptorSetLayout, VkDescriptorSetLayout recordDescriptorSetLayout) {
+    // If we already have a pipeline layout, free it so that we can make a new one
+    if (pipelineLayout) {
+      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+      pipelineLayout = VK_NULL_HANDLE;
+    }
+
+    // If we already have a pipeline, free it so that we can make a new one
+    if (pipeline) {
+      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      pipeline = VK_NULL_HANDLE;
+    }
+
     // currently not using cache.
     VkPipelineCache cache = VK_NULL_HANDLE;
 
@@ -1602,9 +1835,9 @@ struct Compute : public SBTEntry {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
                                                   texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                                  recordDescriptorSetLayout};
+                                                  bufferDescriptorSetLayout,    recordDescriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
@@ -1620,10 +1853,10 @@ struct Compute : public SBTEntry {
     computePipelineCreateInfo.flags = 0;
     computePipelineCreateInfo.stage = shaderStage;
 
-    if (vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("failed to create compute pipeline!");
-    };
+    VkResult err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
+    if (err) {
+      LOG_ERROR("failed to create compute pipeline! Are all entrypoint names correct? \n" + errorString(err));
+    }
   }
 
   void destroy() {
@@ -1666,7 +1899,7 @@ struct RayGen : public SBTEntry {
 
     VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule);
     if (err)
-      GPRT_RAISE("failed to create shader module! : \n" + errorString(err));
+      LOG_ERROR("failed to create shader module! : \n" + errorString(err));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
@@ -1726,6 +1959,11 @@ struct Miss : public SBTEntry {
     will later get subclassed into triangle geometries, user/custom
     primitive geometry types, etc */
 struct GeomType : public SBTEntry {
+
+  // Our own virtual "geom types address space".
+  VkDeviceAddress address = -1;
+  static std::vector<GeomType *> geomTypes;
+
   VkDevice logicalDevice;
   uint32_t numRayTypes;
 
@@ -1761,6 +1999,20 @@ struct GeomType : public SBTEntry {
   std::vector<RasterData> raster;
 
   GeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
+    // Hunt for an existing free address for this geom type
+    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
+      if (GeomType::geomTypes[i] == nullptr) {
+        GeomType::geomTypes[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      GeomType::geomTypes.push_back(this);
+      address = GeomType::geomTypes.size() - 1;
+    }
+
     this->numRayTypes = numRayTypes;
     closestHitShaderStages.resize(numRayTypes, {});
     anyHitShaderStages.resize(numRayTypes, {});
@@ -1987,7 +2239,28 @@ struct GeomType : public SBTEntry {
                            VkDescriptorSetLayout texture1DDescriptorSetLayout,
                            VkDescriptorSetLayout texture2DDescriptorSetLayout,
                            VkDescriptorSetLayout texture3DDescriptorSetLayout,
+                           VkDescriptorSetLayout bufferDescriptorSetLayout,
                            VkDescriptorSetLayout recordDescriptorSetLayout) {
+    // we need both of these to be set, otherwise we can't build a raster pipeline...
+    if (!vertexShaderUsed[rasterType] || !pixelShaderUsed[rasterType])
+      return;
+
+    // we also need a framebuffer...
+    if (!raster[rasterType].frameBuffer)
+      return;
+
+    // If we already have a pipeline layout, free it so that we can make a new one
+    if (raster[rasterType].pipelineLayout) {
+      vkDestroyPipelineLayout(logicalDevice, raster[rasterType].pipelineLayout, nullptr);
+      raster[rasterType].pipelineLayout = VK_NULL_HANDLE;
+    }
+
+    // If we already have a pipeline, free it so that we can make a new one
+    if (raster[rasterType].pipeline) {
+      vkDestroyPipeline(logicalDevice, raster[rasterType].pipeline, nullptr);
+      raster[rasterType].pipeline = VK_NULL_HANDLE;
+    }
+
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {vertexShaderStages[rasterType],
                                                                  pixelShaderStages[rasterType]};
 
@@ -2067,13 +2340,13 @@ struct GeomType : public SBTEntry {
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;               // Optional
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;    // Optional
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;   // Optional
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;               // Optional
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;                              // Optional
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;                              // Optional
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -2101,9 +2374,9 @@ struct GeomType : public SBTEntry {
     // The layout here describes descriptor sets and push constants used
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
                                                   texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                                  recordDescriptorSetLayout};
+                                                  bufferDescriptorSetLayout,    recordDescriptorSetLayout};
     pipelineLayoutInfo.setLayoutCount = layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
@@ -2144,7 +2417,9 @@ struct GeomType : public SBTEntry {
   }
 
   void destroy() {
-    std::cout << "geom type is being destroyed!" << std::endl;
+    // Free geomtype slot for use by subsequently made geomtypes
+    GeomType::geomTypes[address] = nullptr;
+
     for (uint32_t i = 0; i < closestHitShaderStages.size(); ++i) {
       if (closestHitShaderStages[i].module)
         vkDestroyShaderModule(logicalDevice, closestHitShaderStages[i].module, nullptr);
@@ -2171,6 +2446,10 @@ struct GeomType : public SBTEntry {
         vkDestroyPipelineLayout(logicalDevice, raster[i].pipelineLayout, nullptr);
       }
 
+      if (raster[i].pipeline) {
+        vkDestroyPipeline(logicalDevice, raster[i].pipeline, nullptr);
+      }
+
       if (raster[i].renderPass) {
         vkDestroyRenderPass(logicalDevice, raster[i].renderPass, nullptr);
       }
@@ -2183,6 +2462,8 @@ struct GeomType : public SBTEntry {
 
   virtual Geom *createGeom() { return nullptr; };
 };
+
+std::vector<GeomType *> GeomType::geomTypes;
 
 /*! An actual geometry object with primitives - this class is still
   abstract, and will get fleshed out in its derived classes
@@ -2320,37 +2601,53 @@ typedef enum {
 struct Accel {
   VkPhysicalDevice physicalDevice;
   VkDevice logicalDevice;
+  VmaAllocator allocator;
   VkCommandBuffer commandBuffer;
   VkQueue queue;
   VkDeviceAddress address = 0;
   VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
+  VkAccelerationStructureKHR compactAccelerationStructure = VK_NULL_HANDLE;
+  GPRTBuildMode buildMode = GPRT_BUILD_MODE_UNINITIALIZED;
+  bool allowCompaction = false;
+  bool minimizeMemory = false;
+  bool isCompact = false;
 
   Buffer *accelBuffer = nullptr;
-  Buffer *scratchBuffer = nullptr;
+  Buffer *compactBuffer = nullptr;
+  Buffer *scratchBuffer = nullptr;   // Can we make this static? That way, all trees could share the scratch...
 
-  Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue) {
+  Accel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator, VkCommandBuffer commandBuffer,
+        VkQueue queue) {
     this->physicalDevice = physicalDevice;
     this->logicalDevice = logicalDevice;
+    this->allocator = allocator;
     this->commandBuffer = commandBuffer;
     this->queue = queue;
   };
 
   ~Accel(){};
 
-  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
+  virtual void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes,
+                     GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory){};
+  virtual void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes){};
+  virtual void compact(VkQueryPool compactedSizeQueryPool){};
   virtual void destroy(){};
+  virtual size_t getSize() { return -1; };
   virtual AccelType getType() { return GPRT_UNKNOWN_ACCEL; }
 };
 
 struct TriangleAccel : public Accel {
   std::vector<TriangleGeom *> geometries;
 
-  // todo, accept this in constructor
-  VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  // caching these for fast tree updates
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos;
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
+  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
+  std::vector<uint32_t> maxPrimitiveCounts;
 
-  TriangleAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
-                size_t numGeometries, TriangleGeom *geometries)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+  TriangleAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator,
+                VkCommandBuffer commandBuffer, VkQueue queue, size_t numGeometries, TriangleGeom *geometries)
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
@@ -2359,13 +2656,25 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  size_t getSize() {
+    size_t size = 0;
+    if (accelBuffer)
+      size += accelBuffer->getSize();
+    if (compactBuffer)
+      size += compactBuffer->getSize();
+    if (scratchBuffer)
+      size += scratchBuffer->getSize();
+    return size;
+  };
+
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes,
+             GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
 
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs(geometries.size());
-    std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries(geometries.size());
-    std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    maxPrimitiveCounts.resize(geometries.size());
     for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
       auto &geom = accelerationStructureGeometries[gid];
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -2385,14 +2694,14 @@ struct TriangleAccel : public Accel {
       // vertex data
       geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
       geom.geometry.triangles.vertexData.deviceAddress =
-          geometries[gid]->vertex.buffers[0]->address + geometries[gid]->vertex.offset;
+          geometries[gid]->vertex.buffers[0]->deviceAddress + geometries[gid]->vertex.offset;
       geom.geometry.triangles.vertexStride = geometries[gid]->vertex.stride;
       geom.geometry.triangles.maxVertex = geometries[gid]->vertex.count;
 
       // index data
       geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
       // note, offset accounted for in range
-      geom.geometry.triangles.indexData.deviceAddress = geometries[gid]->index.buffer->address;
+      geom.geometry.triangles.indexData.deviceAddress = geometries[gid]->index.buffer->deviceAddress;
       maxPrimitiveCounts[gid] = geometries[gid]->index.count;
 
       // transform data
@@ -2412,7 +2721,28 @@ struct TriangleAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
     accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationStructureBuildGeometryInfo.flags = flags;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
@@ -2422,8 +2752,17 @@ struct TriangleAccel : public Accel {
                                                &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
                                                &accelerationStructureBuildSizesInfo);
 
-    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
-      // Destroy old accel handle too
+    // If previously compacted, free those resources up.
+    if (compactBuffer) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    // Destroy old accel handle
+    if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
       accelerationStructure = VK_NULL_HANDLE;
       accelBuffer->destroy();
@@ -2432,13 +2771,15 @@ struct TriangleAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                                    // means we can get this buffer's address with
                                    // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                // means that this memory is stored directly on the device
                                //  (rather than the host, or in a special host/device section)
                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -2452,12 +2793,12 @@ struct TriangleAccel : public Accel {
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
                                                 &accelerationStructure);
       if (err)
-        GPRT_RAISE("failed to create acceleration structure for triangle accel "
-                   "build! : \n" +
-                   errorString(err));
+        LOG_ERROR("failed to create acceleration structure for triangle accel "
+                  "build! : \n" +
+                  errorString(err));
     }
 
-    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+    if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -2465,13 +2806,15 @@ struct TriangleAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                          // means we can get this buffer's address with
                          // vkGetBufferDeviceAddress
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
@@ -2480,12 +2823,33 @@ struct TriangleAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
-    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
     // Build the acceleration structure on the device via a one-time command
     // buffer submission Some implementations may support acceleration structure
@@ -2498,14 +2862,14 @@ struct TriangleAccel : public Accel {
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
     if (err)
-      GPRT_RAISE("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
     gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
                                            accelerationBuildStructureRangeInfoPtrs.data());
 
     err = vkEndCommandBuffer(commandBuffer);
     if (err)
-      GPRT_RAISE("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
     VkSubmitInfo submitInfo;
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -2523,20 +2887,20 @@ struct TriangleAccel : public Accel {
     // fenceInfo.flags = 0;
     // VkFence fence;
     // err = vkCreateFence(logicalDevice, &fenceInfo, nullptr, &fence);
-    // if (err) GPRT_RAISE("failed to create fence for triangle accel build! :
+    // if (err) LOG_ERROR("failed to create fence for triangle accel build! :
     // \n" + errorString(err));
 
     err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
-      GPRT_RAISE("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
     if (err)
-      GPRT_RAISE("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
 
     // Wait for the fence to signal that command buffer has finished executing
     // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000
-    // /*timeout*/); if (err) GPRT_RAISE("failed to wait for fence for triangle
+    // /*timeout*/); if (err) LOG_ERROR("failed to wait for fence for triangle
     // accel build! : \n" + errorString(err)); vkDestroyFence(logicalDevice,
     // fence, nullptr);
 
@@ -2544,6 +2908,321 @@ struct TriangleAccel : public Accel {
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+    this->allowCompaction = allowCompaction;
+
+    // note that the current tree is not yet compact
+    isCompact = false;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+
+    VkResult err;
+
+    // if we previously minimized memory, we need to reallocate our scratch buffer...
+    if (minimizeMemory) {
+      // Get size info
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+      accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+        LOG_ERROR("build mode is uninitialized!");
+      } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else {
+        LOG_ERROR("build mode unsupported!");
+      }
+
+      if (minimizeMemory) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+      }
+      if (allowCompaction) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+      }
+      accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+      accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+
+      VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+      accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+      gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                 &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                                 &accelerationStructureBuildSizesInfo);
+
+      if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
+        scratchBuffer->destroy();
+        delete (scratchBuffer);
+        scratchBuffer = nullptr;
+      }
+
+      if (!scratchBuffer) {
+        scratchBuffer =
+            new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                       // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                       // Is this required? If not, remove this...
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                           // means we can get this buffer's address with
+                           // vkGetBufferDeviceAddress
+                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                           // means we can use this buffer as a storage buffer
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                       // means that this memory is stored directly on the device
+                       //  (rather than the host, or in a special host/device section)
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+      }
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode unsupported!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.srcAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.dstAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void compact(VkQueryPool compactedSizeQueryPool) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (!allowCompaction) {
+      LOG_ERROR("Tree must have previously been built with compaction allowed.");
+    }
+    if (isCompact)
+      return;   // tree is already compact.
+
+    VkResult err;
+
+    VkDeviceSize compactedSize;
+
+    // get size for compacted structure.
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for triangle accel query compaction size! : \n" + errorString(err));
+
+      // reset the query so we can use it again
+      vkCmdResetQueryPool(commandBuffer, compactedSizeQueryPool, 0, 1);
+
+      gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure,
+                                                       VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                                                       compactedSizeQueryPool, 0);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for triangle accel query compaction size! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for triangle accel query compaction size! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for triangle accel query compaction size! : \n" + errorString(err));
+
+      uint64_t buffer[1] = {0};
+      err = vkGetQueryPoolResults(logicalDevice, compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize), buffer,
+                                  sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
+      compactedSize = buffer[0];
+
+      if (err)
+        LOG_ERROR("failed to get query pool results for triangle accel query compaction size! : \n" + errorString(err));
+    }
+
+    // allocate compact buffer and compact acceleration structure
+    if (compactBuffer && compactBuffer->size != compactedSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (!compactBuffer) {
+      compactBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 // means we can use this buffer as a means of storing an acceleration
+                                 // structure
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                     // means we can get this buffer's address with
+                                     // vkGetBufferDeviceAddress
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                     // means we can use this buffer as a storage buffer
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                 // means that this memory is stored directly on the device
+                                 //  (rather than the host, or in a special host/device section)
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
+      accelerationStructureCreateInfo.size = compactedSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &compactAccelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create compact acceleration structure for triangle accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    // Copy over the compacted acceleration structure
+    VkCopyAccelerationStructureInfoKHR copyAccelerationStructureInfo{};
+    copyAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copyAccelerationStructureInfo.src = accelerationStructure;
+    copyAccelerationStructureInfo.dst = compactAccelerationStructure;
+    copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    copyAccelerationStructureInfo.pNext = nullptr;
+
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for triangle accel compaction! : \n" + errorString(err));
+
+      gprt::vkCmdCopyAccelerationStructure(commandBuffer, &copyAccelerationStructureInfo);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for triangle accel compaction! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for triangle accel compaction! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for triangle accel compaction! : \n" + errorString(err));
+    }
+
+    // free the original tree and buffer
+    {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    // get compact address
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = compactAccelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // mark that the tree is now compact
+    isCompact = true;
   }
 
   void destroy() {
@@ -2558,6 +3237,17 @@ struct TriangleAccel : public Accel {
       accelBuffer = nullptr;
     }
 
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+    }
+
+    if (compactBuffer) {
+      compactBuffer->destroy();
+      delete compactBuffer;
+      compactBuffer = nullptr;
+    }
+
     if (scratchBuffer) {
       scratchBuffer->destroy();
       delete scratchBuffer;
@@ -2569,12 +3259,15 @@ struct TriangleAccel : public Accel {
 struct AABBAccel : public Accel {
   std::vector<AABBGeom *> geometries;
 
-  // todo, accept this in constructor
-  VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  // Caching these for fast tree updates
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos;
+  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
+  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
+  std::vector<uint32_t> maxPrimitiveCounts;
 
-  AABBAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
-            size_t numGeometries, AABBGeom *geometries)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+  AABBAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator,
+            VkCommandBuffer commandBuffer, VkQueue queue, size_t numGeometries, AABBGeom *geometries)
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
@@ -2583,13 +3276,25 @@ struct AABBAccel : public Accel {
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  size_t getSize() {
+    size_t size = 0;
+    if (accelBuffer)
+      size += accelBuffer->getSize();
+    if (compactBuffer)
+      size += compactBuffer->getSize();
+    if (scratchBuffer)
+      size += scratchBuffer->getSize();
+    return size;
+  };
+
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes,
+             GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
 
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos(geometries.size());
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs(geometries.size());
-    std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries(geometries.size());
-    std::vector<uint32_t> maxPrimitiveCounts(geometries.size());
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    maxPrimitiveCounts.resize(geometries.size());
 
     for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
       auto &geom = accelerationStructureGeometries[gid];
@@ -2609,7 +3314,7 @@ struct AABBAccel : public Accel {
       // aabb data
       geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
       geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
-      geom.geometry.aabbs.data.deviceAddress = geometries[gid]->aabb.buffers[0]->address;
+      geom.geometry.aabbs.data.deviceAddress = geometries[gid]->aabb.buffers[0]->deviceAddress;
       geom.geometry.aabbs.stride = geometries[gid]->aabb.stride;
 
       auto &geomRange = accelerationBuildStructureRangeInfos[gid];
@@ -2626,7 +3331,28 @@ struct AABBAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
     accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationStructureBuildGeometryInfo.flags = flags;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
@@ -2636,8 +3362,16 @@ struct AABBAccel : public Accel {
                                                &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
                                                &accelerationStructureBuildSizesInfo);
 
-    if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
-      // Destroy old accel handle too
+    // If previously compacted, free those resources up.
+    if (compactBuffer) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
       accelerationStructure = VK_NULL_HANDLE;
       accelBuffer->destroy();
@@ -2646,13 +3380,15 @@ struct AABBAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                                    // means we can get this buffer's address with
                                    // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                // means that this memory is stored directly on the device
                                //  (rather than the host, or in a special host/device section)
                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -2666,12 +3402,12 @@ struct AABBAccel : public Accel {
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
                                                 &accelerationStructure);
       if (err)
-        GPRT_RAISE("failed to create acceleration structure for AABB accel "
-                   "build! : \n" +
-                   errorString(err));
+        LOG_ERROR("failed to create acceleration structure for AABB accel "
+                  "build! : \n" +
+                  errorString(err));
     }
 
-    if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+    if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -2679,13 +3415,15 @@ struct AABBAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                          // means we can get this buffer's address with
                          // vkGetBufferDeviceAddress
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
@@ -2694,12 +3432,33 @@ struct AABBAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
-    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
     // Build the acceleration structure on the device via a one-time command
     // buffer submission Some implementations may support acceleration structure
@@ -2712,14 +3471,14 @@ struct AABBAccel : public Accel {
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
     if (err)
-      GPRT_RAISE("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
     gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
                                            accelerationBuildStructureRangeInfoPtrs.data());
 
     err = vkEndCommandBuffer(commandBuffer);
     if (err)
-      GPRT_RAISE("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
     VkSubmitInfo submitInfo;
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -2734,16 +3493,332 @@ struct AABBAccel : public Accel {
 
     err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
-      GPRT_RAISE("failed to submit to queue for AABB accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to submit to queue for AABB accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
     if (err)
-      GPRT_RAISE("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
 
     VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+    this->allowCompaction = allowCompaction;
+
+    // note that the current tree is not yet compact
+    isCompact = false;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+
+    VkResult err;
+
+    // if we previously minimized memory, we need to reallocate our scratch buffer...
+    if (minimizeMemory) {
+      // Get size info
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+      accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+        LOG_ERROR("build mode is uninitialized!");
+      } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else {
+        LOG_ERROR("build mode not recognized!");
+      }
+
+      if (minimizeMemory) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+      }
+      if (allowCompaction) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+      }
+      accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+      accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+
+      VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+      accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+      gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                 &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                                 &accelerationStructureBuildSizesInfo);
+
+      if (scratchBuffer && scratchBuffer->size < accelerationStructureBuildSizesInfo.buildScratchSize) {
+        scratchBuffer->destroy();
+        delete (scratchBuffer);
+        scratchBuffer = nullptr;
+      }
+
+      if (!scratchBuffer) {
+        scratchBuffer =
+            new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                       // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                       // Is this required? If not, remove this...
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                           // means we can get this buffer's address with
+                           // vkGetBufferDeviceAddress
+                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                           // means we can use this buffer as a storage buffer
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                       // means that this memory is stored directly on the device
+                       //  (rather than the host, or in a special host/device section)
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+      }
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode unsupported!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.srcAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.dstAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for AABB accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void compact(VkQueryPool compactedSizeQueryPool) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (!allowCompaction) {
+      LOG_ERROR("Tree must have previously been built with compaction allowed.");
+    }
+    if (isCompact)
+      return;   // tree is already compact.
+
+    VkResult err;
+
+    VkDeviceSize compactedSize;
+
+    // get size for compacted structure.
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for aabb accel query compaction size! : \n" + errorString(err));
+
+      // reset the query so we can use it again
+      vkCmdResetQueryPool(commandBuffer, compactedSizeQueryPool, 0, 1);
+
+      gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure,
+                                                       VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                                                       compactedSizeQueryPool, 0);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for aabb accel query compaction size! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for aabb accel query compaction size! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for aabb accel query compaction size! : \n" + errorString(err));
+
+      uint64_t buffer[1] = {0};
+      err = vkGetQueryPoolResults(logicalDevice, compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize), buffer,
+                                  sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
+      compactedSize = buffer[0];
+
+      if (err)
+        LOG_ERROR("failed to get query pool results for aabb accel query compaction size! : \n" + errorString(err));
+    }
+
+    // allocate compact buffer and compact acceleration structure
+    if (compactBuffer && compactBuffer->size != compactedSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (!compactBuffer) {
+      compactBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 // means we can use this buffer as a means of storing an acceleration
+                                 // structure
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                     // means we can get this buffer's address with
+                                     // vkGetBufferDeviceAddress
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                     // means we can use this buffer as a storage buffer
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                 // means that this memory is stored directly on the device
+                                 //  (rather than the host, or in a special host/device section)
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
+      accelerationStructureCreateInfo.size = compactedSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &compactAccelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create compact acceleration structure for aabb accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    // Copy over the compacted acceleration structure
+    VkCopyAccelerationStructureInfoKHR copyAccelerationStructureInfo{};
+    copyAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copyAccelerationStructureInfo.src = accelerationStructure;
+    copyAccelerationStructureInfo.dst = compactAccelerationStructure;
+    copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    copyAccelerationStructureInfo.pNext = nullptr;
+
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for aabb accel compaction! : \n" + errorString(err));
+
+      gprt::vkCmdCopyAccelerationStructure(commandBuffer, &copyAccelerationStructureInfo);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for aabb accel compaction! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for aabb accel compaction! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for aabb accel compaction! : \n" + errorString(err));
+    }
+
+    // free the original tree and buffer
+    {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    // get compact address
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = compactAccelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // mark that the tree is now compact
+    isCompact = true;
   }
 
   void destroy() {
@@ -2756,6 +3831,17 @@ struct AABBAccel : public Accel {
       accelBuffer->destroy();
       delete accelBuffer;
       accelBuffer = nullptr;
+    }
+
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+    }
+
+    if (compactBuffer) {
+      compactBuffer->destroy();
+      delete compactBuffer;
+      compactBuffer = nullptr;
     }
 
     if (scratchBuffer) {
@@ -2773,7 +3859,12 @@ struct InstanceAccel : public Accel {
   // the total number of geometries referenced by this instance accel's BLASes
   size_t numGeometries = -1;
 
+  // caching these for fast updates
   size_t instanceOffset = -1;
+  uint64_t referencesAddress;
+  uint64_t visibilityMasksAddress;
+  uint64_t instanceOffsetsAddress;
+  uint64_t transformBufferAddress;
 
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
@@ -2806,9 +3897,9 @@ struct InstanceAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer commandBuffer, VkQueue queue,
-                size_t numInstances, GPRTAccel *instances)
-      : Accel(physicalDevice, logicalDevice, commandBuffer, queue) {
+  InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator,
+                VkCommandBuffer commandBuffer, VkQueue queue, size_t numInstances, GPRTAccel *instances)
+      : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->numInstances = numInstances;
 
     if (instances) {
@@ -2825,18 +3916,20 @@ struct InstanceAccel : public Accel {
           AABBAccel *aabbAccel = (AABBAccel *) this->instances[j];
           numGeometry += aabbAccel->geometries.size();
         } else {
-          GPRT_RAISE("Unaccounted for BLAS type!");
+          LOG_ERROR("Unaccounted for BLAS type!");
         }
       }
       this->numGeometries = numGeometry;
     }
 
-    instancesBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+    instancesBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                  // I guess I need this to use these buffers as input to tree builds?
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                      // means we can get this buffer's address with
                                      // vkGetBufferDeviceAddress
-                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                     // means we can use this buffer as a storage buffer
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
                                  // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
@@ -2883,33 +3976,34 @@ struct InstanceAccel : public Accel {
 
   size_t getNumGeometries() {
     if (this->numGeometries == -1) {
-      GPRT_RAISE("Error, numGeometries for this instance must be set by the user!");
+      LOG_ERROR("Error, numGeometries for this instance must be set by the user!");
     }
     return this->numGeometries;
   }
 
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
-  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+  size_t getSize() { throw std::runtime_error("Error, not implemeted!"); };
+
+  void build(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes,
+             GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
 
     // Compute the instance offset for the SBT record.
     //   The instance shader binding table record offset is the total number
     //   of geometries referenced by all instances up until this instance tree
     //   multiplied by the number of ray types.
-    uint64_t instanceShaderBindingTableRecordOffset = 0;
+    instanceOffset = 0;
     for (uint32_t i = 0; i < accels.size(); ++i) {
       if (accels[i] == this)
         break;
       if (accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
         InstanceAccel *instanceAccel = (InstanceAccel *) accels[i];
         size_t numGeometry = instanceAccel->getNumGeometries();
-        instanceShaderBindingTableRecordOffset += numGeometry * numRayTypes;
+        instanceOffset += numGeometry * numRayTypes;
       }
     }
-    instanceOffset = instanceShaderBindingTableRecordOffset;
 
-    uint64_t referencesAddress;
     // No instance addressed provided, so we need to supply our own.
     if (references.buffer == nullptr) {
       // delete if not big enough
@@ -2921,12 +4015,14 @@ struct InstanceAccel : public Accel {
 
       // make buffer if not made yet
       if (accelAddressesBuffer == nullptr) {
-        accelAddressesBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+        accelAddressesBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                           // I guess I need this to use these buffers as input to tree builds?
                                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                               // means we can get this buffer's address with
                                               // vkGetBufferDeviceAddress
-                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                              // means we can use this buffer as a storage buffer
+                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                           // means that this memory is stored directly on the device
                                           //  (rather than the host, or in a special host/device section)
                                           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
@@ -2942,21 +4038,20 @@ struct InstanceAccel : public Accel {
       accelAddressesBuffer->map();
       memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
       accelAddressesBuffer->unmap();
-      referencesAddress = accelAddressesBuffer->address;
+      referencesAddress = accelAddressesBuffer->deviceAddress;
     }
     // Instance acceleration structure references provided by the user
     else {
-      referencesAddress = references.buffer->address;
+      referencesAddress = references.buffer->deviceAddress;
     }
 
     // If the visibility mask address is -1, we assume a mask of 0xFF
-    uint64_t visibilityMasksAddress = -1;
+    visibilityMasksAddress = -1;
     if (visibilityMasks.buffer != nullptr) {
-      visibilityMasksAddress = visibilityMasks.buffer->address;
+      visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
     }
 
     // No instance offsets provided, so we need to supply our own.
-    uint64_t instanceOffsetsAddress;
     if (offsets.buffer == nullptr) {
       // delete if not big enough
       if (instanceOffsetsBuffer && instanceOffsetsBuffer->size != numInstances * sizeof(uint64_t)) {
@@ -2967,12 +4062,14 @@ struct InstanceAccel : public Accel {
 
       // make buffer if not made yet
       if (instanceOffsetsBuffer == nullptr) {
-        instanceOffsetsBuffer = new Buffer(physicalDevice, logicalDevice, commandBuffer, queue,
+        instanceOffsetsBuffer = new Buffer(physicalDevice, logicalDevice, allocator, commandBuffer, queue,
                                            // I guess I need this to use these buffers as input to tree builds?
                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
                                                // means we can get this buffer's address with
                                                // vkGetBufferDeviceAddress
-                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                               // means we can use this buffer as a storage buffer
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                            // means that this memory is stored directly on the device
                                            // (rather than the host, or in a special host/device section)
                                            // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
@@ -2994,78 +4091,78 @@ struct InstanceAccel : public Accel {
           AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
           offset += aabbAccel->geometries.size() * numRayTypes;
         } else {
-          GPRT_RAISE("Error, unknown instance type");
+          LOG_ERROR("Error, unknown instance type");
         }
       }
       instanceOffsetsBuffer->map();
       memcpy(instanceOffsetsBuffer->mapped, blasOffsets.data(), sizeof(int32_t) * numInstances);
       instanceOffsetsBuffer->unmap();
-      instanceOffsetsAddress = instanceOffsetsBuffer->address;
+      instanceOffsetsAddress = instanceOffsetsBuffer->deviceAddress;
     }
     // Instance acceleration structure references provided by the user
     else {
-      instanceOffsetsAddress = offsets.buffer->address;
+      instanceOffsetsAddress = offsets.buffer->deviceAddress;
     }
 
-    // No instance addressed provided, so we assume identity.
-    uint64_t transformBufferAddress;
-    if (transforms.buffer == nullptr) {
-      transformBufferAddress = -1;
-    } else {
-      transformBufferAddress = transforms.buffer->address;
+    // If transform buffer address is -1, we assume an identity transformation.
+    transformBufferAddress = -1;
+    if (transforms.buffer != nullptr) {
+      transformBufferAddress = transforms.buffer->deviceAddress;
     }
 
     // Use a compute shader to copy transforms into instances buffer
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    struct PushConstants {
-      uint64_t instanceBufferAddr;
-      uint64_t transformBufferAddr;
-      uint64_t accelReferencesAddr;
-      uint64_t instanceShaderBindingTableRecordOffset;
-      uint64_t transformOffset;
-      uint64_t transformStride;
-      uint64_t instanceOffsetsBufferAddr;
-      uint64_t instanceVisibilityMasksBufferAddr;
-      uint64_t pad[16 - 8];
-    } pushConstants;
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      struct PushConstants {
+        uint64_t instanceBufferAddr;
+        uint64_t transformBufferAddr;
+        uint64_t accelReferencesAddr;
+        uint64_t instanceShaderBindingTableRecordOffset;
+        uint64_t transformOffset;
+        uint64_t transformStride;
+        uint64_t instanceOffsetsBufferAddr;
+        uint64_t instanceVisibilityMasksBufferAddr;
+        uint64_t pad[16 - 8];
+      } pushConstants;
 
-    pushConstants.instanceBufferAddr = instancesBuffer->address;
-    pushConstants.transformBufferAddr = transformBufferAddress;
-    pushConstants.accelReferencesAddr = referencesAddress;
-    pushConstants.instanceShaderBindingTableRecordOffset = instanceShaderBindingTableRecordOffset;
-    pushConstants.transformOffset = transforms.offset;
-    pushConstants.transformStride = transforms.stride;
-    pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
-    pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+      pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
+      pushConstants.transformBufferAddr = transformBufferAddress;
+      pushConstants.accelReferencesAddr = referencesAddress;
+      pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
+      pushConstants.transformOffset = transforms.offset;
+      pushConstants.transformStride = transforms.stride;
+      pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+      pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
 
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
-    vkCmdPushConstants(commandBuffer, internalStages["gprtFillInstanceData"].layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                       sizeof(PushConstants), &pushConstants);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["gprtFillInstanceData"].pipeline);
-    // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-    // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-    vkCmdDispatch(commandBuffer, numInstances, 1, 1);
-    err = vkEndCommandBuffer(commandBuffer);
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      vkCmdPushConstants(commandBuffer, internalStages["gprtFillInstanceData"].layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         sizeof(PushConstants), &pushConstants);
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["gprtFillInstanceData"].pipeline);
+      // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+      vkCmdDispatch(commandBuffer, numInstances, 1, 1);
+      err = vkEndCommandBuffer(commandBuffer);
 
-    VkSubmitInfo submitInfo;
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
-    err = vkQueueWaitIdle(queue);
-    if (err)
-      GPRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+    }
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -3074,7 +4171,7 @@ struct InstanceAccel : public Accel {
     accelerationStructureGeometry.geometry.instances.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     accelerationStructureGeometry.geometry.instances.arrayOfPointers = VK_FALSE;
-    accelerationStructureGeometry.geometry.instances.data.deviceAddress = instancesBuffer->address;
+    accelerationStructureGeometry.geometry.instances.data.deviceAddress = instancesBuffer->deviceAddress;
 
     // Get size info
     /*
@@ -3087,7 +4184,28 @@ struct InstanceAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
     accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                     VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
     accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
@@ -3099,6 +4217,16 @@ struct InstanceAccel : public Accel {
                                                &accelerationStructureBuildGeometryInfo, &primitive_count,
                                                &accelerationStructureBuildSizesInfo);
 
+    // If previously compacted, free those resources up.
+    if (compactBuffer) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
     if (accelBuffer && accelBuffer->size != accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       // Destroy old accel handle too
       gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
@@ -3109,13 +4237,15 @@ struct InstanceAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                // means we can use this buffer as a means of storing an acceleration
                                // structure
                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                                    // means we can get this buffer's address with
                                    // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                   // means we can use this buffer as a storage buffer
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                // means that this memory is stored directly on the device
                                //  (rather than the host, or in a special host/device section)
                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -3129,9 +4259,9 @@ struct InstanceAccel : public Accel {
       err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
                                                 &accelerationStructure);
       if (err)
-        GPRT_RAISE("failed to create acceleration structure for instance accel "
-                   "build! : \n" +
-                   errorString(err));
+        LOG_ERROR("failed to create acceleration structure for instance accel "
+                  "build! : \n" +
+                  errorString(err));
     }
 
     if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
@@ -3142,13 +4272,15 @@ struct InstanceAccel : public Accel {
 
     if (!scratchBuffer) {
       scratchBuffer =
-          new Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE,
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                      // means that the buffer can be used in a VkDescriptorBufferInfo. //
                      // Is this required? If not, remove this...
                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                          // means we can get this buffer's address with
                          // vkGetBufferDeviceAddress
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
@@ -3157,12 +4289,33 @@ struct InstanceAccel : public Accel {
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (mode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (mode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (mode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode not recognized!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = 1;
     accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
-    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->address;
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
     VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
     accelerationStructureBuildRangeInfo.primitiveCount = numInstances;
@@ -3179,20 +4332,20 @@ struct InstanceAccel : public Accel {
     // (VkPhysicalDeviceAccelerationStructureFeaturesKHR->accelerationStructureHostCommands),
     // but we prefer device builds
 
-    // VkCommandBufferBeginInfo cmdBufInfo{};
+    VkCommandBufferBeginInfo cmdBufInfo{};
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
     if (err)
-      GPRT_RAISE("failed to begin command buffer for instance accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to begin command buffer for instance accel build! : \n" + errorString(err));
 
     gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
                                            accelerationBuildStructureRangeInfoPtrs.data());
 
     err = vkEndCommandBuffer(commandBuffer);
     if (err)
-      GPRT_RAISE("failed to end command buffer for instance accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
-    // VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo;
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -3207,17 +4360,17 @@ struct InstanceAccel : public Accel {
 
     err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
-      GPRT_RAISE("failed to submit to queue for instance accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
 
     err = vkQueueWaitIdle(queue);
     if (err)
-      GPRT_RAISE("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+      LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
 
     // // // Wait for the fence to signal that command buffer has finished
     // executing
     // // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000
     // /*timeout*/);
-    // // if (err) GPRT_RAISE("failed to wait for fence for instance accel
+    // // if (err) LOG_ERROR("failed to wait for fence for instance accel
     // build! : \n" + errorString(err));
     // // vkDestroyFence(logicalDevice, fence, nullptr);
 
@@ -3225,6 +4378,402 @@ struct InstanceAccel : public Accel {
     accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
     address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // update last used build modes
+    this->buildMode = mode;
+    this->minimizeMemory = minimizeMemory;
+    this->allowCompaction = allowCompaction;
+
+    // note that the current tree is not yet compact
+    isCompact = false;
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void update(std::map<std::string, Stage> internalStages, std::vector<Accel *> accels, uint32_t numRayTypes) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+    if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) {
+      LOG_ERROR("Previous build mode must support updates!");
+    }
+
+    VkResult err;
+
+    // assuming that instanceOffset for the SBT record has not changed...
+    // assuming that referencesAddress is already configured from previous build
+    // assuming that visibilityMasksAddress is already configured from previous build
+    // assuming instanceOffsetsAddress is already configured from previous build
+    // assuming transformBufferAddress is already configured from previous build
+
+    // Use a compute shader to copy data into instances buffer
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      struct PushConstants {
+        uint64_t instanceBufferAddr;
+        uint64_t transformBufferAddr;
+        uint64_t accelReferencesAddr;
+        uint64_t instanceShaderBindingTableRecordOffset;
+        uint64_t transformOffset;
+        uint64_t transformStride;
+        uint64_t instanceOffsetsBufferAddr;
+        uint64_t instanceVisibilityMasksBufferAddr;
+        uint64_t pad[16 - 8];
+      } pushConstants;
+
+      pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
+      pushConstants.transformBufferAddr = transformBufferAddress;
+      pushConstants.accelReferencesAddr = referencesAddress;
+      pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
+      pushConstants.transformOffset = transforms.offset;
+      pushConstants.transformStride = transforms.stride;
+      pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+      pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      vkCmdPushConstants(commandBuffer, internalStages["gprtFillInstanceData"].layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                         sizeof(PushConstants), &pushConstants);
+      vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, internalStages["gprtFillInstanceData"].pipeline);
+      // vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+      vkCmdDispatch(commandBuffer, numInstances, 1, 1);
+      err = vkEndCommandBuffer(commandBuffer);
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+    }
+
+    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+    accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    accelerationStructureGeometry.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    accelerationStructureGeometry.geometry.instances.arrayOfPointers = VK_FALSE;
+    accelerationStructureGeometry.geometry.instances.data.deviceAddress = instancesBuffer->deviceAddress;
+
+    // if we previously minimized memory, we need to reallocate our scratch buffer...
+    if (minimizeMemory) {
+      // Get size info
+      VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
+      accelerationStructureBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+      accelerationStructureBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+        LOG_ERROR("build mode is uninitialized!");
+      } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+        accelerationStructureBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+      else {
+        LOG_ERROR("build mode unsupported!");
+      }
+
+      if (minimizeMemory) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+      }
+      if (allowCompaction) {
+        accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+      }
+      accelerationStructureBuildGeometryInfo.geometryCount = 1;
+      accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+
+      uint32_t primitive_count = numInstances;
+
+      VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+      accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+      gprt::vkGetAccelerationStructureBuildSizes(logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                 &accelerationStructureBuildGeometryInfo, &primitive_count,
+                                                 &accelerationStructureBuildSizesInfo);
+
+      if (scratchBuffer && scratchBuffer->size != accelerationStructureBuildSizesInfo.buildScratchSize) {
+        scratchBuffer->destroy();
+        delete (scratchBuffer);
+        scratchBuffer = nullptr;
+      }
+
+      if (!scratchBuffer) {
+        scratchBuffer =
+            new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                       // means that the buffer can be used in a VkDescriptorBufferInfo. //
+                       // Is this required? If not, remove this...
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                           // means we can get this buffer's address with
+                           // vkGetBufferDeviceAddress
+                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                           // means we can use this buffer as a storage buffer
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                       // means that this memory is stored directly on the device
+                       //  (rather than the host, or in a special host/device section)
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+      }
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
+    accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    accelerationBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("build mode is uninitialized!");
+    } else if (buildMode == GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else if (buildMode == GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE)
+      accelerationBuildGeometryInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    else {
+      LOG_ERROR("build mode unsupported!");
+    }
+
+    if (minimizeMemory) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    }
+    if (allowCompaction) {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
+    accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    accelerationBuildGeometryInfo.srcAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.dstAccelerationStructure =
+        (isCompact) ? compactAccelerationStructure : accelerationStructure;
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+    accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
+
+    VkAccelerationStructureBuildRangeInfoKHR accelerationStructureBuildRangeInfo{};
+    accelerationStructureBuildRangeInfo.primitiveCount = numInstances;
+    accelerationStructureBuildRangeInfo.primitiveOffset = 0;
+    accelerationStructureBuildRangeInfo.firstVertex = 0;
+    accelerationStructureBuildRangeInfo.transformOffset = 0;
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs = {
+        &accelerationStructureBuildRangeInfo};
+
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    if (err)
+      LOG_ERROR("failed to begin command buffer for instance accel build! : \n" + errorString(err));
+
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
+                                           accelerationBuildStructureRangeInfoPtrs.data());
+
+    err = vkEndCommandBuffer(commandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueWaitIdle(queue);
+
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(queue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = accelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // If we're minimizing memory usage, free scratch now
+    if (minimizeMemory) {
+      scratchBuffer->destroy();
+      scratchBuffer = nullptr;
+    }
+  }
+
+  void compact(VkQueryPool compactedSizeQueryPool) {
+    if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
+      LOG_ERROR("Tree not previously built!");
+    }
+    if (!allowCompaction) {
+      LOG_ERROR("Tree must have previously been built with compaction allowed.");
+    }
+    if (isCompact)
+      return;   // tree is already compact.
+
+    VkResult err;
+
+    VkDeviceSize compactedSize;
+
+    // get size for compacted structure.
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for instance accel query compaction size! : \n" + errorString(err));
+
+      // reset the query so we can use it again
+      vkCmdResetQueryPool(commandBuffer, compactedSizeQueryPool, 0, 1);
+
+      gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure,
+                                                       VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                                                       compactedSizeQueryPool, 0);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for instance accel query compaction size! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel query compaction size! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel query compaction size! : \n" + errorString(err));
+
+      uint64_t buffer[1] = {0};
+      err = vkGetQueryPoolResults(logicalDevice, compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize), buffer,
+                                  sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
+      compactedSize = buffer[0];
+
+      if (err)
+        LOG_ERROR("failed to get query pool results for instance accel query compaction size! : \n" + errorString(err));
+    }
+
+    // allocate compact buffer and compact acceleration structure
+    if (compactBuffer && compactBuffer->size != compactedSize) {
+      // Destroy old accel handle too
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+      compactBuffer->destroy();
+      delete (compactBuffer);
+      compactBuffer = nullptr;
+    }
+
+    if (!compactBuffer) {
+      compactBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 // means we can use this buffer as a means of storing an acceleration
+                                 // structure
+                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                     // means we can get this buffer's address with
+                                     // vkGetBufferDeviceAddress
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                     // means we can use this buffer as a storage buffer
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                 // means that this memory is stored directly on the device
+                                 //  (rather than the host, or in a special host/device section)
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+
+      VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
+      accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      accelerationStructureCreateInfo.buffer = compactBuffer->buffer;
+      accelerationStructureCreateInfo.size = compactedSize;
+      accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+      err = gprt::vkCreateAccelerationStructure(logicalDevice, &accelerationStructureCreateInfo, nullptr,
+                                                &compactAccelerationStructure);
+      if (err)
+        LOG_ERROR("failed to create compact acceleration structure for instance accel "
+                  "build! : \n" +
+                  errorString(err));
+    }
+
+    // Copy over the compacted acceleration structure
+    VkCopyAccelerationStructureInfoKHR copyAccelerationStructureInfo{};
+    copyAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+    copyAccelerationStructureInfo.src = accelerationStructure;
+    copyAccelerationStructureInfo.dst = compactAccelerationStructure;
+    copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    copyAccelerationStructureInfo.pNext = nullptr;
+
+    {
+      VkCommandBufferBeginInfo cmdBufInfo{};
+      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      if (err)
+        LOG_ERROR("failed to begin command buffer for instance accel compaction! : \n" + errorString(err));
+
+      gprt::vkCmdCopyAccelerationStructure(commandBuffer, &copyAccelerationStructureInfo);
+
+      err = vkEndCommandBuffer(commandBuffer);
+      if (err)
+        LOG_ERROR("failed to end command buffer for instance accel compaction! : \n" + errorString(err));
+
+      VkSubmitInfo submitInfo;
+      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      submitInfo.pNext = NULL;
+      submitInfo.waitSemaphoreCount = 0;
+      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+      submitInfo.commandBufferCount = 1;
+      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.signalSemaphoreCount = 0;
+      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      if (err)
+        LOG_ERROR("failed to submit to queue for instance accel compaction! : \n" + errorString(err));
+
+      err = vkQueueWaitIdle(queue);
+      if (err)
+        LOG_ERROR("failed to wait for queue idle for instance accel compaction! : \n" + errorString(err));
+    }
+
+    // free the original tree and buffer
+    {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, accelerationStructure, nullptr);
+      accelerationStructure = VK_NULL_HANDLE;
+      accelBuffer->destroy();
+      delete (accelBuffer);
+      accelBuffer = nullptr;
+    }
+
+    // get compact address
+    VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{};
+    accelerationDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    accelerationDeviceAddressInfo.accelerationStructure = compactAccelerationStructure;
+    address = gprt::vkGetAccelerationStructureDeviceAddress(logicalDevice, &accelerationDeviceAddressInfo);
+
+    // mark that the tree is now compact
+    isCompact = true;
   }
 
   void destroy() {
@@ -3237,6 +4786,17 @@ struct InstanceAccel : public Accel {
       accelBuffer->destroy();
       delete accelBuffer;
       accelBuffer = nullptr;
+    }
+
+    if (compactAccelerationStructure) {
+      gprt::vkDestroyAccelerationStructure(logicalDevice, compactAccelerationStructure, nullptr);
+      compactAccelerationStructure = VK_NULL_HANDLE;
+    }
+
+    if (compactBuffer) {
+      compactBuffer->destroy();
+      delete compactBuffer;
+      compactBuffer = nullptr;
     }
 
     if (scratchBuffer) {
@@ -3265,20 +4825,6 @@ struct InstanceAccel : public Accel {
   };
 };
 
-/** @brief A collection of features that are requested to support before
- * creating a GPRT context. These features might not be available on all
- * platforms.
- */
-static struct RequestedFeatures {
-  /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
-  bool window = false;
-  struct Window {
-    uint32_t initialWidth;
-    uint32_t initialHeight;
-    std::string title;
-  } windowProperties;
-} requestedFeatures;
-
 struct Context {
   VkApplicationInfo appInfo;
 
@@ -3301,6 +4847,15 @@ struct Context {
   VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
+  struct ImGuiData {
+    uint32_t width = -1;
+    uint32_t height = -1;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
+    Texture *colorAttachment = nullptr;
+    Texture *depthAttachment = nullptr;
+  } imgui;
+
   // Physical device (GPU) that Vulkan will use
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
@@ -3312,6 +4867,9 @@ struct Context {
   VkPhysicalDeviceFeatures deviceFeatures;
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
+
+  // For handling vulkan memory allocation
+  VmaAllocator allocator;
 
   /** @brief Queue family properties of the chosen physical device */
   std::vector<VkQueueFamilyProperties> queueFamilyProperties;
@@ -3355,6 +4913,7 @@ struct Context {
   VkCommandPool computeCommandPool;
   VkCommandPool transferCommandPool;
   VkQueryPool queryPool;
+  VkQueryPool compactedSizeQueryPool;
   bool queryRequested = false;
 
   /** @brief Pipeline stages used to wait at for graphics queue submissions */
@@ -3375,13 +4934,16 @@ struct Context {
   VkPipelineCache pipelineCache;
 
   // ray tracing pipeline and layout
-  VkPipeline pipeline = VK_NULL_HANDLE;
-  VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+  bool raytracingPipelineOutOfDate = true;
+  VkPipeline raytracingPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
 
-  std::vector<Compute *> computePrograms;
   std::vector<RayGen *> raygenPrograms;
   std::vector<Miss *> missPrograms;
   std::vector<GeomType *> geomTypes;
+
+  bool computePipelinesOutOfDate = true;
+  bool rasterPipelinesOutOfDate = true;
 
   std::vector<Accel *> accels;
 
@@ -3389,6 +4951,7 @@ struct Context {
   Texture *defaultTexture1D = nullptr;
   Texture *defaultTexture2D = nullptr;
   Texture *defaultTexture3D = nullptr;
+  Buffer *defaultBuffer = nullptr;
 
   Buffer *rasterRecordBuffer = nullptr;
   Buffer *computeRecordBuffer = nullptr;
@@ -3397,13 +4960,18 @@ struct Context {
   VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorPool bufferDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
 
+  VkDescriptorPool imguiPool = VK_NULL_HANDLE;
+
+  // used to determine what descriptor sets need rebuilding
   uint32_t previousNumSamplers = 0;
   uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
   uint32_t previousNumTexture3Ds = 0;
+  uint32_t previousNumBuffers = 0;
   uint32_t previousNumRasterRecords = 0;
   uint32_t previousNumComputeRecords = 0;
 
@@ -3411,6 +4979,7 @@ struct Context {
   VkDescriptorSetLayout texture1DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture2DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture3DDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout bufferDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout rasterRecordDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout computeRecordDescriptorSetLayout = VK_NULL_HANDLE;
 
@@ -3418,14 +4987,17 @@ struct Context {
   VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
+  VkDescriptorSet bufferDescriptorSet = VK_NULL_HANDLE;
 
   VkDescriptorSet rasterRecordDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-  Buffer shaderBindingTable;
+  Buffer *raygenTable = nullptr;
+  Buffer *missTable = nullptr;
+  Buffer *hitgroupTable = nullptr;
 
-  uint32_t numRayTypes = 1;
+  // uint32_t numRayTypes = 1;
 
   // struct InternalStages {
   //   // for copying transforms into the instance buffer
@@ -3437,14 +5009,29 @@ struct Context {
   Stage fillInstanceDataStage;
   Module *internalModule = nullptr;
 
-  /*! returns whether logging is enabled */
-  inline static bool logging() {
-#ifdef NDEBUG
-    return false;
-#else
-    return true;
-#endif
-  }
+  struct SortStages {
+    Stage Count;
+    Stage CountReduce;
+    Stage Scan;
+    Stage ScanAdd;
+    Stage Scatter;
+    Stage ScatterPayload;
+
+    // For now, copied over from sample
+    VkDescriptorSetLayout   m_SortDescriptorSetLayoutInputOutputs;
+    VkDescriptorSetLayout   m_SortDescriptorSetLayoutScan;
+    VkDescriptorSetLayout   m_SortDescriptorSetLayoutScratch;
+    
+    VkDescriptorSet         m_SortDescriptorSetInputOutput[2];
+    VkDescriptorSet         m_SortDescriptorSetScanSets[2];
+    VkDescriptorSet         m_SortDescriptorSetScratch;
+
+    VkPipelineLayout layout;
+    
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+  } ;
+  SortStages sortStages;
+  Module *radixSortModule = nullptr;
 
   /*! returns whether validation is enabled */
   inline static bool validation() {
@@ -3475,7 +5062,7 @@ struct Context {
       }
     }
 
-    int numHitRecords = totalGeometries * numRayTypes;
+    int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
     return numHitRecords;
   }
 
@@ -3536,11 +5123,11 @@ struct Context {
     const char **glfwExtensions;
     if (requestedFeatures.window) {
       if (!glfwInit()) {
-        LOG("Warning: Unable to create window. Falling back to headless mode.");
+        LOG_WARNING("Unable to create window. Falling back to headless mode.");
         requestedFeatures.window = false;
       } else {
         if (!glfwVulkanSupported()) {
-          GPRT_RAISE("Window requested but unsupported!");
+          LOG_ERROR("Window requested but unsupported!");
         }
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
         for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
@@ -3572,7 +5159,7 @@ struct Context {
 
     err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
     if (err) {
-      GPRT_RAISE("failed to create instance! : \n" + errorString(err));
+      LOG_ERROR("failed to create instance! : \n" + errorString(err));
     }
 
     /// 1.5 - create a window and surface if requested
@@ -3586,7 +5173,7 @@ struct Context {
 
       VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
       if (err != VK_SUCCESS) {
-        GPRT_RAISE("failed to create window surface! : \n" + errorString(err));
+        LOG_ERROR("failed to create window surface! : \n" + errorString(err));
       }
       // Poll some initial event values
       glfwPollEvents();
@@ -3619,13 +5206,13 @@ struct Context {
     // Get number of available physical devices
     VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
     if (gpuCount == 0) {
-      GPRT_RAISE("No device with Vulkan support found : \n" + errorString(err));
+      LOG_ERROR("No device with Vulkan support found : \n" + errorString(err));
     }
     // Enumerate devices
     std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
     err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
     if (err) {
-      GPRT_RAISE("Could not enumerate physical devices : \n" + errorString(err));
+      LOG_ERROR("Could not enumerate physical devices : \n" + errorString(err));
     }
 
     // GPU selection
@@ -3673,6 +5260,7 @@ struct Context {
     };
 
     // Ray tracing related extensions required
+
     enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
     enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
@@ -3687,6 +5275,9 @@ struct Context {
     enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
 
     enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    // required for vulkan memory model stuff
+    enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
 
     // Required by VK_KHR_spirv_1_4
     enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
@@ -3707,7 +5298,7 @@ struct Context {
 
     std::vector<uint32_t> usableDevices;
 
-    LOG("Searching for usable Vulkan physical device...");
+    LOG_INFO("Searching for usable Vulkan physical device...");
     for (uint32_t i = 0; i < gpuCount; i++) {
       VkPhysicalDeviceProperties deviceProperties;
       vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
@@ -3717,24 +5308,26 @@ struct Context {
       message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".") +
                  std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".") +
                  std::to_string(deviceProperties.apiVersion & 0xfff);
-      LOG(message);
+      LOG_INFO(message);
 
       if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
         usableDevices.push_back(i);
+        LOG_INFO("\tFound usable device");
       } else {
         /* Explain why we aren't using this device */
         for (const char *enabledExtension : enabledDeviceExtensions) {
           if (!extensionSupported(enabledExtension, supportedExtensions)) {
-            LOG("Device unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
+            LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension
+                                                                             << "\" is not present.");
           }
         }
       }
     }
 
     if (usableDevices.size() == 0) {
-      GPRT_RAISE("Unable to find physical device meeting requirements\n");
+      LOG_ERROR("Unable to find physical device meeting requirements");
     } else {
-      LOG("Selecting first usable device");
+      LOG_INFO("Selecting first usable device");
       selectedDevice = usableDevices[0];
     }
 
@@ -3810,7 +5403,8 @@ struct Context {
       for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
         if (queueFamilyProperties[i].queueFlags & queueFlags)
           return i;
-      GPRT_RAISE("Could not find a matching queue family index");
+      LOG_ERROR("Could not find a matching queue family index");
+      return -1;
     };
 
     const float defaultQueuePriority(0.0f);
@@ -3875,12 +5469,19 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
+    memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    memoryModelFeatures.vulkanMemoryModel = VK_TRUE;
+    memoryModelFeatures.vulkanMemoryModelDeviceScope = VK_TRUE;
+    memoryModelFeatures.vulkanMemoryModelAvailabilityVisibilityChains = VK_TRUE;
+
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
     descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
     descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+    descriptorIndexingFeatures.pNext = &memoryModelFeatures;
 
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
@@ -3943,7 +5544,24 @@ struct Context {
     // this->enabledFeatures = enabledFeatures;
     err = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
     if (err) {
-      GPRT_RAISE("Could not create logical devices : \n" + errorString(err));
+      LOG_ERROR("Could not create logical devices : \n" + errorString(err));
+    }
+
+    // Create vulkan memory allocator
+    VmaVulkanFunctions vulkanFunctions = {};
+    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo allocatorCreateInfo = {};
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+    allocatorCreateInfo.physicalDevice = physicalDevice;
+    allocatorCreateInfo.device = logicalDevice;
+    allocatorCreateInfo.instance = instance;
+    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+    allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    err = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
+    if (err) {
+      LOG_ERROR("Could not create vulkan memory allocator : \n" + errorString(err));
     }
 
     // Get the ray tracing and acceleration structure related function pointers
@@ -3952,8 +5570,12 @@ struct Context {
         vkGetDeviceProcAddr(logicalDevice, "vkGetBufferDeviceAddressKHR"));
     gprt::vkCmdBuildAccelerationStructures = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
         vkGetDeviceProcAddr(logicalDevice, "vkCmdBuildAccelerationStructuresKHR"));
+    gprt::vkCmdCopyAccelerationStructure = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(logicalDevice, "vkCmdCopyAccelerationStructureKHR"));
     gprt::vkBuildAccelerationStructures = reinterpret_cast<PFN_vkBuildAccelerationStructuresKHR>(
         vkGetDeviceProcAddr(logicalDevice, "vkBuildAccelerationStructuresKHR"));
+    gprt::vkCopyAccelerationStructure = reinterpret_cast<PFN_vkCopyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(logicalDevice, "vkCopyAccelerationStructureKHR"));
     gprt::vkCreateAccelerationStructure = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
         vkGetDeviceProcAddr(logicalDevice, "vkCreateAccelerationStructureKHR"));
     gprt::vkDestroyAccelerationStructure = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
@@ -3968,6 +5590,9 @@ struct Context {
         vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
     gprt::vkCreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
         vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
+    gprt::vkCmdWriteAccelerationStructuresProperties =
+        reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
+            vkGetDeviceProcAddr(logicalDevice, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
 
     auto createCommandPool = [&](uint32_t queueFamilyIndex,
                                  VkCommandPoolCreateFlags createFlags =
@@ -3997,7 +5622,20 @@ struct Context {
 
     err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
     if (err)
-      GPRT_RAISE("Failed to create time query pool!");
+      LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
+
+    // We also need a query pool to determine compacted tree sizes
+    VkQueryPoolCreateInfo compactedSizeQueryPoolCreateInfo{};
+    compactedSizeQueryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    compactedSizeQueryPoolCreateInfo.pNext = nullptr;   // Optional
+    compactedSizeQueryPoolCreateInfo.flags = 0;         // Reserved for future use, must be 0!
+
+    compactedSizeQueryPoolCreateInfo.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+    compactedSizeQueryPoolCreateInfo.queryCount = 1;   // for now, just one query
+
+    err = vkCreateQueryPool(logicalDevice, &compactedSizeQueryPoolCreateInfo, nullptr, &compactedSizeQueryPool);
+    if (err)
+      LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
 
     /// 5. Allocate command buffers
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
@@ -4008,17 +5646,17 @@ struct Context {
     cmdBufAllocateInfo.commandPool = graphicsCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
     if (err)
-      GPRT_RAISE("Could not create graphics command buffer : \n" + errorString(err));
+      LOG_ERROR("Could not create graphics command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = computeCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
     if (err)
-      GPRT_RAISE("Could not create compute command buffer : \n" + errorString(err));
+      LOG_ERROR("Could not create compute command buffer : \n" + errorString(err));
 
     cmdBufAllocateInfo.commandPool = transferCommandPool;
     err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
     if (err)
-      GPRT_RAISE("Could not create transfer command buffer : \n" + errorString(err));
+      LOG_ERROR("Could not create transfer command buffer : \n" + errorString(err));
 
     /// 6. Get queue handles
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
@@ -4028,6 +5666,10 @@ struct Context {
     // 7. Create a module for internal device entry points
     internalModule = new Module(gprtDeviceCode);
     setupInternalStages(internalModule);
+
+    // 7. Create a module for internal device entry points
+    radixSortModule = new Module(sortDeviceCode);
+    setupSortStages(radixSortModule);
 
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4040,7 +5682,7 @@ struct Context {
       if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
           vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
           vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-        GPRT_RAISE("Failed to create swapchain semaphores");
+        LOG_ERROR("Failed to create swapchain semaphores");
       }
     }
 
@@ -4066,7 +5708,7 @@ struct Context {
         if (formats[i].format == surfaceFormat.format && formats[i].colorSpace == surfaceFormat.colorSpace)
           surfaceFormatFound = true;
       if (!surfaceFormatFound)
-        GPRT_RAISE("Error, unable to find RGBA8 SRGB surface format...");
+        LOG_ERROR("Error, unable to find RGBA8 SRGB surface format...");
 
       // For now, we assume the user wants FIFO, which is similar to vsync.
       // All vulkan implementations must support FIFO per-spec, so it's
@@ -4084,7 +5726,7 @@ struct Context {
         if (presentModes[i] == presentMode)
           presentModeFound = true;
       if (!presentModeFound)
-        GPRT_RAISE("Error, unable to find vsync present mode...");
+        LOG_ERROR("Error, unable to find vsync present mode...");
 
       // Window extent is the number of pixels truly used by the surface. For
       // high dps displays (like on mac) the window extent might be larger
@@ -4140,7 +5782,7 @@ struct Context {
       // Create the swapchain
       err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
       if (err != VK_SUCCESS) {
-        GPRT_RAISE("Error, failed to create swap chain : \n" + errorString(err));
+        LOG_ERROR("Error, failed to create swap chain : \n" + errorString(err));
       }
 
       // Now, receive the swapchain images
@@ -4185,9 +5827,21 @@ struct Context {
       defaultTexture3D =
           new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
                       memoryUsageFlags, VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
+
+      const VkBufferUsageFlags bufferUsageFlags =
+          // means we can get this buffer's address with vkGetBufferDeviceAddress
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          // means we can use this buffer to transfer into another
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+          // means we can use this buffer to receive data transferred from another
+          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+          // means we can use this buffer as a storage buffer resource
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      defaultBuffer = new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue,
+                                 bufferUsageFlags, memoryUsageFlags, 1);
     }
 
-    // For the SBT record descriptor for compute and raster shaders
+    // For the SBT record descriptor for raster shaders
     {
       VkDescriptorSetLayoutBinding binding{};
       binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -4227,6 +5881,7 @@ struct Context {
       VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &rasterRecordDescriptorSet));
     }
 
+    // For the SBT record descriptor for compute shaders
     {
       VkDescriptorSetLayoutBinding binding{};
       binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -4266,6 +5921,43 @@ struct Context {
 
       VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
     }
+
+    // Init imgui
+    if (requestedFeatures.window) {
+      // 1: create descriptor pool for IMGUI
+      // the size of the pool is very oversize, but it's copied from imgui demo itself.
+      VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+                                           {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+      VkDescriptorPoolCreateInfo pool_info = {};
+      pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      pool_info.maxSets = 1000;
+      pool_info.poolSizeCount = std::size(pool_sizes);
+      pool_info.pPoolSizes = pool_sizes;
+
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &pool_info, nullptr, &imguiPool));
+
+      // 2: initialize imgui library
+
+      // this initializes the core structures of imgui
+      ImGui::CreateContext();
+
+      // this initializes imgui for SDL
+      ImGui_ImplGlfw_InitForVulkan(window, true);
+
+      // Call new frame here to initialize some internal imgui data
+      ImGui_ImplGlfw_NewFrame();
+    }
   };
 
   void destroy() {
@@ -4290,6 +5982,11 @@ struct Context {
       delete defaultTexture3D;
       defaultTexture3D = nullptr;
     }
+    if (defaultBuffer) {
+      defaultBuffer->destroy();
+      delete defaultBuffer;
+      defaultBuffer = nullptr;
+    }
 
     if (rasterRecordBuffer) {
       rasterRecordBuffer->destroy();
@@ -4311,6 +6008,8 @@ struct Context {
       vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
     if (texture3DDescriptorSet)
       vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
+    if (bufferDescriptorSet)
+      vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
 
     if (samplerDescriptorSetLayout)
       vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
@@ -4324,6 +6023,8 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
     if (computeRecordDescriptorSetLayout)
       vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
+    if (bufferDescriptorSetLayout)
+      vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
 
     if (samplerDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
@@ -4337,6 +6038,18 @@ struct Context {
       vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
     if (computeRecordDescriptorPool)
       vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
+    if (bufferDescriptorPool)
+      vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
+    if (imguiPool) {
+      vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
+    }
+    if (imgui.renderPass) {
+      ImGui_ImplVulkan_Shutdown();
+      vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+    }
+    if (imgui.frameBuffer) {
+      vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+    }
 
     if (imageAvailableSemaphore)
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
@@ -4356,10 +6069,10 @@ struct Context {
     if (surface)
       vkDestroySurfaceKHR(instance, surface, nullptr);
 
-    if (pipelineLayout)
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-    if (pipeline)
-      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+    if (raytracingPipelineLayout)
+      vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+    if (raytracingPipeline)
+      vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
 
     if (fillInstanceDataStage.layout)
       vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
@@ -4367,15 +6080,36 @@ struct Context {
       vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
     if (fillInstanceDataStage.module)
       vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
+    
+    destroySortStages();
 
-    shaderBindingTable.destroy();
+    if (raygenTable) {
+      raygenTable->destroy();
+      delete raygenTable;
+      raygenTable = nullptr;
+    }
+    if (missTable) {
+      missTable->destroy();
+      delete missTable;
+      missTable = nullptr;
+    }
+    if (hitgroupTable) {
+      hitgroupTable->destroy();
+      delete hitgroupTable;
+      hitgroupTable = nullptr;
+    }
+
     vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+
+    vmaDestroyAllocator(allocator);
+
     vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
+    vkDestroyQueryPool(logicalDevice, compactedSizeQueryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
     freeDebugCallback(instance);
@@ -4384,7 +6118,7 @@ struct Context {
 
   ~Context(){};
 
-  void buildSBT() {
+  void buildSBT(GPRTBuildSBTFlags flags) {
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -4406,16 +6140,18 @@ struct Context {
       const uint32_t sbtSize = groupCount * handleSize;
 
       std::vector<uint8_t> shaderHandleStorage(sbtSize);
-      VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, pipeline, 0, groupCount, sbtSize,
+      VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
                                                              shaderHandleStorage.data());
       if (err)
-        GPRT_RAISE("failed to get ray tracing shader group handles! : \n" + errorString(err));
+        LOG_ERROR("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
       const VkBufferUsageFlags bufferUsageFlags =
           // means we can use this buffer as a SBT
           VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
           // means we can get this buffer's address with vkGetBufferDeviceAddress
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          // means we can use this buffer as a storage buffer resource
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
                                                                                              // vkMapMemory
                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
@@ -4424,24 +6160,58 @@ struct Context {
       // std::cout<<"Todo, get some smarter memory allocation working..."
       // <<std::endl;
 
+      // allocate / resize ray generation table
       size_t numRayGens = raygenPrograms.size();
+      if (raygenTable && raygenTable->size != recordSize * numRayGens) {
+        raygenTable->destroy();
+        delete raygenTable;
+        raygenTable = nullptr;
+      }
+      if (!raygenTable && raygenPrograms.size() > 0) {
+        raygenTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 bufferUsageFlags, memoryUsageFlags, recordSize * numRayGens);
+      }
+
       size_t numMissProgs = missPrograms.size();
+      if (missTable && missTable->size != recordSize * numMissProgs) {
+        missTable->destroy();
+        delete missTable;
+        missTable = nullptr;
+      }
+      if (!missTable && missPrograms.size() > 0) {
+        missTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                               bufferUsageFlags, memoryUsageFlags, recordSize * numMissProgs);
+      }
+
       size_t numHitRecords = getNumHitRecords();
+      if (hitgroupTable && hitgroupTable->size != recordSize * numHitRecords) {
+        hitgroupTable->destroy();
+        delete hitgroupTable;
+        hitgroupTable = nullptr;
+      }
+      if (!hitgroupTable && numHitRecords > 0) {
+        hitgroupTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                   bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords);
+      }
 
       size_t numRecords = numRayGens + numMissProgs + numHitRecords;
 
-      if (shaderBindingTable.size != recordSize * numRecords) {
-        shaderBindingTable.destroy();
-      }
-      if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
-        shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-                                    memoryUsageFlags, recordSize * numRecords);
-      }
-      shaderBindingTable.map();
-      uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
+      // if (shaderBindingTable.size != recordSize * numRecords) {
+      //   shaderBindingTable.destroy();
+      // }
+      // if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
+      //   shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
+      //                               memoryUsageFlags, recordSize * numRecords);
+      // }
+
+      // shaderBindingTable.map();
+      // uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
 
       // Raygen records
-      if (raygenPrograms.size() > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygenPrograms.size() > 0) {
+        raygenTable->map();
+        uint8_t *mapped = ((uint8_t *) (raygenTable->mapped));
+
         for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
@@ -4457,16 +6227,20 @@ struct Context {
           RayGen *raygen = raygenPrograms[idx];
           memcpy(params, raygen->SBTRecord, raygen->recordSize);
         }
+        raygenTable->unmap();
       }
 
       // Miss records
-      if (missPrograms.size() > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && missPrograms.size() > 0) {
+        missTable->map();
+        uint8_t *mapped = ((uint8_t *) (missTable->mapped));
+
         for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
           size_t recordStride = recordSize;
           size_t handleStride = handleSize;
 
           // First, copy handle
-          size_t recordOffset = recordStride * idx + recordStride * numRayGens;
+          size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
           size_t handleOffset = handleStride * idx + handleStride * numRayGens;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
@@ -4476,10 +6250,15 @@ struct Context {
           Miss *miss = missPrograms[idx];
           memcpy(params, miss->SBTRecord, miss->recordSize);
         }
+
+        missTable->unmap();
       }
 
       // Hit records
-      if (numHitRecords > 0) {
+      if ((flags & GPRTBuildSBTFlags::GPRT_SBT_HITGROUP) != 0 && numHitRecords > 0) {
+        hitgroupTable->map();
+        uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
+
         // Go over all TLAS by order they were created
         for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
           Accel *tlas = accels[tlasID];
@@ -4501,7 +6280,7 @@ struct Context {
                 for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
                   auto &geom = triAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -4509,10 +6288,13 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numRayGens + numMissProgs);
-                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numRayGens + numMissProgs);
+                    size_t recordOffset =
+                        recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset);
+                    // +
+                    // recordStride * (numRayGens + numMissProgs);
+                    size_t handleOffset =
+                        handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
+                        handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -4530,7 +6312,7 @@ struct Context {
                 for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
                   auto &geom = aabbAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < numRayTypes; ++rayType) {
+                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -4538,10 +6320,12 @@ struct Context {
                     // Account for all prior instance's geometries and for prior
                     // BLAS's geometry
                     size_t instanceOffset = instanceAccel->instanceOffset + geomIDOffset;
-                    size_t recordOffset = recordStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          recordStride * (numRayGens + numMissProgs);
-                    size_t handleOffset = handleStride * (rayType + numRayTypes * geomID + instanceOffset) +
-                                          handleStride * (numRayGens + numMissProgs);
+                    size_t recordOffset =
+                        recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset);
+                    // + recordStride * (numRayGens + numMissProgs);
+                    size_t handleOffset =
+                        handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
+                        handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                     // Then, copy params following handle
@@ -4554,16 +6338,17 @@ struct Context {
               }
 
               else {
-                GPRT_RAISE("Unaccounted for BLAS type!");
+                LOG_ERROR("Unaccounted for BLAS type!");
               }
             }
           }
         }
+        hitgroupTable->unmap();
       }
     }
 
     // Update geometry record data in the record buffer for raster programs
-    {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RASTER) != 0) {
       rasterRecordBuffer->map();
       uint8_t *mapped = ((uint8_t *) (rasterRecordBuffer->mapped));
       for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
@@ -4575,7 +6360,7 @@ struct Context {
     }
 
     // Update compute record data in the record buffer for compute programs
-    {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_COMPUTE) != 0) {
       computeRecordBuffer->map();
       uint8_t *mapped = ((uint8_t *) (computeRecordBuffer->mapped));
       for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
@@ -4600,6 +6385,8 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
       samplerDescriptorPool = VK_NULL_HANDLE;
+
+      LOG_INFO("Reallocating texture sampler space");
     }
     if (!samplerDescriptorPool) {
       VkDescriptorPoolSize poolSize;
@@ -4620,7 +6407,8 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                           VK_SHADER_STAGE_COMPUTE_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4670,8 +6458,6 @@ struct Context {
         samplerDescriptors[i].imageView = VK_NULL_HANDLE;
       }
 
-      // [POI] Second and final descriptor is a texture array
-      // Unlike an array texture, these are adressed like typical arrays
       writeDescriptorSets[0] = {};
       writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
       writeDescriptorSets[0].dstBinding = 0;
@@ -4685,6 +6471,12 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumSamplers = poolSize.descriptorCount;
     }
@@ -4696,6 +6488,8 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
       texture1DDescriptorPool = VK_NULL_HANDLE;
+
+      LOG_INFO("Reallocating texture1D space");
     }
     if (!texture1DDescriptorPool) {
       VkDescriptorPoolSize poolSize;
@@ -4716,7 +6510,8 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                           VK_SHADER_STAGE_COMPUTE_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4771,8 +6566,6 @@ struct Context {
         textureDescriptors[i].imageLayout = layout;
       }
 
-      // [POI] Second and final descriptor is a texture array
-      // Unlike an array texture, these are adressed like typical arrays
       writeDescriptorSets[0] = {};
       writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
       writeDescriptorSets[0].dstBinding = 0;
@@ -4786,6 +6579,12 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumTexture1Ds = Texture::texture1Ds.size();
     }
@@ -4797,6 +6596,8 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
       texture2DDescriptorPool = VK_NULL_HANDLE;
+
+      LOG_INFO("Reallocating texture2D space");
     }
     if (!texture2DDescriptorPool) {
       VkDescriptorPoolSize poolSize;
@@ -4817,7 +6618,8 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                           VK_SHADER_STAGE_COMPUTE_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4872,8 +6674,6 @@ struct Context {
         textureDescriptors[i].imageLayout = layout;
       }
 
-      // [POI] Second and final descriptor is a texture array
-      // Unlike an array texture, these are adressed like typical arrays
       writeDescriptorSets[0] = {};
       writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
       writeDescriptorSets[0].dstBinding = 0;
@@ -4887,17 +6687,25 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumTexture2Ds = Texture::texture2Ds.size();
     }
 
-    // If the number of texture2ds has changed, we need to make a new
+    // If the number of texture3ds has changed, we need to make a new
     // descriptor pool
     if (texture3DDescriptorPool && previousNumTexture3Ds != Texture::texture3Ds.size()) {
       vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
       vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
       vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
       texture3DDescriptorPool = VK_NULL_HANDLE;
+
+      LOG_INFO("Reallocating texture3D space");
     }
     if (!texture3DDescriptorPool) {
       VkDescriptorPoolSize poolSize;
@@ -4918,7 +6726,8 @@ struct Context {
       binding.binding = 0;
       binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                           VK_SHADER_STAGE_COMPUTE_BIT;
 
       std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
 
@@ -4973,8 +6782,6 @@ struct Context {
         textureDescriptors[i].imageLayout = layout;
       }
 
-      // [POI] Second and final descriptor is a texture array
-      // Unlike an array texture, these are adressed like typical arrays
       writeDescriptorSets[0] = {};
       writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
       writeDescriptorSets[0].dstBinding = 0;
@@ -4988,15 +6795,132 @@ struct Context {
       vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
                              writeDescriptorSets.data(), 0, nullptr);
 
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
       // Finally, keep track of if the texture count here changes
       previousNumTexture3Ds = Texture::texture3Ds.size();
     }
 
-    // If the number of records has changed, we need to make a new descriptor pool
+    // If the number of buffers has changed, we need to make a new
+    // descriptor pool
+    if (bufferDescriptorPool && previousNumBuffers != Buffer::buffers.size()) {
+      vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
+      vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
+      bufferDescriptorPool = VK_NULL_HANDLE;
+
+      LOG_INFO("Reallocating buffer space");
+    }
+    if (!bufferDescriptorPool) {
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      poolSize.descriptorCount = std::max(uint32_t(Buffer::buffers.size()), uint32_t(1));
+
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &bufferDescriptorPool));
+
+      VkDescriptorSetLayoutBinding binding{};
+      binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      binding.descriptorCount = poolSize.descriptorCount;
+      binding.binding = 0;
+      binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                           VK_SHADER_STAGE_COMPUTE_BIT;
+
+      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
+
+      VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+      setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+      setLayoutBindingFlags.bindingCount = 1;
+      std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+          VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
+      setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+
+      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+      descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+      descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+      descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
+                                                  &bufferDescriptorSetLayout));
+
+      // Now, making the descriptor sets
+      VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+      uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
+
+      variableDescriptorCountAllocInfo.sType =
+          VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+      variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+      variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = bufferDescriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = &bufferDescriptorSetLayout;
+      descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &bufferDescriptorSet));
+
+      std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
+
+      std::vector<VkDescriptorBufferInfo> bufferDescriptors(poolSize.descriptorCount);
+      for (size_t i = 0; i < poolSize.descriptorCount; i++) {
+        VkBuffer buffer = defaultBuffer->buffer;
+        VkDeviceSize range = defaultBuffer->size;
+
+        if (Buffer::buffers.size() > 0 && Buffer::buffers[i]) {
+          buffer = Buffer::buffers[i]->buffer;
+          range = Buffer::buffers[i]->size;
+        }
+
+        bufferDescriptors[i].offset = 0;
+        bufferDescriptors[i].buffer = buffer;
+        bufferDescriptors[i].range = range;
+      }
+
+      writeDescriptorSets[0] = {};
+      writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSets[0].dstBinding = 0;
+      writeDescriptorSets[0].dstArrayElement = 0;
+      writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
+      writeDescriptorSets[0].pImageInfo = 0;
+      writeDescriptorSets[0].dstSet = bufferDescriptorSet;
+      writeDescriptorSets[0].pBufferInfo = bufferDescriptors.data();
+
+      vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                             writeDescriptorSets.data(), 0, nullptr);
+
+      // After this, we'll need to rebuild our pipelines since our descriptor
+      // set layouts changed.
+      raytracingPipelineOutOfDate = true;
+      computePipelinesOutOfDate = true;
+      rasterPipelinesOutOfDate = true;
+
+      // Finally, keep track of if the buffer count here changes
+      previousNumBuffers = Buffer::buffers.size();
+    }
+
+    // If the number of raster records has changed, we need to make a new buffer of
+    // raster program records
     if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
       rasterRecordBuffer->destroy();
       delete rasterRecordBuffer;
       rasterRecordBuffer = nullptr;
+
+      LOG_INFO("Reallocating rasterizer record space");
     }
     if (!rasterRecordBuffer) {
       // Create buffer to contain uniform buffer data
@@ -5008,7 +6932,9 @@ struct Context {
           // means we can use this buffer to receive data transferred from another
           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
           // means we can use this buffer as a uniform buffer
-          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+          // means we can use this buffer as a storage buffer
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                             // device access
 
@@ -5024,7 +6950,7 @@ struct Context {
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
       rasterRecordBuffer =
-          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+          new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                      memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()));
 
       // Uniform buffer descriptors for each geometry's record
@@ -5047,15 +6973,21 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
+      // We're only updating an existing descriptor set here, so we don't
+      // need to mark our raster pipelines as "outdated" from this.
+
       // Finally, keep track of if the record count here changes
       previousNumRasterRecords = Geom::geoms.size();
     }
 
-    // If the number of records has changed, we need to make a new descriptor pool
+    // If the number of compute records has changed, we need to make a new buffer of
+    // compute records
     if (computeRecordBuffer && previousNumComputeRecords != Compute::computes.size()) {
       computeRecordBuffer->destroy();
       delete computeRecordBuffer;
       computeRecordBuffer = nullptr;
+
+      LOG_INFO("Reallocating compute record space");
     }
     if (!computeRecordBuffer) {
       // Create buffer to contain uniform buffer data
@@ -5067,7 +6999,9 @@ struct Context {
           // means we can use this buffer to receive data transferred from another
           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
           // means we can use this buffer as a uniform buffer
-          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+          // means we can use this buffer as a storage buffer
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                             // device access
 
@@ -5083,7 +7017,7 @@ struct Context {
       const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
       computeRecordBuffer =
-          new Buffer(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
+          new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                      memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()));
 
       // Uniform buffer descriptors for each geometry's record
@@ -5106,184 +7040,217 @@ struct Context {
       // We'll write these descriptors now, but the actual recordBuffer will be written to later.
       vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
 
+      // We're only updating an existing descriptor set here, so we don't
+      // need to mark our compute pipelines as "outdated" from this.
+
       // Finally, keep track of if the record count here changes
       previousNumComputeRecords = Compute::computes.size();
     }
 
-    // Build the ray tracing pipeline
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                                   VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                                   VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    // Build / update the ray tracing pipeline if required
+    if (raytracingPipelineOutOfDate) {
+      LOG_INFO("Building ray tracing pipeline");
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
-    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {
-        samplerDescriptorSetLayout,
-        texture1DDescriptorSetLayout,
-        texture2DDescriptorSetLayout,
-        texture3DDescriptorSetLayout,
-    };
-    pipelineLayoutCI.setLayoutCount = layouts.size();
-    pipelineLayoutCI.pSetLayouts = layouts.data();
+      VkPushConstantRange pushConstantRange = {};
+      pushConstantRange.size = 128;
+      pushConstantRange.offset = 0;
+      pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                                     VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
-    pipelineLayoutCI.pushConstantRangeCount = 1;
-    pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+      VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+      pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                                    texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+                                                    bufferDescriptorSetLayout};
+      pipelineLayoutCI.setLayoutCount = layouts.size();
+      pipelineLayoutCI.pSetLayouts = layouts.data();
 
-    if (pipelineLayout != VK_NULL_HANDLE) {
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-      pipelineLayout = VK_NULL_HANDLE;
-    }
-    VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout));
+      pipelineLayoutCI.pushConstantRangeCount = 1;
+      pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 
-    /*
-      Setup ray tracing shader groups
-    */
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    shaderGroups.clear();
-
-    // Ray generation groups
-    {
-      for (auto raygen : raygenPrograms) {
-        shaderStages.push_back(raygen->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
+      if (raytracingPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+        raytracingPipelineLayout = VK_NULL_HANDLE;
       }
-    }
+      VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &raytracingPipelineLayout));
 
-    // Miss group
-    {
-      for (auto miss : missPrograms) {
-        shaderStages.push_back(miss->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
+      /*
+        Setup ray tracing shader groups
+      */
+      std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+      shaderGroups.clear();
+
+      // Ray generation groups
+      {
+        for (auto raygen : raygenPrograms) {
+          shaderStages.push_back(raygen->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
       }
-    }
 
-    // Hit groups
+      // Miss group
+      {
+        for (auto miss : missPrograms) {
+          shaderStages.push_back(miss->shaderStage);
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+          shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+          shaderGroups.push_back(shaderGroup);
+        }
+      }
 
-    // Go over all TLAS by order they were created
-    for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-      Accel *tlas = accels[tlasID];
-      if (!tlas)
-        continue;
-      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-        // Iterate over all BLAS stored in the TLAS
-        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-        for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
-          Accel *blas = instanceAccel->instances[blasID];
-          // Handle different BLAS types...
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
-            TriangleAccel *triAccel = (TriangleAccel *) blas;
-            // Add a record for every geometry-raytype permutation
-            for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
-              auto &geom = triAccel->geometries[geomID];
-              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+      // Hit groups
 
-                // init all to unused
-                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+      // Go over all TLAS by order they were created
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+        Accel *tlas = accels[tlasID];
+        if (!tlas)
+          continue;
+        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+          // Iterate over all BLAS stored in the TLAS
+          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+            Accel *blas = instanceAccel->instances[blasID];
+            // Handle different BLAS types...
+            if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
+              TriangleAccel *triAccel = (TriangleAccel *) blas;
+              // Add a record for every geometry-raytype permutation
+              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                auto &geom = triAccel->geometries[geomID];
+                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                  VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                  shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                  shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
 
-                // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  // init all to unused
+                  shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+                  // populate hit group programs using geometry type
+                  if (geom->geomType->closestHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                    shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->anyHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                    shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->intersectionShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                    shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+                  shaderGroups.push_back(shaderGroup);
                 }
-
-                if (geom->geomType->anyHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-
-                if (geom->geomType->intersectionShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-                shaderGroups.push_back(shaderGroup);
               }
-            }
-          } else if (blas->getType() == GPRT_AABB_ACCEL) {
-            AABBAccel *aabbAccel = (AABBAccel *) blas;
-            // Add a record for every geometry-raytype permutation
-            for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
-              auto &geom = aabbAccel->geometries[geomID];
-              for (int rayType = 0; rayType < numRayTypes; ++rayType) {
-                VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-                shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-                shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            } else if (blas->getType() == GPRT_AABB_ACCEL) {
+              AABBAccel *aabbAccel = (AABBAccel *) blas;
+              // Add a record for every geometry-raytype permutation
+              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                auto &geom = aabbAccel->geometries[geomID];
+                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                  VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+                  shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+                  shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
 
-                // init all to unused
-                shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-                shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+                  // init all to unused
+                  shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+                  shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
-                // populate hit group programs using geometry type
-                if (geom->geomType->closestHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  // populate hit group programs using geometry type
+                  if (geom->geomType->closestHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                    shaderGroup.closestHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->anyHitShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                    shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+
+                  if (geom->geomType->intersectionShaderUsed[rayType]) {
+                    shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                    shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+                  }
+                  shaderGroups.push_back(shaderGroup);
                 }
-
-                if (geom->geomType->anyHitShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  shaderGroup.anyHitShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-
-                if (geom->geomType->intersectionShaderUsed[rayType]) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  shaderGroup.intersectionShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-                }
-                shaderGroups.push_back(shaderGroup);
               }
+            } else {
+              LOG_ERROR("Unaccounted for BLAS type!");
             }
-          } else {
-            GPRT_RAISE("Unaccounted for BLAS type!");
           }
         }
       }
+
+      if (shaderStages.size() > 0) {
+        /*
+          Create the ray tracing pipeline
+        */
+        VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
+        rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+        rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+        rayTracingPipelineCI.pStages = shaderStages.data();
+        rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
+        rayTracingPipelineCI.pGroups = shaderGroups.data();
+        rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
+        rayTracingPipelineCI.layout = raytracingPipelineLayout;
+
+        if (raytracingPipeline != VK_NULL_HANDLE) {
+          vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+          raytracingPipeline = VK_NULL_HANDLE;
+        }
+        VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
+                                                         &rayTracingPipelineCI, nullptr, &raytracingPipeline);
+        if (err) {
+          LOG_ERROR("failed to create ray tracing pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      // Mark our ray tracing pipeline as "updated".
+      raytracingPipelineOutOfDate = false;
     }
 
-    if (shaderStages.size() > 0) {
-      /*
-        Create the ray tracing pipeline
-      */
-      VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
-      rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-      rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-      rayTracingPipelineCI.pStages = shaderStages.data();
-      rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
-      rayTracingPipelineCI.pGroups = shaderGroups.data();
-      rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
-      rayTracingPipelineCI.layout = pipelineLayout;
+    // Build / update the compute pipelines if required
+    if (computePipelinesOutOfDate) {
+      for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+        if (!Compute::computes[i])
+          continue;
+        Compute::computes[i]->buildPipeline(samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+                                            bufferDescriptorSetLayout, computeRecordDescriptorSetLayout);
+      }
+      computePipelinesOutOfDate = false;
+    }
 
-      if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(logicalDevice, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
+    // Build / update the raster pipelines if required
+    if (rasterPipelinesOutOfDate) {
+      for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
+        if (!GeomType::geomTypes[i])
+          continue;
+        for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
+          geomTypes[i]->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+                                            bufferDescriptorSetLayout, rasterRecordDescriptorSetLayout);
+        }
       }
-      VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
-                                                       &rayTracingPipelineCI, nullptr, &pipeline);
-      if (err) {
-        GPRT_RAISE("failed to create ray tracing pipeline! : \n" + errorString(err));
-      }
+      rasterPipelinesOutOfDate = false;
     }
   }
 
@@ -5336,7 +7303,339 @@ struct Context {
     // At this point, create all internal compute pipelines as well.
     err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
                                    &fillInstanceDataStage.pipeline);
+  }
+
+  void setupSortStages(Module *module) {
+    // currently not using cache.
+    VkPipelineCache cache = VK_NULL_HANDLE;
+
+    VkDescriptorPoolSize poolSize;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 5;
+
+    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolInfo.poolSizeCount = 1;
+    descriptorPoolInfo.pPoolSizes = &poolSize;
+    descriptorPoolInfo.maxSets = 5; 
+    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
+
+    sortStages.Count.entryPoint = "Count";
+    sortStages.CountReduce.entryPoint = "CountReduce";
+    sortStages.Scan.entryPoint = "Scan";
+    sortStages.ScanAdd.entryPoint = "ScanAdd";
+    sortStages.Scatter.entryPoint = "Scatter";
+    sortStages.ScatterPayload.entryPoint = "ScatterPayload";
+
+    // Create binding for Radix sort passes
+    VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // SrcBuffer (sort)
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // DstBuffer (sort)
+        { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // ScrPayload (sort only)
+        { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // DstPayload (sort only)
+    };
+
+    VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // ScanSrc
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // ScanDst
+        { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // ScanScratch
+    };
+
+    VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // Scratch (sort only)
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr },  // Scratch (reduced)
+    };
+
+    auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = pool;
+      descriptorSetAllocateInfo.pSetLayouts = &layout;
+      descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = nullptr;
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet));
+    };
+
+    VkResult vkResult;
+    
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    descriptor_set_layout_create_info.pNext = nullptr;
+    descriptor_set_layout_create_info.flags = 0;
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
+    descriptor_set_layout_create_info.bindingCount = 4;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutInputOutputs);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &sortStages.m_SortDescriptorSetInputOutput[1]);
+
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
+    descriptor_set_layout_create_info.bindingCount = 3;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScan);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan, &sortStages.m_SortDescriptorSetScanSets[1]);
+
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
+    descriptor_set_layout_create_info.bindingCount = 2;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr, &sortStages.m_SortDescriptorSetLayoutScratch);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch, &sortStages.m_SortDescriptorSetScratch);
+
+    // Create constant range representing our static constant
+    VkPushConstantRange constant_range;
+    constant_range.stageFlags = VK_SHADER_STAGE_ALL;
+    constant_range.offset = 0;
+    constant_range.size = sizeof(ParallelSortCB);
+
+    // Create the pipeline layout (Root signature)
+    VkPipelineLayoutCreateInfo layout_create_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    layout_create_info.pNext = nullptr;
+    layout_create_info.flags = 0;
+    layout_create_info.setLayoutCount = 3;
+    VkDescriptorSetLayout layouts[] = { sortStages.m_SortDescriptorSetLayoutInputOutputs, sortStages.m_SortDescriptorSetLayoutScan, 
+                                        sortStages.m_SortDescriptorSetLayoutScratch };
+    layout_create_info.pSetLayouts = layouts;
+    layout_create_info.pushConstantRangeCount = 1;
+    layout_create_info.pPushConstantRanges = &constant_range;
+
+    VkResult bCreatePipelineLayout = vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
+    assert(bCreatePipelineLayout == VK_SUCCESS);
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Count.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Count.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Count.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.Count.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.CountReduce.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.CountReduce.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.CountReduce.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.CountReduce.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scan.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scan.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Scan.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.Scan.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScanAdd.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScanAdd.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.ScanAdd.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.ScanAdd.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scatter.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scatter.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Scatter.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.Scatter.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScatterPayload.entryPoint);
+      auto binary = module->getBinary("COMPUTE");
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScatterPayload.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.ScatterPayload.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                    &sortStages.ScatterPayload.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
     // todo, destroy the above stuff
+  }
+
+  void destroySortStages() {
+    vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
+    sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
+    sortStages.Scatter.pipeline = VK_NULL_HANDLE;
+    sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
+    sortStages.Scan.pipeline = VK_NULL_HANDLE;
+    sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
+    sortStages.Count.pipeline = VK_NULL_HANDLE;
+
+    vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
+    sortStages.ScatterPayload.module = VK_NULL_HANDLE;
+    sortStages.Scatter.module = VK_NULL_HANDLE;
+    sortStages.ScanAdd.module = VK_NULL_HANDLE;
+    sortStages.Scan.module = VK_NULL_HANDLE;
+    sortStages.CountReduce.module = VK_NULL_HANDLE;
+    sortStages.Count.module = VK_NULL_HANDLE;
+
+    vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
+    sortStages.layout = VK_NULL_HANDLE;
+
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
+
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
+
+    vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
   }
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
@@ -5419,6 +7718,270 @@ struct Context {
 
     endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
   }
+
+  // For ImGui
+  void setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
+    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
+      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
+    } else {
+      imgui.width = colorTexture->width;
+      imgui.height = colorTexture->height;
+    }
+
+    imgui.colorAttachment = colorTexture;
+    imgui.depthAttachment = depthTexture;
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = colorTexture->format;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    // clear here says to clear the values to a constant at start.
+    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
+    // save rasterized fragments to memory
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    // not currently using a stencil
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // Initial and final layouts of the texture
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthTexture->format;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.attachmentCount = attachments.size();
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
+
+    VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
+
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = imgui.renderPass;
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.pAttachments = attachmentViews;
+    framebufferInfo.width = imgui.width;
+    framebufferInfo.height = imgui.height;
+    framebufferInfo.layers = 1;
+
+    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &imgui.frameBuffer) != VK_SUCCESS) {
+      throw std::runtime_error("failed to create framebuffer!");
+    }
+
+    // this initializes imgui for Vulkan
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = instance;
+    init_info.PhysicalDevice = physicalDevice;
+    init_info.Device = logicalDevice;
+    init_info.Queue = graphicsQueue;
+    init_info.DescriptorPool = imguiPool;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = 2;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+    ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
+
+    // execute a gpu command to upload imgui font textures
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
+    ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
+    VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;
+    submitInfo.pWaitDstStageMask = nullptr;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;
+
+    VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
+
+    // clear font textures from cpu data
+    ImGui_ImplVulkan_DestroyFontUploadObjects();
+  }
+
+  void rasterizeGui() {
+    ImGui::Render();
+    ImDrawData *draw_data = ImGui::GetDrawData();
+
+    VkResult err;
+    VkCommandBufferBeginInfo cmdBufInfo{};
+    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    VkRenderPassBeginInfo renderPassBeginInfo = {};
+    renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassBeginInfo.pNext = nullptr;
+    renderPassBeginInfo.renderPass = imgui.renderPass;
+    renderPassBeginInfo.renderArea.offset.x = 0;
+    renderPassBeginInfo.renderArea.offset.y = 0;
+    renderPassBeginInfo.renderArea.extent.width = imgui.width;
+    renderPassBeginInfo.renderArea.extent.height = imgui.height;
+    renderPassBeginInfo.clearValueCount = 0;
+    renderPassBeginInfo.pClearValues = nullptr;
+    renderPassBeginInfo.framebuffer = imgui.frameBuffer;
+
+    err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
+
+    // Transition our attachments into optimal attachment formats
+    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
+                                          imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
+                                          imgui.depthAttachment->layout,
+                                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+    // This will clear the color and depth attachment
+    vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    // Record dear imgui primitives into command buffer
+    ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
+
+    // if (imgui.pipeline == VK_NULL_HANDLE) {
+    //   geometryType->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+    //                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
+    //                                     rasterRecordDescriptorSetLayout);
+    // }
+
+    // // Bind the rendering pipeline
+    // // todo, if pipeline doesn't exist, create it.
+    // vkCmdBindPipeline(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                   geometryType->raster[rasterType].pipeline);
+
+    // VkViewport viewport{};
+    // viewport.x = 0.0f;
+    // viewport.y = 0.0f;
+    // viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
+    // viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
+    // viewport.minDepth = 0.0f;
+    // viewport.maxDepth = 1.0f;
+    // vkCmdSetViewport(graphicsCommandBuffer, 0, 1, &viewport);
+
+    // VkRect2D scissor{};
+    // scissor.offset = {0, 0};
+    // scissor.extent.width = geometryType->raster[rasterType].width;
+    // scissor.extent.height = geometryType->raster[rasterType].height;
+    // vkCmdSetScissor(graphicsCommandBuffer, 0, 1, &scissor);
+
+    // auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+    //   return (value + alignment - 1) & ~(alignment - 1);
+    // };
+
+    // const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
+    // const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+    // const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+    // const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
+
+    // // for the moment, just assume the max group size
+    // const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+
+    // for (uint32_t i = 0; i < numGeometry; ++i) {
+    //   GeomType *geomType = geometry[i]->geomType;
+
+    //   if (geomType->getKind() == GPRT_TRIANGLES) {
+    //     TriangleGeom *geom = (TriangleGeom *) geometry[i];
+    //     VkDeviceSize offsets[1] = {0};
+
+    //     uint32_t instanceCount = 1;
+    //     if (instanceCounts != nullptr) {
+    //       instanceCount = instanceCounts[i];
+    //     }
+
+    //     std::vector<VkDescriptorSet> descriptorSets = {samplerDescriptorSet, texture1DDescriptorSet,
+    //                                                    texture2DDescriptorSet, texture3DDescriptorSet,
+    //                                                    rasterRecordDescriptorSet};
+
+    //     uint32_t offset = geom->address * recordSize;
+    //     vkCmdBindDescriptorSets(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                             geomType->raster[rasterType].pipelineLayout, 0, descriptorSets.size(),
+    //                             descriptorSets.data(), 1, &offset);
+    //     vkCmdBindIndexBuffer(graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+    //     vkCmdDrawIndexed(graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
+    //   }
+    // }
+
+    vkCmdEndRenderPass(graphicsCommandBuffer);
+
+    // At the end of the renderpass, we'll transition the layout back to it's previous layout
+    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                          imgui.colorAttachment->layout,
+                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                          imgui.depthAttachment->layout,
+                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+    err = vkEndCommandBuffer(graphicsCommandBuffer);
+    if (err)
+      LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+    VkSubmitInfo submitInfo;
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = NULL;
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (err)
+      LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+    err = vkQueueWaitIdle(graphicsQueue);
+    if (err)
+      LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
 };
 
 GPRT_API void
@@ -5430,6 +7993,12 @@ gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *tit
   requestedFeatures.windowProperties.title = std::string(title);
 }
 
+GPRT_API void
+gprtRequestRayTypeCount(size_t rayTypeCount) {
+  LOG_API_CALL();
+  requestedFeatures.numRayTypes = rayTypeCount;
+}
+
 GPRT_API bool
 gprtWindowShouldClose(GPRTContext _context) {
   LOG_API_CALL();
@@ -5438,7 +8007,22 @@ gprtWindowShouldClose(GPRTContext _context) {
     return true;
 
   glfwPollEvents();
+
+  // Start the Dear ImGui frame
+  // ImGui_ImplVulkan_NewFrame(); // I'm not entirely convinced this is needed?
+  ImGui_ImplGlfw_NewFrame();   // if GLFW isn't available this might be odd...
+
   return glfwWindowShouldClose(context->window);
+}
+
+GPRT_API void
+gprtSetWindowTitle(GPRTContext _context, const char *title) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  if (!requestedFeatures.window)
+    return;
+
+  glfwSetWindowTitle(context->window, title);
 }
 
 GPRT_API void
@@ -5461,7 +8045,7 @@ gprtGetMouseButton(GPRTContext _context, int button) {
   return glfwGetMouseButton(context->window, button);
 }
 
-GPRT_API int 
+GPRT_API int
 gprtGetKey(GPRTContext _context, int key) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
@@ -5768,11 +8352,24 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
+GPRT_API void
+gprtGuiSetRasterAttachments(GPRTContext _context, GPRTTexture _colorAttachment, GPRTTexture _depthAttachment) {
+  Context *context = (Context *) _context;
+  Texture *colorAttachment = (Texture *) _colorAttachment;
+  Texture *depthAttachment = (Texture *) _depthAttachment;
+  context->setRasterAttachments(colorAttachment, depthAttachment);
+}
+
+GPRT_API void
+gprtGuiRasterize(GPRTContext _context) {
+  Context *context = (Context *) _context;
+  context->rasterizeGui();
+}
+
 GPRT_API GPRTContext
 gprtContextCreate(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   LOG_API_CALL();
   Context *context = new Context(requestedDeviceIDs, numRequestedDevices);
-  LOG("context created...");
   return (GPRTContext) context;
 }
 
@@ -5783,21 +8380,20 @@ gprtContextDestroy(GPRTContext _context) {
   context->destroy();
   delete context;
   context = nullptr;
-  LOG("context destroyed...");
 }
 
 GPRT_API void
 gprtContextSetRayTypeCount(GPRTContext _context, size_t numRayTypes) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->numRayTypes = numRayTypes;
+  requestedFeatures.numRayTypes = numRayTypes;
 }
 
 GPRT_API size_t
 gprtContextGetRayTypeCount(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  return context->numRayTypes;
+  return requestedFeatures.numRayTypes;
 }
 
 GPRT_API GPRTModule
@@ -5805,7 +8401,6 @@ gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = new Module(spvCode);
-  LOG("module created...");
   return (GPRTModule) module;
 }
 
@@ -5815,7 +8410,6 @@ gprtModuleDestroy(GPRTModule _module) {
   Module *module = (Module *) _module;
   delete module;
   module = nullptr;
-  LOG("module destroyed...");
 }
 
 GPRT_API GPRTGeom
@@ -5828,7 +8422,6 @@ gprtGeomCreate(GPRTContext _context, GPRTGeomType _geomType) {
   // function to construct the appropriate geometry
   Geom *geometry = geomType->createGeom();
   return (GPRTGeom) geometry;
-  LOG("geometry created...");
 }
 
 GPRT_API void
@@ -5838,7 +8431,6 @@ gprtGeomDestroy(GPRTGeom _geometry) {
   geometry->destroy();
   delete geometry;
   geometry = nullptr;
-  LOG("geometry destroyed...");
 }
 
 GPRT_API void *
@@ -5856,6 +8448,41 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   Context *context = (Context *) _context;
   GeomType *geometryType = (GeomType *) _geomType;
   Geom **geometry = (Geom **) _geometry;
+
+  // Before we rasterize any geometry, we need to temporarily remove our framebuffer attachments from
+  // the list of textures in our texture array.
+  {
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
+    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
+    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
+
+    VkDescriptorImageInfo placeholder;
+    placeholder.imageView = context->defaultTexture2D->imageView;
+    placeholder.imageLayout = context->defaultTexture2D->layout;
+
+    writeDescriptorSets[0] = {};
+    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[0].dstBinding = 0;
+    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[0].descriptorCount = 1;
+    writeDescriptorSets[0].pBufferInfo = 0;
+    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[0].pImageInfo = &placeholder;
+
+    writeDescriptorSets[1] = {};
+    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[1].dstBinding = 0;
+    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[1].descriptorCount = 1;
+    writeDescriptorSets[1].pBufferInfo = 0;
+    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[1].pImageInfo = &placeholder;
+
+    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                           writeDescriptorSets.data(), 0, nullptr);
+  }
 
   VkResult err;
 
@@ -5889,12 +8516,6 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
   // This will clear the color and depth attachment
   vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-  if (geometryType->raster[rasterType].pipeline == VK_NULL_HANDLE) {
-    geometryType->buildRasterPipeline(rasterType, context->samplerDescriptorSetLayout,
-                                      context->texture1DDescriptorSetLayout, context->texture2DDescriptorSetLayout,
-                                      context->texture3DDescriptorSetLayout, context->rasterRecordDescriptorSetLayout);
-  }
 
   // Bind the rendering pipeline
   // todo, if pipeline doesn't exist, create it.
@@ -5940,9 +8561,9 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
         instanceCount = instanceCounts[i];
       }
 
-      std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
-                                                     context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                     context->rasterRecordDescriptorSet};
+      std::vector<VkDescriptorSet> descriptorSets = {
+          context->samplerDescriptorSet,   context->texture1DDescriptorSet, context->texture2DDescriptorSet,
+          context->texture3DDescriptorSet, context->bufferDescriptorSet,    context->rasterRecordDescriptorSet};
 
       uint32_t offset = geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -5968,7 +8589,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err)
-    GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
+    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
   VkSubmitInfo submitInfo;
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -5983,11 +8604,49 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
   if (err)
-    GPRT_RAISE("failed to submit to queue! : \n" + errorString(err));
+    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
-    GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+
+  // Now, add the attachment textures back to our list of textures
+  {
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
+    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
+    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
+
+    VkDescriptorImageInfo colorAttachment;
+    colorAttachment.imageView = geometryType->raster[rasterType].colorAttachment->imageView;
+    colorAttachment.imageLayout = geometryType->raster[rasterType].colorAttachment->layout;
+
+    writeDescriptorSets[0] = {};
+    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[0].dstBinding = 0;
+    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[0].descriptorCount = 1;
+    writeDescriptorSets[0].pBufferInfo = 0;
+    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[0].pImageInfo = &colorAttachment;
+
+    VkDescriptorImageInfo depthAttachment;
+    depthAttachment.imageView = geometryType->raster[rasterType].depthAttachment->imageView;
+    depthAttachment.imageLayout = geometryType->raster[rasterType].depthAttachment->layout;
+
+    writeDescriptorSets[1] = {};
+    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSets[1].dstBinding = 0;
+    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSets[1].descriptorCount = 1;
+    writeDescriptorSets[1].pBufferInfo = 0;
+    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
+    writeDescriptorSets[1].pImageInfo = &depthAttachment;
+
+    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
+                           writeDescriptorSets.data(), 0, nullptr);
+  }
 }
 
 // ==================================================================
@@ -5999,7 +8658,6 @@ gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, size_t count
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *vertices = (Buffer *) _vertices;
   triangles->setVertices(vertices, count, stride, offset);
-  LOG("Setting triangle vertices...");
 }
 // GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
 //                                            /*! number of vertex arrays
@@ -6024,7 +8682,6 @@ gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, size_t count, 
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
   triangles->setIndices(indices, count, stride, offset);
-  LOG("Setting triangle indices...");
 }
 
 void
@@ -6033,7 +8690,6 @@ gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, size_t count, size
   AABBGeom *aabbs = (AABBGeom *) _aabbs;
   Buffer *positions = (Buffer *) _positions;
   aabbs->setAABBs(positions, count, stride, offset);
-  LOG("Setting AABB positions...");
 }
 
 GPRT_API GPRTRayGen
@@ -6046,7 +8702,9 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
 
   context->raygenPrograms.push_back(raygen);
 
-  LOG("raygen created...");
+  // Creating a raygen program requires rebuilding a RT pipeline.
+  context->raytracingPipelineOutOfDate = true;
+
   return (GPRTRayGen) raygen;
 }
 
@@ -6057,7 +8715,8 @@ gprtRayGenDestroy(GPRTRayGen _rayGen) {
   rayGen->destroy();
   delete rayGen;
   rayGen = nullptr;
-  LOG("raygen destroyed...");
+
+  // todo, remove from context->raygenPrograms, rebuild pipelines
 }
 
 GPRT_API void *
@@ -6075,9 +8734,9 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
 
   Compute *compute = new Compute(context->logicalDevice, module, programName, recordSize);
 
-  context->computePrograms.push_back(compute);
+  // Notify context that we need to build this compute pipeline
+  context->computePipelinesOutOfDate = true;
 
-  LOG("compute created...");
   return (GPRTCompute) compute;
 }
 
@@ -6088,7 +8747,6 @@ gprtComputeDestroy(GPRTCompute _compute) {
   compute->destroy();
   delete compute;
   compute = nullptr;
-  LOG("compute destroyed...");
 }
 
 GPRT_API void *
@@ -6108,7 +8766,9 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
 
   context->missPrograms.push_back(missProg);
 
-  LOG("miss program created...");
+  // Creating a miss program requires rebuilding a RT pipeline.
+  context->raytracingPipelineOutOfDate = true;
+
   return (GPRTMiss) missProg;
 }
 
@@ -6125,7 +8785,8 @@ gprtMissDestroy(GPRTMiss _miss) {
   missProg->destroy();
   delete missProg;
   missProg = nullptr;
-  LOG("miss program destroyed...");
+
+  // todo, update context->missPrograms list... rebuild pipelines
 }
 
 GPRT_API void *
@@ -6144,10 +8805,10 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
 
   switch (kind) {
   case GPRT_TRIANGLES:
-    geomType = new TriangleGeomType(context->logicalDevice, context->numRayTypes, recordSize);
+    geomType = new TriangleGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
     break;
   case GPRT_AABBS:
-    geomType = new AABBGeomType(context->logicalDevice, context->numRayTypes, recordSize);
+    geomType = new AABBGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
     break;
   default:
     GPRT_NOTIMPLEMENTED;
@@ -6156,7 +8817,6 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
 
   context->geomTypes.push_back(geomType);
 
-  LOG("geom type created...");
   return (GPRTGeomType) geomType;
 }
 
@@ -6167,7 +8827,6 @@ gprtGeomTypeDestroy(GPRTGeomType _geomType) {
   geomType->destroy();
   delete geomType;
   geomType = nullptr;
-  LOG("geom type destroyed...");
 }
 
 GPRT_API void
@@ -6177,7 +8836,6 @@ gprtGeomTypeSetClosestHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _m
   Module *module = (Module *) _module;
 
   geomType->setClosestHit(rayType, module, progName);
-  LOG("assigning closest hit program to geom type...");
 }
 
 GPRT_API void
@@ -6187,7 +8845,6 @@ gprtGeomTypeSetAnyHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _modul
   Module *module = (Module *) _module;
 
   geomType->setAnyHit(rayType, module, progName);
-  LOG("assigning any hit program to geom type...");
 }
 
 GPRT_API void
@@ -6197,7 +8854,6 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
   Module *module = (Module *) _module;
 
   geomType->setIntersection(rayType, module, progName);
-  LOG("assigning intersect program to geom type...");
 }
 
 GPRT_API void
@@ -6207,7 +8863,6 @@ gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mo
   Module *module = (Module *) _module;
 
   geomType->setVertex(rasterType, module, progName);
-  LOG("assigning vertex program to geom type...");
 }
 
 GPRT_API void
@@ -6217,7 +8872,6 @@ gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mod
   Module *module = (Module *) _module;
 
   geomType->setPixel(rasterType, module, progName);
-  LOG("assigning pixel program to geom type...");
 }
 
 GPRT_API void
@@ -6391,13 +9045,26 @@ gprtTextureClear(GPRTTexture _texture) {
 }
 
 GPRT_API void
+gprtTextureMap(GPRTTexture _texture, int deviceID) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+  texture->map();
+}
+
+GPRT_API void
+gprtTextureUnmap(GPRTTexture _texture, int deviceID) {
+  LOG_API_CALL();
+  Texture *texture = (Texture *) _texture;
+  texture->unmap();
+}
+
+GPRT_API void
 gprtTextureDestroy(GPRTTexture _texture) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
   texture->destroy();
   delete texture;
   texture = nullptr;
-  LOG("texture destroyed");
 }
 
 GPRT_API GPRTBuffer
@@ -6413,15 +9080,18 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
       // means we can use this buffer to receive data transferred from another
       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       // means we can use this buffer as an index buffer for rasterization
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+      // means we can use this buffer as a storage buffer resource
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and "invalidate"
                                               // not needed
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                              context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+  Buffer *buffer =
+      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   // Pin the buffer to the host
   buffer->map();
@@ -6430,7 +9100,6 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
     void *mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
   }
-  LOG("buffer created");
   return (GPRTBuffer) buffer;
 }
 
@@ -6447,13 +9116,16 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       // means we can use this buffer to receive data transferred from another
       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       // means we can use this buffer as an index buffer for rasterization
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+      // means we can use this buffer as a storage buffer resource
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                              context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+  Buffer *buffer =
+      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   if (init) {
     buffer->map();
@@ -6461,7 +9133,6 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
     memcpy(mapped, init, size * count);
     buffer->unmap();
   }
-  LOG("buffer created");
   return (GPRTBuffer) buffer;
 }
 
@@ -6478,7 +9149,9 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       // means we can use this buffer to receive data transferred from another
       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       // means we can use this buffer as an index buffer for rasterization
-      VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+      // means we can use this buffer as a storage buffer resource
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   const VkMemoryPropertyFlags memoryUsageFlags =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |    // mappable to host with vkMapMemory
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |   // means "flush" and "invalidate"
@@ -6487,8 +9160,9 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
                                                // access
 
   Context *context = (Context *) _context;
-  Buffer *buffer = new Buffer(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                              context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+  Buffer *buffer =
+      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
 
   // Pin the buffer to the host
   buffer->map();
@@ -6497,10 +9171,15 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
     void *mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
     buffer->flush();
-    buffer->invalidate();
   }
-  LOG("buffer created");
   return (GPRTBuffer) buffer;
+}
+
+GPRT_API void
+gprtBufferClear(GPRTBuffer _buffer) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  buffer->clear();
 }
 
 GPRT_API void
@@ -6510,7 +9189,13 @@ gprtBufferDestroy(GPRTBuffer _buffer) {
   buffer->destroy();
   delete buffer;
   buffer = nullptr;
-  LOG("buffer destroyed");
+}
+
+GPRT_API size_t
+gprtBufferGetSize(GPRTBuffer _buffer, int deviceID) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  return buffer->getSize();
 }
 
 GPRT_API void *
@@ -6534,11 +9219,257 @@ gprtBufferUnmap(GPRTBuffer _buffer, int deviceID) {
   buffer->unmap();
 }
 
+GPRT_API void
+gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination, size_t srcOffset, size_t dstOffset,
+               size_t size, size_t count, int srcDeviceID, int dstDeviceID) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Buffer *destination = (Buffer *) _destination;
+  Buffer *source = (Buffer *) _source;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  VkBufferCopy region;
+  region.srcOffset = srcOffset * size;
+  region.dstOffset = dstOffset * size;
+  region.size = count * size;
+  vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+}
+
+void
+gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t count, bool preserveContents,
+                 int deviceID) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Buffer *buffer = (Buffer *) _buffer;
+  buffer->resize(size * count, preserveContents);
+}
+
+void bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffer _scratch) 
+{
+  LOG_API_CALL();
+  
+  Context *context = (Context *) _context;
+  Buffer *keys = (Buffer *) _keys;
+  Buffer *values = (Buffer *) _values;
+  Buffer *scratch = (Buffer *) _scratch;
+
+  bool bHasPayload = false;
+  if (values) {
+    if (keys->getSize() != values->getSize() ) 
+      LOG_ERROR("Keys and Values buffers must be equal in size\n");
+    
+    bHasPayload = true;
+  }
+
+  uint32_t numKeys = keys->getSize() / sizeof(uint32_t);
+  uint32_t maxNumThreadgroups = 800;
+  ParallelSortCB  constantBufferData = { 0 };
+
+  // Allocate the scratch buffers needed for radix sort
+  uint64_t scratchBufferSize;
+  uint64_t reducedScratchBufferSize;
+  ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
+
+  scratch->resize(keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
+  size_t valuesOffset = keys->size;
+  size_t scratchOffset = keys->size + ((bHasPayload) ? values->size : 0);
+  size_t reducedScratchOffset = keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize;
+
+  uint32_t NumThreadgroupsToRun;
+  uint32_t NumReducedThreadgroupsToRun;
+  ParallelSort_SetConstantAndDispatchData(numKeys, maxNumThreadgroups, constantBufferData, NumThreadgroupsToRun, NumReducedThreadgroupsToRun);
+
+  auto BindUAVBuffer = [&](VkBuffer* pBuffer, VkDeviceSize * Offsets, VkDescriptorSet& DescriptorSet, uint32_t Binding/*=0*/, uint32_t Count/*=1*/)
+  {
+      std::vector<VkDescriptorBufferInfo> bufferInfos;
+      for (uint32_t i = 0; i < Count; i++)
+      {
+          VkDescriptorBufferInfo bufferInfo;
+          bufferInfo.buffer = pBuffer[i];
+          bufferInfo.offset = Offsets[i];
+          bufferInfo.range = VK_WHOLE_SIZE;
+          bufferInfos.push_back(bufferInfo);
+      }
+
+      VkWriteDescriptorSet write_set = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+      write_set.pNext = nullptr;
+      write_set.dstSet = DescriptorSet;
+      write_set.dstBinding = Binding;
+      write_set.dstArrayElement = 0;
+      write_set.descriptorCount = Count;
+      write_set.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      write_set.pImageInfo = nullptr;
+      write_set.pBufferInfo = bufferInfos.data();
+      write_set.pTexelBufferView = nullptr;
+
+      vkUpdateDescriptorSets(context->logicalDevice, 1, &write_set, 0, nullptr);
+  };
+
+  // Do binding setups
+  {
+    VkBuffer BufferMaps[4];
+    VkDeviceSize Offsets1[4] = {0,0,0,0};
+
+    // Map inputs/outputs
+    BufferMaps[0] = keys->buffer;
+    BufferMaps[1] = scratch->buffer;
+    if (bHasPayload) {
+      BufferMaps[2] = values->buffer;
+      BufferMaps[3] = scratch->buffer;
+      Offsets1[2] = 0;
+      Offsets1[3] = valuesOffset;
+    }
+    BindUAVBuffer(BufferMaps, Offsets1, context->sortStages.m_SortDescriptorSetInputOutput[0], 0, (bHasPayload) ? 4 : 2);
+
+    BufferMaps[0] = scratch->buffer;
+    BufferMaps[1] = keys->buffer;
+    if (bHasPayload) {
+      BufferMaps[2] = scratch->buffer;
+      BufferMaps[3] = values->buffer;
+      Offsets1[2] = valuesOffset;
+      Offsets1[3] = 0;
+    }
+    BindUAVBuffer(BufferMaps, Offsets1, context->sortStages.m_SortDescriptorSetInputOutput[1], 0, (bHasPayload) ? 4 : 2);
+
+    // Map scan sets (reduced, scratch)
+    VkDeviceSize  Offsets2[4] = {reducedScratchOffset,reducedScratchOffset,0,0};
+    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
+    BufferMaps[2] = scratch->buffer;
+    BindUAVBuffer(BufferMaps, Offsets2, context->sortStages.m_SortDescriptorSetScanSets[0], 0, 3);
+
+    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
+    BufferMaps[2] = scratch->buffer;
+    VkDeviceSize  Offsets3[4] = {scratchOffset,scratchOffset, reducedScratchOffset,0};
+    BindUAVBuffer(BufferMaps, Offsets3, context->sortStages.m_SortDescriptorSetScanSets[1], 0, 3);
+
+    // Map Scratch areas (fixed)
+    BufferMaps[0] = scratch->buffer;
+    BufferMaps[1] = scratch->buffer;
+    VkDeviceSize  Offsets4[4] = {scratchOffset,reducedScratchOffset,0,0};
+    BindUAVBuffer(BufferMaps, Offsets4, context->sortStages.m_SortDescriptorSetScratch, 0, 2);
+  }
+
+  // Transition barrier
+  auto BufferTransition = [](VkBuffer buffer, VkAccessFlags before, VkAccessFlags after, VkDeviceSize offset, VkDeviceSize size)
+  {
+      VkBufferMemoryBarrier bufferBarrier = {};
+      bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      bufferBarrier.srcAccessMask = before;
+      bufferBarrier.dstAccessMask = after;
+      bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      bufferBarrier.buffer = buffer;
+      bufferBarrier.size = VK_WHOLE_SIZE;
+      // bufferBarrier.offset = offset;
+      // bufferBarrier.size = size;
+
+      return bufferBarrier;
+  };
+
+  VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  // Bind the scratch descriptor sets
+  vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1, &context->sortStages.m_SortDescriptorSetScratch, 0, nullptr);
+
+  // Push the data into the constant buffer and bind
+  vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0, sizeof(ParallelSortCB), &constantBufferData);
+
+  // Perform Radix Sort (currently only support 32-bit key/payload sorting
+  uint32_t inputSet = 0;
+  VkBufferMemoryBarrier Barriers[3];
+  for (uint64_t Shift = 0; Shift < 32u; Shift += PARALLELSORT_SORT_BITS_PER_PASS)
+  {
+    // Update the bit shift
+    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, sizeof(ParallelSortCB) - 4, 4, &Shift);
+  //     vkCmdPushConstants(commandList, m_SortPipelineLayout, VK_SHADER_STAGE_ALL, 0, 4, &Shift);
+
+    // Bind input/output for this pass
+    vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 0, 1, &context->sortStages.m_SortDescriptorSetInputOutput[inputSet], 0, nullptr);
+
+    // Sort Count
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Count.pipeline);
+      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    }
+
+    // UAV barrier on the sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratchOffset, scratchBufferSize);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+
+    // Sort Reduce
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.CountReduce.pipeline);
+      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+                  
+    }
+    // UAV barrier on the reduced sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, reducedScratchOffset, reducedScratchBufferSize);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+
+    // Sort Scan
+    {
+      // First do scan prefix of reduced values
+      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1, &context->sortStages.m_SortDescriptorSetScanSets[0], 0, nullptr);
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Scan.pipeline);
+      assert(NumReducedThreadgroupsToRun < PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE && "Need to account for bigger reduced histogram scan");
+      vkCmdDispatch(commandList, 1, 1, 1);
+
+      // UAV barrier on the reduced sum table
+      Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, reducedScratchOffset, reducedScratchBufferSize);
+      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+              
+      // Next do scan prefix on the histogram with partial sums that we just did
+      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1, &context->sortStages.m_SortDescriptorSetScanSets[1], 0, nullptr);
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.ScanAdd.pipeline);
+      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+    }
+
+    // UAV barrier on the sum table
+    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratchOffset, scratchBufferSize);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+          
+    // Sort Scatter
+    {
+      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, bHasPayload ? context->sortStages.ScatterPayload.pipeline : context->sortStages.Scatter.pipeline);
+      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    }
+          
+    // Finish doing everything and barrier for the next pass
+    VkBuffer keysBuffer = (inputSet) ? scratch->buffer : keys->buffer;
+    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keys->size);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+    
+    if (bHasPayload) {
+      VkBuffer valsBuffer = (inputSet) ? scratch->buffer : values->buffer;
+      VkDeviceSize offset = (inputSet) ? valuesOffset : 0;
+      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, values->size);
+      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+    }
+          
+    // Swap read/write sources
+    inputSet = !inputSet;
+  }
+  context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+}
+
+GPRT_API void gprtBufferSort(GPRTContext _context, GPRTBuffer _buffer, GPRTBuffer _scratch) 
+{
+  bufferSort(_context, _buffer,  nullptr, _scratch);
+}
+
+GPRT_API void gprtBufferSortPayload(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffer _scratch) 
+{
+  bufferSort(_context, _keys, _values, _scratch);
+}
+
 GPRT_API gprt::Buffer
 gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
-  return gprt::Buffer{buffer->address, buffer->size};
+  return gprt::Buffer{buffer->deviceAddress, buffer->virtualAddress};
 }
 
 GPRT_API void
@@ -6586,7 +9517,7 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
     texture->map();
 
   if (texture->format != VK_FORMAT_R8G8B8A8_SRGB) {
-    GPRT_RAISE("Error, only GPRT_FORMAT_R8G8B8A8_SRGB format currently supported!");
+    LOG_ERROR("Error, only GPRT_FORMAT_R8G8B8A8_SRGB format currently supported!");
   }
 
   const uint8_t *fb = (const uint8_t *) texture->mapped;
@@ -6597,20 +9528,13 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
     texture->unmap();
 }
 
-GPRT_API void
-gprtBuildPipeline(GPRTContext _context) {
-  LOG_API_CALL();
-  Context *context = (Context *) _context;
-  context->buildPipeline();
-  LOG("programs built...");
-}
-
 GPRT_API GPRTAccel
 gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  AABBAccel *accel = new AABBAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                                   context->graphicsQueue, numGeometries, (AABBGeom *) arrayOfChildGeoms);
+  AABBAccel *accel =
+      new AABBAccel(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
+                    context->graphicsQueue, numGeometries, (AABBGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel);
   return (GPRTAccel) accel;
 }
@@ -6619,9 +9543,9 @@ GPRT_API GPRTAccel
 gprtTrianglesAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  TriangleAccel *accel =
-      new TriangleAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                        context->graphicsQueue, numGeometries, (TriangleGeom *) arrayOfChildGeoms);
+  TriangleAccel *accel = new TriangleAccel(context->physicalDevice, context->logicalDevice, context->allocator,
+                                           context->graphicsCommandBuffer, context->graphicsQueue, numGeometries,
+                                           (TriangleGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel);
   return (GPRTAccel) accel;
 }
@@ -6637,9 +9561,15 @@ gprtInstanceAccelCreate(GPRTContext _context, size_t numAccels, GPRTAccel *array
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel =
-      new InstanceAccel(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                        context->graphicsQueue, numAccels, arrayOfAccels);
+      new InstanceAccel(context->physicalDevice, context->logicalDevice, context->allocator,
+                        context->graphicsCommandBuffer, context->graphicsQueue, numAccels, arrayOfAccels);
   context->accels.push_back(accel);
+
+  // Creating an instance acceleration structure will introduce geom records into
+  // the SBT. Therefore, we need to rebuild the pipeline after this.
+
+  context->raytracingPipelineOutOfDate = true;
+
   return (GPRTAccel) accel;
 }
 
@@ -6659,7 +9589,6 @@ gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer _transforms, 
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *transforms = (Buffer *) _transforms;
   accel->setTransforms(transforms, stride, offset);
-  LOG("Setting instance accel transforms...");
 }
 
 GPRT_API void
@@ -6668,7 +9597,6 @@ gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBuffer _masks) 
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *masks = (Buffer *) _masks;
   accel->setVisibilityMasks(masks);
-  LOG("Setting instance accel visibility masks...");
 }
 
 GPRT_API void
@@ -6681,7 +9609,6 @@ gprtInstanceAccelSetReferences(GPRTAccel instanceAccel,
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *references = (Buffer *) _references;
   accel->setReferences(references);
-  LOG("Setting instance accel references...");
 }
 
 GPRT_API void
@@ -6689,7 +9616,6 @@ gprtInstanceAccelSetNumGeometries(GPRTAccel instanceAccel, size_t numGeometries)
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   accel->setNumGeometries(numGeometries);
-  LOG("Setting instance accel references...");
 }
 
 GPRT_API void
@@ -6699,19 +9625,35 @@ gprtAccelDestroy(GPRTAccel _accel) {
   accel->destroy();
   delete accel;
   accel = nullptr;
-  LOG("accel destroyed");
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
-  accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels, context->numRayTypes);
+  accel->build({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
+               requestedFeatures.numRayTypes, mode, allowCompaction, minimizeMemory);
 }
 
 GPRT_API void
-gprtAccelRefit(GPRTContext _context, GPRTAccel accel) {
-  GPRT_NOTIMPLEMENTED;
+gprtAccelUpdate(GPRTContext _context, GPRTAccel _accel) {
+  Accel *accel = (Accel *) _accel;
+  Context *context = (Context *) _context;
+  accel->update({{"gprtFillInstanceData", context->fillInstanceDataStage}}, context->accels,
+                requestedFeatures.numRayTypes);
+}
+
+GPRT_API void
+gprtAccelCompact(GPRTContext _context, GPRTAccel _accel) {
+  Accel *accel = (Accel *) _accel;
+  Context *context = (Context *) _context;
+  accel->compact(context->compactedSizeQueryPool);
+}
+
+GPRT_API size_t
+gprtAccelGetSize(GPRTAccel _accel, int deviceID) {
+  Accel *accel = (Accel *) _accel;
+  return accel->getSize();
 }
 
 GPRT_API gprt::Accel
@@ -6724,7 +9666,8 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->buildSBT();
+  context->buildPipeline();
+  context->buildSBT(flags);
 }
 
 GPRT_API void
@@ -6754,21 +9697,23 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
-                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet};
+                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet,
+                                                 context->bufferDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->pipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
+                          context->raytracingPipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, context->pipeline);
+  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                    context->raytracingPipeline);
 
   struct PushConstants {
-    uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t pad[16] = {requestedFeatures.numRayTypes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   } pushConstants;
-  vkCmdPushConstants(context->graphicsCommandBuffer, context->pipelineLayout,
+  vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                          VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                          VK_SHADER_STAGE_RAYGEN_BIT_KHR,
@@ -6792,7 +9737,11 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-  uint64_t baseAddr = getBufferDeviceAddress(context->logicalDevice, context->shaderBindingTable.buffer);
+  uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
+  uint64_t missBaseAddr =
+      (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
+  uint64_t hitgroupBaseAddr =
+      (context->hitgroupTable) ? getBufferDeviceAddress(context->logicalDevice, context->hitgroupTable->buffer) : 0;
 
   // find raygen in current list of raygens
   int raygenOffset = 0;
@@ -6804,7 +9753,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
   }
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
-  raygenShaderSbtEntry.deviceAddress = baseAddr + raygenOffset;
+  raygenShaderSbtEntry.deviceAddress = raygenBaseAddr + raygenOffset;
   raygenShaderSbtEntry.stride = recordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride;   // for raygen, can only be one. this needs to
                                                              // be the same as stride.
@@ -6812,15 +9761,15 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress = baseAddr + recordSize * context->raygenPrograms.size();
+    missShaderSbtEntry.deviceAddress = missBaseAddr;   // baseAddr + recordSize * context->raygenPrograms.size();
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
-    hitShaderSbtEntry.deviceAddress =
-        baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
+    hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
+    // baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
@@ -6838,7 +9787,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err)
-    GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
+    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
   VkSubmitInfo submitInfo;
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -6853,11 +9802,11 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 
   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
   if (err)
-    GPRT_RAISE("failed to submit to queue! : \n" + errorString(err));
+    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
-    GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
 GPRT_API void
@@ -6880,12 +9829,6 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   Context *context = (Context *) _context;
   Compute *compute = (Compute *) _compute;
   VkResult err;
-
-  if (compute->pipeline == VK_NULL_HANDLE) {
-    compute->buildPipeline(context->samplerDescriptorSetLayout, context->texture1DDescriptorSetLayout,
-                           context->texture2DDescriptorSetLayout, context->texture3DDescriptorSetLayout,
-                           context->computeRecordDescriptorSetLayout);
-  }
 
   VkCommandBufferBeginInfo cmdBufInfo{};
   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -6912,9 +9855,9 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
   uint32_t offset = compute->address * recordSize;
-  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
+  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet,   context->texture1DDescriptorSet,
                                                  context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                 context->computeRecordDescriptorSet};
+                                                 context->bufferDescriptorSet,    context->computeRecordDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           descriptorSets.size(), descriptorSets.data(), 1, &offset);
 
@@ -6931,7 +9874,7 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
   if (err)
-    GPRT_RAISE("failed to end command buffer! : \n" + errorString(err));
+    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
   VkSubmitInfo submitInfo;
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -6946,11 +9889,11 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
 
   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
   if (err)
-    GPRT_RAISE("failed to submit to queue! : \n" + errorString(err));
+    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
-    GPRT_RAISE("failed to wait for queue idle! : \n" + errorString(err));
+    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
 GPRT_API void
@@ -6968,14 +9911,14 @@ gprtEndProfile(GPRTContext _context) {
   Context *context = (Context *) _context;
 
   if (context->queryRequested != true)
-    GPRT_RAISE("Requested profile data without calling gprtBeginProfile");
+    LOG_ERROR("Requested profile data without calling gprtBeginProfile");
   context->queryRequested = false;
 
   uint64_t buffer[2];
   VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2,
                                           buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
   if (result != VK_SUCCESS)
-    GPRT_RAISE("Failed to receive query results!");
+    LOG_ERROR("Failed to receive query results!");
   uint64_t timeResults = buffer[1] - buffer[0];
   float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
   return time;

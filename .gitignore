@@ -40,3 +40,5 @@ Session.vim
 .mc
 pictures
 *.xf
+*.imgui.ini
+gprt/imgui.ini

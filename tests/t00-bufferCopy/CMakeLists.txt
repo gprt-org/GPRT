@@ -20,18 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_devicecode(
-  OUTPUT_TARGET
-    s04_deviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-)
-
-add_executable(s04_computeAABBs hostCode.cpp)
-target_link_libraries(s04_computeAABBs
-  PRIVATE
-    s04_deviceCode
-    gprt::gprt
+add_executable(t00_bufferCopy hostCode.cpp)
+target_link_libraries(t00_bufferCopy
+  PRIVATE gprt::gprt
 )

@@ -79,7 +79,7 @@ jobs:
     - name: Pull and unpack dxc compiler
       run: |
         cd $HOME
-        C:\msys64\usr\bin\wget.exe https://anl.box.com/shared/static/63jh85qcoedxi4hi84lizp9e0c9h0jo5.zip -O dxc-artifacts.zip
+        C:\msys64\usr\bin\wget.exe https://anl.box.com/shared/static/91fgj668javyej2hfwx2ny1w8m1dxbfj.zip -O dxc-artifacts.zip
         unzip dxc-artifacts
 
 

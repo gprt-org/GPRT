@@ -90,11 +90,6 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Note, we'll need to call this again after creating our acceleration
-  // structures, as acceleration structures will introduce new shader
-  // binding table records to the pipeline.
-  gprtBuildPipeline(context);
-
   // ##################################################################
   // set the parameters for our triangle mesh and compute kernel
   // ##################################################################
@@ -137,10 +132,10 @@ main(int ac, char **av) {
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
   GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
+  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -153,6 +148,9 @@ main(int ac, char **av) {
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
+  // Assign the tree handle to our ray generation program's record
+  rayGenData->world = gprtAccelGetHandle(world);
+
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -162,8 +160,6 @@ main(int ac, char **av) {
   // build *SBT* required to trace the groups
   // ##################################################################
 
-  // re-build the pipeline to account for newly introduced geometry
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -235,19 +231,14 @@ main(int ac, char **av) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, vertexProgram, numTriangles);
 
-    // Now that the vertices have moved, we need to rebuild our bottom level tree
-    gprtAccelBuild(context, trianglesAccel);
+    // Now that the vertices have moved, we need to update our bottom level tree.
+    // Note, updates should only be used when primitive counts are unchanged and 
+    // movement is relatively small.  
+    gprtAccelUpdate(context, trianglesAccel);
 
     // And since the bottom level tree is part of the top level tree, we need
-    // to rebuild the top level tree as well
-    gprtAccelBuild(context, world);
-
-    // Assign the updated tree handle to our ray generation program's record
-    rayGenData->world = gprtAccelGetHandle(world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_HITGROUP);
-
-    // Note! we don't need to rebuild the pipeline here, since no geometry was
-    // made or destroyed, only updated.
+    // to update the top level tree as well
+    gprtAccelUpdate(context, world);
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);

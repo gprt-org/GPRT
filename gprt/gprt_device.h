@@ -39,10 +39,13 @@ struct PushConstants {
 // Currently, 0, N is used for textures
 // Then, 1, N is used for record data passed
 // to compute and raster programs.
+//
+// Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
 [[vk::binding(0, 0)]] SamplerState samplers[];
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
 [[vk::binding(0, 3)]] Texture3D texture3Ds[];
+[[vk::binding(0, 4)]] RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -82,13 +85,60 @@ typedef uint64_t2 Buffer;
 
 template <typename T>
 T
+load(in Buffer buffer) {
+  return vk::RawBufferLoad<T>(buffer.x);
+}
+
+template <typename T>
+T
 load(in Buffer buffer, uint64_t index) {
   return vk::RawBufferLoad<T>(buffer.x + index * sizeof(T));
 }
+
 template <typename T>
 void
 store(in Buffer buffer, uint64_t index, in T value) {
   vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
+}
+
+// note, below  atomics are translated from
+// here: https://github.com/treecode/Bonsai/blob/master/runtime/profiling/derived_atomic_functions.h
+
+float
+atomicMin32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value < asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+float
+atomicMax32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value > asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+float
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+  uint old, newint;
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  do {
+    old = ret_i;
+    newint = asuint(asfloat(old) + value);
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+  } while (ret_i != old);
+
+  return asfloat(ret_i);
 }
 
 // x stores pointer, y stores type
@@ -99,6 +149,11 @@ typedef uint64_t2 Accel;
 RaytracingAccelerationStructure
 getAccelHandle(Accel accel) {
   return getAccelHandle(accel.x);
+}
+
+RWByteAddressBuffer
+getBufferHandle(Buffer buffer) {
+  return buffers[buffer.y];
 }
 
 typedef uint64_t2 Texture;
@@ -125,6 +180,18 @@ getSamplerHandle(gprt::Sampler sampler) {
   return samplers[sampler.x];
 }
 
+SamplerState
+getDefaultSampler() {
+  // We assume that there is a default sampler at address 0 here
+  return samplers[0];
+}
+
+uint32_t
+getNumRayTypes() {
+  // for now, we map PC 0 to ray type count
+  return uint32_t(pc.r[0]);
+}
+
 void
 amdkludge() {
   if (pc.r[15]) {
@@ -145,7 +212,6 @@ amdkludge() {
     vk::RawBufferStore<int>(0, stubstruct.tmp);
   }
 }
-
 };   // namespace gprt
 
 /*
@@ -222,12 +288,32 @@ where ARG is "(type_, name)". */
 #endif
 #endif
 
+static bool _ignoreHit = false;
+static bool _acceptHitAndEndSearch = false;
+
+namespace gprt {
+// There's a bug with a couple vendors where calling these functions
+// inside another function can cause bugs when writing to the ray payload.
+// They must be called in the main body of the anyhit entrypoint.
+// These act as a temporary workaround until driver bugs are fixed...
+
+void
+ignoreHit() {
+  _ignoreHit = true;
+}
+
+void
+acceptHitAndEndSearch() {
+  _ignoreHit = true;
+}
+};   // namespace gprt
+
 #ifndef GPRT_ANY_HIT_PROGRAM
 #ifdef ANYHIT
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                               \
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                        \
                                                                                                                        \
   [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
                                                                             RAW(TYPE_EXPAND RecordDecl));              \
@@ -236,16 +322,20 @@ where ARG is "(type_, name)". */
                                                in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                               \
     progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
              RAW(NAME_EXPAND AttributeDecl));                                                                          \
+    if (_ignoreHit)                                                                                                    \
+      IgnoreHit();                                                                                                     \
+    if (_acceptHitAndEndSearch)                                                                                        \
+      AcceptHitAndEndSearch();                                                                                         \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -295,38 +385,10 @@ where ARG is "(type_, name)". */
 #endif
 #endif
 
-// We currently recycle ray generation programs to implement a user-side
-// compute program. This allows us to recycle existing SBT record API
-// for compute shader IO
-#ifndef GPRT_COMPUTE_PROGRAM_OLD
-#ifdef COMPUTE
-#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
-  /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID);                                                                                        \
-                                                                                                                       \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
-                                                                                                                       \
-  [shader("raygeneration")] void __compute__##progName() {                                                             \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), 0, DispatchRaysIndex(), uint3(0, 0, 0), uint3(0, 0, 0)); \
-  }                                                                                                                    \
-                                                                                                                       \
-  /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID) /* program args and body supplied by user ... */
-#else
-#define GPRT_COMPUTE_PROGRAM_OLD(progName, RecordDecl)                                                                 \
-  /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint GroupIndex, uint3 DispatchThreadID, uint3 GroupThreadID,     \
-                uint3 GroupID) /* program args and body supplied by user ... */
-#endif
-#endif
-
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
@@ -384,7 +446,7 @@ Position() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -412,7 +474,7 @@ Position() {
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  [[vk::binding(0, 4)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \

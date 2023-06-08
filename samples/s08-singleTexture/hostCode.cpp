@@ -147,9 +147,6 @@ main(int ac, char **av) {
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR, 1,
                         GPRT_SAMPLER_ADDRESS_MODE_BORDER, GPRT_BORDER_COLOR_OPAQUE_WHITE)};
 
-  // (re-)builds all vulkan programs, with current pipeline settings
-  gprtBuildPipeline(context);
-
   // ------------------------------------------------------------------
   // Meshes
   // ------------------------------------------------------------------
@@ -178,7 +175,6 @@ main(int ac, char **av) {
   transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = samplers.size();
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context, transformProgram, samplers.size());
 
@@ -188,8 +184,8 @@ main(int ac, char **av) {
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
   gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
-  gprtAccelBuild(context, trianglesBLAS);
-  gprtAccelBuild(context, trianglesTLAS);
+  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ------------------------------------------------------------------
   // Setup the ray generation and miss programs
@@ -205,7 +201,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################
@@ -276,10 +271,8 @@ main(int ac, char **av) {
     transformData->now = .5 * gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, instances.size());
-
-    gprtAccelBuild(context, trianglesTLAS);
-    raygenData->world = gprtAccelGetHandle(trianglesTLAS);
-
+    gprtAccelUpdate(context, trianglesTLAS);
+    
     TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);
     planeMeshData->now = gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);

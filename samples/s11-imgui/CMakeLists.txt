@@ -20,34 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_library(gprt)
+embed_devicecode(
+  OUTPUT_TARGET
+    s11_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
 
-target_sources(owl PRIVATE
-  # -------------------------------------------------------
-  # infrastructure
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # API layer
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # data handling
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # base classes
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # program types
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # geometries
-  # -------------------------------------------------------
-
-  # -------------------------------------------------------
-  # accel structures
-  # -------------------------------------------------------
+add_executable(s11_imgui hostCode.cpp)
+target_link_libraries(s11_imgui
+  PRIVATE
+    s11_deviceCode
+    gprt::gprt
 )
