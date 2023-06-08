@@ -89,7 +89,7 @@ a typical workflow, this CMake file would be configured as follows:
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/CMakeLists.txt
    :language: cmake
-   :lines: 23-36
+   :lines: 23-38
 
 
 The `embed_devicecode` macro sets up a compilation target for our 
@@ -196,14 +196,14 @@ and creating a ``GPRTContext``:
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 58-65
+   :lines: 58-66
 
 After that, we create a ``GPRTModule``, which acts as a container that will hold 
 our compiled GPU program. 
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 71
+   :lines: 68-72
 
 Creating our Raytracing Pipeline
 """"""""""""""""""""""""""""""""
@@ -241,7 +241,7 @@ green channel, then red, and finally alpha.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 84-88
+   :lines: 84-86
 
 .. note::
    To create a buffer, we can use either ``gprtDeviceBufferCreate``, ``gprtHostBufferCreate``,
@@ -261,7 +261,7 @@ by calling ``gprtBuildShaderBindingTable``.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 94-100
+   :lines: 88-98
 
 Launching our Program
 """""""""""""""""""""
@@ -274,7 +274,7 @@ image using ``gprtBufferSaveImage``.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 105-119
+   :lines: 103-117
 
 Cleaning Up
 """""""""""
@@ -285,7 +285,7 @@ order that they were made.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
-   :lines: 125-129
+   :lines: 123-127
 
 Conclusion
 ----------
