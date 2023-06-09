@@ -94,16 +94,18 @@ But those same barycentrics might be used to interpolate per-vertex colors, text
 
 This process is called *Ray Tracing*.
 
-The Ray Tracing Pipeline
-^^^^^^^^^^^^^^^^^^^^^^^^
+Acceleration Structures
+^^^^^^^^^^^^^^^^^^^^^^^
 
-So now, say we have more than one triangle, and we want to know which triangles our ray hit.
-We could do a linear traversal over all the triangles in our scene, checking potential ray triangle intersections for each triangle.
-But that quickly become prohibitively expensive, since a scene that we might want to trace rays through might contain thousands if not millions of these triangles. 
-And we also might have millions, if not billions of rays that we want to trace all at the same time.
-So instead, we construct a hierarchical data structure, called an *Acceleration Structure*, in order to skip testing intersections against large collections of triangles. 
+In a real-world application, 3D models are composed of many such triangles, so we not only want to know *if* our ray hit *a* triangle, but also *what* triangle our ray hit. This process also needs to be fast and perform well for really large meshes, so we want to test our ray against only a small subset of the triangles in our model.
 
-In GPRT, we provide real-time acceleration structure construction methods that scale to millions of triangles. 
+To do this, ray tracing frameworks construct a hierarchy over the triangles---called an *Acceleration Structure*---in order to skip testing intersections against large collections of triangles that we know won't be hit. Each level in this hierarchy groups more and more triangles together into boxes, and if our ray does't hit the box, then we know our ray won't hit any of the triangles or sub-boxes inside.
+
+In GPRT, we let you tap into the real-time tree building features available in modern low level ray tracing frameworks. These features let you build these trees over hundreds of thousands of triangles in only a millisecond or two, so if your mesh animates over time, you don't need to worry about that slowing down your app. 
+
+In this little example, we'll build a tree over just one triangle for now. 
+
+
 Then, this traversal process is handled for us by our RT cores. 
 To make this traversal process fast, some parts of the traversal process are handled for us, and then other parts of this traversal process we have control over. 
 This pipeline is called the Ray Tracing Pipeline.
