@@ -97,23 +97,73 @@ This process is called *Ray Tracing*.
 Acceleration Structures
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-In a real-world application, 3D models are composed of many such triangles, so we not only want to know *if* our ray hit *a* triangle, but also *what* triangle our ray hit. This process also needs to be fast and perform well for really large meshes, so we want to test our ray against only a small subset of the triangles in our model.
+In a real-world application, 3D models are composed of many such triangles, so we not only want to know *if* our ray hit *a* triangle, but also *what* triangle our ray hit. 
+This process also needs to be fast and perform well for really large meshes, so we want to test our ray against only a small subset of the triangles in our model.
 
-To do this, ray tracing frameworks construct a hierarchy over the triangles---called an *Acceleration Structure*---in order to skip testing intersections against large collections of triangles that we know won't be hit. Each level in this hierarchy groups more and more triangles together into boxes, and if our ray does't hit the box, then we know our ray won't hit any of the triangles or sub-boxes inside.
+To do this, ray tracing frameworks construct a hierarchy over the triangles---called an *Acceleration Structure*---in order to skip testing intersections against large collections of triangles that we know won't be hit. 
+Each level in this hierarchy groups more and more triangles together into boxes, and if our ray does't hit the box, then we know our ray won't hit any of the triangles or sub-boxes inside.
 
-In GPRT, we let you tap into the real-time tree building features available in modern low level ray tracing frameworks. These features let you build these trees over hundreds of thousands of triangles in only a millisecond or two, so if your mesh animates over time, you don't need to worry about that slowing down your app. 
+.. figure:: ../images/illustrations/acceleration_structures.svg
+   :class: with-border
 
-In this little example, we'll build a tree over just one triangle for now. 
+   On the left, we have a cube made of triangles. 
+   In the middle, we could test our ray against each triangle of the cube, but that would be expensive. 
+   Instead, on the right we use acceleration structures to skip unnecessary intersection tests.
 
+In GPRT, we let you tap into the real-time tree building features available in modern low level ray tracing frameworks. 
+These features let you build these hierarchies on the GPU over hundreds of thousands of triangles in only a millisecond or two, so if your mesh animates over time, you don't need to worry about that slowing down your app. 
 
-Then, this traversal process is handled for us by our RT cores. 
-To make this traversal process fast, some parts of the traversal process are handled for us, and then other parts of this traversal process we have control over. 
-This pipeline is called the Ray Tracing Pipeline.
+The Ray Tracing Pipeline
+^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. figure:: ../images/illustrations/rt_pipeline.svg
+   :class: with-border
 
+   Todo, caption this
 
 Rendering a Single Triangle
 ---------------------------
+
+In this little example, we'll build a tree over just one triangle for now. 
+
+Shared Code
+^^^^^^^^^^^
+To begin, we'll again define some structures that will be shared between our host system
+and our ray tracing device, which we'll declare in our *sharedCode.h* file. 
+
+.. literalinclude:: ../../../samples/s01-singleTriangle/sharedCode.h
+   :language: c++
+   :lines: 23-46
+
+
+Device Code
+^^^^^^^^^^^
+todo
+
+Host Code
+^^^^^^^^^
+
+The first step is to create some buffers that define our geometry. 
+The *vertices* represent the corners of the triangles that define our mesh in 3D space.
+Then *indices* connect these vertices together. So here, since we only have one triangle, we will connect vertices 0, 1, and 2 together.
+
+.. literalinclude:: ../../../samples/s01-singleTriangle/hostCode.cpp
+   :language: c++
+   :lines: 43-54
+
+Then, we create a buffer on our ray tracing device, uploading this geometry data.
+
+.. literalinclude:: ../../../samples/s01-singleTriangle/hostCode.cpp
+   :language: c++
+   :lines: 116-119
+
+.. Then, this traversal process is handled for us by our RT cores. 
+.. To make this traversal process fast, some parts of the traversal process are handled for us, and then other parts of this traversal process we have control over. 
+.. This pipeline is called the Ray Tracing Pipeline.
+
+
+
+
 
 
 
