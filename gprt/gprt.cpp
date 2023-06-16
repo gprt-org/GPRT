@@ -90,6 +90,10 @@ static struct RequestedFeatures {
 
   uint32_t numRayTypes = 1;
 
+  /** Ray queries enable inline ray tracing. 
+   * Not supported by some platforms like the A100, so requesting is important. */
+  bool rayQueries = false;
+
   /*! returns whether logging is enabled */
   inline static bool logging() {
 #ifdef NDEBUG
@@ -5274,8 +5278,6 @@ struct Context {
     // Required for VK_KHR_ray_tracing_pipeline
     enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
 
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-
     // required for vulkan memory model stuff
     enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
 
@@ -5286,6 +5288,12 @@ struct Context {
       // If the device will be used for presenting to a display via a swapchain
       // we need to request the swapchain extension
       enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
+    if (requestedFeatures.rayQueries) {
+      // If the device will be using ray queries for inline ray tracing, 
+      // we need to explicitly request this.
+      enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
     }
 
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
@@ -5471,23 +5479,13 @@ struct Context {
     /// 3. Create the logical device representation
     VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
     memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
-    memoryModelFeatures.vulkanMemoryModel = VK_TRUE;
-    memoryModelFeatures.vulkanMemoryModelDeviceScope = VK_TRUE;
-    memoryModelFeatures.vulkanMemoryModelAvailabilityVisibilityChains = VK_TRUE;
 
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
     descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
-    descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-    descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
-    descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
     descriptorIndexingFeatures.pNext = &memoryModelFeatures;
 
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
-    bufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
-    bufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;
     bufferDeviceAddressFeatures.pNext = &descriptorIndexingFeatures;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
@@ -5496,23 +5494,22 @@ struct Context {
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
     rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.rayTracingPipeline = true;
     rtPipelineFeatures.pNext = &accelerationStructureFeatures;
 
     VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
     rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    rtQueryFeatures.rayQuery = VK_TRUE;
     rtQueryFeatures.pNext = &rtPipelineFeatures;
 
     VkPhysicalDeviceFeatures2 deviceFeatures2{};
     deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     deviceFeatures2.pNext = &rtQueryFeatures;
+
+    // fill in above structs
     vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    ;
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.pEnabledFeatures = nullptr;   //  &enabledFeatures; // TODO, remove or update enabledFeatures
     deviceCreateInfo.pNext = &deviceFeatures2;
@@ -7997,6 +7994,12 @@ GPRT_API void
 gprtRequestRayTypeCount(size_t rayTypeCount) {
   LOG_API_CALL();
   requestedFeatures.numRayTypes = rayTypeCount;
+}
+
+GPRT_API void
+gprtRequestRayQueries() {
+  LOG_API_CALL();
+  requestedFeatures.rayQueries = true;
 }
 
 GPRT_API bool
