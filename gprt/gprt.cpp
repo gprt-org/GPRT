@@ -5322,7 +5322,18 @@ struct Context {
         usableDevices.push_back(i);
         LOG_INFO("\tFound usable device");
       } else {
-        /* Explain why we aren't using this device */
+        // Get list of supported extensions
+        uint32_t devExtCount = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, nullptr);
+        std::vector<VkExtensionProperties> extensions(devExtCount);
+        std::vector<std::string> supportedExtensions;
+        if (vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, &extensions.front()) ==
+            VK_SUCCESS) {
+          for (auto ext : extensions) {
+            supportedExtensions.push_back(ext.extensionName);
+          }
+        }
+        
         for (const char *enabledExtension : enabledDeviceExtensions) {
           if (!extensionSupported(enabledExtension, supportedExtensions)) {
             LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension
