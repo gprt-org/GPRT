@@ -28,7 +28,7 @@
  * SOFTWARE.
  */
 
-#include <stdalign.h>
+#include <cstdalign>
 #include <vulkan/vulkan.h>
 
 #include "linalg.h"
@@ -1210,7 +1210,7 @@ gprtBufferDestroy(GPRTBufferOf<T> buffer) {
  *
  * @param buffer The buffer to measure
  * @return The size of the buffer in bytes
-*/
+ */
 GPRT_API size_t gprtBufferGetSize(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 /***
@@ -1219,7 +1219,7 @@ GPRT_API size_t gprtBufferGetSize(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 
  * @tparam T The template type of the given buffer
  * @param buffer The buffer to measure
  * @return The size of the buffer in bytes
-*/
+ */
 template <typename T>
 size_t
 gprtBufferGetSize(GPRTBufferOf<T> buffer) {
@@ -1272,11 +1272,11 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
  * @param preserveContents If true, preserves the contents of the buffer when resized
  *
  * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
- * and rebuild the shader binding table. When preserving contents, a device copy is executed from an old buffer to a new buffer. 
- * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
+ * and rebuild the shader binding table. When preserving contents, a device copy is executed from an old buffer to a new
+ * buffer. Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
  */
-GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t size, size_t count,
-                               bool preserveContents, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t size, size_t count, bool preserveContents,
+                               int deviceID GPRT_IF_CPP(= 0));
 
 /***
  * @brief Resizes the buffer so that it contains \p count elements, where each element is "sizeof(T)" bytes. If the
@@ -1290,12 +1290,13 @@ GPRT_API void gprtBufferResize(GPRTContext context, GPRTBuffer buffer, size_t si
  * @param preserveContents If true, preserves the contents of the buffer when resized
  *
  * \warning This call will reset the buffer device address. Make sure to reassign the address to any parameter records
- * and rebuild the shader binding table.  When preserving contents, a device copy is executed from an old buffer to a new buffer. 
- * Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
+ * and rebuild the shader binding table.  When preserving contents, a device copy is executed from an old buffer to a
+ * new buffer. Host pinned buffers require allocating a new buffer before releasing the old to preserve prior values.
  */
 template <typename T>
 void
-gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, bool preserveContents, int deviceID GPRT_IF_CPP(= 0)) {
+gprtBufferResize(GPRTContext context, GPRTBufferOf<T> buffer, size_t count, bool preserveContents,
+                 int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferResize(context, (GPRTBuffer) buffer, sizeof(T), count, preserveContents, deviceID);
 }
 
@@ -1352,7 +1353,7 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
 /**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
- * 
+ *
  * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
@@ -1379,12 +1380,13 @@ gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> sc
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values,
+                                    GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
- * 
+ *
  * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
  * @tparam T2 The template type of the given buffer (currently only uint32_t is supported)
  * @tparam T3 The template type of the scratch buffer (uint8_t is assumed)
@@ -1398,7 +1400,8 @@ GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBu
  */
 template <typename T1, typename T2, typename T3>
 void
-gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values, GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
+gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values,
+                      GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
   gprtBufferSortPayload(context, (GPRTBuffer) keys, (GPRTBuffer) values, (GPRTBuffer) scratch);
 }
 
