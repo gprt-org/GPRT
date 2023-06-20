@@ -583,6 +583,9 @@ GPRT_API void gprtGuiRasterize(GPRTContext context);
   created */
 GPRT_API void gprtRequestRayTypeCount(size_t numRayTypes);
 
+/*! Requests that ray queries be enabled for inline ray tracing support. */
+GPRT_API void gprtRequestRayQueries();
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the

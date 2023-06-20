@@ -1,0 +1,36 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: General Purpose Raytracing Tookit
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Nate
+    family-names: Morrical
+    email: natemorrical@gmail.com
+    affiliation: University of Utah
+    orcid: 'https://orcid.org/0000-0002-2262-6974'
+  - given-names: Patrick
+    family-names: Shriwise
+    email: pshriwise@anl.gov
+    affiliation: Argonne National Laboratory
+    orcid: 'https://orcid.org/0000-0002-3979-7665'
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.8019116
+    description: Zenodo DOI of GPRT 1.0.0
+repository-code: 'https://github.com/gprt-org/GPRT'
+url: 'https://gprt-org.github.io/GPRT/'
+abstract: >-
+  GPRT is an open source raytracing library that allows
+  developers to quickly prototype ideas involving
+  high-performance ray tracing. By providing a comprehensive
+  set of abstractions over Khronos's Vulkan API, GPRT
+  empowers developers to explore and push the boundaries of
+  ray tracing technology, enabling the creation of visually
+  stunning, informative and immersive visualizations and
+  simulations.
+license: MIT

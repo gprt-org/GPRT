@@ -3,8 +3,9 @@
 [![CI](https://github.com/natevm/vkrt/actions/workflows/ci.yml/badge.svg)](https://github.com/natevm/vkrt/actions/workflows/ci.yml)
 
 # GPRT (General Purpose Raytracing Toolkit)
-
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
+
+![Sample "Attribute Aware RBFs" images](docs/source/images/papers/vis2023.jpg)
 
 ## Dependencies
 

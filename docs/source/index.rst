@@ -1,37 +1,133 @@
-.. General Purpose Raytracing Toolkit documentation master file, created by
-   sphinx-quickstart on Thu Nov  3 13:42:23 2022.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  GPRT Reference Manual
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-Welcome to General Purpose Raytracing Toolkit's documentation!
-==============================================================
+Welcome to the manual for `GPRT <https://github.com/gprt-org/GPRT>`__, the general purpose raytracing toolkit.
+
+Our goal is to make high performance GPU ray tracing hardware more accessible to 
+a broader developer audience, whether that be on NVIDIA, AMD, or Intel ARC. 
+With this toolkit, we help make your ray tracing development fast and easy 
+by providing GPU-parallel acceleration structures, shader binding table 
+management, and RT pipeline creation. We also provide a collection of examples 
+*here* that should help you get started on all your ray tracing expeditions!
+
+
+.. Getting Started
+.. ===============
+
+.. .. container:: tocdescr
+
+..    :doc:`/hostapi`
+
+.. .. container:: tocdescr
+
+..    :doc:`/deviceapi`
+
+.. .. container:: global-index-toc
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: -1
+   :caption: Table of contents:
+   :glob:
+   :hidden:
+   
+   self
+   examples/*
+   deviceapi
+   hostapi
+   
+
+Examples
+========
+.. container:: tocdescr
+
+      .. container:: descr
+
+         .. figure:: ./images/s00-rayGenOnly.png
+            :target: examples/s00-rayGenOnly.html
+
+         :doc:`/examples/s00-rayGenOnly`
+            Create a classic checkerboard!
+
+      .. container:: descr
+
+         .. figure:: ./images/s01-singleTriangle.png
+            :target: examples/s01-singleTriangle.html
+
+         :doc:`/examples/s01-singleTriangle`
+            Experience the power of one triangle!
+
+      .. container:: descr
+
+         .. figure:: ./images/s02-instances.png
+            :target: examples/s02-instances.html
+
+         :doc:`/examples/s02-instances`
+            Duplicate your designs with ease!
+
+      .. container:: descr
+
+         .. figure:: ./images/s03-singleAABB.png
+            :target: examples/s03-singleAABB.html
+
+         :doc:`/examples/s03-singleAABB`
+            One box to rule them all!
+
+      .. Note, we'll add in the below as more samples are merged into master
 
 
+      .. .. container:: descr
 
-Indices and tables
-==================
+      ..    .. figure:: ./images/s04-computeAABBs.png
+      ..       :target: examples/s04-computeAABBs.html
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to generate AABBs
 
-Testing
-==================
-.. doxygenfunction:: gprtContextCreate
-.. doxygenfunction:: gprtModuleCreate
-.. doxygenfunction:: gprtRayGenCreate
-.. doxygenfunction:: gprtBuildPipeline
-.. doxygenfunction:: gprtHostBufferCreate
-.. doxygenfunction:: gprtRayGenSet3f
-.. doxygenfunction:: gprtRayGenSetBuffer
-.. doxygenfunction:: gprtRayGenSet2i
-.. doxygenfunction:: gprtBuildShaderBindingTable
-.. doxygenfunction:: gprtRayGenLaunch2D
-.. doxygenfunction:: gprtBufferDestroy
-.. doxygenfunction:: gprtRayGenDestroy
-.. doxygenfunction:: gprtModuleDestroy
-.. doxygenfunction:: gprtContextDestroy
+      .. .. container:: descr
+
+      ..    .. figure:: ./images/s05-computeVertex.png
+      ..       :target: examples/s05-computeVertex.html
+
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to manipulate triangle vertices
+      
+      .. .. container:: descr
+
+      ..    .. figure:: ./images/s06-computeTransform.png
+      ..       :target: examples/s06-computeTransform.html
+
+      ..    :doc:`/editors/index`
+      ..       How to use a compute shader to manipulate instance transforms
+      
+      .. .. container:: descr
+
+      ..    .. figure:: ./images/s07-multipleGeometry.png
+      ..       :target: examples/s07-multipleGeometry.html
+
+      ..    :doc:`/editors/index`
+      ..       Here we combine multiple geometries into the same bottom level tree
+
+      .. .. container:: descr
+
+      ..    .. figure:: ./images/s08-multipleBLAS.png
+      ..       :target: examples/s08-multipleBLAS.html
+
+      ..    :doc:`/editors/index`
+      ..       Shows how bottom level trees of different types can be combined
+
+      .. .. container:: descr
+
+      ..    .. figure:: ./images/s09-multipleTLAS.png
+      ..       :target: examples/s09-multipleTLAS.html
+
+      ..    :doc:`/editors/index`
+      ..       Demonstrates multiple top level trees in the same program
+
+Get Involved
+============
+GPRT is an open source project, maintained by volunteers from all over the 
+place.
+
+Please consider joining our efforts, and check out our *contributor guide here*!
+
