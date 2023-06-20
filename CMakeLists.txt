@@ -48,6 +48,7 @@ endif()
 # ------------------------------------------------------------------
 option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
 set(BUILD_SHARED_LIBS ${GPRT_BUILD_SHARED}) # use 'GPRT_' naming convention
+option(GPRT_USE_INCLUDED_GLFW "Build GPRT including the submoduled GLFW? (otherwise, system GLFW will be found)" ON)  
 
 # ------------------------------------------------------------------
 # External configuration variables

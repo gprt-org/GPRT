@@ -101,7 +101,9 @@ add_subdirectory(stb_image)
 
 # Find GLFW
 # if(GPRT_BUILD_SAMPLES)
-  find_package(glfw3 QUIET)
+  if(NOT GPRT_USE_INCLUDED_GLFW)
+    find_package(glfw3 QUIET)
+  endif()
   set(OpenGL_GL_PREFERENCE "LEGACY")
   #find_package(OpenGL QUIET)
   find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS OpenGL)
