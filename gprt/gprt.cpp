@@ -8471,7 +8471,7 @@ gprtGeomGetParameters(GPRTGeom _geometry, int deviceID) {
 }
 
 GPRT_API void
-gprtGeomSetParameters(GPRTGeom _geometry, void* parameters, int deviceID) {
+gprtGeomSetParameters(GPRTGeom _geometry, void *parameters, int deviceID) {
   LOG_API_CALL();
   Geom *geometry = (Geom *) _geometry;
   memcpy(geometry->SBTRecord, parameters, geometry->recordSize);
@@ -8764,7 +8764,7 @@ gprtRayGenGetParameters(GPRTRayGen _rayGen, int deviceID) {
 }
 
 GPRT_API void
-gprtRayGenSetParameters(GPRTRayGen _rayGen, void* parameters, int deviceID) {
+gprtRayGenSetParameters(GPRTRayGen _rayGen, void *parameters, int deviceID) {
   LOG_API_CALL();
   RayGen *rayGen = (RayGen *) _rayGen;
   memcpy(rayGen->SBTRecord, parameters, rayGen->recordSize);
@@ -8801,7 +8801,7 @@ gprtComputeGetParameters(GPRTCompute _compute, int deviceID) {
 }
 
 GPRT_API void
-gprtComputeSetParameters(GPRTCompute _compute, void* parameters, int deviceID) {
+gprtComputeSetParameters(GPRTCompute _compute, void *parameters, int deviceID) {
   LOG_API_CALL();
   Compute *compute = (Compute *) _compute;
   memcpy(compute->SBTRecord, parameters, compute->recordSize);
@@ -8848,7 +8848,7 @@ gprtMissGetParameters(GPRTMiss _miss, int deviceID) {
 }
 
 GPRT_API void
-gprtMissSetParameters(GPRTMiss _miss, void* parameters, int deviceID) {
+gprtMissSetParameters(GPRTMiss _miss, void *parameters, int deviceID) {
   LOG_API_CALL();
   Miss *miss = (Miss *) _miss;
   memcpy(miss->SBTRecord, parameters, miss->recordSize);
@@ -9337,24 +9337,16 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
   ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
   scratchBufferSize = alignedSize(scratchBufferSize, offsetAlignment);
   reducedScratchBufferSize = alignedSize(reducedScratchBufferSize, offsetAlignment);
-  
+
   uint64_t keysSize = alignedSize(keys->size, offsetAlignment);
   uint64_t valuesSize = ((bHasPayload) ? alignedSize(values->size, offsetAlignment) : 0);
-  
 
-<<<<<<< HEAD
-  scratch->resize(keysSize + valuesSize + scratchBufferSize + reducedScratchBufferSize, /*don't transfer old contents*/ false);
+  scratch->resize(keysSize + valuesSize + scratchBufferSize + reducedScratchBufferSize,
+                  /*don't transfer old contents*/ false);
   // All offsets must be a multiple of device limit VkPhysicalDeviceLimits::minStorageBufferOffseteAlignment
   size_t valuesOffset = keysSize;
   size_t scratchOffset = keysSize + valuesSize;
   size_t reducedScratchOffset = keysSize + valuesSize + scratchBufferSize;
-=======
-  scratch->resize(keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize + reducedScratchBufferSize,
-                  /*don't transfer old contents*/ false);
-  size_t valuesOffset = keys->size;
-  size_t scratchOffset = keys->size + ((bHasPayload) ? values->size : 0);
-  size_t reducedScratchOffset = keys->size + ((bHasPayload) ? values->size : 0) + scratchBufferSize;
->>>>>>> master
 
   uint32_t NumThreadgroupsToRun;
   uint32_t NumReducedThreadgroupsToRun;
@@ -9538,14 +9530,18 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
 
     // Finish doing everything and barrier for the next pass
     VkBuffer keysBuffer = (inputSet) ? scratch->buffer : keys->buffer;
-    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keysSize);
-    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
-    
+    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                                   VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keysSize);
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                         nullptr, 1, Barriers, 0, nullptr);
+
     if (bHasPayload) {
       VkBuffer valsBuffer = (inputSet) ? scratch->buffer : values->buffer;
       VkDeviceSize offset = (inputSet) ? valuesOffset : 0;
-      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, valuesSize);
-      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1, Barriers, 0, nullptr);
+      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                                     VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, valuesSize);
+      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                           nullptr, 1, Barriers, 0, nullptr);
     }
 
     // Swap read/write sources
