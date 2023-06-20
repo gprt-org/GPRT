@@ -7321,7 +7321,7 @@ struct Context {
 
     VkDescriptorPoolSize poolSize;
     poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = 5;
+    poolSize.descriptorCount = 16;
 
     VkDescriptorPoolCreateInfo descriptorPoolInfo{};
     descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
