@@ -191,27 +191,6 @@ getNumRayTypes() {
   // for now, we map PC 0 to ray type count
   return uint32_t(pc.r[0]);
 }
-
-void
-amdkludge() {
-  if (pc.r[15]) {
-    struct Stubstruct {
-      int tmp;
-    } stubstruct;
-    RaytracingAccelerationStructure stubtree = getAccelHandle(0);
-    RayDesc rayDesc;
-    TraceRay(stubtree,                // the tree
-             RAY_FLAG_FORCE_OPAQUE,   // ray flags
-             0xff,                    // instance inclusion mask
-             0,                       // ray type
-             0,                       // number of ray types
-             0,                       // miss type
-             rayDesc,                 // the ray to trace
-             stubstruct               // the payload IO
-    );
-    vk::RawBufferStore<int>(0, stubstruct.tmp);
-  }
-}
 };   // namespace gprt
 
 /*
@@ -272,7 +251,6 @@ where ARG is "(type_, name)". */
                                                                                                                        \
   [shader("closesthit")] void __closesthit__##progName(inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                        \
                                                        in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                       \
-    gprt::amdkludge();                                                                                                 \
     progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
              RAW(NAME_EXPAND AttributeDecl));                                                                          \
   }                                                                                                                    \
