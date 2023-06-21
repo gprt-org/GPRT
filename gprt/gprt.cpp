@@ -9297,6 +9297,49 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
 }
 
 void
+gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _texture, size_t bufferOffset,
+                      size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
+                      uint32_t imageOffsetZ, uint32_t imageExtentX, uint32_t imageExtentY, uint32_t imageExtentZ,
+                      int srcDeviceID, int dstDeviceID) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Texture *texture = (Texture *) _texture;
+  Buffer *buffer = (Buffer *) _buffer;
+
+  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+  VkImageLayout originalLayout = texture->layout;
+
+  // transition to a transfer destination format
+  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          {uint32_t(texture->aspectFlagBits), 0, texture->mipLevels, 0, 1});
+  texture->layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+  VkBufferImageCopy region;
+  region.bufferOffset = bufferOffset;
+  region.bufferRowLength = bufferRowLength;
+  region.bufferImageHeight = bufferImageHeight;
+  region.imageOffset.x = imageOffsetX;
+  region.imageOffset.y = imageOffsetY;
+  region.imageOffset.z = imageOffsetZ;
+  region.imageExtent.width = imageExtentX;
+  region.imageExtent.height = imageExtentY;
+  region.imageExtent.depth = imageExtentZ;
+  region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.mipLevel = 0;
+  region.imageSubresource.layerCount = 1;
+  vkCmdCopyBufferToImage(commandBuffer, buffer->buffer, texture->image, texture->layout, 1, &region);
+
+  // transition back to original format
+  texture->setImageLayout(commandBuffer, texture->image, texture->layout, originalLayout,
+                          {uint32_t(texture->aspectFlagBits), 0, texture->mipLevels, 0, 1});
+  texture->layout = originalLayout;
+
+  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+}
+
+void
 gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t count, bool preserveContents,
                  int deviceID) {
   LOG_API_CALL();

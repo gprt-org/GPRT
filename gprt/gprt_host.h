@@ -1583,6 +1583,23 @@ gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, si
                  dstDeviceID);
 }
 
+GPRT_API void gprtBufferTextureCopy(GPRTContext context, GPRTBuffer buffer, GPRTTexture texture, size_t bufferOffset,
+                                    size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX,
+                                    uint32_t imageOffsetY, uint32_t imageOffsetZ, uint32_t imageExtentX,
+                                    uint32_t imageExtentY, uint32_t imageExtentZ, int srcDeviceID GPRT_IF_CPP(= 0),
+                                    int dstDeviceID GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureOf<T2> texture, size_t bufferOffset,
+                      size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
+                      uint32_t imageOffsetZ, uint32_t imageExtentX, uint32_t imageExtentY, uint32_t imageExtentZ,
+                      int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
+  gprtBufferTextureCopy(context, (GPRTBuffer) buffer, (GPRTTexture) texture, bufferOffset, bufferRowLength,
+                        bufferImageHeight, imageOffsetX, imageOffsetY, imageOffsetZ, imageExtentX, imageExtentY,
+                        imageExtentZ, srcDeviceID, dstDeviceID);
+}
+
 /**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
