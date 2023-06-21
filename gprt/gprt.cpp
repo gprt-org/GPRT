@@ -5292,8 +5292,7 @@ struct Context {
       enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
-    /* Unfortunately, DXC forces you into supporting ray queries if K*/
-    if (requestedFeatures.rayQueries || true) {
+    if (requestedFeatures.rayQueries) {
       // If the device will be using ray queries for inline ray tracing,
       // we need to explicitly request this.
       enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
