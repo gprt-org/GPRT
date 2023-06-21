@@ -51,11 +51,11 @@ function(embed_devicecode)
     "ANYHIT"
     "CLOSESTHIT"
     "MISS"
-    "CALLABLE"
     "COMPUTE"
     "VERTEX"
     "PIXEL"
   )
+  # "CALLABLE"
   list(LENGTH ENTRY_POINT_TYPES NUM_ENTRY_POINT_TYPES)
   math(EXPR NUM_ENTRY_POINT_TYPES_MINUS_ONE "${NUM_ENTRY_POINT_TYPES}-1")
 
