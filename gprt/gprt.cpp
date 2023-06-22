@@ -369,6 +369,7 @@ struct Buffer {
   } stagingBuffer;
 
   VkDeviceSize size = 0;
+  VkDeviceSize alignment = 16;
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
@@ -763,7 +764,8 @@ struct Buffer {
 
   Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator,
          VkCommandBuffer _commandBuffer, VkQueue _queue, VkBufferUsageFlags _usageFlags,
-         VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, void *data = nullptr) {
+         VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
+         void *data = nullptr) {
 
     // Hunt for an existing free virtual address for this buffer
     for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
@@ -784,6 +786,7 @@ struct Buffer {
     allocator = _allocator;
     usageFlags = _usageFlags;
     size = _size;
+    alignment = _alignment;
     commandBuffer = _commandBuffer;
     queue = _queue;
 
@@ -809,7 +812,8 @@ struct Buffer {
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     }
 
-    VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+    VK_CHECK_RESULT(vmaCreateBufferWithAlignment(allocator, &bufferCreateInfo, &allocInfo, alignment, &buffer,
+                                                 &allocation, nullptr));
 
     // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
 
@@ -830,8 +834,8 @@ struct Buffer {
       VmaAllocationCreateInfo allocInfo = {};
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
       allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
-                                      &stagingBuffer.allocation, nullptr));
+      VK_CHECK_RESULT(vmaCreateBufferWithAlignment(allocator, &bufferCreateInfo, &allocInfo, alignment,
+                                                   &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
@@ -2613,6 +2617,8 @@ struct Accel {
   VkDeviceAddress address = 0;
   VkAccelerationStructureKHR accelerationStructure = VK_NULL_HANDLE;
   VkAccelerationStructureKHR compactAccelerationStructure = VK_NULL_HANDLE;
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties;
   GPRTBuildMode buildMode = GPRT_BUILD_MODE_UNINITIALIZED;
   bool allowCompaction = false;
   bool minimizeMemory = false;
@@ -2629,6 +2635,24 @@ struct Accel {
     this->allocator = allocator;
     this->commandBuffer = commandBuffer;
     this->queue = queue;
+
+    accelerationStructureFeatures = {};
+    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+
+    VkPhysicalDeviceFeatures2 deviceFeatures2{};
+    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    deviceFeatures2.pNext = &accelerationStructureFeatures;
+
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+
+    accelerationStructureProperties = {};
+    accelerationStructureProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+
+    VkPhysicalDeviceProperties2 deviceProperties2{};
+    deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    deviceProperties2.pNext = &accelerationStructureProperties;
+
+    vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
   };
 
   ~Accel(){};
@@ -2777,19 +2801,20 @@ struct TriangleAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                               // means we can use this buffer as a means of storing an acceleration
-                               // structure
-                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                   // means we can get this buffer's address with
-                                   // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                   // means we can use this buffer as a storage buffer
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                               // means that this memory is stored directly on the device
-                               //  (rather than the host, or in a special host/device section)
-                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+      accelBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means we can use this buffer as a means of storing an acceleration
+                     // structure
+                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -2823,7 +2848,8 @@ struct TriangleAccel : public Accel {
                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -2995,7 +3021,8 @@ struct TriangleAccel : public Accel {
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
       }
     }
 
@@ -3156,7 +3183,8 @@ struct TriangleAccel : public Accel {
                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -3386,19 +3414,20 @@ struct AABBAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                               // means we can use this buffer as a means of storing an acceleration
-                               // structure
-                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                   // means we can get this buffer's address with
-                                   // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                   // means we can use this buffer as a storage buffer
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                               // means that this memory is stored directly on the device
-                               //  (rather than the host, or in a special host/device section)
-                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+      accelBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means we can use this buffer as a means of storing an acceleration
+                     // structure
+                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -3432,7 +3461,8 @@ struct AABBAccel : public Accel {
                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -3590,7 +3620,8 @@ struct AABBAccel : public Accel {
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
       }
     }
 
@@ -3752,7 +3783,8 @@ struct AABBAccel : public Accel {
                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -3941,7 +3973,7 @@ struct InstanceAccel : public Accel {
                                  // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                                  // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 sizeof(VkAccelerationStructureInstanceKHR) * numInstances);
+                                 sizeof(VkAccelerationStructureInstanceKHR) * numInstances, 16);
   };
 
   ~InstanceAccel(){};
@@ -4034,7 +4066,7 @@ struct InstanceAccel : public Accel {
                                           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
                                           // on AMD)
                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
-                                          sizeof(uint64_t) * numInstances);
+                                          sizeof(uint64_t) * numInstances, 16);
       }
 
       // transfer over addresses
@@ -4081,7 +4113,7 @@ struct InstanceAccel : public Accel {
                                            // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
                                            // on AMD)
                                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
-                                           sizeof(uint64_t) * numInstances);
+                                           sizeof(uint64_t) * numInstances, 16);
       }
 
       // transfer over offsets
@@ -4243,19 +4275,20 @@ struct InstanceAccel : public Accel {
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                               // means we can use this buffer as a means of storing an acceleration
-                               // structure
-                               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                   // means we can get this buffer's address with
-                                   // vkGetBufferDeviceAddress
-                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                   // means we can use this buffer as a storage buffer
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                               // means that this memory is stored directly on the device
-                               //  (rather than the host, or in a special host/device section)
-                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                               accelerationStructureBuildSizesInfo.accelerationStructureSize);
+      accelBuffer =
+          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                     // means we can use this buffer as a means of storing an acceleration
+                     // structure
+                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                         // means we can get this buffer's address with
+                         // vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         // means we can use this buffer as a storage buffer
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     // means that this memory is stored directly on the device
+                     //  (rather than the host, or in a special host/device section)
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -4289,7 +4322,8 @@ struct InstanceAccel : public Accel {
                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -4536,7 +4570,8 @@ struct InstanceAccel : public Accel {
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize);
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
       }
     }
 
@@ -4707,7 +4742,8 @@ struct InstanceAccel : public Accel {
                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
-                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize);
+                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -5848,7 +5884,7 @@ struct Context {
           // means we can use this buffer as a storage buffer resource
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       defaultBuffer = new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue,
-                                 bufferUsageFlags, memoryUsageFlags, 1);
+                                 bufferUsageFlags, memoryUsageFlags, 1, 16);
     }
 
     // For the SBT record descriptor for raster shaders
@@ -6179,7 +6215,8 @@ struct Context {
       }
       if (!raygenTable && raygenPrograms.size() > 0) {
         raygenTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                 bufferUsageFlags, memoryUsageFlags, recordSize * numRayGens);
+                                 bufferUsageFlags, memoryUsageFlags, recordSize * numRayGens,
+                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
       }
 
       size_t numMissProgs = missPrograms.size();
@@ -6190,7 +6227,8 @@ struct Context {
       }
       if (!missTable && missPrograms.size() > 0) {
         missTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                               bufferUsageFlags, memoryUsageFlags, recordSize * numMissProgs);
+                               bufferUsageFlags, memoryUsageFlags, recordSize * numMissProgs,
+                               rayTracingPipelineProperties.shaderGroupBaseAlignment);
       }
 
       size_t numHitRecords = getNumHitRecords();
@@ -6201,7 +6239,8 @@ struct Context {
       }
       if (!hitgroupTable && numHitRecords > 0) {
         hitgroupTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                   bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords);
+                                   bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords,
+                                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
       }
 
       size_t numRecords = numRayGens + numMissProgs + numHitRecords;
@@ -6961,7 +7000,8 @@ struct Context {
 
       rasterRecordBuffer =
           new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                     memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()));
+                     memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()),
+                     rayTracingPipelineProperties.shaderGroupBaseAlignment);
 
       // Uniform buffer descriptors for each geometry's record
       VkDescriptorBufferInfo uniformBufferDescriptor;
@@ -7028,7 +7068,8 @@ struct Context {
 
       computeRecordBuffer =
           new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                     memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()));
+                     memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()),
+                     rayTracingPipelineProperties.shaderGroupBaseAlignment);
 
       // Uniform buffer descriptors for each geometry's record
       VkDescriptorBufferInfo uniformBufferDescriptor;
@@ -9149,7 +9190,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
 
   // Pin the buffer to the host
   buffer->map();
@@ -9183,7 +9224,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
 
   if (init) {
     buffer->map();
@@ -9220,7 +9261,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
 
   // Pin the buffer to the host
   buffer->map();
