@@ -99,6 +99,9 @@ add_subdirectory(vma)
 # Find STB Image
 add_subdirectory(stb_image)
 
+# Find Tiny Obj
+add_subdirectory(tinyobj)
+
 # Find GLFW
 # if(GPRT_BUILD_SAMPLES)
   if(NOT GPRT_USE_INCLUDED_GLFW)
