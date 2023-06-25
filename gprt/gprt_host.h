@@ -602,7 +602,7 @@ GPRT_API void gprtRequestRayQueries();
   the system
 
   - int gpu=2;gprtContextCreate(&gpu,1) will create a context on GPU #2
-  (where 2 refers to the CUDA device ordinal; from that point on, from
+  (where 2 refers to the vulkan device ordinal; from that point on, from
   gprt's standpoint (eg, during gprtBufferGetPointer() this GPU will
   from that point on be known as device #0 */
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(= nullptr),

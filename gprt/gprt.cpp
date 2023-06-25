@@ -5384,8 +5384,19 @@ struct Context {
     if (usableDevices.size() == 0) {
       LOG_ERROR("Unable to find physical device meeting requirements");
     } else {
-      LOG_INFO("Selecting first usable device");
-      selectedDevice = usableDevices[0];
+      uint32_t requestedDevice = 0;
+
+      if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
+        LOG_INFO("Selecting first usable device");
+      } else if (numRequestedDevices > 1) {
+        LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
+      } else {
+        requestedDevice = requestedDeviceIDs[0];
+        if (requestedDevice > usableDevices.size()) {
+          LOG_ERROR("Requested device is out of range!");
+        }
+      }
+      selectedDevice = usableDevices[requestedDevice];
     }
 
     physicalDevice = physicalDevices[selectedDevice];
