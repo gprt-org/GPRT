@@ -539,8 +539,8 @@ GPRT_API int gprtGetMouseButton(GPRTContext context, int button);
  */
 GPRT_API int gprtGetKey(GPRTContext context, int key);
 
-/** If a window was requested, this function returns the time elapsed since
- * GPRT was initialized.
+/** If a window was requested, this function returns the time elapsed (in seconds)
+ * since GPRT was initialized.
  *
  * At the moment, if a window was not requested (ie headless), this function
  * will return 0.
@@ -1754,5 +1754,5 @@ gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x, i
 
 GPRT_API void gprtBeginProfile(GPRTContext context);
 
-// returned results are in nanoseconds
+// returned results are in milliseconds
 GPRT_API float gprtEndProfile(GPRTContext context);

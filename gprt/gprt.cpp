@@ -10110,6 +10110,6 @@ gprtEndProfile(GPRTContext _context) {
   if (result != VK_SUCCESS)
     LOG_ERROR("Failed to receive query results!");
   uint64_t timeResults = buffer[1] - buffer[0];
-  float time = float(timeResults) / context->deviceProperties.limits.timestampPeriod;
+  float time = (float(timeResults) * (context->deviceProperties.limits.timestampPeriod / 1000000000.0f));
   return time;
 }
