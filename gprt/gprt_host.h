@@ -1728,28 +1728,30 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x, int 
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
 }
 
-GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, int dims_x);
+GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, int x_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x) {
-  gprtComputeLaunch1D(context, (GPRTCompute) compute, dims_x);
+gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups) {
+  gprtComputeLaunch1D(context, (GPRTCompute) compute, x_workgroups);
 }
 
-GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, int dims_x, int dims_y);
+GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, int x_workgroups, int y_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x, int dims_y) {
-  gprtComputeLaunch2D(context, (GPRTCompute) compute, dims_x, dims_y);
+gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups, int y_workgroups) {
+  gprtComputeLaunch2D(context, (GPRTCompute) compute, x_workgroups, y_workgroups);
 }
 
-GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, int dims_x, int dims_y, int dims_z);
+GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, int x_workgroups, int y_workgroups,
+                                  int z_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, int dims_x, int dims_y, int dims_z) {
-  gprtComputeLaunch3D(context, (GPRTCompute) compute, dims_x, dims_y, dims_z);
+gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups, int y_workgroups,
+                    int z_workgroups) {
+  gprtComputeLaunch3D(context, (GPRTCompute) compute, x_workgroups, y_workgroups, z_workgroups);
 }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);

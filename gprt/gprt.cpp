@@ -9999,21 +9999,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
-GPRT_API void
-gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, int dims_x) {
-  LOG_API_CALL();
-  gprtComputeLaunch2D(_context, _compute, dims_x, 1);
-}
-
-GPRT_API void
-gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y) {
-  LOG_API_CALL();
-  gprtComputeLaunch3D(_context, _compute, dims_x, dims_y, 1);
-}
-
-GPRT_API void
-gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z) {
-  LOG_API_CALL();
+void
+gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z) {
   assert(_compute);
 
   Context *context = (Context *) _context;
@@ -10051,6 +10038,22 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           descriptorSets.size(), descriptorSets.data(), 1, &offset);
 
+  if (dims_x >= context->deviceProperties.limits.maxComputeWorkGroupCount[0]) {
+    LOG_ERROR("X workgroups (" + std::to_string(dims_x) +
+              ") exceed the maximum number of compute workgroups! (max for this platform is " +
+              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[0]) + ")\n");
+  }
+  if (dims_y >= context->deviceProperties.limits.maxComputeWorkGroupCount[1]) {
+    LOG_ERROR("Y workgroups (" + std::to_string(dims_y) +
+              ") exceed the maximum number of compute workgroups! (max for this platform is " +
+              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[1]) + ")\n");
+  }
+  if (dims_z >= context->deviceProperties.limits.maxComputeWorkGroupCount[2]) {
+    LOG_ERROR("Z workgroups (" + std::to_string(dims_z) +
+              ") exceed the maximum number of compute workgroups! (max for this platform is " +
+              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[2]) + ")\n");
+  }
+
   struct PushConstants {
     uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   } pushConstants;
@@ -10084,6 +10087,24 @@ gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int 
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+}
+
+GPRT_API void
+gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, int dims_x) {
+  LOG_API_CALL();
+  gprtComputeLaunch(_context, _compute, dims_x, 1, 1);
+}
+
+GPRT_API void
+gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y) {
+  LOG_API_CALL();
+  gprtComputeLaunch(_context, _compute, dims_x, dims_y, 1);
+}
+
+GPRT_API void
+gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z) {
+  LOG_API_CALL();
+  gprtComputeLaunch(_context, _compute, dims_x, dims_y, dims_z);
 }
 
 GPRT_API void
