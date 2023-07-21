@@ -9,7 +9,7 @@ message: >-
 type: software
 authors:
   - given-names: Nathan
-    family-names: Morrcal
+    family-names: Morrical
     email: natemorrical@gmail.com
     affiliation: University of Utah
     orcid: 'https://orcid.org/0000-0002-2262-6974'
