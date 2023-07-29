@@ -69,7 +69,7 @@ template <typename T> struct Mesh {
       vertGenerator.next();
     }
     while (!triGenerator.done()) {
-      Triangle triangle = triGenerator.generate();
+      auto triangle = triGenerator.generate();
       auto vertices = triangle.vertices;
       indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
       triGenerator.next();
