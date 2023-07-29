@@ -53,6 +53,7 @@ struct LBVHData {
 };
 
 #ifndef GPRT_DEVICE
+#include <limits.h>
 extern GPRTProgram lbvhDeviceCode;
 
 typedef enum {
@@ -164,9 +165,6 @@ GPRTLBVH gprtTriangleLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertic
     return lbvh;
 }
 
-#include <limits.h>
-#include <intrin.h>
-#include <cassert>
 inline void gprtLBVHBuild(GPRTContext context, GPRTLBVH &lbvh) {
     typedef uint32_t uint;
 
