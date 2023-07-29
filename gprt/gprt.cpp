@@ -361,7 +361,7 @@ struct Buffer {
 
   // Some operations require buffers to be in a separate array.
   // Instead, we make our own virtual "sampler address space".
-  VkDeviceAddress virtualAddress = -1;
+  uint32_t virtualAddress = -1;
 
   struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -779,7 +779,7 @@ struct Buffer {
     // one
     if (virtualAddress == -1) {
       Buffer::buffers.push_back(this);
-      virtualAddress = buffers.size() - 1;
+      virtualAddress = (uint32_t)buffers.size() - 1;
     }
 
     device = logicalDevice;
@@ -900,7 +900,7 @@ struct Texture {
 
   // Technically, textures in vulkan don't support addresses.
   // Instead, we make our own virtual "texture address space".
-  VkDeviceAddress address = -1;
+  uint32_t address = -1;
 
   VkImageView imageView = VK_NULL_HANDLE;
 
@@ -1412,7 +1412,7 @@ struct Texture {
     // one
     if (address == -1) {
       textures.push_back(this);
-      address = textures.size() - 1;
+      address = (uint32_t)textures.size() - 1;
     }
 
     device = logicalDevice;
@@ -1694,7 +1694,7 @@ struct Sampler {
 
   // Technically, samplers in vulkan don't support addresses.
   // Instead, we make our own virtual "sampler address space".
-  VkDeviceAddress address = -1;
+  uint32_t address = -1;
 
   Sampler(){};
 
@@ -1715,7 +1715,7 @@ struct Sampler {
     // one
     if (address == -1) {
       samplers.push_back(this);
-      address = samplers.size() - 1;
+      address = (uint32_t)samplers.size() - 1;
     }
 
     device = logicalDevice;
@@ -1768,7 +1768,7 @@ struct SBTEntry {
 struct Compute : public SBTEntry {
 
   // Our own virtual "compute address space".
-  VkDeviceAddress address = -1;
+  uint32_t address = -1;
   static std::vector<Compute *> computes;
 
   VkPipelineShaderStageCreateInfo shaderStage{};
@@ -1792,7 +1792,7 @@ struct Compute : public SBTEntry {
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
       Compute::computes.push_back(this);
-      address = Compute::computes.size() - 1;
+      address = (uint32_t)Compute::computes.size() - 1;
     }
 
     entryPoint = std::string("__compute__") + std::string(_entryPoint);
@@ -1848,7 +1848,7 @@ struct Compute : public SBTEntry {
     std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
                                                   texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                                   bufferDescriptorSetLayout,    recordDescriptorSetLayout};
-    pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
+    pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
     pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
@@ -1971,7 +1971,7 @@ struct Miss : public SBTEntry {
 struct GeomType : public SBTEntry {
 
   // Our own virtual "geom types address space".
-  VkDeviceAddress address = -1;
+  uint32_t address = -1;
   static std::vector<GeomType *> geomTypes;
 
   VkDevice logicalDevice;
@@ -2020,7 +2020,7 @@ struct GeomType : public SBTEntry {
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
       GeomType::geomTypes.push_back(this);
-      address = GeomType::geomTypes.size() - 1;
+      address = (uint32_t)GeomType::geomTypes.size() - 1;
     }
 
     this->numRayTypes = numRayTypes;
@@ -2219,7 +2219,7 @@ struct GeomType : public SBTEntry {
     VkRenderPassCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     createInfo.pNext = nullptr;
-    createInfo.attachmentCount = attachments.size();
+    createInfo.attachmentCount = (uint32_t)attachments.size();
     createInfo.pAttachments = attachments.data();
     createInfo.subpassCount = 1;
     createInfo.pSubpasses = &subpass;
@@ -2387,7 +2387,7 @@ struct GeomType : public SBTEntry {
     std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
                                                   texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                                   bufferDescriptorSetLayout,    recordDescriptorSetLayout};
-    pipelineLayoutInfo.setLayoutCount = layouts.size();
+    pipelineLayoutInfo.setLayoutCount = (uint32_t)layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
     VkPushConstantRange pushConstantRange = {};
@@ -2515,17 +2515,17 @@ std::vector<Geom *> Geom::geoms;
 
 struct TriangleGeom : public Geom {
   struct {
-    size_t count = 0;         // number of indices
-    size_t stride = 0;        // stride between indices
-    size_t offset = 0;        // offset in bytes to the first index
-    size_t firstVertex = 0;   // added to the index values before fetching vertices
+    uint32_t count = 0;         // number of indices
+    uint32_t stride = 0;        // stride between indices
+    uint32_t offset = 0;        // offset in bytes to the first index
+    uint32_t firstVertex = 0;   // added to the index values before fetching vertices
     Buffer *buffer = nullptr;
   } index;
 
   struct {
-    size_t count = 0;    // number of vertices
-    size_t stride = 0;   // stride between vertices
-    size_t offset = 0;   // an offset in bytes to the first vertex
+    uint32_t count = 0;    // number of vertices
+    uint32_t stride = 0;   // stride between vertices
+    uint32_t offset = 0;   // an offset in bytes to the first vertex
     std::vector<Buffer *> buffers;
   } vertex;
 
@@ -2538,7 +2538,7 @@ struct TriangleGeom : public Geom {
   };
   ~TriangleGeom() { free(this->SBTRecord); };
 
-  void setVertices(Buffer *vertices, size_t count, size_t stride, size_t offset) {
+  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
     // assuming no motion blurred triangles for now, so we assume 1 buffer
     vertex.buffers.resize(1);
     vertex.buffers[0] = vertices;
@@ -2547,7 +2547,7 @@ struct TriangleGeom : public Geom {
     vertex.offset = offset;
   }
 
-  void setIndices(Buffer *indices, size_t count, size_t stride, size_t offset) {
+  void setIndices(Buffer *indices, uint32_t count, uint32_t stride, uint32_t offset) {
     index.buffer = indices;
     index.count = count;
     index.stride = stride;
@@ -2567,9 +2567,9 @@ struct TriangleGeomType : public GeomType {
 
 struct AABBGeom : public Geom {
   struct {
-    size_t count;
-    size_t stride;
-    size_t offset;
+    uint32_t count;
+    uint32_t stride;
+    uint32_t offset;
     std::vector<Buffer *> buffers;
   } aabb;
 
@@ -2582,7 +2582,7 @@ struct AABBGeom : public Geom {
   };
   ~AABBGeom() { free(this->SBTRecord); };
 
-  void setAABBs(Buffer *aabbs, size_t count, size_t stride, size_t offset) {
+  void setAABBs(Buffer *aabbs, uint32_t count, uint32_t stride, uint32_t offset) {
     // assuming no motion blurred triangles for now, so we assume 1 buffer
     aabb.buffers.resize(1);
     aabb.buffers[0] = aabbs;
@@ -2773,7 +2773,7 @@ struct TriangleAccel : public Accel {
     if (allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
@@ -2879,7 +2879,7 @@ struct TriangleAccel : public Accel {
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
@@ -2993,7 +2993,7 @@ struct TriangleAccel : public Accel {
       if (allowCompaction) {
         accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
       }
-      accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+      accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
       accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
       VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
@@ -3052,7 +3052,7 @@ struct TriangleAccel : public Accel {
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure =
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
@@ -3387,7 +3387,7 @@ struct AABBAccel : public Accel {
     if (allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
@@ -3492,7 +3492,7 @@ struct AABBAccel : public Accel {
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
@@ -3592,7 +3592,7 @@ struct AABBAccel : public Accel {
       if (allowCompaction) {
         accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
       }
-      accelerationStructureBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+      accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
       accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
       VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
@@ -3651,7 +3651,7 @@ struct AABBAccel : public Accel {
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure =
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = accelerationStructureGeometries.size();
+    accelerationBuildGeometryInfo.geometryCount = (uint32_t)accelerationStructureGeometries.size();
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = scratchBuffer->deviceAddress;
 
@@ -3891,11 +3891,11 @@ struct AABBAccel : public Accel {
 };
 
 struct InstanceAccel : public Accel {
-  size_t numInstances;
+  uint32_t numInstances;
   std::vector<Accel *> instances;
 
   // the total number of geometries referenced by this instance accel's BLASes
-  size_t numGeometries = -1;
+  uint32_t numGeometries = -1;
 
   // caching these for fast updates
   size_t instanceOffset = -1;
@@ -3910,33 +3910,33 @@ struct InstanceAccel : public Accel {
 
   struct {
     Buffer *buffer = nullptr;
-    size_t stride = 0;
-    size_t offset = 0;
+    uint32_t stride = 0;
+    uint32_t offset = 0;
   } transforms;
 
   struct {
     Buffer *buffer = nullptr;
-    // size_t stride = 0;
-    // size_t offset = 0;
+    // uint32_t stride = 0;
+    // uint32_t offset = 0;
   } references;
 
   struct {
     Buffer *buffer = nullptr;
-    // size_t stride = 0;
-    // size_t offset = 0;
+    // uint32_t stride = 0;
+    // uint32_t offset = 0;
   } visibilityMasks;
 
   struct {
     Buffer *buffer = nullptr;
-    // size_t stride = 0;
-    // size_t offset = 0;
+    // uint32_t stride = 0;
+    // uint32_t offset = 0;
   } offsets;
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
   InstanceAccel(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator allocator,
-                VkCommandBuffer commandBuffer, VkQueue queue, size_t numInstances, GPRTAccel *instances)
+                VkCommandBuffer commandBuffer, VkQueue queue, uint32_t numInstances, GPRTAccel *instances)
       : Accel(physicalDevice, logicalDevice, allocator, commandBuffer, queue) {
     this->numInstances = numInstances;
 
@@ -3945,14 +3945,14 @@ struct InstanceAccel : public Accel {
       memcpy(this->instances.data(), instances, sizeof(GPRTAccel *) * numInstances);
 
       // count number of geometry referenced.
-      size_t numGeometry = 0;
+      uint32_t numGeometry = 0;
       for (uint32_t j = 0; j < this->instances.size(); ++j) {
         if (this->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
           TriangleAccel *triangleAccel = (TriangleAccel *) this->instances[j];
-          numGeometry += triangleAccel->geometries.size();
+          numGeometry += (uint32_t)triangleAccel->geometries.size();
         } else if (this->instances[j]->getType() == GPRT_AABB_ACCEL) {
           AABBAccel *aabbAccel = (AABBAccel *) this->instances[j];
-          numGeometry += aabbAccel->geometries.size();
+          numGeometry += (uint32_t)aabbAccel->geometries.size();
         } else {
           LOG_ERROR("Unaccounted for BLAS type!");
         }
@@ -3978,7 +3978,7 @@ struct InstanceAccel : public Accel {
 
   ~InstanceAccel(){};
 
-  void setTransforms(Buffer *transforms, size_t stride, size_t offset) {
+  void setTransforms(Buffer *transforms, uint32_t stride, uint32_t offset) {
     // assuming no motion blurred triangles for now, so we assume 1 transform
     // per instance
     this->transforms.buffer = transforms;
@@ -4010,9 +4010,9 @@ struct InstanceAccel : public Accel {
     this->offsets.buffer = offsets;
   }
 
-  void setNumGeometries(size_t numGeometries) { this->numGeometries = numGeometries; }
+  void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
 
-  size_t getNumGeometries() {
+  uint32_t getNumGeometries() {
     if (this->numGeometries == -1) {
       LOG_ERROR("Error, numGeometries for this instance must be set by the user!");
     }
@@ -4124,10 +4124,10 @@ struct InstanceAccel : public Accel {
 
         if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) {
           TriangleAccel *triAccel = (TriangleAccel *) this->instances[i];
-          offset += triAccel->geometries.size() * numRayTypes;
+          offset += (uint32_t)triAccel->geometries.size() * numRayTypes;
         } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
           AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
-          offset += aabbAccel->geometries.size() * numRayTypes;
+          offset += (uint32_t)aabbAccel->geometries.size() * numRayTypes;
         } else {
           LOG_ERROR("Error, unknown instance type");
         }
@@ -5999,7 +5999,7 @@ struct Context {
       pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
       pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
       pool_info.maxSets = 1000;
-      pool_info.poolSizeCount = std::size(pool_sizes);
+      pool_info.poolSizeCount = (uint32_t)std::size(pool_sizes);
       pool_info.pPoolSizes = pool_sizes;
 
       VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &pool_info, nullptr, &imguiPool));
@@ -6331,16 +6331,16 @@ struct Context {
             // SBT data... So, if we have a bunch of instances set by reference on
             // device, we need to eventually do something smarter here...
             size_t geomIDOffset = 0;
-            for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+            for (uint32_t blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
 
               Accel *blas = instanceAccel->instances[blasID];
               if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
                 TriangleAccel *triAccel = (TriangleAccel *) blas;
 
-                for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+                for (uint32_t geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
                   auto &geom = triAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                  for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -6369,10 +6369,10 @@ struct Context {
               else if (blas->getType() == GPRT_AABB_ACCEL) {
                 AABBAccel *aabbAccel = (AABBAccel *) blas;
 
-                for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+                for (uint32_t geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
                   auto &geom = aabbAccel->geometries[geomID];
 
-                  for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                  for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                     size_t recordStride = recordSize;
                     size_t handleStride = handleSize;
 
@@ -6646,7 +6646,7 @@ struct Context {
       rasterPipelinesOutOfDate = true;
 
       // Finally, keep track of if the texture count here changes
-      previousNumTexture1Ds = Texture::texture1Ds.size();
+      previousNumTexture1Ds = (uint32_t)Texture::texture1Ds.size();
     }
 
     // If the number of texture2ds has changed, we need to make a new
@@ -6754,7 +6754,7 @@ struct Context {
       rasterPipelinesOutOfDate = true;
 
       // Finally, keep track of if the texture count here changes
-      previousNumTexture2Ds = Texture::texture2Ds.size();
+      previousNumTexture2Ds = (uint32_t)Texture::texture2Ds.size();
     }
 
     // If the number of texture3ds has changed, we need to make a new
@@ -6862,7 +6862,7 @@ struct Context {
       rasterPipelinesOutOfDate = true;
 
       // Finally, keep track of if the texture count here changes
-      previousNumTexture3Ds = Texture::texture3Ds.size();
+      previousNumTexture3Ds = (uint32_t)Texture::texture3Ds.size();
     }
 
     // If the number of buffers has changed, we need to make a new
@@ -6970,7 +6970,7 @@ struct Context {
       rasterPipelinesOutOfDate = true;
 
       // Finally, keep track of if the buffer count here changes
-      previousNumBuffers = Buffer::buffers.size();
+      previousNumBuffers = (uint32_t)Buffer::buffers.size();
     }
 
     // If the number of raster records has changed, we need to make a new buffer of
@@ -7038,7 +7038,7 @@ struct Context {
       // need to mark our raster pipelines as "outdated" from this.
 
       // Finally, keep track of if the record count here changes
-      previousNumRasterRecords = Geom::geoms.size();
+      previousNumRasterRecords = (uint32_t)Geom::geoms.size();
     }
 
     // If the number of compute records has changed, we need to make a new buffer of
@@ -7106,7 +7106,7 @@ struct Context {
       // need to mark our compute pipelines as "outdated" from this.
 
       // Finally, keep track of if the record count here changes
-      previousNumComputeRecords = Compute::computes.size();
+      previousNumComputeRecords = (uint32_t)Compute::computes.size();
     }
 
     // Build / update the ray tracing pipeline if required
@@ -7125,7 +7125,7 @@ struct Context {
       std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
                                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                                     bufferDescriptorSetLayout};
-      pipelineLayoutCI.setLayoutCount = layouts.size();
+      pipelineLayoutCI.setLayoutCount = (uint32_t)layouts.size();
       pipelineLayoutCI.pSetLayouts = layouts.data();
 
       pipelineLayoutCI.pushConstantRangeCount = 1;
@@ -7176,22 +7176,22 @@ struct Context {
       // Hit groups
 
       // Go over all TLAS by order they were created
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      for (uint32_t tlasID = 0; tlasID < accels.size(); ++tlasID) {
         Accel *tlas = accels[tlasID];
         if (!tlas)
           continue;
         if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
           // Iterate over all BLAS stored in the TLAS
           InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-          for (int blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
+          for (uint32_t blasID = 0; blasID < instanceAccel->instances.size(); ++blasID) {
             Accel *blas = instanceAccel->instances[blasID];
             // Handle different BLAS types...
             if (blas->getType() == GPRT_TRIANGLE_ACCEL) {
               TriangleAccel *triAccel = (TriangleAccel *) blas;
               // Add a record for every geometry-raytype permutation
-              for (int geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
+              for (uint32_t geomID = 0; geomID < triAccel->geometries.size(); ++geomID) {
                 auto &geom = triAccel->geometries[geomID];
-                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                   VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
                   shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
                   shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
@@ -7223,9 +7223,9 @@ struct Context {
             } else if (blas->getType() == GPRT_AABB_ACCEL) {
               AABBAccel *aabbAccel = (AABBAccel *) blas;
               // Add a record for every geometry-raytype permutation
-              for (int geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
+              for (uint32_t geomID = 0; geomID < aabbAccel->geometries.size(); ++geomID) {
                 auto &geom = aabbAccel->geometries[geomID];
-                for (int rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
                   VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
                   shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
                   shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
@@ -7861,7 +7861,7 @@ struct Context {
     VkRenderPassCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     createInfo.pNext = nullptr;
-    createInfo.attachmentCount = attachments.size();
+    createInfo.attachmentCount = (uint32_t)attachments.size();
     createInfo.pAttachments = attachments.data();
     createInfo.subpassCount = 1;
     createInfo.pSubpasses = &subpass;
@@ -8070,7 +8070,7 @@ gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *tit
 }
 
 GPRT_API void
-gprtRequestRayTypeCount(size_t rayTypeCount) {
+gprtRequestRayTypeCount(uint32_t rayTypeCount) {
   LOG_API_CALL();
   requestedFeatures.numRayTypes = rayTypeCount;
 }
@@ -8465,7 +8465,7 @@ gprtContextDestroy(GPRTContext _context) {
 }
 
 GPRT_API void
-gprtContextSetRayTypeCount(GPRTContext _context, size_t numRayTypes) {
+gprtContextSetRayTypeCount(GPRTContext _context, uint32_t numRayTypes) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   requestedFeatures.numRayTypes = numRayTypes;
@@ -8552,7 +8552,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
     writeDescriptorSets[0] = {};
     writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].dstArrayElement = (uint32_t)colorAttachmentAddress;
     writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writeDescriptorSets[0].descriptorCount = 1;
     writeDescriptorSets[0].pBufferInfo = 0;
@@ -8562,7 +8562,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
     writeDescriptorSets[1] = {};
     writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSets[1].dstBinding = 0;
-    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].dstArrayElement = (uint32_t)depthAttachmentAddress;
     writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writeDescriptorSets[1].descriptorCount = 1;
     writeDescriptorSets[1].pBufferInfo = 0;
@@ -8654,9 +8654,9 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
           context->samplerDescriptorSet,   context->texture1DDescriptorSet, context->texture2DDescriptorSet,
           context->texture3DDescriptorSet, context->bufferDescriptorSet,    context->rasterRecordDescriptorSet};
 
-      uint32_t offset = geom->address * recordSize;
+      uint32_t offset = (uint32_t)geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              geomType->raster[rasterType].pipelineLayout, 0, descriptorSets.size(),
+                              geomType->raster[rasterType].pipelineLayout, 0, (uint32_t)descriptorSets.size(),
                               descriptorSets.data(), 1, &offset);
       vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
@@ -8712,7 +8712,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
     writeDescriptorSets[0] = {};
     writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = colorAttachmentAddress;
+    writeDescriptorSets[0].dstArrayElement = (uint32_t)colorAttachmentAddress;
     writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writeDescriptorSets[0].descriptorCount = 1;
     writeDescriptorSets[0].pBufferInfo = 0;
@@ -8726,7 +8726,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
     writeDescriptorSets[1] = {};
     writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeDescriptorSets[1].dstBinding = 0;
-    writeDescriptorSets[1].dstArrayElement = depthAttachmentAddress;
+    writeDescriptorSets[1].dstArrayElement = (uint32_t)depthAttachmentAddress;
     writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writeDescriptorSets[1].descriptorCount = 1;
     writeDescriptorSets[1].pBufferInfo = 0;
@@ -8742,7 +8742,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 // "Triangles" functions
 // ==================================================================
 GPRT_API void
-gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, size_t count, size_t stride, size_t offset) {
+gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *vertices = (Buffer *) _vertices;
@@ -8766,7 +8766,7 @@ gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, size_t count
 // }
 
 GPRT_API void
-gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, size_t count, size_t stride, size_t offset) {
+gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
@@ -8774,7 +8774,7 @@ gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, size_t count, 
 }
 
 void
-gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, size_t count, size_t stride, size_t offset) {
+gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   AABBGeom *aabbs = (AABBGeom *) _aabbs;
   Buffer *positions = (Buffer *) _positions;
@@ -9349,8 +9349,8 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
 }
 
 void
-gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _texture, size_t bufferOffset,
-                      size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
+gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _texture, uint32_t bufferOffset,
+                      uint32_t bufferRowLength, uint32_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
                       uint32_t imageOffsetZ, uint32_t imageExtentX, uint32_t imageExtentY, uint32_t imageExtentZ,
                       int srcDeviceID, int dstDeviceID) {
   LOG_API_CALL();
@@ -9417,15 +9417,15 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     bHasPayload = true;
   }
 
-  uint32_t numKeys = keys->getSize() / sizeof(uint32_t);
+  uint32_t numKeys = uint32_t(keys->getSize() / sizeof(uint32_t));
   uint32_t maxNumThreadgroups = 800;
   ParallelSortCB constantBufferData = {0};
 
   // Allocate the scratch buffers needed for radix sort
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
+  auto alignedSize = [](size_t value, size_t alignment) -> size_t {
     return (value + alignment - 1) & ~(alignment - 1);
   };
-  int offsetAlignment = context->deviceProperties.limits.minStorageBufferOffsetAlignment;
+  uint32_t offsetAlignment = (uint32_t)context->deviceProperties.limits.minStorageBufferOffsetAlignment;
 
   uint64_t scratchBufferSize;
   uint64_t reducedScratchBufferSize;
@@ -9741,13 +9741,13 @@ gprtTrianglesAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *a
 }
 
 GPRT_API GPRTAccel
-gprtCurvesAccelCreate(GPRTContext context, size_t numCurveGeometries, GPRTGeom *curveGeometries, unsigned int flags) {
+gprtCurvesAccelCreate(GPRTContext context, uint32_t numCurveGeometries, GPRTGeom *curveGeometries, unsigned int flags) {
   GPRT_NOTIMPLEMENTED;
   return nullptr;
 }
 
 GPRT_API GPRTAccel
-gprtInstanceAccelCreate(GPRTContext _context, size_t numAccels, GPRTAccel *arrayOfAccels, unsigned int flags) {
+gprtInstanceAccelCreate(GPRTContext _context, uint32_t numAccels, GPRTAccel *arrayOfAccels, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel =
@@ -9774,7 +9774,7 @@ gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel, GPRTBuffer transforms
 }
 
 GPRT_API void
-gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer _transforms, size_t stride, size_t offset) {
+gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer _transforms, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *transforms = (Buffer *) _transforms;
@@ -9802,7 +9802,7 @@ gprtInstanceAccelSetReferences(GPRTAccel instanceAccel,
 }
 
 GPRT_API void
-gprtInstanceAccelSetNumGeometries(GPRTAccel instanceAccel, size_t numGeometries) {
+gprtInstanceAccelSetNumGeometries(GPRTAccel instanceAccel, uint32_t numGeometries) {
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   accel->setNumGeometries(numGeometries);
@@ -9861,19 +9861,19 @@ gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
 }
 
 GPRT_API void
-gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x) {
+gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x) {
   LOG_API_CALL();
   gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1);
 }
 
 GPRT_API void
-gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dims_y) {
+gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y) {
   LOG_API_CALL();
   gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1);
 }
 
 GPRT_API void
-gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dims_y, int dims_z) {
+gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
   LOG_API_CALL();
   assert(_rayGen);
 
@@ -9890,7 +9890,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
                                                  context->texture2DDescriptorSet, context->texture3DDescriptorSet,
                                                  context->bufferDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->raytracingPipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, NULL);
+                          context->raytracingPipelineLayout, 0, (uint32_t)descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
@@ -10000,7 +10000,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, int dims_x, int dim
 }
 
 void
-gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z) {
+gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
   assert(_compute);
 
   Context *context = (Context *) _context;
@@ -10031,12 +10031,12 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, int dims_x, int di
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
-  uint32_t offset = compute->address * recordSize;
+  uint32_t offset = (uint32_t)compute->address * recordSize;
   std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet,   context->texture1DDescriptorSet,
                                                  context->texture2DDescriptorSet, context->texture3DDescriptorSet,
                                                  context->bufferDescriptorSet,    context->computeRecordDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
-                          descriptorSets.size(), descriptorSets.data(), 1, &offset);
+                          (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
 
   if (dims_x >= context->deviceProperties.limits.maxComputeWorkGroupCount[0]) {
     LOG_ERROR("X workgroups (" + std::to_string(dims_x) +
@@ -10090,19 +10090,19 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, int dims_x, int di
 }
 
 GPRT_API void
-gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, int dims_x) {
+gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x) {
   LOG_API_CALL();
   gprtComputeLaunch(_context, _compute, dims_x, 1, 1);
 }
 
 GPRT_API void
-gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y) {
+gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y) {
   LOG_API_CALL();
   gprtComputeLaunch(_context, _compute, dims_x, dims_y, 1);
 }
 
 GPRT_API void
-gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, int dims_x, int dims_y, int dims_z) {
+gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
   LOG_API_CALL();
   gprtComputeLaunch(_context, _compute, dims_x, dims_y, dims_z);
 }

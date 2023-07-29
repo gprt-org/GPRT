@@ -106,7 +106,7 @@ store(in Buffer buffer, uint64_t index, in T value) {
 // here: https://github.com/treecode/Bonsai/blob/master/runtime/profiling/derived_atomic_functions.h
 
 float
-atomicMin32f(in Buffer buffer, uint64_t index, float value) {
+atomicMin32f(in Buffer buffer, uint32_t index, float value) {
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
   while (value < asfloat(ret_i)) {
     uint old = ret_i;
@@ -118,7 +118,7 @@ atomicMin32f(in Buffer buffer, uint64_t index, float value) {
 }
 
 float
-atomicMax32f(in Buffer buffer, uint64_t index, float value) {
+atomicMax32f(in Buffer buffer, uint32_t index, float value) {
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
   while (value > asfloat(ret_i)) {
     uint old = ret_i;
@@ -130,7 +130,7 @@ atomicMax32f(in Buffer buffer, uint64_t index, float value) {
 }
 
 float
-atomicAdd32f(in Buffer buffer, uint64_t index, float value) {
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   uint old, newint;
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
   do {

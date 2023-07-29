@@ -106,4 +106,10 @@ target_include_directories(gprt
 
 target_compile_features(gprt PRIVATE cxx_std_17)
 
+# if(MSVC)
+#   target_compile_options(gprt PRIVATE /WX)
+# else()
+#   target_compile_options(gprt PRIVATE -Werror)
+# endif()
+
 add_library(gprt::gprt ALIAS gprt)

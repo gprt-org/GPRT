@@ -297,13 +297,13 @@ gprtGeomSetParameters(GPRTGeomOf<T> geometry, T *parameters, int deviceID GPRT_I
 // ==================================================================
 // "Triangles" functions
 // ==================================================================
-GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles, GPRTBuffer vertices, size_t count,
-                                       size_t stride GPRT_IF_CPP(= sizeof(float3)), size_t offset GPRT_IF_CPP(= 0));
+GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles, GPRTBuffer vertices, uint32_t count,
+                                       uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, size_t count,
-                         size_t stride GPRT_IF_CPP(= sizeof(float3)), size_t offset GPRT_IF_CPP(= 0)) {
+gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
 }
 
@@ -320,13 +320,14 @@ gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, si
 //                                            size_t count,
 //                                            size_t stride,
 //                                            size_t offset);
-GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, size_t count,
-                                      size_t stride GPRT_IF_CPP(= sizeof(uint3)), size_t offset GPRT_IF_CPP(= 0));
+
+GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
+                                      uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, size_t count,
-                        size_t stride GPRT_IF_CPP(= sizeof(float3)), size_t offset GPRT_IF_CPP(= 0)) {
+gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
+                        uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 
@@ -585,7 +586,7 @@ GPRT_API void gprtGuiRasterize(GPRTContext context);
 /*! set number of ray types to be used; this should be
   done before any programs, pipelines, geometries, etc get
   created */
-GPRT_API void gprtRequestRayTypeCount(size_t numRayTypes);
+GPRT_API void gprtRequestRayTypeCount(uint32_t numRayTypes);
 
 /*! Requests that ray queries be enabled for inline ray tracing support. */
 GPRT_API void gprtRequestRayQueries();
@@ -961,15 +962,15 @@ gprtTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, size_t numAccels, GPRTAccel *arrayOfAccels,
+GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint32_t numAccels, GPRTAccel *arrayOfAccels,
                                            unsigned int flags GPRT_IF_CPP(= 0));
 
-GPRT_API void gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer transforms, size_t stride,
-                                             size_t offset);
+GPRT_API void gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer transforms, uint32_t stride,
+                                             uint32_t offset);
 
 template <typename T>
 void
-gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBufferOf<T> transforms, size_t stride, size_t offset) {
+gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBufferOf<T> transforms, uint32_t stride, uint32_t offset) {
   gprtInstanceAccelSetTransforms(instanceAccel, (GPRTBuffer) transforms, stride, offset);
 }
 
@@ -1577,22 +1578,22 @@ GPRT_API void gprtBufferCopy(GPRTContext context, GPRTBuffer src, GPRTBuffer dst
  */
 template <typename T>
 void
-gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, size_t srcOffset, size_t dstOffset,
-               size_t count, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
+gprtBufferCopy(GPRTContext context, GPRTBufferOf<T> src, GPRTBufferOf<T> dst, uint32_t srcOffset, uint32_t dstOffset,
+               uint32_t count, int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
   gprtBufferCopy(context, (GPRTBuffer) src, (GPRTBuffer) dst, srcOffset, dstOffset, sizeof(T), count, srcDeviceID,
                  dstDeviceID);
 }
 
-GPRT_API void gprtBufferTextureCopy(GPRTContext context, GPRTBuffer buffer, GPRTTexture texture, size_t bufferOffset,
-                                    size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX,
+GPRT_API void gprtBufferTextureCopy(GPRTContext context, GPRTBuffer buffer, GPRTTexture texture, uint32_t bufferOffset,
+                                    uint32_t bufferRowLength, uint32_t bufferImageHeight, uint32_t imageOffsetX,
                                     uint32_t imageOffsetY, uint32_t imageOffsetZ, uint32_t imageExtentX,
                                     uint32_t imageExtentY, uint32_t imageExtentZ, int srcDeviceID GPRT_IF_CPP(= 0),
                                     int dstDeviceID GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureOf<T2> texture, size_t bufferOffset,
-                      size_t bufferRowLength, size_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
+gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureOf<T2> texture, uint32_t bufferOffset,
+                      uint32_t bufferRowLength, uint32_t bufferImageHeight, uint32_t imageOffsetX, uint32_t imageOffsetY,
                       uint32_t imageOffsetZ, uint32_t imageExtentX, uint32_t imageExtentY, uint32_t imageExtentZ,
                       int srcDeviceID GPRT_IF_CPP(= 0), int dstDeviceID GPRT_IF_CPP(= 0)) {
   gprtBufferTextureCopy(context, (GPRTBuffer) buffer, (GPRTTexture) texture, bufferOffset, bufferRowLength,
@@ -1701,56 +1702,56 @@ gprtBufferSaveImage(GPRTBufferOf<T> buffer, uint32_t width, uint32_t height, con
   gprtBufferSaveImage((GPRTBuffer) buffer, width, height, imageName);
 }
 
-GPRT_API void gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, int dims_x);
+GPRT_API void gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x);
 
 template <typename T>
 void
-gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x) {
+gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<T> rayGen, uint32_t dims_x) {
   gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x);
 }
 
 /*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
-GPRT_API void gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y);
+GPRT_API void gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y);
 
 template <typename T>
 void
-gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x, int dims_y) {
+gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<T> rayGen, uint32_t dims_x, uint32_t dims_y) {
   gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y);
 }
 
 /*! 3D-launch variant of \see gprtRayGenLaunch2D */
-GPRT_API void gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, int dims_x, int dims_y, int dims_z);
+GPRT_API void gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z);
 
 template <typename T>
 void
-gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<T> rayGen, int dims_x, int dims_y, int dims_z) {
+gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<T> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
 }
 
-GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, int x_workgroups);
+GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups) {
+gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<T> compute, uint32_t x_workgroups) {
   gprtComputeLaunch1D(context, (GPRTCompute) compute, x_workgroups);
 }
 
-GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, int x_workgroups, int y_workgroups);
+GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups, uint32_t y_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups, int y_workgroups) {
+gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<T> compute, uint32_t x_workgroups, uint32_t y_workgroups) {
   gprtComputeLaunch2D(context, (GPRTCompute) compute, x_workgroups, y_workgroups);
 }
 
-GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, int x_workgroups, int y_workgroups,
-                                  int z_workgroups);
+GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups, uint32_t y_workgroups,
+                                  uint32_t z_workgroups);
 
 template <typename T>
 void
-gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, int x_workgroups, int y_workgroups,
-                    int z_workgroups) {
+gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<T> compute, uint32_t x_workgroups, uint32_t y_workgroups,
+                    uint32_t z_workgroups) {
   gprtComputeLaunch3D(context, (GPRTCompute) compute, x_workgroups, y_workgroups, z_workgroups);
 }
 
