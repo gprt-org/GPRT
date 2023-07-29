@@ -190,8 +190,8 @@ main(int ac, char **av) {
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = (lastxpos - xpos) * deltaAngleX;
-      float yAngle = (lastypos - ypos) * deltaAngleY;
+      float xAngle = float(lastxpos - xpos) * deltaAngleX;
+      float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
       float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));

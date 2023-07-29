@@ -334,13 +334,13 @@ gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint
 /*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ)
   for the given AABB geometry. This _has_ to be set before the accel(s)
   that this geom is used in get built. */
-GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, size_t count,
-                                    size_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), size_t offset GPRT_IF_CPP(= 0));
+GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint32_t count,
+                                    uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, size_t count,
-                      size_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), size_t offset GPRT_IF_CPP(= 0)) {
+gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
+                      uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 

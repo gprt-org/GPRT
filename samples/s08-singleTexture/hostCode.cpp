@@ -174,14 +174,14 @@ main(int ac, char **av) {
   TransformData *transformData = gprtComputeGetParameters(transformProgram);
   transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
-  transformData->numTransforms = samplers.size();
+  transformData->numTransforms = (uint32_t)samplers.size();
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context, transformProgram, samplers.size());
+  gprtComputeLaunch1D(context, transformProgram, (uint32_t)samplers.size());
 
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, 1, &plane);
 
   std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instances.data());
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, (uint32_t)instances.size(), instances.data());
   gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
   gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
@@ -268,13 +268,13 @@ main(int ac, char **av) {
 
     // Animate transforms
     TransformData *transformData = gprtComputeGetParameters(transformProgram);
-    transformData->now = .5 * gprtGetTime(context);
+    transformData->now = .5f * (float)gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
     gprtComputeLaunch1D(context, transformProgram, instances.size());
     gprtAccelUpdate(context, trianglesTLAS);
     
     TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);
-    planeMeshData->now = gprtGetTime(context);
+    planeMeshData->now = (float)gprtGetTime(context);
     gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
 
     // Calls the GPU raygen kernel function

@@ -86,7 +86,7 @@ struct GPRTLBVH {
 };
 
 inline 
-GPRTLBVH gprtPointsLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, size_t count) {
+GPRTLBVH gprtPointsLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, uint32_t count) {
     GPRTLBVH lbvh;
     lbvh.type = GPRT_LBVH_POINTS;
     lbvh.module = gprtModuleCreate(context, lbvhDeviceCode);
@@ -125,7 +125,7 @@ GPRTLBVH gprtPointsLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices
 }
 
 inline 
-GPRTLBVH gprtTriangleLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, GPRTBufferOf<uint3> indices, size_t count) {
+GPRTLBVH gprtTriangleLBVHCreate(GPRTContext context, GPRTBufferOf<float3> vertices, GPRTBufferOf<uint3> indices, uint32_t count) {
     GPRTLBVH lbvh;
     lbvh.type = GPRT_LBVH_TRIANGLES;
     lbvh.module = gprtModuleCreate(context, lbvhDeviceCode);

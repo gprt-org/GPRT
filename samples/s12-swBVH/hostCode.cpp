@@ -147,47 +147,47 @@ main(int ac, char **av) {
   std::vector<uint3> indices;
 
   // Loop over shapes
-  for (size_t s = 0; s < shapes.size(); s++) {
+  for (uint32_t s = 0; s < shapes.size(); s++) {
     // Loop over faces(polygon)
-    size_t index_offset = 0;
-    for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
-      size_t fv = size_t(shapes[s].mesh.num_face_vertices[f]);
+    uint32_t index_offset = 0;
+    for (uint32_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
+      uint32_t fv = uint32_t(shapes[s].mesh.num_face_vertices[f]);
 
       if (fv != 3) throw std::runtime_error("Error, expected only triangle faces");
 
       // Loop over vertices in the face.
-      for (size_t v = 0; v < fv; v++) {
+      for (uint32_t v = 0; v < fv; v++) {
         // access to vertex
         tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
-        tinyobj::real_t vx = attrib.vertices[3*size_t(idx.vertex_index)+0];
-        tinyobj::real_t vy = attrib.vertices[3*size_t(idx.vertex_index)+1];
-        tinyobj::real_t vz = attrib.vertices[3*size_t(idx.vertex_index)+2];
+        tinyobj::real_t vx = attrib.vertices[3*uint32_t(idx.vertex_index)+0];
+        tinyobj::real_t vy = attrib.vertices[3*uint32_t(idx.vertex_index)+1];
+        tinyobj::real_t vz = attrib.vertices[3*uint32_t(idx.vertex_index)+2];
 
         vertices.push_back(float3(vx, vy, vz));
 
         // // Check if `normal_index` is zero or positive. negative = no normal data
         // if (idx.normal_index >= 0) {
-        //   tinyobj::real_t nx = attrib.normals[3*size_t(idx.normal_index)+0];
-        //   tinyobj::real_t ny = attrib.normals[3*size_t(idx.normal_index)+1];
-        //   tinyobj::real_t nz = attrib.normals[3*size_t(idx.normal_index)+2];
+        //   tinyobj::real_t nx = attrib.normals[3*uint32_t(idx.normal_index)+0];
+        //   tinyobj::real_t ny = attrib.normals[3*uint32_t(idx.normal_index)+1];
+        //   tinyobj::real_t nz = attrib.normals[3*uint32_t(idx.normal_index)+2];
         // }
 
         // // Check if `texcoord_index` is zero or positive. negative = no texcoord data
         // if (idx.texcoord_index >= 0) {
-        //   tinyobj::real_t tx = attrib.texcoords[2*size_t(idx.texcoord_index)+0];
-        //   tinyobj::real_t ty = attrib.texcoords[2*size_t(idx.texcoord_index)+1];
+        //   tinyobj::real_t tx = attrib.texcoords[2*uint32_t(idx.texcoord_index)+0];
+        //   tinyobj::real_t ty = attrib.texcoords[2*uint32_t(idx.texcoord_index)+1];
         // }
 
         // Optional: vertex colors
-        // tinyobj::real_t red   = attrib.colors[3*size_t(idx.vertex_index)+0];
-        // tinyobj::real_t green = attrib.colors[3*size_t(idx.vertex_index)+1];
-        // tinyobj::real_t blue  = attrib.colors[3*size_t(idx.vertex_index)+2];
+        // tinyobj::real_t red   = attrib.colors[3*uint32_t(idx.vertex_index)+0];
+        // tinyobj::real_t green = attrib.colors[3*uint32_t(idx.vertex_index)+1];
+        // tinyobj::real_t blue  = attrib.colors[3*uint32_t(idx.vertex_index)+2];
       }
       indices.push_back(uint3(0 + index_offset, 1 + index_offset, 2 + index_offset));
       index_offset += fv;
 
       // per-face material
-      shapes[s].mesh.material_ids[f];
+      // shapes[s].mesh.material_ids[f];
     }
   }
 
@@ -200,7 +200,7 @@ main(int ac, char **av) {
 
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
   GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());  
-  GPRTLBVH lbvh = gprtTriangleLBVHCreate(context, vertexBuffer, indexBuffer, indices.size());
+  GPRTLBVH lbvh = gprtTriangleLBVHCreate(context, vertexBuffer, indexBuffer, (uint32_t)indices.size());
   gprtLBVHBuild(context, lbvh);
 
   // LBVHData lbvhParams = {};
@@ -339,8 +339,8 @@ main(int ac, char **av) {
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = (lastxpos - xpos) * deltaAngleX;
-      float yAngle = (lastypos - ypos) * deltaAngleY;
+      float xAngle = float(lastxpos - xpos) * deltaAngleX;
+      float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
       float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
@@ -372,11 +372,11 @@ main(int ac, char **av) {
 
     if (lstate == GPRT_PRESS || firstFrame) {
       RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->cuttingPlane = (xpos / fbSize.x) * 2.f - 1.0f;
+      raygenData->cuttingPlane = float(xpos / fbSize.x) * 2.f - 1.0f;
       iFrame = 0;
     }
     
-    rayGenData->iTime = gprtGetTime(context) * .5;
+    rayGenData->iTime = (float)gprtGetTime(context) * .5f;
     rayGenData->iFrame = iFrame;
 
     // Use this to upload all set parameters to our ray tracing device

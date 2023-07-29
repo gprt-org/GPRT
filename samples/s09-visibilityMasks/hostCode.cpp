@@ -213,7 +213,7 @@ main(int ac, char **av) {
 
   GPRTBufferOf<float4x4> transformsBuffer = gprtDeviceBufferCreate<float4x4>(context, NUM_INSTANCES, transforms);
 
-  GPRTAccel world = gprtInstanceAccelCreate(context, BLAS.size(), BLAS.data());
+  GPRTAccel world = gprtInstanceAccelCreate(context, (uint32_t)BLAS.size(), BLAS.data());
   gprtInstanceAccelSet4x4Transforms(world, transformsBuffer);
 
   // This is new! We want our wall and floor instances to cast shadows,
@@ -277,8 +277,8 @@ main(int ac, char **av) {
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = (lastxpos - xpos) * deltaAngleX;
-      float yAngle = (lastypos - ypos) * deltaAngleY;
+      float xAngle = float(lastxpos - xpos) * deltaAngleX;
+      float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
       float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
@@ -309,7 +309,7 @@ main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    rayGenData->lightPos = float3(3.f * sin(gprtGetTime(context)), 3.f, 3.f * cos(gprtGetTime(context)));
+    rayGenData->lightPos = float3(3.f * sin((float)gprtGetTime(context)), 3.f, 3.f * cos((float)gprtGetTime(context)));
     gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
     // Calls the GPU raygen kernel function
