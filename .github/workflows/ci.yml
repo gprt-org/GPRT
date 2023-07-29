@@ -23,7 +23,7 @@ jobs:
     - name: Prepare Vulkan SDK
       uses: humbletim/install-vulkan-sdk@v1.1.1
       with:
-        version: 1.3.231.1
+        version: 1.3.250.1
         cache: true
       
     - name: Apt dependencies
@@ -36,11 +36,6 @@ jobs:
                             libglu1-mesa-dev \
                             freeglut3-dev \
                             mesa-common-dev
-
-    - name: Setup environment
-      shell: bash
-      run: |
-         echo "PATH=$HOME/dxc-artifacts/bin:$PATH" >> $GITHUB_ENV
 
     - name: Build Static
       shell: bash
@@ -72,7 +67,7 @@ jobs:
     - name: Prepare Vulkan SDK
       uses: humbletim/setup-vulkan-sdk@v1.2.0
       with:
-        vulkan-query-version: 1.3.231.0
+        vulkan-query-version: 1.3.250.1
         vulkan-components: Vulkan-Headers, Vulkan-Loader
         vulkan-use-cache: true
 
