@@ -49,7 +49,6 @@
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram s12_deviceCode;
-extern GPRTProgram lbvhDeviceCode;
 
 // A class we'll use to quickly generate meshes and bottom level trees
 template <typename T> struct Mesh {
@@ -112,7 +111,6 @@ main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s12_deviceCode);
-  GPRTModule lbvhModule = gprtModuleCreate(context, lbvhDeviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

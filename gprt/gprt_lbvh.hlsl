@@ -272,10 +272,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (LBVHData, record), (1, 1, 1)) 
   pt = (pt - aabbMin) / (aabbMax - aabbMin);
 
   // Quantize to 10 bit
-  // pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
-
-  // Quantize to 4 bit
-  pt = min(max(pt * 16.f, float3(0.f, 0.f, 0.f)), float3(15.f, 15.f, 15.f));
+  pt = min(max(pt * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
   
   uint code = morton_encode3D(pt.x, pt.y, pt.z);
   gprt::store<uint>(record.mortonCodes, primID, code);

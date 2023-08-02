@@ -33,7 +33,6 @@ add_executable(s12_swBVH hostCode.cpp)
 target_link_libraries(s12_swBVH
   PRIVATE
     s12_deviceCode
-    lbvhDeviceCode
     gprt::gprt
     tiny_obj_loader
 )
