@@ -20,8 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(t00-bufferCopy)
-add_subdirectory(t01-bufferResize)
-add_subdirectory(t02-bufferSort)
-add_subdirectory(t03-swBVH)
-add_subdirectory(t04-nearestNeighbors)
+embed_devicecode(
+  OUTPUT_TARGET
+    t04_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+)
+
+add_executable(t04_nearestNeighbors hostCode.cpp)
+target_link_libraries(t04_nearestNeighbors
+  PRIVATE gprt::gprt generator t04_deviceCode
+)

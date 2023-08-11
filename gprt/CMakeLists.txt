@@ -56,6 +56,17 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_lbvh.hlsl
 )
 
+embed_devicecode(
+  OUTPUT_TARGET
+    knnDeviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.hlsl
+)
+
 target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
@@ -87,6 +98,7 @@ target_link_libraries(gprt
     gprtDeviceCode
     sortDeviceCode
     lbvhDeviceCode
+    knnDeviceCode
     glfw
     stb_image
     vma
