@@ -40,9 +40,9 @@ embed_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
   HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sort.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/sort.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.hlsl
 )
 
 embed_devicecode(
@@ -70,6 +70,9 @@ embed_devicecode(
 target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
+    gprt_knn.h
+    gprt_lbvh.h
+    gprt_sort.h
 )
 
 set_target_properties(gprt

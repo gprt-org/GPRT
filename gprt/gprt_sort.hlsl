@@ -20,7 +20,7 @@
 // ParallelSort Shaders/Includes
 //--------------------------------------------------------------------------------------
 #define HLSL
-#include "sort.h"
+#include "gprt_sort.h"
 
 // [[vk::binding(/*binding*/, /*set*/)]] 
 

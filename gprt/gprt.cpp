@@ -73,7 +73,7 @@
 #include "vma/vk_mem_alloc.h"
 
 // For FFX radix sort
-#include "sort.h"
+#include "gprt_sort.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all

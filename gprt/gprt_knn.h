@@ -23,13 +23,14 @@
 
 #include "gprt.h"
 
+#define NUM_CLUSTERS_PER_SUPERCLUSTER 8
+#define NUM_PRIMS_PER_CLUSTER 8
+
 struct KNNAccelData {
   // input
   alignas(4) uint32_t numPrims;
   alignas(4) uint32_t numClusters;
   alignas(4) uint32_t numSuperClusters;
-  alignas(4) uint32_t numPrimsPerCluster;
-  alignas(4) uint32_t numClustersPerSuperCluster;
   alignas(4) float maxSearchRange;
 
   alignas(16) gprt::Buffer points; 
@@ -49,10 +50,138 @@ struct KNNAccelData {
 
   // Buffers of AABBs. Each aabb is a pair of float3.
   alignas(16) gprt::Buffer clusters;
+
+  // Buffers of AABBs. Each AABB here contains clusters, but is also dialated by "maximum search range".
   alignas(16) gprt::Buffer superClusters;
+
+  // An RT core tree
+  alignas(16) gprt::Accel accel;
 };
 
-#ifndef GPRT_DEVICE
+float rm(float p, float rp, float rq) {
+    if (p <= (rp+rq)/2.f) {
+        return rp;
+    }
+    return rq;
+}
+
+float rM(float p, float rp, float rq) {
+    if (p >= (rp+rq)/2.f) {
+        return rp;
+    }
+    return rq;
+}
+
+// minMaxDist computes the minimum of the maximum distances from p to points
+// on r. If r is the bounding box of some geometric objects, then there is
+// at least one object contained in r within minMaxDist(p, r) of p.
+//
+// Implemented per Definition 4 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+    float minmaxdist = 1e20f;
+    float S = 0.f;
+    for (int i = 0; i < 3; ++i) {
+        float d = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
+        S += d * d;
+    }    
+    for (int i = 0; i < 3; ++i) {
+        float d1 = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
+        float d2 = origin[i] - rm(origin[i], aabbMin[i], aabbMax[i]);
+        float d = S - d1*d1 + d2*d2;
+        if (d < minmaxdist) minmaxdist = d;
+    }
+    return minmaxdist;
+}
+
+// minDist computes the square of the distance from a point to a rectangle.
+// If the point is contained in the rectangle then the distance is zero.
+//
+// Implemented per Definition 2 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+    float minDist = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        if (origin[i] < aabbMin[i]) {
+            float d = origin[i] - aabbMin[i];
+            minDist += d * d;
+        } else if (origin[i] > aabbMax[i]) {
+            float d = origin[i] - aabbMax[i];
+            minDist += d * d;
+        } 
+    }
+    return minDist;
+}
+
+float dot2(float3 v ) { return dot(v,v); }
+float ndot(float2 a, float2 b ) { return a.x*b.x - a.y*b.y; }
+
+float getPointDist2( float3 p, float3 a )
+{
+  return dot2(a - p);
+}
+
+float getEdgeDist2( float3 p, float3 a, float3 b )
+{
+  float3 pa = p - a, ba = b - a;
+  float h = clamp( dot(pa,ba)/dot2(ba), 0.0f, 1.0f );
+  return dot2(pa - ba*h);
+}
+
+float getTriangleDist2( float3 p, float3 a, float3 b, float3 c )
+{
+  float3 ba = b - a; float3 pa = p - a;
+  float3 cb = c - b; float3 pb = p - b;
+  float3 ac = a - c; float3 pc = p - c;
+  float3 nor = cross( ba, ac );
+
+  return 
+    (sign(dot(cross(ba,nor),pa)) +
+     sign(dot(cross(cb,nor),pb)) +
+     sign(dot(cross(ac,nor),pc))<2.0f)
+     ?
+     min( min(
+     dot2(ba*clamp(dot(ba,pa)/dot2(ba),0.0f,1.0f)-pa),
+     dot2(cb*clamp(dot(cb,pb)/dot2(cb),0.0f,1.0f)-pb) ),
+     dot2(ac*clamp(dot(ac,pc)/dot2(ac),0.0f,1.0f)-pc) )
+     :
+     dot(nor,pa)*dot(nor,pa)/dot2(nor);
+}
+
+#ifdef GPRT_DEVICE
+
+// Payload for nearest neighbor queries
+struct [raypayload] NNPayload {
+  float closestDistance : read(anyhit, caller) : write(anyhit, caller);
+  int closestPrimitive : read(anyhit, caller) : write(anyhit, caller);
+};
+
+void TraceNN(float3 queryOrigin, in KNNAccelData knnAccel, out int closestPrimitive, out float closestDistance) {
+  NNPayload payload;
+  payload.closestPrimitive = -1;
+  payload.closestDistance = 1e20f;
+
+  RayDesc rayDesc;
+  rayDesc.Origin = queryOrigin;
+  rayDesc.Direction = float3(1.f, 1.f, 1.f);
+  rayDesc.TMin = 0.0f;
+  rayDesc.TMax = 0.0f;
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(knnAccel.accel);
+  TraceRay(world,
+           RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+           0xff,
+           0,                       // ray type
+           gprt::getNumRayTypes(),  // number of ray types
+           0,                       // miss type
+           rayDesc,                 // the ray to trace
+           payload                  // the payload IO
+  );
+
+  closestPrimitive = payload.closestPrimitive;
+  closestDistance = payload.closestDistance;
+}
+
+#else
 #include <limits.h>
 #include <stdexcept>
 extern GPRTProgram knnDeviceCode;
@@ -80,6 +209,11 @@ struct GPRTKNNAccel {
     GPRTBufferOf<float3> superClusters;
 
     GPRTBufferOf<uint8_t> scratch;
+
+    GPRTGeomTypeOf<KNNAccelData> geomType;
+    GPRTGeomOf<KNNAccelData> geom;
+    GPRTAccel geomAccel;
+    GPRTAccel instanceAccel;
 
     GPRTComputeOf<KNNAccelData> computePointBounds;
     GPRTComputeOf<KNNAccelData> computeEdgeBounds;
@@ -136,15 +270,27 @@ GPRTKNNAccel gprtKNNAccelCreate(
   knnAccel.computeTriangleHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleHilbertCodes");
 
   knnAccel.computeSuperClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeSuperClusters");
+  
+  knnAccel.geomType = gprtGeomTypeCreate<KNNAccelData>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(knnAccel.geomType, 0, knnAccel.module, "ClosestNeighborIntersection");
+  if (knnAccel.type == GPRT_KNN_TYPE_POINTS) {
+    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestPointAnyHit");
+  } else if (knnAccel.type == GPRT_KNN_TYPE_EDGES) {
+    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestEdgeAnyHit");
+  } else if (knnAccel.type == GPRT_KNN_TYPE_TRIANGLES) {
+    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestTriangleAnyHit");
+  }
+
+  knnAccel.geom = gprtGeomCreate<KNNAccelData>(context, knnAccel.geomType);
+  knnAccel.geomAccel = gprtAABBAccelCreate(context, 1, &knnAccel.geom);
+  knnAccel.instanceAccel = gprtInstanceAccelCreate(context, 1, &knnAccel.geomAccel);
 
   knnAccel.handle.numPrims = count;
-  knnAccel.handle.numPrimsPerCluster = 16;
-  knnAccel.handle.numClustersPerSuperCluster = 16;
   knnAccel.handle.maxSearchRange = maxSearchRange;
 
   // some logic here for rounding up
-  knnAccel.handle.numClusters = (knnAccel.handle.numPrims + (knnAccel.handle.numPrimsPerCluster - 1)) / knnAccel.handle.numPrimsPerCluster;
-  knnAccel.handle.numSuperClusters = (knnAccel.handle.numClusters + (knnAccel.handle.numClustersPerSuperCluster - 1)) / knnAccel.handle.numClustersPerSuperCluster;
+  knnAccel.handle.numClusters = (knnAccel.handle.numPrims + (NUM_PRIMS_PER_CLUSTER - 1)) / NUM_PRIMS_PER_CLUSTER;
+  knnAccel.handle.numSuperClusters = (knnAccel.handle.numClusters + (NUM_CLUSTERS_PER_SUPERCLUSTER - 1)) / NUM_CLUSTERS_PER_SUPERCLUSTER;
 
   // cache these...
   knnAccel.points = points;
@@ -173,6 +319,8 @@ GPRTKNNAccel gprtKNNAccelCreate(
   knnAccel.handle.clusters = gprtBufferGetHandle(knnAccel.clusters);
   knnAccel.handle.superClusters = gprtBufferGetHandle(knnAccel.superClusters);
 
+  knnAccel.handle.accel = gprtAccelGetHandle(knnAccel.instanceAccel);
+
   gprtComputeSetParameters(knnAccel.computePointBounds, &knnAccel.handle);
   gprtComputeSetParameters(knnAccel.computePointClusters, &knnAccel.handle);
   gprtComputeSetParameters(knnAccel.computePointHilbertCodes, &knnAccel.handle);
@@ -186,8 +334,10 @@ GPRTKNNAccel gprtKNNAccelCreate(
   gprtComputeSetParameters(knnAccel.computeTriangleHilbertCodes, &knnAccel.handle);
   
   gprtComputeSetParameters(knnAccel.computeSuperClusters, &knnAccel.handle);
-  
 
+  gprtGeomSetParameters(knnAccel.geom, &knnAccel.handle);
+  gprtAABBsSetPositions(knnAccel.geom, knnAccel.superClusters, knnAccel.handle.numSuperClusters);
+  
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   return knnAccel;
@@ -534,8 +684,8 @@ inline void gprtKNNAccelBuild(GPRTContext context, GPRTKNNAccel &knnAccel)
     for (uint32_t i = 0; i < knnAccel.handle.numClusters; ++i) {
       float3 aabbMin = clusters[i * 2 + 0];
       float3 aabbMax = clusters[i * 2 + 1];
-      for (uint32_t j = 0; j < knnAccel.handle.numPrimsPerCluster; ++j) {
-        uint32_t idx = i * knnAccel.handle.numPrimsPerCluster + j;
+      for (uint32_t j = 0; j < NUM_PRIMS_PER_CLUSTER; ++j) {
+        uint32_t idx = i * NUM_PRIMS_PER_CLUSTER + j;
         uint32_t primID = ids[idx];
         if (primID >= knnAccel.handle.numPrims || primID == -1) continue;
 
@@ -586,10 +736,10 @@ inline void gprtKNNAccelBuild(GPRTContext context, GPRTKNNAccel &knnAccel)
     float3* clusters = gprtBufferGetPointer(knnAccel.clusters);
     
     for (uint32_t i = 0; i < knnAccel.handle.numSuperClusters; ++i) {
-      float3 aabbMin = superClusters[i * 2 + 0];
-      float3 aabbMax = superClusters[i * 2 + 1];
-      for (uint32_t j = 0; j < knnAccel.handle.numClustersPerSuperCluster; ++j) {
-        uint32_t idx = i * knnAccel.handle.numClustersPerSuperCluster + j;
+      float3 aabbMin = superClusters[i * 2 + 0] + knnAccel.handle.maxSearchRange;
+      float3 aabbMax = superClusters[i * 2 + 1] - knnAccel.handle.maxSearchRange;
+      for (uint32_t j = 0; j < NUM_CLUSTERS_PER_SUPERCLUSTER; ++j) {
+        uint32_t idx = i * NUM_CLUSTERS_PER_SUPERCLUSTER + j;
         if (idx >= knnAccel.handle.numClusters) continue;
 
         float3 cAABBMin = clusters[idx * 2 + 0];
@@ -598,17 +748,24 @@ inline void gprtKNNAccelBuild(GPRTContext context, GPRTKNNAccel &knnAccel)
         // invalid box
         if (any(less(cAABBMax, cAABBMin))) continue;
 
-        if (any(greater(cAABBMax, aabbMax)) || any(less(cAABBMin, aabbMin))) throw std::runtime_error("cluster out of bounds!");
+        if (any(greater(cAABBMax - .0001f, aabbMax))) 
+          throw std::runtime_error("cluster out of bounds!");
+        
+        if (any(less(cAABBMin + .0001f, aabbMin))) 
+          throw std::runtime_error("cluster out of bounds!");
       }
     }
     
     gprtBufferUnmap(knnAccel.clusters);
     gprtBufferUnmap(knnAccel.superClusters);
   }
-
-  // At this point, we want to create an RT core tree over these superclusters.
-  // We dialate the bounds of these superclusters by the maximum search radius
   
+  // Now we can build our RT core tree
+  gprtAccelBuild(context, knnAccel.geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+  gprtAccelBuild(context, knnAccel.instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+
+  // Handle might have changed, so update here
+  knnAccel.handle.accel = gprtAccelGetHandle(knnAccel.instanceAccel);
 }
 
 inline void gprtKNNAccelDestroy(GPRTKNNAccel &knnAccel) {
@@ -629,6 +786,11 @@ inline void gprtKNNAccelDestroy(GPRTKNNAccel &knnAccel) {
     gprtComputeDestroy(knnAccel.computePointHilbertCodes);
     gprtComputeDestroy(knnAccel.computeEdgeHilbertCodes);
     gprtComputeDestroy(knnAccel.computeTriangleHilbertCodes);
+
+    gprtAccelDestroy(knnAccel.instanceAccel);
+    gprtAccelDestroy(knnAccel.geomAccel);
+    gprtGeomDestroy(knnAccel.geom);
+    gprtGeomTypeDestroy(knnAccel.geomType);
     gprtModuleDestroy(knnAccel.module);
 }
 

@@ -28,7 +28,8 @@ struct RayGenData {
   alignas(16) gprt::Buffer queryBuffer;
 
   // A pair of ints. First int is either -1, or the closest primitive ID. Second is distance. 
-  alignas(16) gprt::Buffer resultBuffer;
+  alignas(16) gprt::Buffer resultIDsBuffer;
+  alignas(16) gprt::Buffer resultDistsBuffer;
 
   alignas(16) KNNAccelData knnAccel;
 };

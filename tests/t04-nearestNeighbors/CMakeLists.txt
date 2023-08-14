@@ -25,6 +25,7 @@ embed_devicecode(
     t04_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../gprt/gprt_knn.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )

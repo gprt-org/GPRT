@@ -649,6 +649,11 @@ namespace linalg
         template<class C, class T, int M> std::basic_ostream<C> & operator << (std::basic_ostream<C> & out, const mat<T,M,3> & m) { return out << '{' << m[0] << ',' << m[1] << ',' << m[2] << '}'; }
         template<class C, class T, int M> std::basic_ostream<C> & operator << (std::basic_ostream<C> & out, const mat<T,M,4> & m) { return out << '{' << m[0] << ',' << m[1] << ',' << m[2] << ',' << m[3] << '}'; }
     }
+
+    // misc functions in HLSL
+    inline float sign(float a) {
+        return (a < 0.f) ? -1.f : (a > 0.f) ? 1.f : 0.f;
+    } 
 }
 
 namespace std 

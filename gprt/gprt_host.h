@@ -33,7 +33,7 @@
 
 #include "linalg.h"
 using namespace linalg;
-using namespace linalg::detail;
+// using namespace linalg::detail; // causes conflicts
 using namespace linalg::aliases;
 using namespace linalg::ostream_overloads;
 

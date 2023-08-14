@@ -22,14 +22,12 @@
 
 #include "sharedCode.h"
 
-GPRT_RAYGEN_PROGRAM(closestPoint, (RayGenData, record)) {
-  
-}
-
-GPRT_RAYGEN_PROGRAM(closestPointOnEdge, (RayGenData, record)) {
-  
-}
-
-GPRT_RAYGEN_PROGRAM(closestPointOnTriangle, (RayGenData, record)) {
-  
+GPRT_RAYGEN_PROGRAM(NearestNeighbor, (RayGenData, record)) {
+    int queryID = DispatchRaysIndex().x;
+    float3 queryOrigin = gprt::load<float3>(record.queryBuffer, queryID);
+    int closestPrimitive;
+    float closestDistance;
+    TraceNN(queryOrigin, record.knnAccel, closestPrimitive, closestDistance);
+    gprt::store<int>(record.resultIDsBuffer, queryID, closestPrimitive);    
+    gprt::store<int>(record.resultDistsBuffer, queryID, closestDistance);    
 }

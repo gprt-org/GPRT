@@ -403,13 +403,12 @@ GPRT_COMPUTE_PROGRAM(ComputePointClusters, (KNNAccelData, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
-  uint32_t numPrimsPerCluster = record.numPrimsPerCluster;
   uint32_t numClusters = record.numClusters;
 
   float3 clusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
-  for (uint32_t i = 0; i < numPrimsPerCluster; ++i) {
-    uint32_t idx = numPrimsPerCluster * clusterID + i;
+  for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
+    uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
     uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
@@ -426,13 +425,12 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (KNNAccelData, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
-  uint32_t numPrimsPerCluster = record.numPrimsPerCluster;
   uint32_t numClusters = record.numClusters;
 
   float3 clusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
-  for (uint32_t i = 0; i < numPrimsPerCluster; ++i) {
-    uint32_t idx = numPrimsPerCluster * clusterID + i;
+  for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
+    uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
     uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
@@ -449,13 +447,12 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (KNNAccelData, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
-  uint32_t numPrimsPerCluster = record.numPrimsPerCluster;
   uint32_t numClusters = record.numClusters;
 
   float3 clusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
-  for (uint32_t i = 0; i < numPrimsPerCluster; ++i) {
-    uint32_t idx = numPrimsPerCluster * clusterID + i;
+  for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
+    uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
     uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
@@ -472,13 +469,12 @@ GPRT_COMPUTE_PROGRAM(ComputeSuperClusters, (KNNAccelData, record), (1,1,1)) {
   int superClusterID = DispatchThreadID.x;
   if (superClusterID >= record.numSuperClusters) return;
   uint32_t numClusters = record.numClusters;
-  uint32_t numClustersPerSuperCluster = record.numClustersPerSuperCluster;
   uint32_t numSuperClusters = record.numSuperClusters;
 
   float3 superClusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
   float3 superClusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
-  for (uint32_t i = 0; i < numClustersPerSuperCluster; ++i) {
-    uint32_t clusterID = numClustersPerSuperCluster * superClusterID + i;
+  for (uint32_t i = 0; i < NUM_CLUSTERS_PER_SUPERCLUSTER; ++i) {
+    uint32_t clusterID = NUM_CLUSTERS_PER_SUPERCLUSTER * superClusterID + i;
     if (clusterID >= numClusters) continue;
     float3 aabbMin = gprt::load<float3>(record.clusters, clusterID * 2 + 0);
     float3 aabbMax = gprt::load<float3>(record.clusters, clusterID * 2 + 1);
@@ -487,6 +483,157 @@ GPRT_COMPUTE_PROGRAM(ComputeSuperClusters, (KNNAccelData, record), (1,1,1)) {
     superClusterAabbMax = max(aabbMax, superClusterAabbMax);
   }
 
-  gprt::store<float3>(record.superClusters, 2 * superClusterID + 0, superClusterAabbMin);
-  gprt::store<float3>(record.superClusters, 2 * superClusterID + 1, superClusterAabbMax);
+  // Dialate by the max search range
+  gprt::store<float3>(record.superClusters, 2 * superClusterID + 0, superClusterAabbMin - record.maxSearchRange);
+  gprt::store<float3>(record.superClusters, 2 * superClusterID + 1, superClusterAabbMax + record.maxSearchRange);
+}
+
+struct ClosestPointAttributes {
+  int minDist;
+}; 
+
+GPRT_INTERSECTION_PROGRAM(ClosestNeighborIntersection, (KNNAccelData, record)) {
+  uint superClusterID = PrimitiveIndex();
+  float3 aabbMin = gprt::load<float3>(record.superClusters, 2 * superClusterID + 0) + record.maxSearchRange;
+  float3 aabbMax = gprt::load<float3>(record.superClusters, 2 * superClusterID + 1) - record.maxSearchRange;
+  float3 origin = WorldRayOrigin();
+  
+  float minDist = getMinDist(origin, aabbMin, aabbMax);
+  if (minDist > pow(record.maxSearchRange, 2)) return;
+  
+  ClosestPointAttributes attr;
+  attr.minDist = minDist;
+  ReportHit(0.0f, 0, attr);
+}
+
+void ClosestPrimitiveQuery(
+  float3 queryOrigin, 
+  int superClusterID, 
+  int numClusters, 
+  int numPrims, 
+  int primType, 
+  gprt::Buffer clusters,
+  gprt::Buffer primIDs,
+  gprt::Buffer vertices,
+  gprt::Buffer indices,
+  inout NNPayload payload
+  )
+{   
+  // Initialize active cluster list
+  int activeClusters[NUM_CLUSTERS_PER_SUPERCLUSTER];
+  float clusterDistances[NUM_CLUSTERS_PER_SUPERCLUSTER];
+  for (int i = 0; i < NUM_CLUSTERS_PER_SUPERCLUSTER; ++i) {
+    activeClusters[i] = -1;
+    clusterDistances[i] = 1e20f;
+  }
+
+  // Insert into active cluster list by distance far to near
+  for (int i = 0; i < NUM_CLUSTERS_PER_SUPERCLUSTER; ++i) {
+    int clusterID = superClusterID * NUM_CLUSTERS_PER_SUPERCLUSTER + i;
+    if (clusterID > numClusters) break;
+    float3 aabbMin = gprt::load<float3>(clusters, clusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(clusters, clusterID * 2 + 1);
+    float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
+    if (minDist >= clusterDistances[0]) continue;
+    clusterDistances[0] = minDist;
+    activeClusters[0] = clusterID;
+
+    for (int j = 1; j < NUM_CLUSTERS_PER_SUPERCLUSTER; ++j) {
+      if (clusterDistances[j-1] >= clusterDistances[j]) break;
+      float tmpDist = clusterDistances[j-1]; clusterDistances[j-1] = clusterDistances[j]; clusterDistances[j] = tmpDist;
+      int tmpID = activeClusters[j-1]; activeClusters[j-1] = activeClusters[j]; activeClusters[j] = tmpID;
+    }
+  }
+
+  // Traverse clusters near to far
+  for (int i = 0; i < NUM_CLUSTERS_PER_SUPERCLUSTER; ++i) {
+    float minDist = clusterDistances[NUM_CLUSTERS_PER_SUPERCLUSTER - 1 - i];
+    int clusterID = activeClusters[NUM_CLUSTERS_PER_SUPERCLUSTER - 1 - i];
+
+    // break out when all clusters from here on are too far
+    if (minDist >= payload.closestDistance) break;
+
+    // Traverse all primitives in this cluster
+    for (int j = 0; j < NUM_CLUSTERS_PER_SUPERCLUSTER; ++j) {
+      int primitiveID = gprt::load<int>(primIDs, clusterID * NUM_PRIMS_PER_CLUSTER + j);
+      float dist = 1e20f;
+      if (primType == 0) {
+        float3 a = gprt::load<float3>(vertices, primitiveID);
+        if (isnan(a.x)) continue;
+        dist = getPointDist2(queryOrigin, a);
+      } else if (primType == 1) {
+        int2 edge = gprt::load<int2>(indices, primitiveID);
+        float3 a = gprt::load<float3>(vertices, edge.x);
+        float3 b = gprt::load<float3>(vertices, edge.y);
+        if (isnan(a.x)) continue;
+        dist = getEdgeDist2(queryOrigin, a, b);
+      } else if (primType == 2) {
+        int3 tri = gprt::load<int3>(indices, primitiveID);
+        float3 a = gprt::load<float3>(vertices, tri.x);
+        float3 b = gprt::load<float3>(vertices, tri.y);
+        float3 c = gprt::load<float3>(vertices, tri.z);
+        if (isnan(a.x)) continue;
+        dist = getTriangleDist2(queryOrigin, a, b, c);
+      }
+      if (dist >= payload.closestDistance) continue;
+      
+      // replace the closest primitive
+      payload.closestDistance = dist;
+      payload.closestPrimitive = primitiveID;
+    }
+  }
+}
+
+GPRT_ANY_HIT_PROGRAM(ClosestPointAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+  uint superClusterID = PrimitiveIndex();
+  float3 origin = WorldRayOrigin();
+
+  // Out of range
+  if (hitSuperCluster.minDist > payload.closestDistance) {
+    gprt::ignoreHit();
+    return;
+  }
+
+  ClosestPrimitiveQuery(
+    origin, superClusterID, 
+    record.numClusters, record.numPrims, 0,
+    record.clusters, record.ids, record.points, gprt::Buffer(0,0), payload);
+
+  gprt::ignoreHit(); // forces traversal to continue to next supercluster
+}
+
+GPRT_ANY_HIT_PROGRAM(ClosestEdgeAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+  uint superClusterID = PrimitiveIndex();
+  float3 origin = WorldRayOrigin();
+
+  // Out of range
+  if (hitSuperCluster.minDist > payload.closestDistance) {
+    gprt::ignoreHit();
+    return;
+  }
+
+  ClosestPrimitiveQuery(
+    origin, superClusterID, 
+    record.numClusters, record.numPrims, 1,
+    record.clusters, record.ids, record.points, record.edges, payload);
+
+  gprt::ignoreHit(); // forces traversal to continue to next supercluster
+}
+
+GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+  uint superClusterID = PrimitiveIndex();
+  float3 origin = WorldRayOrigin();
+
+  // Out of range
+  if (hitSuperCluster.minDist > payload.closestDistance) {
+    gprt::ignoreHit();
+    return;
+  }
+
+  ClosestPrimitiveQuery(
+    origin, superClusterID, 
+    record.numClusters, record.numPrims, 2,
+    record.clusters, record.ids, record.points, record.triangles, payload);
+
+  gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
