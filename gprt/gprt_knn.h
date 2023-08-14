@@ -192,15 +192,40 @@ typedef enum {
     GPRT_KNN_TYPE_TRIANGLES = 3,
 } GPRTKNNType;
 
+typedef enum {
+    GPRT_KNN_GEOM_KIND_POINTS = 1,
+    GPRT_KNN_GEOM_KIND_EDGES = 2,
+    GPRT_KNN_GEOM_KIND_TRIANGLES = 3,
+} GPRTKNNGeomKind;
+
+typedef enum {
+  GPRT_KNN_BUILD_MODE_UNINITIALIZED,
+  GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE
+} GPRTKNNBuildMode;
+
+// Down the road, we might be able to add callables to this type which could serve 
+// to replace closest hit / anyhit / intersection programs
+struct GPRTKNNGeomType {
+  GPRTKNNGeomKind kind;
+  size_t recordSize;
+};
+
+struct GPRTKNNGeom {
+  GPRTKNNGeomType type; 
+  uint32_t numPoints;
+  GPRTBufferOf<float3> points;
+  
+  uint32_t numPrims;
+  GPRTBufferOf<uint2> edges;
+  GPRTBufferOf<uint3> triangles;
+};
+
 struct GPRTKNNAccel {
     KNNAccelData handle;
     GPRTModule module;
     
     GPRTKNNType type;
-
-    GPRTBufferOf<float3> points;
-    GPRTBufferOf<uint2> edges;
-    GPRTBufferOf<uint3> triangles;
+    GPRTKNNGeom* knnGeom;
 
     GPRTBufferOf<uint32_t> hilbertCodes;
     GPRTBufferOf<uint32_t> ids;
@@ -215,16 +240,16 @@ struct GPRTKNNAccel {
     GPRTAccel geomAccel;
     GPRTAccel instanceAccel;
 
-    GPRTComputeOf<KNNAccelData> computePointBounds;
-    GPRTComputeOf<KNNAccelData> computeEdgeBounds;
-    GPRTComputeOf<KNNAccelData> computeTriangleBounds;
-    GPRTComputeOf<KNNAccelData> computePointClusters;
-    GPRTComputeOf<KNNAccelData> computeEdgeClusters;
-    GPRTComputeOf<KNNAccelData> computeTriangleClusters;
-    GPRTComputeOf<KNNAccelData> computeSuperClusters;
-    GPRTComputeOf<KNNAccelData> computePointHilbertCodes;
-    GPRTComputeOf<KNNAccelData> computeEdgeHilbertCodes;
-    GPRTComputeOf<KNNAccelData> computeTriangleHilbertCodes;
+    GPRTComputeOf<KNNAccelData> computePointBounds = nullptr;
+    GPRTComputeOf<KNNAccelData> computeEdgeBounds = nullptr;
+    GPRTComputeOf<KNNAccelData> computeTriangleBounds = nullptr;
+    GPRTComputeOf<KNNAccelData> computePointClusters = nullptr;
+    GPRTComputeOf<KNNAccelData> computeEdgeClusters = nullptr;
+    GPRTComputeOf<KNNAccelData> computeTriangleClusters = nullptr;
+    GPRTComputeOf<KNNAccelData> computeSuperClusters = nullptr;
+    GPRTComputeOf<KNNAccelData> computePointHilbertCodes = nullptr;
+    GPRTComputeOf<KNNAccelData> computeEdgeHilbertCodes = nullptr;
+    GPRTComputeOf<KNNAccelData> computeTriangleHilbertCodes = nullptr;
 
     // Set to true to enable validation.
     bool _testing = false;
@@ -243,59 +268,93 @@ struct GPRTKNNAccel {
  * @param count The number of primitives (either points, edges or triangles depending on the type)
  * @param maxSearchRange The largest possible search radius
 */
-inline 
-GPRTKNNAccel gprtKNNAccelCreate(
+
+inline GPRTKNNGeomType gprtKNNGeomTypeCreate(
+  GPRTContext context, 
+  GPRTKNNGeomKind kind,
+  size_t recordSize = 0
+) {
+  GPRTKNNGeomType geomType;
+  geomType.kind = kind;
+  geomType.recordSize = recordSize;
+  return geomType;
+}
+
+inline void gprtKNNGeomTypeSetClosestNeighborProg(
+  GPRTKNNGeomType &type, 
+  uint32_t queryType,
+  GPRTModule module,
+  const char *entrypoint
+) {
+  // todo
+}
+
+inline GPRTKNNGeom gprtKNNGeomCreate(
+  GPRTContext context, 
+  GPRTKNNGeomType type
+) {
+  GPRTKNNGeom geom;
+  geom.type = type;
+  return geom;
+}
+
+inline void gprtKNNGeomSetPositions(
+  GPRTKNNGeom &geom, 
+  GPRTBufferOf<float3> positions,
+  size_t numPositions
+) {
+  geom.points = positions;
+  geom.numPoints = numPositions;
+}
+
+inline void gprtKNNEdgesSetIndices(
+  GPRTKNNGeom &geom, 
+  GPRTBufferOf<uint2> edges,
+  size_t numEdges
+) {
+  geom.edges = edges;
+  geom.numPrims = numEdges;
+}
+
+inline void gprtKNNTrianglesSetIndices(
+  GPRTKNNGeom &geom, 
+  GPRTBufferOf<uint3> triangles,
+  size_t numTriangles
+) {
+  geom.triangles = triangles;
+  geom.numPrims = numTriangles;
+}
+
+inline GPRTKNNAccel gprtKNNPointsAccelCreate(
   GPRTContext context,
-  GPRTKNNType type,
-  GPRTBufferOf<float3> points, 
-  GPRTBufferOf<uint2> edges, 
-  GPRTBufferOf<uint3> triangles, 
-  uint32_t count,
-  float maxSearchRange) 
-{
+  size_t numGeometries,
+  GPRTKNNGeom* arrayOfChildGeoms
+){
   GPRTKNNAccel knnAccel;
-  knnAccel.type = type;
+  knnAccel.type = GPRT_KNN_TYPE_POINTS;
   knnAccel.module = gprtModuleCreate(context, knnDeviceCode);
+
+  if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
+
+  knnAccel.knnGeom = &arrayOfChildGeoms[0];
 
   knnAccel.computePointBounds = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputePointBounds");
   knnAccel.computePointClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputePointClusters");
   knnAccel.computePointHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputePointHilbertCodes");
-
-  knnAccel.computeEdgeBounds = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeBounds");
-  knnAccel.computeEdgeClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeClusters");
-  knnAccel.computeEdgeHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeHilbertCodes");
-
-  knnAccel.computeTriangleBounds = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleBounds");
-  knnAccel.computeTriangleClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleClusters");
-  knnAccel.computeTriangleHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleHilbertCodes");
-
   knnAccel.computeSuperClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeSuperClusters");
   
   knnAccel.geomType = gprtGeomTypeCreate<KNNAccelData>(context, GPRT_AABBS);
   gprtGeomTypeSetIntersectionProg(knnAccel.geomType, 0, knnAccel.module, "ClosestNeighborIntersection");
-  if (knnAccel.type == GPRT_KNN_TYPE_POINTS) {
-    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestPointAnyHit");
-  } else if (knnAccel.type == GPRT_KNN_TYPE_EDGES) {
-    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestEdgeAnyHit");
-  } else if (knnAccel.type == GPRT_KNN_TYPE_TRIANGLES) {
-    gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestTriangleAnyHit");
-  }
-
+  gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestPointAnyHit");
+  
   knnAccel.geom = gprtGeomCreate<KNNAccelData>(context, knnAccel.geomType);
   knnAccel.geomAccel = gprtAABBAccelCreate(context, 1, &knnAccel.geom);
   knnAccel.instanceAccel = gprtInstanceAccelCreate(context, 1, &knnAccel.geomAccel);
 
-  knnAccel.handle.numPrims = count;
-  knnAccel.handle.maxSearchRange = maxSearchRange;
-
   // some logic here for rounding up
+  knnAccel.handle.numPrims = knnAccel.knnGeom->numPoints;
   knnAccel.handle.numClusters = (knnAccel.handle.numPrims + (NUM_PRIMS_PER_CLUSTER - 1)) / NUM_PRIMS_PER_CLUSTER;
   knnAccel.handle.numSuperClusters = (knnAccel.handle.numClusters + (NUM_CLUSTERS_PER_SUPERCLUSTER - 1)) / NUM_CLUSTERS_PER_SUPERCLUSTER;
-
-  // cache these...
-  knnAccel.points = points;
-  knnAccel.edges = edges;
-  knnAccel.triangles = triangles;
 
   // create these
   knnAccel.hilbertCodes = gprtDeviceBufferCreate<uint32_t>(context, knnAccel.handle.numPrims);
@@ -304,14 +363,12 @@ GPRTKNNAccel gprtKNNAccelCreate(
   knnAccel.clusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numClusters);
   knnAccel.superClusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numSuperClusters);
   
+  knnAccel.handle.maxSearchRange = 0.f; 
+
   // to be resized as needed
   knnAccel.scratch = gprtDeviceBufferCreate<uint8_t>(context);
 
-  knnAccel.handle.points = gprtBufferGetHandle(knnAccel.points);
-  if (type == GPRT_KNN_TYPE_EDGES)
-    knnAccel.handle.edges = gprtBufferGetHandle(knnAccel.edges);
-  if (type == GPRT_KNN_TYPE_TRIANGLES)
-    knnAccel.handle.triangles = gprtBufferGetHandle(knnAccel.triangles);
+  knnAccel.handle.points = gprtBufferGetHandle(knnAccel.knnGeom->points);
 
   knnAccel.handle.hilbertCodes = gprtBufferGetHandle(knnAccel.hilbertCodes);
   knnAccel.handle.ids = gprtBufferGetHandle(knnAccel.ids);
@@ -324,33 +381,153 @@ GPRTKNNAccel gprtKNNAccelCreate(
   gprtComputeSetParameters(knnAccel.computePointBounds, &knnAccel.handle);
   gprtComputeSetParameters(knnAccel.computePointClusters, &knnAccel.handle);
   gprtComputeSetParameters(knnAccel.computePointHilbertCodes, &knnAccel.handle);
-
-  gprtComputeSetParameters(knnAccel.computeEdgeBounds, &knnAccel.handle);
-  gprtComputeSetParameters(knnAccel.computeEdgeClusters, &knnAccel.handle);
-  gprtComputeSetParameters(knnAccel.computeEdgeHilbertCodes, &knnAccel.handle);
-
-  gprtComputeSetParameters(knnAccel.computeTriangleBounds, &knnAccel.handle);
-  gprtComputeSetParameters(knnAccel.computeTriangleClusters, &knnAccel.handle);
-  gprtComputeSetParameters(knnAccel.computeTriangleHilbertCodes, &knnAccel.handle);
-  
   gprtComputeSetParameters(knnAccel.computeSuperClusters, &knnAccel.handle);
 
   gprtGeomSetParameters(knnAccel.geom, &knnAccel.handle);
   gprtAABBsSetPositions(knnAccel.geom, knnAccel.superClusters, knnAccel.handle.numSuperClusters);
   
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
   return knnAccel;
 };
 
-// We might change to an API like this in the future...
-// inline void gprtPointKNNAccelSetPoints();
-// inline void gprtEdgeKNNAccelSetIndices();
-// inline void gprtTriangleKNNAccelSetIndices();
+inline GPRTKNNAccel gprtKNNEdgesAccelCreate(
+  GPRTContext context,
+  size_t numGeometries,
+  GPRTKNNGeom* arrayOfChildGeoms
+){
+  GPRTKNNAccel knnAccel;
+  knnAccel.type = GPRT_KNN_TYPE_EDGES;
+  knnAccel.module = gprtModuleCreate(context, knnDeviceCode);
 
-inline void gprtKNNAccelBuild(GPRTContext context, GPRTKNNAccel &knnAccel)
+  if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
+
+  knnAccel.knnGeom = &arrayOfChildGeoms[0];
+
+  knnAccel.computeEdgeBounds = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeBounds");
+  knnAccel.computeEdgeClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeClusters");
+  knnAccel.computeEdgeHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeEdgeHilbertCodes");
+  knnAccel.computeSuperClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeSuperClusters");
+  
+  knnAccel.geomType = gprtGeomTypeCreate<KNNAccelData>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(knnAccel.geomType, 0, knnAccel.module, "ClosestNeighborIntersection");
+  gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestEdgeAnyHit");
+  
+  knnAccel.geom = gprtGeomCreate<KNNAccelData>(context, knnAccel.geomType);
+  knnAccel.geomAccel = gprtAABBAccelCreate(context, 1, &knnAccel.geom);
+  knnAccel.instanceAccel = gprtInstanceAccelCreate(context, 1, &knnAccel.geomAccel);
+
+  // some logic here for rounding up
+  knnAccel.handle.numPrims = knnAccel.knnGeom->numPrims;
+  knnAccel.handle.numClusters = (knnAccel.handle.numPrims + (NUM_PRIMS_PER_CLUSTER - 1)) / NUM_PRIMS_PER_CLUSTER;
+  knnAccel.handle.numSuperClusters = (knnAccel.handle.numClusters + (NUM_CLUSTERS_PER_SUPERCLUSTER - 1)) / NUM_CLUSTERS_PER_SUPERCLUSTER;
+
+  // create these
+  knnAccel.hilbertCodes = gprtDeviceBufferCreate<uint32_t>(context, knnAccel.handle.numPrims);
+  knnAccel.ids = gprtDeviceBufferCreate<uint32_t>(context, knnAccel.handle.numPrims);
+  knnAccel.aabb = gprtDeviceBufferCreate<float3>(context, 2);
+  knnAccel.clusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numClusters);
+  knnAccel.superClusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numSuperClusters);
+  
+  knnAccel.handle.maxSearchRange = 0.f; 
+
+  // to be resized as needed
+  knnAccel.scratch = gprtDeviceBufferCreate<uint8_t>(context);
+
+  knnAccel.handle.points = gprtBufferGetHandle(knnAccel.knnGeom->points);
+  knnAccel.handle.edges = gprtBufferGetHandle(knnAccel.knnGeom->edges);
+
+  knnAccel.handle.hilbertCodes = gprtBufferGetHandle(knnAccel.hilbertCodes);
+  knnAccel.handle.ids = gprtBufferGetHandle(knnAccel.ids);
+  knnAccel.handle.aabb = gprtBufferGetHandle(knnAccel.aabb);
+  knnAccel.handle.clusters = gprtBufferGetHandle(knnAccel.clusters);
+  knnAccel.handle.superClusters = gprtBufferGetHandle(knnAccel.superClusters);
+
+  knnAccel.handle.accel = gprtAccelGetHandle(knnAccel.instanceAccel);
+
+  gprtComputeSetParameters(knnAccel.computeEdgeBounds, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeEdgeClusters, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeEdgeHilbertCodes, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeSuperClusters, &knnAccel.handle);
+
+  gprtGeomSetParameters(knnAccel.geom, &knnAccel.handle);
+  gprtAABBsSetPositions(knnAccel.geom, knnAccel.superClusters, knnAccel.handle.numSuperClusters);
+  
+  return knnAccel;
+};
+
+inline GPRTKNNAccel gprtKNNTrianglesAccelCreate(
+  GPRTContext context,
+  size_t numGeometries,
+  GPRTKNNGeom* arrayOfChildGeoms
+){
+  GPRTKNNAccel knnAccel;
+  knnAccel.type = GPRT_KNN_TYPE_TRIANGLES;
+  knnAccel.module = gprtModuleCreate(context, knnDeviceCode);
+
+  if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
+
+  knnAccel.knnGeom = &arrayOfChildGeoms[0];
+
+  knnAccel.computeTriangleBounds = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleBounds");
+  knnAccel.computeTriangleClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleClusters");
+  knnAccel.computeTriangleHilbertCodes = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeTriangleHilbertCodes");
+  knnAccel.computeSuperClusters = gprtComputeCreate<KNNAccelData>(context, knnAccel.module, "ComputeSuperClusters");
+  
+  knnAccel.geomType = gprtGeomTypeCreate<KNNAccelData>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(knnAccel.geomType, 0, knnAccel.module, "ClosestNeighborIntersection");
+  gprtGeomTypeSetAnyHitProg(knnAccel.geomType, 0, knnAccel.module, "ClosestTriangleAnyHit");
+  
+  knnAccel.geom = gprtGeomCreate<KNNAccelData>(context, knnAccel.geomType);
+  knnAccel.geomAccel = gprtAABBAccelCreate(context, 1, &knnAccel.geom);
+  knnAccel.instanceAccel = gprtInstanceAccelCreate(context, 1, &knnAccel.geomAccel);
+
+  // some logic here for rounding up
+  knnAccel.handle.numPrims = knnAccel.knnGeom->numPrims;
+  knnAccel.handle.numClusters = (knnAccel.handle.numPrims + (NUM_PRIMS_PER_CLUSTER - 1)) / NUM_PRIMS_PER_CLUSTER;
+  knnAccel.handle.numSuperClusters = (knnAccel.handle.numClusters + (NUM_CLUSTERS_PER_SUPERCLUSTER - 1)) / NUM_CLUSTERS_PER_SUPERCLUSTER;
+
+  // create these
+  knnAccel.hilbertCodes = gprtDeviceBufferCreate<uint32_t>(context, knnAccel.handle.numPrims);
+  knnAccel.ids = gprtDeviceBufferCreate<uint32_t>(context, knnAccel.handle.numPrims);
+  knnAccel.aabb = gprtDeviceBufferCreate<float3>(context, 2);
+  knnAccel.clusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numClusters);
+  knnAccel.superClusters = gprtDeviceBufferCreate<float3>(context, 2 * knnAccel.handle.numSuperClusters);
+  
+  knnAccel.handle.maxSearchRange = 0.f; 
+
+  // to be resized as needed
+  knnAccel.scratch = gprtDeviceBufferCreate<uint8_t>(context);
+
+  knnAccel.handle.points = gprtBufferGetHandle(knnAccel.knnGeom->points);
+  knnAccel.handle.triangles = gprtBufferGetHandle(knnAccel.knnGeom->triangles);
+
+  knnAccel.handle.hilbertCodes = gprtBufferGetHandle(knnAccel.hilbertCodes);
+  knnAccel.handle.ids = gprtBufferGetHandle(knnAccel.ids);
+  knnAccel.handle.aabb = gprtBufferGetHandle(knnAccel.aabb);
+  knnAccel.handle.clusters = gprtBufferGetHandle(knnAccel.clusters);
+  knnAccel.handle.superClusters = gprtBufferGetHandle(knnAccel.superClusters);
+
+  knnAccel.handle.accel = gprtAccelGetHandle(knnAccel.instanceAccel);
+
+  gprtComputeSetParameters(knnAccel.computeTriangleBounds, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeTriangleClusters, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeTriangleHilbertCodes, &knnAccel.handle);
+  gprtComputeSetParameters(knnAccel.computeSuperClusters, &knnAccel.handle);
+
+  gprtGeomSetParameters(knnAccel.geom, &knnAccel.handle);
+  gprtAABBsSetPositions(knnAccel.geom, knnAccel.superClusters, knnAccel.handle.numSuperClusters);
+  
+  return knnAccel;
+};
+
+inline void gprtKNNAccelSetSearchRange(GPRTKNNAccel &accel, float searchRange) {
+  accel.handle.maxSearchRange = searchRange;
+};
+
+inline void gprtKNNAccelBuild(GPRTContext context, GPRTKNNAccel &knnAccel, GPRTKNNBuildMode mode)
 {
   typedef uint32_t uint;
+
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // initialize root AABB
   gprtBufferMap(knnAccel.aabb);
@@ -408,16 +585,16 @@ inline void gprtKNNAccelDestroy(GPRTKNNAccel &knnAccel) {
     gprtBufferDestroy(knnAccel.superClusters);
     gprtBufferDestroy(knnAccel.scratch);
 
-    gprtComputeDestroy(knnAccel.computePointBounds);
-    gprtComputeDestroy(knnAccel.computeEdgeBounds);
-    gprtComputeDestroy(knnAccel.computeTriangleBounds);
-    gprtComputeDestroy(knnAccel.computePointClusters);
-    gprtComputeDestroy(knnAccel.computeEdgeClusters);
-    gprtComputeDestroy(knnAccel.computeTriangleClusters);
-    gprtComputeDestroy(knnAccel.computeSuperClusters);
-    gprtComputeDestroy(knnAccel.computePointHilbertCodes);
-    gprtComputeDestroy(knnAccel.computeEdgeHilbertCodes);
-    gprtComputeDestroy(knnAccel.computeTriangleHilbertCodes);
+    if (knnAccel.computePointBounds) gprtComputeDestroy(knnAccel.computePointBounds);
+    if (knnAccel.computeEdgeBounds) gprtComputeDestroy(knnAccel.computeEdgeBounds);
+    if (knnAccel.computeTriangleBounds) gprtComputeDestroy(knnAccel.computeTriangleBounds);
+    if (knnAccel.computePointClusters) gprtComputeDestroy(knnAccel.computePointClusters);
+    if (knnAccel.computeEdgeClusters) gprtComputeDestroy(knnAccel.computeEdgeClusters);
+    if (knnAccel.computeTriangleClusters) gprtComputeDestroy(knnAccel.computeTriangleClusters);
+    if (knnAccel.computeSuperClusters) gprtComputeDestroy(knnAccel.computeSuperClusters);
+    if (knnAccel.computePointHilbertCodes) gprtComputeDestroy(knnAccel.computePointHilbertCodes);
+    if (knnAccel.computeEdgeHilbertCodes) gprtComputeDestroy(knnAccel.computeEdgeHilbertCodes);
+    if (knnAccel.computeTriangleHilbertCodes) gprtComputeDestroy(knnAccel.computeTriangleHilbertCodes);
 
     gprtAccelDestroy(knnAccel.instanceAccel);
     gprtAccelDestroy(knnAccel.geomAccel);

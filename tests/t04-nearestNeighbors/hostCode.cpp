@@ -80,33 +80,53 @@ main(int ac, char **av) {
   {
     GPRTContext context = gprtContextCreate(nullptr, 1);
     GPRTModule module = gprtModuleCreate(context, t04_deviceCode);
+
+    // -------------------------------------------------------
+    // declare geometry type
+    // -------------------------------------------------------
+    GPRTKNNGeomType pointGeomType =
+      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
+    gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+
+    // -------------------------------------------------------
+    // set up ray gen program
+    // -------------------------------------------------------
     GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "NearestNeighbor");
 
-    // Treat vertices of high res teapot as our data points.
-    GPRTBufferOf<float3> dataPoints = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-
-    // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    // ##################################################################
+    // set the parameters for those kernels
+    // ##################################################################
     
     // Buffer that will contain results for K=1
     GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
     GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    
+    // Treat vertices of low res teapot as our query points.
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    
+    RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
+    rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
+    rayGenData->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->queryBuffer = gprtBufferGetHandle(queryPoints);
+
+    // Create geometry
+    // Treat vertices of high res teapot as our data points.
+    GPRTBufferOf<float3> dataPoints = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
+    GPRTKNNGeom geom = gprtKNNGeomCreate(context, pointGeomType);
+    gprtKNNGeomSetPositions(geom, dataPoints, highResTeapot.vertices.size());
 
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNAccelCreate(context, GPRT_KNN_TYPE_POINTS, dataPoints, nullptr, nullptr, highResTeapot.vertices.size(), .1f);
+    GPRTKNNAccel knnAccel = gprtKNNPointsAccelCreate(context, 1, &geom);
+    gprtKNNAccelSetSearchRange(knnAccel, .1f);
 
     // enabling internal testing variable
     knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel);
+    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
     
     // Now, upload accel to record
-    RayGenData* data = gprtRayGenGetParameters(rayGen);
-    data->knnAccel = knnAccel.handle;
-    data->queryBuffer = gprtBufferGetHandle(queryPoints);
-    data->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
-    data->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->knnAccel = knnAccel.handle;
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
@@ -164,34 +184,55 @@ main(int ac, char **av) {
   {
     GPRTContext context = gprtContextCreate(nullptr, 1);
     GPRTModule module = gprtModuleCreate(context, t04_deviceCode);
+    
+    // -------------------------------------------------------
+    // declare geometry type
+    // -------------------------------------------------------
+    GPRTKNNGeomType edgeGeomType =
+      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_EDGES /* <- This is new! */);
+    gprtKNNGeomTypeSetClosestNeighborProg(edgeGeomType, 0, module, "closestEdge");
+
+    // -------------------------------------------------------
+    // set up ray gen program
+    // -------------------------------------------------------
     GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "NearestNeighbor");
 
-    // Treat edges of high res teapot as our primitives.
-    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-    GPRTBufferOf<uint2> edges = gprtDeviceBufferCreate<uint2>(context, highResTeapot.edges.size(), highResTeapot.edges.data());
-
-    // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    // ##################################################################
+    // set the parameters for those kernels
+    // ##################################################################
     
     // Buffer that will contain results for K=1
     GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
     GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    
+    // Treat vertices of low res teapot as our query points.
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    
+    RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
+    rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
+    rayGenData->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->queryBuffer = gprtBufferGetHandle(queryPoints);
 
+    // Create geometry
+    // Treat edges of high res teapot as our primitives.
+    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
+    GPRTBufferOf<uint2> edges = gprtDeviceBufferCreate<uint2>(context, highResTeapot.edges.size(), highResTeapot.edges.data());
+    GPRTKNNGeom geom = gprtKNNGeomCreate(context, edgeGeomType);
+    gprtKNNGeomSetPositions(geom, vertices, highResTeapot.vertices.size());
+    gprtKNNEdgesSetIndices(geom, edges, highResTeapot.edges.size());
+    
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNAccelCreate(context, GPRT_KNN_TYPE_EDGES, vertices, edges, nullptr, highResTeapot.edges.size(), .1f);
+    GPRTKNNAccel knnAccel = gprtKNNEdgesAccelCreate(context, 1, &geom);
+    gprtKNNAccelSetSearchRange(knnAccel, .1f);
 
     // enabling internal testing variable
     knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel);
+    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
     // Now, upload accel to record
-    RayGenData* data = gprtRayGenGetParameters(rayGen);
-    data->knnAccel = knnAccel.handle;
-    data->queryBuffer = gprtBufferGetHandle(queryPoints);
-    data->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
-    data->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->knnAccel = knnAccel.handle;
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
@@ -252,34 +293,55 @@ main(int ac, char **av) {
   {
     GPRTContext context = gprtContextCreate(nullptr, 1);
     GPRTModule module = gprtModuleCreate(context, t04_deviceCode);
+    
+    // -------------------------------------------------------
+    // declare geometry type
+    // -------------------------------------------------------
+    GPRTKNNGeomType triangleGeomType =
+      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_TRIANGLES /* <- This is new! */);
+    gprtKNNGeomTypeSetClosestNeighborProg(triangleGeomType, 0, module, "closestTriangle");
+
+    // -------------------------------------------------------
+    // set up ray gen program
+    // -------------------------------------------------------
     GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "NearestNeighbor");
 
-    // Treat edges of high res teapot as our primitives.
-    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-    GPRTBufferOf<uint3> triangles = gprtDeviceBufferCreate<uint3>(context, highResTeapot.triangles.size(), highResTeapot.triangles.data());
-
-    // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    // ##################################################################
+    // set the parameters for those kernels
+    // ##################################################################
     
     // Buffer that will contain results for K=1
     GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
     GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    
+    // Treat vertices of low res teapot as our query points.
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    
+    RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
+    rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
+    rayGenData->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->queryBuffer = gprtBufferGetHandle(queryPoints);
+
+    // Create geometry
+    // Treat triangles of high res teapot as our primitives.
+    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
+    GPRTBufferOf<uint3> triangles = gprtDeviceBufferCreate<uint3>(context, highResTeapot.triangles.size(), highResTeapot.triangles.data());
+    GPRTKNNGeom geom = gprtKNNGeomCreate(context, triangleGeomType);
+    gprtKNNGeomSetPositions(geom, vertices, highResTeapot.vertices.size());
+    gprtKNNTrianglesSetIndices(geom, triangles, highResTeapot.triangles.size());
 
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNAccelCreate(context, GPRT_KNN_TYPE_TRIANGLES, vertices, nullptr, triangles, highResTeapot.triangles.size(), .1f);
-
+    GPRTKNNAccel knnAccel = gprtKNNTrianglesAccelCreate(context, 1, &geom);
+    gprtKNNAccelSetSearchRange(knnAccel, .1f);
+    
     // enabling internal testing variable
     knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel);
+    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
     // Now, upload accel to record
-    RayGenData* data = gprtRayGenGetParameters(rayGen);
-    data->knnAccel = knnAccel.handle;
-    data->queryBuffer = gprtBufferGetHandle(queryPoints);
-    data->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
-    data->resultDistsBuffer = gprtBufferGetHandle(resultDistsBuffer);
+    rayGenData->knnAccel = knnAccel.handle;
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
