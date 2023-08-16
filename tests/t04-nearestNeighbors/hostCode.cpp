@@ -73,8 +73,8 @@ int
 main(int ac, char **av) {
 
   // Generate a common mesh for testing
-  Mesh<TeapotMesh> highResTeapot(TeapotMesh{12});
-  Mesh<TeapotMesh> lowResTeapot(TeapotMesh{6});
+  Mesh<TeapotMesh> primitiveModel(TeapotMesh{12});
+  Mesh<SphereMesh> queryModel(SphereMesh{});
 
   // Test closest point query
   {
@@ -84,9 +84,12 @@ main(int ac, char **av) {
     // -------------------------------------------------------
     // declare geometry type
     // -------------------------------------------------------
-    GPRTKNNGeomType pointGeomType =
-      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
-    gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    GPRTGeomTypeOf<NNData> pointGeomType = 
+      gprtGeomTypeCreate<NNData>(context, GPRT_NN_POINTS);
+    // GPRTKNNGeomType pointGeomType =
+    //   gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
+    // gprtGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    // gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
 
     // -------------------------------------------------------
     // set up ray gen program
@@ -98,11 +101,11 @@ main(int ac, char **av) {
     // ##################################################################
     
     // Buffer that will contain results for K=1
-    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
-    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, queryModel.vertices.size());
+    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, queryModel.vertices.size());
     
     // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, queryModel.vertices.size(), queryModel.vertices.data());
     
     RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
     rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
@@ -111,27 +114,28 @@ main(int ac, char **av) {
 
     // Create geometry
     // Treat vertices of high res teapot as our data points.
-    GPRTBufferOf<float3> dataPoints = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-    GPRTKNNGeom geom = gprtKNNGeomCreate(context, pointGeomType);
-    gprtKNNGeomSetPositions(geom, dataPoints, highResTeapot.vertices.size());
+    GPRTBufferOf<float3> dataPoints = gprtDeviceBufferCreate<float3>(context, primitiveModel.vertices.size(), primitiveModel.vertices.data());
+    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, pointGeomType);
+    gprtNNPointsSetVertices(geom, dataPoints, primitiveModel.vertices.size());
 
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNPointsAccelCreate(context, 1, &geom);
-    gprtKNNAccelSetSearchRange(knnAccel, .1f);
+    float searchRange = 10.1f;
+    GPRTAccel knnAccel = gprtNNPointsAccelCreate(context, 1, &geom);
+    gprtNNAccelSetSearchRange(knnAccel, searchRange);
 
     // enabling internal testing variable
-    knnAccel._testing = true;
+    // knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+    gprtAccelBuild(context, knnAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
     
     // Now, upload accel to record
-    rayGenData->knnAccel = knnAccel.handle;
+    rayGenData->knnAccel = gprtNNAccelGetHandle(knnAccel);
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     // Launch
-    gprtRayGenLaunch1D(context, rayGen, lowResTeapot.vertices.size());
+    gprtRayGenLaunch1D(context, rayGen, queryModel.vertices.size());
 
     // Verify results are correct
     gprtBufferMap(resultIDsBuffer);
@@ -141,24 +145,26 @@ main(int ac, char **av) {
     float* dists = gprtBufferGetPointer(resultDistsBuffer);
     
     // Confirm results on CPU with a brute force search
-    for (uint32_t i = 0; i < lowResTeapot.vertices.size(); ++i) {
-      float3 queryPoint = lowResTeapot.vertices[i];
+    for (uint32_t i = 0; i < queryModel.vertices.size(); ++i) {
+      float3 queryPoint = queryModel.vertices[i];
 
       /* First, confirm distance for the given primitive is correct */
       float gpuDist = dists[i];
       int gpuPrim = IDs[i];
 
-      float actualDist = getPointDist2(queryPoint, highResTeapot.vertices[gpuPrim]);
+      float actualDist = getPointDist2(queryPoint, primitiveModel.vertices[gpuPrim]);
       if (abs(gpuDist - actualDist) > .0001f) { 
         throw std::runtime_error("Incorrect distance for closest found primitive!");
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
       float closestDistance = 1e20f;
-      for (uint32_t j = 0; j < highResTeapot.vertices.size(); ++j) {
-        float distance = getPointDist2(queryPoint, highResTeapot.vertices[j]);
-        if (distance < closestDistance && distance <= pow(knnAccel.handle.maxSearchRange, 2.f)) {
+      int closestPrim = -1;
+      for (uint32_t j = 0; j < primitiveModel.vertices.size(); ++j) {
+        float distance = getPointDist2(queryPoint, primitiveModel.vertices[j]);
+        if (distance < closestDistance && distance <= pow(searchRange, 2.f)) {
           closestDistance = distance;
+          closestPrim = j;
         }
       }
 
@@ -175,7 +181,7 @@ main(int ac, char **av) {
     gprtBufferDestroy(queryPoints);
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
-    gprtKNNAccelDestroy(knnAccel);  
+    gprtAccelDestroy(knnAccel);  
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }
@@ -184,13 +190,16 @@ main(int ac, char **av) {
   {
     GPRTContext context = gprtContextCreate(nullptr, 1);
     GPRTModule module = gprtModuleCreate(context, t04_deviceCode);
-    
+
     // -------------------------------------------------------
     // declare geometry type
     // -------------------------------------------------------
-    GPRTKNNGeomType edgeGeomType =
-      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_EDGES /* <- This is new! */);
-    gprtKNNGeomTypeSetClosestNeighborProg(edgeGeomType, 0, module, "closestEdge");
+    GPRTGeomTypeOf<NNData> pointGeomType = 
+      gprtGeomTypeCreate<NNData>(context, GPRT_NN_EDGES);
+    // GPRTKNNGeomType pointGeomType =
+    //   gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
+    // gprtGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    // gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
 
     // -------------------------------------------------------
     // set up ray gen program
@@ -202,11 +211,11 @@ main(int ac, char **av) {
     // ##################################################################
     
     // Buffer that will contain results for K=1
-    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
-    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, queryModel.vertices.size());
+    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, queryModel.vertices.size());
     
     // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, queryModel.vertices.size(), queryModel.vertices.data());
     
     RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
     rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
@@ -214,30 +223,31 @@ main(int ac, char **av) {
     rayGenData->queryBuffer = gprtBufferGetHandle(queryPoints);
 
     // Create geometry
-    // Treat edges of high res teapot as our primitives.
-    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-    GPRTBufferOf<uint2> edges = gprtDeviceBufferCreate<uint2>(context, highResTeapot.edges.size(), highResTeapot.edges.data());
-    GPRTKNNGeom geom = gprtKNNGeomCreate(context, edgeGeomType);
-    gprtKNNGeomSetPositions(geom, vertices, highResTeapot.vertices.size());
-    gprtKNNEdgesSetIndices(geom, edges, highResTeapot.edges.size());
-    
+    // Treat vertices of high res teapot as our data points.
+    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, primitiveModel.vertices.size(), primitiveModel.vertices.data());
+    GPRTBufferOf<uint2> indices = gprtDeviceBufferCreate<uint2>(context, primitiveModel.edges.size(), primitiveModel.edges.data());
+    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, pointGeomType);
+    gprtNNEdgesSetVertices(geom, vertices, primitiveModel.vertices.size());
+    gprtNNEdgesSetIndices(geom, indices, primitiveModel.edges.size());
+
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNEdgesAccelCreate(context, 1, &geom);
-    gprtKNNAccelSetSearchRange(knnAccel, .1f);
+    float searchRange = 10.1f;
+    GPRTAccel knnAccel = gprtNNEdgesAccelCreate(context, 1, &geom);
+    gprtNNAccelSetSearchRange(knnAccel, searchRange);
 
     // enabling internal testing variable
-    knnAccel._testing = true;
+    // knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
+    gprtAccelBuild(context, knnAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+    
     // Now, upload accel to record
-    rayGenData->knnAccel = knnAccel.handle;
+    rayGenData->knnAccel = gprtNNAccelGetHandle(knnAccel);
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     // Launch
-    gprtRayGenLaunch1D(context, rayGen, lowResTeapot.vertices.size());
+    gprtRayGenLaunch1D(context, rayGen, queryModel.vertices.size());
 
     // Verify results are correct
     gprtBufferMap(resultIDsBuffer);
@@ -247,25 +257,25 @@ main(int ac, char **av) {
     float* dists = gprtBufferGetPointer(resultDistsBuffer);
     
     // Confirm results on CPU with a brute force search
-    for (uint32_t i = 0; i < lowResTeapot.vertices.size(); ++i) {
-      float3 queryPoint = lowResTeapot.vertices[i];
+    for (uint32_t i = 0; i < queryModel.vertices.size(); ++i) {
+      float3 queryPoint = queryModel.vertices[i];
 
       /* First, confirm distance for the given primitive is correct */
       float gpuDist = dists[i];
       int gpuPrim = IDs[i];
-      uint2 gpuEdge = highResTeapot.edges[gpuPrim];
+      uint2 gpuEdge = primitiveModel.edges[gpuPrim];
 
-      float actualDist = getEdgeDist2(queryPoint, highResTeapot.vertices[gpuEdge.x], highResTeapot.vertices[gpuEdge.y]);
+      float actualDist = getEdgeDist2(queryPoint, primitiveModel.vertices[gpuEdge.x], primitiveModel.vertices[gpuEdge.y]);
       if (abs(gpuDist - actualDist) > .0001f) { 
         throw std::runtime_error("Incorrect distance for closest found primitive!");
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
       float closestDistance = 1e20f;
-      for (uint32_t j = 0; j < highResTeapot.edges.size(); ++j) {
-        uint2 edge = highResTeapot.edges[j];
-        float distance = getEdgeDist2(queryPoint, highResTeapot.vertices[edge.x], highResTeapot.vertices[edge.y]);
-        if (distance < closestDistance && distance <= pow(knnAccel.handle.maxSearchRange, 2.f)) {
+      for (uint32_t j = 0; j < primitiveModel.edges.size(); ++j) {
+        uint2 edge = primitiveModel.edges[j];
+        float distance = getEdgeDist2(queryPoint, primitiveModel.vertices[edge.x], primitiveModel.vertices[edge.y]);
+        if (distance < closestDistance && distance <= pow(searchRange, 2.f)) {
           closestDistance = distance;
         }
       }
@@ -280,11 +290,11 @@ main(int ac, char **av) {
 
     // Cleanup
     gprtBufferDestroy(vertices);
-    gprtBufferDestroy(edges);
+    gprtBufferDestroy(indices);
     gprtBufferDestroy(queryPoints);
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
-    gprtKNNAccelDestroy(knnAccel);  
+    gprtAccelDestroy(knnAccel);  
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }
@@ -293,13 +303,16 @@ main(int ac, char **av) {
   {
     GPRTContext context = gprtContextCreate(nullptr, 1);
     GPRTModule module = gprtModuleCreate(context, t04_deviceCode);
-    
+
     // -------------------------------------------------------
     // declare geometry type
     // -------------------------------------------------------
-    GPRTKNNGeomType triangleGeomType =
-      gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_TRIANGLES /* <- This is new! */);
-    gprtKNNGeomTypeSetClosestNeighborProg(triangleGeomType, 0, module, "closestTriangle");
+    GPRTGeomTypeOf<NNData> pointGeomType = 
+      gprtGeomTypeCreate<NNData>(context, GPRT_NN_TRIANGLES);
+    // GPRTKNNGeomType pointGeomType =
+    //   gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
+    // gprtGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    // gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
 
     // -------------------------------------------------------
     // set up ray gen program
@@ -311,11 +324,11 @@ main(int ac, char **av) {
     // ##################################################################
     
     // Buffer that will contain results for K=1
-    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, lowResTeapot.vertices.size());
-    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, lowResTeapot.vertices.size());
+    GPRTBufferOf<int> resultIDsBuffer = gprtDeviceBufferCreate<int>(context, queryModel.vertices.size());
+    GPRTBufferOf<float> resultDistsBuffer = gprtDeviceBufferCreate<float>(context, queryModel.vertices.size());
     
     // Treat vertices of low res teapot as our query points.
-    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, lowResTeapot.vertices.size(), lowResTeapot.vertices.data());
+    GPRTBufferOf<float3> queryPoints = gprtDeviceBufferCreate<float3>(context, queryModel.vertices.size(), queryModel.vertices.data());
     
     RayGenData* rayGenData = gprtRayGenGetParameters(rayGen);
     rayGenData->resultIDsBuffer = gprtBufferGetHandle(resultIDsBuffer);
@@ -323,30 +336,31 @@ main(int ac, char **av) {
     rayGenData->queryBuffer = gprtBufferGetHandle(queryPoints);
 
     // Create geometry
-    // Treat triangles of high res teapot as our primitives.
-    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, highResTeapot.vertices.size(), highResTeapot.vertices.data());
-    GPRTBufferOf<uint3> triangles = gprtDeviceBufferCreate<uint3>(context, highResTeapot.triangles.size(), highResTeapot.triangles.data());
-    GPRTKNNGeom geom = gprtKNNGeomCreate(context, triangleGeomType);
-    gprtKNNGeomSetPositions(geom, vertices, highResTeapot.vertices.size());
-    gprtKNNTrianglesSetIndices(geom, triangles, highResTeapot.triangles.size());
+    // Treat vertices of high res teapot as our data points.
+    GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, primitiveModel.vertices.size(), primitiveModel.vertices.data());
+    GPRTBufferOf<uint3> indices = gprtDeviceBufferCreate<uint3>(context, primitiveModel.triangles.size(), primitiveModel.triangles.data());
+    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, pointGeomType);
+    gprtNNTrianglesSetVertices(geom, vertices, primitiveModel.vertices.size());
+    gprtNNTrianglesSetIndices(geom, indices, primitiveModel.edges.size());
 
     // Create the accel
-    GPRTKNNAccel knnAccel = gprtKNNTrianglesAccelCreate(context, 1, &geom);
-    gprtKNNAccelSetSearchRange(knnAccel, .1f);
-    
+    float searchRange = 10.1f;
+    GPRTAccel knnAccel = gprtNNTrianglesAccelCreate(context, 1, &geom);
+    gprtNNAccelSetSearchRange(knnAccel, searchRange);
+
     // enabling internal testing variable
-    knnAccel._testing = true;
+    // knnAccel._testing = true;
     
     // Build the accel
-    gprtKNNAccelBuild(context, knnAccel, GPRT_KNN_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
+    gprtAccelBuild(context, knnAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+    
     // Now, upload accel to record
-    rayGenData->knnAccel = knnAccel.handle;
+    rayGenData->knnAccel = gprtNNAccelGetHandle(knnAccel);
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     // Launch
-    gprtRayGenLaunch1D(context, rayGen, lowResTeapot.vertices.size());
+    gprtRayGenLaunch1D(context, rayGen, queryModel.vertices.size());
 
     // Verify results are correct
     gprtBufferMap(resultIDsBuffer);
@@ -356,24 +370,24 @@ main(int ac, char **av) {
     float* dists = gprtBufferGetPointer(resultDistsBuffer);
     
     // Confirm results on CPU with a brute force search
-    for (uint32_t i = 0; i < lowResTeapot.vertices.size(); ++i) {
-      float3 queryPoint = lowResTeapot.vertices[i];
+    for (uint32_t i = 0; i < queryModel.vertices.size(); ++i) {
+      float3 queryPoint = queryModel.vertices[i];
 
       /* First, confirm distance for the given primitive is correct */
       float gpuDist = dists[i];
       int gpuPrim = IDs[i];
-      uint3 gpuTriangle = highResTeapot.triangles[gpuPrim];
-      float actualDist = getTriangleDist2(queryPoint, highResTeapot.vertices[gpuTriangle.x], highResTeapot.vertices[gpuTriangle.y], highResTeapot.vertices[gpuTriangle.z]);
+      uint3 gpuTriangle = primitiveModel.triangles[gpuPrim];
+      float actualDist = getTriangleDist2(queryPoint, primitiveModel.vertices[gpuTriangle.x], primitiveModel.vertices[gpuTriangle.y], primitiveModel.vertices[gpuTriangle.z]);
       if (abs(gpuDist - actualDist) > .0001f) { 
         throw std::runtime_error("Incorrect distance for closest found primitive!");
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
       float closestDistance = 1e20f;
-      for (uint32_t j = 0; j < highResTeapot.triangles.size(); ++j) {
-        uint3 triangle = highResTeapot.triangles[j];
-        float distance = getTriangleDist2(queryPoint, highResTeapot.vertices[triangle.x], highResTeapot.vertices[triangle.y], highResTeapot.vertices[triangle.z]);
-        if (distance < closestDistance && distance <= pow(knnAccel.handle.maxSearchRange, 2.f)) {
+      for (uint32_t j = 0; j < primitiveModel.triangles.size(); ++j) {
+        uint3 triangle = primitiveModel.triangles[j];
+        float distance = getTriangleDist2(queryPoint, primitiveModel.vertices[triangle.x], primitiveModel.vertices[triangle.y], primitiveModel.vertices[triangle.z]);
+        if (distance < closestDistance && distance <= pow(searchRange, 2.f)) {
           closestDistance = distance;
         }
       }
@@ -388,11 +402,11 @@ main(int ac, char **av) {
 
     // Cleanup
     gprtBufferDestroy(vertices);
-    gprtBufferDestroy(triangles);
+    gprtBufferDestroy(indices);
     gprtBufferDestroy(queryPoints);
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
-    gprtKNNAccelDestroy(knnAccel);  
+    gprtAccelDestroy(knnAccel);  
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }

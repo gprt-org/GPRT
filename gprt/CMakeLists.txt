@@ -58,7 +58,7 @@ embed_devicecode(
 
 embed_devicecode(
   OUTPUT_TARGET
-    knnDeviceCode
+    nnDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
@@ -101,7 +101,7 @@ target_link_libraries(gprt
     gprtDeviceCode
     sortDeviceCode
     lbvhDeviceCode
-    knnDeviceCode
+    nnDeviceCode
     glfw
     stb_image
     vma

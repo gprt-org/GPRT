@@ -29,5 +29,5 @@ GPRT_RAYGEN_PROGRAM(NearestNeighbor, (RayGenData, record)) {
     float closestDistance;
     TraceNN(queryOrigin, record.knnAccel, closestPrimitive, closestDistance);
     gprt::store<int>(record.resultIDsBuffer, queryID, closestPrimitive);    
-    gprt::store<int>(record.resultDistsBuffer, queryID, closestDistance);    
+    gprt::store<float>(record.resultDistsBuffer, queryID, closestDistance);    
 }

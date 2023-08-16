@@ -31,5 +31,9 @@ struct RayGenData {
   alignas(16) gprt::Buffer resultIDsBuffer;
   alignas(16) gprt::Buffer resultDistsBuffer;
 
-  alignas(16) KNNAccelData knnAccel;
+  alignas(16) gprt::NNAccel knnAccel;
+};
+
+struct NNData {
+  alignas(4) int tmp;
 };

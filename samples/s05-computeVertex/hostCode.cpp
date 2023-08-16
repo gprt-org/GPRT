@@ -131,7 +131,7 @@ main(int ac, char **av) {
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);

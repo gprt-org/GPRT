@@ -192,6 +192,40 @@ getNumRayTypes() {
   // for now, we map PC 0 to ray type count
   return uint32_t(pc.r[0]);
 }
+
+// NOTE, struct must be synchronized with declaration in gprt_host.h
+struct NNAccel {
+    // input
+    alignas(4) uint32_t numPrims;
+    alignas(4) uint32_t numClusters;
+    alignas(4) uint32_t numSuperClusters;
+    alignas(4) float maxSearchRange;
+
+    alignas(16) gprt::Buffer points; 
+    alignas(16) gprt::Buffer edges; 
+    alignas(16) gprt::Buffer triangles;
+
+    // Hilbert codes of quantized primitive centroids
+    // One uint32_t per primitive
+    alignas(16) gprt::Buffer hilbertCodes;
+
+    // Primitive IDs that correspond to sorted hilbert codes. 
+    // One uint32_t per primitive
+    alignas(16) gprt::Buffer ids;
+
+    // Buffer containing the global AABB. Pair of two floats
+    alignas(16) gprt::Buffer aabb;
+
+    // Buffers of AABBs. Each aabb is a pair of float3.
+    alignas(16) gprt::Buffer clusters;
+
+    // Buffers of AABBs. Each AABB here contains clusters, but is also dialated by "maximum search range".
+    alignas(16) gprt::Buffer superClusters;
+
+    // An RT core tree
+    alignas(16) gprt::Accel accel;
+};
+
 };   // namespace gprt
 
 /*

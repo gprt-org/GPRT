@@ -93,7 +93,7 @@ template <typename T> struct Mesh {
     geomData->index = gprtBufferGetHandle(indexBuffer);
 
     // Build the bottom level acceleration structure
-    accel = gprtTrianglesAccelCreate(context, 1, &geometry);
+    accel = gprtTriangleAccelCreate(context, 1, &geometry);
     gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/true);
     // gprtAccelCompact(context, accel);
   };

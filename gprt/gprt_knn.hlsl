@@ -296,7 +296,9 @@ bool getTriangleCentroid(gprt::Buffer triangles, gprt::Buffer points, uint primI
   return true; 
 }
 
-GPRT_COMPUTE_PROGRAM(ComputePointBounds, (KNNAccelData, record), (1,1,1)) {
+typedef gprt::NNAccel NNAccel;
+
+GPRT_COMPUTE_PROGRAM(ComputePointBounds, (NNAccel, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
@@ -309,7 +311,7 @@ GPRT_COMPUTE_PROGRAM(ComputePointBounds, (KNNAccelData, record), (1,1,1)) {
   gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (NNAccel, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
@@ -322,7 +324,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (KNNAccelData, record), (1,1,1)) {
   gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (NNAccel, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
@@ -335,7 +337,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (KNNAccelData, record), (1,1,1)) {
   gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputePointHilbertCodes, (KNNAccelData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(ComputePointHilbertCodes, (NNAccel, record), (1, 1, 1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 c;
@@ -355,7 +357,7 @@ GPRT_COMPUTE_PROGRAM(ComputePointHilbertCodes, (KNNAccelData, record), (1, 1, 1)
   gprt::store<uint>(record.ids, primID, primID);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (KNNAccelData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (NNAccel, record), (1, 1, 1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 c;
@@ -377,7 +379,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (KNNAccelData, record), (1, 1, 1))
   gprt::store<uint>(record.ids, primID, primID);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (KNNAccelData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (NNAccel, record), (1, 1, 1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
   float3 c;
@@ -399,7 +401,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (KNNAccelData, record), (1, 1,
   gprt::store<uint>(record.ids, primID, primID);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputePointClusters, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputePointClusters, (NNAccel, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
@@ -421,7 +423,7 @@ GPRT_COMPUTE_PROGRAM(ComputePointClusters, (KNNAccelData, record), (1,1,1)) {
   gprt::store<float3>(record.clusters, 2 * clusterID + 1, clusterAabbMax);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (NNAccel, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
@@ -443,7 +445,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (KNNAccelData, record), (1,1,1)) {
   gprt::store<float3>(record.clusters, 2 * clusterID + 1, clusterAabbMax);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (NNAccel, record), (1,1,1)) {
   int clusterID = DispatchThreadID.x;
   if (clusterID >= record.numClusters) return;
   uint32_t numPrims = record.numPrims;
@@ -465,7 +467,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (KNNAccelData, record), (1,1,1)) {
   gprt::store<float3>(record.clusters, 2 * clusterID + 1, clusterAabbMax);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeSuperClusters, (KNNAccelData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeSuperClusters, (NNAccel, record), (1,1,1)) {
   int superClusterID = DispatchThreadID.x;
   if (superClusterID >= record.numSuperClusters) return;
   uint32_t numClusters = record.numClusters;
@@ -492,7 +494,7 @@ struct ClosestPointAttributes {
   int minDist;
 }; 
 
-GPRT_INTERSECTION_PROGRAM(ClosestNeighborIntersection, (KNNAccelData, record)) {
+GPRT_INTERSECTION_PROGRAM(ClosestNeighborIntersection, (NNAccel, record)) {
   uint superClusterID = PrimitiveIndex();
   float3 aabbMin = gprt::load<float3>(record.superClusters, 2 * superClusterID + 0) + record.maxSearchRange;
   float3 aabbMax = gprt::load<float3>(record.superClusters, 2 * superClusterID + 1) - record.maxSearchRange;
@@ -584,7 +586,7 @@ void ClosestPrimitiveQuery(
   }
 }
 
-GPRT_ANY_HIT_PROGRAM(ClosestPointAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+GPRT_ANY_HIT_PROGRAM(ClosestPointAnyHit, (NNAccel, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
   uint superClusterID = PrimitiveIndex();
   float3 origin = WorldRayOrigin();
 
@@ -602,7 +604,7 @@ GPRT_ANY_HIT_PROGRAM(ClosestPointAnyHit, (KNNAccelData, record), (NNPayload, pay
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
 
-GPRT_ANY_HIT_PROGRAM(ClosestEdgeAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+GPRT_ANY_HIT_PROGRAM(ClosestEdgeAnyHit, (NNAccel, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
   uint superClusterID = PrimitiveIndex();
   float3 origin = WorldRayOrigin();
 
@@ -620,7 +622,7 @@ GPRT_ANY_HIT_PROGRAM(ClosestEdgeAnyHit, (KNNAccelData, record), (NNPayload, payl
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
 
-GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (KNNAccelData, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
   uint superClusterID = PrimitiveIndex();
   float3 origin = WorldRayOrigin();
 
