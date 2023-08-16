@@ -1049,14 +1049,14 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtNNPointsAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
                                             unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtNNPointsAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
                          unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtNNPointsAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+  return gprtNNPointAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1072,14 +1072,14 @@ gprtNNPointsAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtNNEdgesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
                                             unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtNNEdgesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
                          unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtNNEdgesAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+  return gprtNNEdgeAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1095,14 +1095,14 @@ gprtNNEdgesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> 
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtNNTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtNNTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
                                             unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtNNTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+gprtNNTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
                          unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtNNTrianglesAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+  return gprtNNTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
 GPRT_API void gprtNNAccelSetSearchRange(GPRTAccel nnAccel, float searchRange);

@@ -2483,6 +2483,10 @@ struct GeomType : public SBTEntry {
       if (pixelShaderStages[i].module)
         vkDestroyShaderModule(logicalDevice, pixelShaderStages[i].module, nullptr);
     }
+    for (uint32_t i = 0; i < closestNeighborShaderStages.size(); ++i) {
+      if (closestNeighborShaderStages[i].module)
+        vkDestroyShaderModule(logicalDevice, closestNeighborShaderStages[i].module, nullptr);
+    }
 
     for (uint32_t i = 0; i < raster.size(); ++i) {
       if (raster[i].pipelineLayout) {
@@ -2892,7 +2896,6 @@ struct Context {
 
   std::vector<RayGen *> raygenPrograms;
   std::vector<Miss *> missPrograms;
-  std::vector<GeomType *> geomTypes;
 
   bool computePipelinesOutOfDate = true;
   bool rasterPipelinesOutOfDate = true;
@@ -4075,6 +4078,37 @@ struct Context {
 
     freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
+
+    // verify these are all cleared.
+    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
+      if (GeomType::geomTypes[i] != nullptr) throw std::runtime_error("Not all geom types destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
+      if (Buffer::buffers[i] != nullptr) throw std::runtime_error("Not all buffers destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
+      if (Texture::texture1Ds[i] != nullptr) throw std::runtime_error("Not all texture1Ds destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
+      if (Texture::texture2Ds[i] != nullptr) throw std::runtime_error("Not all texture2Ds destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
+      if (Texture::texture3Ds[i] != nullptr) throw std::runtime_error("Not all texture3Ds destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
+      if (Sampler::samplers[i] != nullptr) throw std::runtime_error("Not all samplers destroyed!");
+    }
+
+    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+      if (Compute::computes[i] != nullptr) throw std::runtime_error("Not all compute programs destroyed!");
+    }
+   
+
   }
 
   ~Context(){};
@@ -4501,9 +4535,11 @@ struct Context {
     nnPointsType = gprtGeomTypeCreate<gprt::NNAccel>((GPRTContext)this, GPRT_AABBS);
     gprtGeomTypeSetIntersectionProg(nnPointsType, 0, (GPRTModule)module, "ClosestNeighborIntersection");
     gprtGeomTypeSetAnyHitProg(nnPointsType, 0, (GPRTModule)module, "ClosestPointAnyHit");
+    
     nnEdgesType = gprtGeomTypeCreate<gprt::NNAccel>((GPRTContext)this, GPRT_AABBS);
     gprtGeomTypeSetIntersectionProg(nnEdgesType, 0, (GPRTModule)module, "ClosestNeighborIntersection");
     gprtGeomTypeSetAnyHitProg(nnEdgesType, 0, (GPRTModule)module, "ClosestEdgeAnyHit");
+    
     nnTrianglesType = gprtGeomTypeCreate<gprt::NNAccel>((GPRTContext)this, GPRT_AABBS);
     gprtGeomTypeSetIntersectionProg(nnTrianglesType, 0, (GPRTModule)module, "ClosestNeighborIntersection");
     gprtGeomTypeSetAnyHitProg(nnTrianglesType, 0, (GPRTModule)module, "ClosestTriangleAnyHit");
@@ -4522,6 +4558,17 @@ struct Context {
     internalComputePrograms["ComputeTriangleClusters"]->destroy();
     internalComputePrograms["ComputeTriangleHilbertCodes"]->destroy();
     internalComputePrograms["ComputeSuperClusters"]->destroy();
+
+    delete internalComputePrograms["ComputePointBounds"];
+    delete internalComputePrograms["ComputePointClusters"];
+    delete internalComputePrograms["ComputePointHilbertCodes"];
+    delete internalComputePrograms["ComputeEdgeBounds"];
+    delete internalComputePrograms["ComputeEdgeClusters"];
+    delete internalComputePrograms["ComputeEdgeHilbertCodes"];
+    delete internalComputePrograms["ComputeTriangleBounds"];
+    delete internalComputePrograms["ComputeTriangleClusters"];
+    delete internalComputePrograms["ComputeTriangleHilbertCodes"];
+    delete internalComputePrograms["ComputeSuperClusters"];
 
     internalComputePrograms.erase("ComputePointBounds");
     internalComputePrograms.erase("ComputePointClusters");
@@ -8666,7 +8713,7 @@ void Context::buildPipeline() {
       if (!GeomType::geomTypes[i])
         continue;
       for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
-        geomTypes[i]->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+        GeomType::geomTypes[i]->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
                                           texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                           bufferDescriptorSetLayout, rasterRecordDescriptorSetLayout);
       }
@@ -9589,8 +9636,6 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   }
 
-  context->geomTypes.push_back(geomType);
-
   return (GPRTGeomType) geomType;
 }
 
@@ -10428,7 +10473,7 @@ GPRT_API GPRTAccel
 gprtNNEdgeAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  NNEdgeAccel *accel = new NNEdgeAccel(context, numGeometries, (NNPointGeom *) arrayOfChildGeoms);
+  NNEdgeAccel *accel = new NNEdgeAccel(context, numGeometries, (NNEdgeGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel); // I think this is a bug
   return (GPRTAccel) accel;
 }
@@ -10437,7 +10482,7 @@ GPRT_API GPRTAccel
 gprtNNTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  NNTriangleAccel *accel = new NNTriangleAccel(context, numGeometries, (NNPointGeom *) arrayOfChildGeoms);
+  NNTriangleAccel *accel = new NNTriangleAccel(context, numGeometries, (NNTriangleGeom *) arrayOfChildGeoms);
   context->accels.push_back(accel); // I think this is a bug
   return (GPRTAccel) accel;
 }

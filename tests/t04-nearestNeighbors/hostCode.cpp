@@ -120,7 +120,7 @@ main(int ac, char **av) {
 
     // Create the accel
     float searchRange = 10.1f;
-    GPRTAccel knnAccel = gprtNNPointsAccelCreate(context, 1, &geom);
+    GPRTAccel knnAccel = gprtNNPointAccelCreate(context, 1, &geom);
     gprtNNAccelSetSearchRange(knnAccel, searchRange);
 
     // enabling internal testing variable
@@ -182,6 +182,7 @@ main(int ac, char **av) {
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
     gprtAccelDestroy(knnAccel);  
+    gprtGeomTypeDestroy(pointGeomType);
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }
@@ -194,12 +195,12 @@ main(int ac, char **av) {
     // -------------------------------------------------------
     // declare geometry type
     // -------------------------------------------------------
-    GPRTGeomTypeOf<NNData> pointGeomType = 
+    GPRTGeomTypeOf<NNData> edgeGeomType = 
       gprtGeomTypeCreate<NNData>(context, GPRT_NN_EDGES);
-    // GPRTKNNGeomType pointGeomType =
+    // GPRTKNNGeomType edgeGeomType =
     //   gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
-    // gprtGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
-    // gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    // gprtGeomTypeSetClosestNeighborProg(edgeGeomType, 0, module, "closestPoint");
+    // gprtKNNGeomTypeSetClosestNeighborProg(edgeGeomType, 0, module, "closestPoint");
 
     // -------------------------------------------------------
     // set up ray gen program
@@ -226,13 +227,13 @@ main(int ac, char **av) {
     // Treat vertices of high res teapot as our data points.
     GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, primitiveModel.vertices.size(), primitiveModel.vertices.data());
     GPRTBufferOf<uint2> indices = gprtDeviceBufferCreate<uint2>(context, primitiveModel.edges.size(), primitiveModel.edges.data());
-    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, pointGeomType);
+    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, edgeGeomType);
     gprtNNEdgesSetVertices(geom, vertices, primitiveModel.vertices.size());
     gprtNNEdgesSetIndices(geom, indices, primitiveModel.edges.size());
 
     // Create the accel
     float searchRange = 10.1f;
-    GPRTAccel knnAccel = gprtNNEdgesAccelCreate(context, 1, &geom);
+    GPRTAccel knnAccel = gprtNNEdgeAccelCreate(context, 1, &geom);
     gprtNNAccelSetSearchRange(knnAccel, searchRange);
 
     // enabling internal testing variable
@@ -295,6 +296,7 @@ main(int ac, char **av) {
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
     gprtAccelDestroy(knnAccel);  
+    gprtGeomTypeDestroy(edgeGeomType);
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }
@@ -307,12 +309,12 @@ main(int ac, char **av) {
     // -------------------------------------------------------
     // declare geometry type
     // -------------------------------------------------------
-    GPRTGeomTypeOf<NNData> pointGeomType = 
+    GPRTGeomTypeOf<NNData> triangleGeomType = 
       gprtGeomTypeCreate<NNData>(context, GPRT_NN_TRIANGLES);
-    // GPRTKNNGeomType pointGeomType =
+    // GPRTKNNGeomType triangleGeomType =
     //   gprtKNNGeomTypeCreate(context, GPRT_KNN_GEOM_KIND_POINTS /* <- This is new! */);
-    // gprtGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
-    // gprtKNNGeomTypeSetClosestNeighborProg(pointGeomType, 0, module, "closestPoint");
+    // gprtGeomTypeSetClosestNeighborProg(triangleGeomType, 0, module, "closestPoint");
+    // gprtKNNGeomTypeSetClosestNeighborProg(triangleGeomType, 0, module, "closestPoint");
 
     // -------------------------------------------------------
     // set up ray gen program
@@ -339,13 +341,13 @@ main(int ac, char **av) {
     // Treat vertices of high res teapot as our data points.
     GPRTBufferOf<float3> vertices = gprtDeviceBufferCreate<float3>(context, primitiveModel.vertices.size(), primitiveModel.vertices.data());
     GPRTBufferOf<uint3> indices = gprtDeviceBufferCreate<uint3>(context, primitiveModel.triangles.size(), primitiveModel.triangles.data());
-    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, pointGeomType);
+    GPRTGeomOf<NNData> geom = gprtGeomCreate(context, triangleGeomType);
     gprtNNTrianglesSetVertices(geom, vertices, primitiveModel.vertices.size());
-    gprtNNTrianglesSetIndices(geom, indices, primitiveModel.edges.size());
+    gprtNNTrianglesSetIndices(geom, indices, primitiveModel.triangles.size());
 
     // Create the accel
     float searchRange = 10.1f;
-    GPRTAccel knnAccel = gprtNNTrianglesAccelCreate(context, 1, &geom);
+    GPRTAccel knnAccel = gprtNNTriangleAccelCreate(context, 1, &geom);
     gprtNNAccelSetSearchRange(knnAccel, searchRange);
 
     // enabling internal testing variable
@@ -407,6 +409,7 @@ main(int ac, char **av) {
     gprtBufferDestroy(resultIDsBuffer);
     gprtBufferDestroy(resultDistsBuffer);
     gprtAccelDestroy(knnAccel);  
+    gprtGeomTypeDestroy(triangleGeomType);
     gprtModuleDestroy(module);
     gprtContextDestroy(context);
   }
