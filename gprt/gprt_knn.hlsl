@@ -100,65 +100,6 @@ bitTranspose(uint32_t nDims, uint32_t nBits, bitmask_t inCoords)
   return coords;
 }
 
-
-/*****************************************************************
- * hilbert_i2c
- * 
- * Convert an index into a Hilbert curve to a set of coordinates.
- * Inputs:
- *  nDims:      Number of coordinate axes.
- *  nBits:      Number of bits per axis.
- *  index:      The index, contains nDims*nBits bits (so nDims*nBits must be <= 8*sizeof(bitmask_t)).
- * Outputs:
- *  coord:      The list of nDims coordinates, each with nBits bits.
- * Assumptions:
- *      nDims*nBits <= (sizeof index) * (bits_per_byte)
- */
-
-inline void hilbert_i2c(uint32_t nDims, uint32_t nBits, bitmask_t index, bitmask_t coord[])
-{
-  if (nDims > 1)
-    {
-      bitmask_t coords;
-      halfmask_t const nbOnes = ones(halfmask_t,nBits);
-      uint32_t d;
-
-      if (nBits > 1)
-	{
-	  uint32_t const nDimsBits = nDims*nBits;
-	  halfmask_t const ndOnes = ones(halfmask_t,nDims);
-	  halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
-	  uint32_t b = nDimsBits;
-	  uint32_t rotation = 0;
-	  halfmask_t flipBit = 0;
-	  bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
-	  index ^= (index ^ nthbits) >> 1;
-	  coords = 0;
-	  do
-	    {
-	      halfmask_t bits = (halfmask_t)((index >> (b-=nDims)) & ndOnes);
-	      coords <<= nDims;
-	      coords |= rotateLeft(bits, rotation, nDims) ^ flipBit;
-	      flipBit = (halfmask_t)1 << rotation;
-	      adjust_rotation(rotation,nDims,bits);
-	    } while (b);
-	  for (b = nDims; b < nDimsBits; b *= 2)
-	    coords ^= coords >> b;
-	  coords = bitTranspose(nBits, nDims, coords);
-	}
-      else
-	coords = index ^ (index >> 1);
-
-      for (d = 0; d < nDims; ++d)
-	{
-	  coord[d] = coords & nbOnes;
-	  coords >>= nBits;
-	}
-    }
-  else
-    coord[0] = index;
-}
-
 /*****************************************************************
  * hilbert_c2i
  * 
@@ -171,69 +112,222 @@ inline void hilbert_i2c(uint32_t nDims, uint32_t nBits, bitmask_t index, bitmask
  * Assumptions:
  *      nDims*nBits <= (sizeof bitmask_t) * (bits_per_byte)
  */
-inline bitmask_t hilbert_c2i(uint32_t nBits, bitmask_t const coord[3])
+// inline bitmask_t hilbert_c2i(uint32_t nBits, bitmask_t const coord[3])
+// {
+//   int nDims = 3;
+//   if (nDims > 1)
+//     {
+//       uint32_t const nDimsBits = nDims*nBits;
+//       bitmask_t index;
+//       uint32_t d;
+//       bitmask_t coords = 0;
+//       for (d = nDims; d--; )
+// 	{
+// 	  coords <<= nBits;
+// 	  coords |= coord[d];
+// 	}
+
+//       if (nBits > 1)
+// 	{
+// 	  halfmask_t const ndOnes = ones(halfmask_t,nDims);
+// 	  halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+// 	  uint32_t b = nDimsBits;
+// 	  uint32_t rotation = 0;
+// 	  halfmask_t flipBit = 0;
+// 	  bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+// 	  coords = bitTranspose(nDims, nBits, coords);
+// 	  coords ^= coords >> nDims;
+// 	  index = 0;
+// 	  do
+// 	    {
+// 	      halfmask_t bits = (halfmask_t)((coords >> (b-=nDims)) & ndOnes);
+// 	      bits = (halfmask_t)rotateRight(flipBit ^ bits, rotation, nDims);
+// 	      index <<= nDims;
+// 	      index |= bits;
+// 	      flipBit = (halfmask_t)1 << rotation;
+// 	      adjust_rotation(rotation,nDims,bits);
+// 	    } while (b);
+// 	  index ^= nthbits >> 1;
+// 	}
+//       else
+// 	index = coords;
+//       for (d = 1; d < nDimsBits; d *= 2)
+// 	index ^= index >> d;
+//       return index;
+//     }
+//   else
+//     return coord[0];
+// }
+
+inline bitmask_t hilbert_c2i_3d(uint nBits, bitmask_t const coord[3])
 {
   int nDims = 3;
-  if (nDims > 1)
-    {
-      uint32_t const nDimsBits = nDims*nBits;
-      bitmask_t index;
-      uint32_t d;
-      bitmask_t coords = 0;
-      for (d = nDims; d--; )
-	{
-	  coords <<= nBits;
-	  coords |= coord[d];
-	}
-
-      if (nBits > 1)
-	{
-	  halfmask_t const ndOnes = ones(halfmask_t,nDims);
-	  halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
-	  uint32_t b = nDimsBits;
-	  uint32_t rotation = 0;
-	  halfmask_t flipBit = 0;
-	  bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
-	  coords = bitTranspose(nDims, nBits, coords);
-	  coords ^= coords >> nDims;
-	  index = 0;
-	  do
-	    {
-	      halfmask_t bits = (halfmask_t)((coords >> (b-=nDims)) & ndOnes);
-	      bits = (halfmask_t)rotateRight(flipBit ^ bits, rotation, nDims);
-	      index <<= nDims;
-	      index |= bits;
-	      flipBit = (halfmask_t)1 << rotation;
-	      adjust_rotation(rotation,nDims,bits);
-	    } while (b);
-	  index ^= nthbits >> 1;
-	}
-      else
-	index = coords;
-      for (d = 1; d < nDimsBits; d *= 2)
-	index ^= index >> d;
-      return index;
-    }
+  
+  uint const nDimsBits = nDims*nBits;
+  bitmask_t index;
+  uint d;
+  bitmask_t coords = 0;
+  for (d = nDims; d--; )
+  {
+    coords <<= nBits;
+    coords |= coord[d];
+  }
+  if (nBits > 1)
+  {
+    halfmask_t const ndOnes = ones(halfmask_t,nDims);
+    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    uint b = nDimsBits;
+    uint rotation = 0;
+    halfmask_t flipBit = 0;
+    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    coords = bitTranspose(nDims, nBits, coords);
+    coords ^= coords >> nDims;
+    index = 0;
+    do {
+        halfmask_t bits = halfmask_t((coords >> (b-=nDims)) & ndOnes);
+        bits = halfmask_t(rotateRight(flipBit ^ bits, rotation, nDims));
+        index <<= nDims;
+        index |= bits;
+        flipBit = (halfmask_t)1 << rotation;
+        adjust_rotation(rotation,nDims,bits);
+    } while (b);
+    index ^= nthbits >> 1;
+  }
   else
-    return coord[0];
+    index = coords;
+  for (d = 1; d < nDimsBits; d *= 2)
+    index ^= index >> d;
+  return index;
+}
+
+inline bitmask_t hilbert_c2i_4d(uint nBits, bitmask_t const coord[4])
+{
+  int nDims = 4;
+  
+  uint const nDimsBits = nDims*nBits;
+  bitmask_t index;
+  uint d;
+  bitmask_t coords = 0;
+  for (d = nDims; d--; )
+  {
+    coords <<= nBits;
+    coords |= coord[d];
+  }
+  if (nBits > 1)
+  {
+    halfmask_t const ndOnes = ones(halfmask_t,nDims);
+    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    uint b = nDimsBits;
+    uint rotation = 0;
+    halfmask_t flipBit = 0;
+    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    coords = bitTranspose(nDims, nBits, coords);
+    coords ^= coords >> nDims;
+    index = 0;
+    do {
+        halfmask_t bits = halfmask_t((coords >> (b-=nDims)) & ndOnes);
+        bits = halfmask_t(rotateRight(flipBit ^ bits, rotation, nDims));
+        index <<= nDims;
+        index |= bits;
+        flipBit = (halfmask_t)1 << rotation;
+        adjust_rotation(rotation,nDims,bits);
+    } while (b);
+    index ^= nthbits >> 1;
+  }
+  else
+    index = coords;
+  for (d = 1; d < nDimsBits; d *= 2)
+    index ^= index >> d;
+  return index;
 }
 
 inline uint32_t hilbert_encode3D(float x, float y, float z)
 {
-    x = x * (float)(1 << 10);
-    y = y * (float)(1 << 10);
-    z = z * (float)(1 << 10);
-    const bitmask_t coord[3] = {bitmask_t(x), bitmask_t(y), bitmask_t(z)};
-    return uint32_t(hilbert_c2i(10, coord));
+    x = x * (float)(1ul << 10);
+    y = y * (float)(1ul << 10);
+    z = z * (float)(1ul << 10);
+    bitmask_t coord[3];
+    coord[0] = bitmask_t(x);
+    coord[1] = bitmask_t(y);
+    coord[2] = bitmask_t(z);
+    return uint32_t(hilbert_c2i_3d(10, coord));
+}
+
+inline uint32_t hilbert_encode4D(float x, float y, float z, float w)
+{
+    x = x * (float)(1ul << 8);
+    y = y * (float)(1ul << 8);
+    z = z * (float)(1ul << 8);
+    w = w * (float)(1ul << 8);
+    bitmask_t coord[4];
+    coord[0] = bitmask_t(x);
+    coord[1] = bitmask_t(y);
+    coord[2] = bitmask_t(z);
+    coord[3] = bitmask_t(w);
+    return uint32_t(hilbert_c2i_4d(8, coord));
 }
 
 inline uint64_t hilbert64_encode3D(float x, float y, float z)
 {
-    x = x * (float)(1 << 20);
-    y = y * (float)(1 << 20);
-    z = z * (float)(1 << 20);
-    const bitmask_t coord[3] = {bitmask_t(x), bitmask_t(y), bitmask_t(z)};
-    return hilbert_c2i(20, coord);
+    x = x * (float)(1ull << 20);
+    y = y * (float)(1ull << 20);
+    z = z * (float)(1ull << 20);
+    bitmask_t coord[3];
+    coord[0] = bitmask_t(x);
+    coord[1] = bitmask_t(y);
+    coord[2] = bitmask_t(z);
+    return hilbert_c2i_3d(20, coord);
+}
+
+inline uint64_t hilbert64_encode4D(float x, float y, float z, float w)
+{
+    x = x * (float)(1ull << 16);
+    y = y * (float)(1ull << 16);
+    z = z * (float)(1ull << 16);
+    w = w * (float)(1ull << 16);
+    bitmask_t coord[4];
+    coord[0] = bitmask_t(x);
+    coord[1] = bitmask_t(y);
+    coord[2] = bitmask_t(z);
+    coord[3] = bitmask_t(w);
+    return hilbert_c2i_4d(16, coord);
+}
+
+uint separate_bits(uint n)
+{
+    n &=                  0x000003FF;// 0xb00000000000000000000001111111111u;
+    n = (n ^ (n << 16)) & 0xFF0000FF;// 0xb11111111000000000000000011111111u;
+    n = (n ^ (n <<  8)) & 0x0300F00F;// 0xb00000011000000001111000000001111u;
+    n = (n ^ (n <<  4)) & 0x030C30C3;// 0xb00000011000011000011000011000011u;
+    n = (n ^ (n <<  2)) & 0x09249249;// 0xb00001001001001001001001001001001u;
+    return n;
+};
+
+uint64_t separate_bits_64(uint64_t n)
+{
+    n &=                  0x00000000003FFFFF;//0b0000000000000000000000000000000000000000001111111111111111111111ull;
+    n = (n ^ (n << 32)) & 0xFFFF00000000FFFF;//0b1111111111111111000000000000000000000000000000001111111111111111ull;
+    n = (n ^ (n << 16)) & 0x00FF0000FF0000FF;//0b0000000011111111000000000000000011111111000000000000000011111111ull;
+    n = (n ^ (n <<  8)) & 0xF00F00F00F00F00F;//0b1111000000001111000000001111000000001111000000001111000000001111ull;
+    n = (n ^ (n <<  4)) & 0x30C30C30C30C30C3;//0b0011000011000011000011000011000011000011000011000011000011000011ull;
+    n = (n ^ (n <<  2)) & 0x9249249249249249;//0b1001001001001001001001001001001001001001001001001001001001001001ull;
+    return n;
+};  
+
+inline uint morton_encode3D(float x, float y, float z)
+{
+  x = x * (float)(1ul << 10);
+  y = y * (float)(1ul << 10);
+  z = z * (float)(1ul << 10);
+  return separate_bits(x) | (separate_bits(y) << 1) | (separate_bits(z) << 2); 
+}
+
+inline uint64_t morton64_encode3D(float x, float y, float z)
+{
+  x = x * (float)(1ull << 20);
+  y = y * (float)(1ull << 20);
+  z = z * (float)(1ull << 20);
+  return separate_bits_64(x) | (separate_bits_64(y) << 1) | (separate_bits_64(z) << 2); 
 }
 
 bool getPointBounds(gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
@@ -296,6 +390,23 @@ bool getTriangleCentroid(gprt::Buffer triangles, gprt::Buffer points, uint primI
   return true; 
 }
 
+bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points, uint primID, out float3 c, out float d) 
+{
+  d = 0.f;
+  uint3 tri = gprt::load<uint3>(triangles, primID);
+  float3 p1 = gprt::load<float3>(points, tri.x);
+  if (isnan(p1.x)) return false;
+  float3 p2 = gprt::load<float3>(points, tri.y);
+  float3 p3 = gprt::load<float3>(points, tri.z);
+  c = (p1 + p2 + p3) / 3.f;
+
+  float3 aabbMin = min(min(p1, p2), p3);
+  float3 aabbMax = max(max(p1, p2), p3);
+  float3 diagonal = aabbMax - aabbMin;
+  d = length(diagonal);
+  return true; 
+}
+
 typedef gprt::NNAccel NNAccel;
 
 GPRT_COMPUTE_PROGRAM(ComputePointBounds, (NNAccel, record), (1,1,1)) {
@@ -342,19 +453,33 @@ GPRT_COMPUTE_PROGRAM(ComputePointHilbertCodes, (NNAccel, record), (1, 1, 1)) {
   if (primID >= record.numPrims) return;
   float3 c;
   if (!getPointCentroid(record.points, primID, c)) {
-    gprt::store<uint>(record.hilbertCodes, primID, -1);
+    gprt::store<uint>(record.codes, primID, -1);
+    return;
+  }
+  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+  c = (c - aabbMin) / (aabbMax - aabbMin);
+  
+  uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputePointMortonCodes, (NNAccel, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 c;
+  if (!getPointCentroid(record.points, primID, c)) {
+    gprt::store<uint>(record.codes, primID, -1);
     return;
   }
   float3 aabbMin = gprt::load<float3>(record.aabb, 0);
   float3 aabbMax = gprt::load<float3>(record.aabb, 1);
   c = (c - aabbMin) / (aabbMax - aabbMin);
 
-  // Quantize to 10 bit
-  c = min(max(c * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
-  
-  uint code = hilbert_encode3D(c.x, c.y, c.z);
-  gprt::store<uint>(record.hilbertCodes, primID, code);
-  gprt::store<uint>(record.ids, primID, primID);
+  uint64_t code = morton64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (NNAccel, record), (1, 1, 1)) {
@@ -362,7 +487,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (NNAccel, record), (1, 1, 1)) {
   if (primID >= record.numPrims) return;
   float3 c;
   if (!getEdgeCentroid(record.edges, record.points, primID, c)) {
-    gprt::store<uint>(record.hilbertCodes, primID, -1);
+    gprt::store<uint>(record.codes, primID, -1);
     return;
   }
 
@@ -371,12 +496,28 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeHilbertCodes, (NNAccel, record), (1, 1, 1)) {
 
   c = (c - aabbMin) / (aabbMax - aabbMin);
 
-  // Quantize to 10 bit
-  c = min(max(c * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+  uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeEdgeMortonCodes, (NNAccel, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 c;
+  if (!getEdgeCentroid(record.edges, record.points, primID, c)) {
+    gprt::store<uint>(record.codes, primID, -1);
+    return;
+  }
+
+  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+
+  c = (c - aabbMin) / (aabbMax - aabbMin);
   
-  uint code = hilbert_encode3D(c.x, c.y, c.z);
-  gprt::store<uint>(record.hilbertCodes, primID, code);
-  gprt::store<uint>(record.ids, primID, primID);
+  uint64_t code = morton64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (NNAccel, record), (1, 1, 1)) {
@@ -384,7 +525,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (NNAccel, record), (1, 1, 1)) 
   if (primID >= record.numPrims) return;
   float3 c;
   if (!getTriangleCentroid(record.triangles, record.points, primID, c)) {
-    gprt::store<uint>(record.hilbertCodes, primID, -1);
+    gprt::store<uint>(record.codes, primID, -1);
     return;
   }
 
@@ -393,12 +534,54 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (NNAccel, record), (1, 1, 1)) 
 
   c = (c - aabbMin) / (aabbMax - aabbMin);
 
-  // Quantize to 10 bit
-  c = min(max(c * 1024.f, float3(0.f, 0.f, 0.f)), float3(1023.f, 1023.f, 1023.f));
+  uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
+}
 
-  uint code = hilbert_encode3D(c.x, c.y, c.z);
-  gprt::store<uint>(record.hilbertCodes, primID, code);
-  gprt::store<uint>(record.ids, primID, primID);
+GPRT_COMPUTE_PROGRAM(ComputeTriangle4DHilbertCodes, (NNAccel, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 c;
+  float d;
+  if (!getTriangleCentroidAndDiagonal(record.triangles, record.points, primID, c, d)) {
+    gprt::store<uint>(record.codes, primID, -1);
+    return;
+  }
+
+  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+  float3 diagonal = aabbMax - aabbMin;
+
+  c = (c - aabbMin) / (aabbMax - aabbMin);
+  float s = d / length(diagonal);
+  // xyzs xyzs xyzs xyzs xyzs xyzs xyzs xyzs
+
+  if (primID < 10) {
+    printf("ID is %d, s is %f\n", primID, s);
+  }
+  uint64_t code = hilbert64_encode4D(c.x, c.y, c.z, s);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (NNAccel, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
+  float3 c;
+  if (!getTriangleCentroid(record.triangles, record.points, primID, c)) {
+    gprt::store<uint>(record.codes, primID, -1);
+    return;
+  }
+
+  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+
+  c = (c - aabbMin) / (aabbMax - aabbMin);
+
+  uint64_t code = morton64_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(record.codes, primID, code);
+  gprt::store<uint64_t>(record.ids, primID, primID);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputePointClusters, (NNAccel, record), (1,1,1)) {
@@ -411,7 +594,7 @@ GPRT_COMPUTE_PROGRAM(ComputePointClusters, (NNAccel, record), (1,1,1)) {
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
   for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
     uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
-    uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
+    uint32_t primID = uint32_t(gprt::load<uint64_t>(record.ids, idx));
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
     if (!getPointBounds(record.points, primID, aabbMin, aabbMax)) continue;
@@ -433,7 +616,7 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (NNAccel, record), (1,1,1)) {
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
   for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
     uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
-    uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
+    uint32_t primID = uint32_t(gprt::load<uint64_t>(record.ids, idx));
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
     if (!getEdgeBounds(record.edges, record.points, primID, aabbMin, aabbMax)) continue;
@@ -455,7 +638,29 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (NNAccel, record), (1,1,1)) {
   float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
   for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
     uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
-    uint32_t primID = gprt::load<uint32_t>(record.ids, idx);
+    uint32_t primID = uint32_t(gprt::load<uint64_t>(record.ids, idx));
+    if (primID >= numPrims || primID == -1) continue;
+    float3 aabbMin, aabbMax;
+    if (!getTriangleBounds(record.triangles, record.points, primID, aabbMin, aabbMax)) continue;
+    clusterAabbMin = min(aabbMin, clusterAabbMin);
+    clusterAabbMax = max(aabbMax, clusterAabbMax);
+  }
+
+  gprt::store<float3>(record.clusters, 2 * clusterID + 0, clusterAabbMin);
+  gprt::store<float3>(record.clusters, 2 * clusterID + 1, clusterAabbMax);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeSplitTriangleClusters, (NNAccel, record), (1,1,1)) {
+  int clusterID = DispatchThreadID.x;
+  if (clusterID >= record.numClusters) return;
+  uint32_t numPrims = record.numPrims;
+  uint32_t numClusters = record.numClusters;
+
+  float3 clusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
+  float3 clusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
+  for (uint32_t i = 0; i < NUM_PRIMS_PER_CLUSTER; ++i) {
+    uint32_t idx = NUM_PRIMS_PER_CLUSTER * clusterID + i;
+    uint32_t primID = uint32_t(gprt::load<uint64_t>(record.ids, idx));
     if (primID >= numPrims || primID == -1) continue;
     float3 aabbMin, aabbMax;
     if (!getTriangleBounds(record.triangles, record.points, primID, aabbMin, aabbMax)) continue;
@@ -514,6 +719,7 @@ void ClosestPrimitiveQuery(
   int numClusters, 
   int numPrims, 
   int primType, 
+  float maxSearchRange, 
   gprt::Buffer clusters,
   gprt::Buffer primIDs,
   gprt::Buffer vertices,
@@ -521,6 +727,8 @@ void ClosestPrimitiveQuery(
   inout NNPayload payload
   )
 {   
+  payload.stats.z++; // Count this as traversing a supercluster
+
   // Initialize active cluster list
   int activeClusters[NUM_CLUSTERS_PER_SUPERCLUSTER];
   float clusterDistances[NUM_CLUSTERS_PER_SUPERCLUSTER];
@@ -536,10 +744,17 @@ void ClosestPrimitiveQuery(
     float3 aabbMin = gprt::load<float3>(clusters, clusterID * 2 + 0);
     float3 aabbMax = gprt::load<float3>(clusters, clusterID * 2 + 1);
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
-    if (minDist >= clusterDistances[0]) continue;
+    
+    // Skip clusters outside the search radius
+    if (minDist >= maxSearchRange * maxSearchRange) continue;
+
+    // Skip clusters father than current closest primitive
+    if (minDist >= payload.closestDistance) continue;
+
+    // // Skip clusters   
+    // if (minDist >= clusterDistances[0]) continue;
     clusterDistances[0] = minDist;
     activeClusters[0] = clusterID;
-
     for (int j = 1; j < NUM_CLUSTERS_PER_SUPERCLUSTER; ++j) {
       if (clusterDistances[j-1] >= clusterDistances[j]) break;
       float tmpDist = clusterDistances[j-1]; clusterDistances[j-1] = clusterDistances[j]; clusterDistances[j] = tmpDist;
@@ -555,9 +770,12 @@ void ClosestPrimitiveQuery(
     // break out when all clusters from here on are too far
     if (minDist >= payload.closestDistance) break;
 
+    payload.stats.y++; // Count this as traversing a cluster
+
     // Traverse all primitives in this cluster
-    for (int j = 0; j < NUM_CLUSTERS_PER_SUPERCLUSTER; ++j) {
-      int primitiveID = gprt::load<int>(primIDs, clusterID * NUM_PRIMS_PER_CLUSTER + j);
+    for (int j = 0; j < NUM_PRIMS_PER_CLUSTER; ++j) {
+      payload.stats.x++; // Count this as traversing a primitive
+      int primitiveID = int(gprt::load<uint64_t>(primIDs, clusterID * NUM_PRIMS_PER_CLUSTER + j));
       float dist = 1e20f;
       if (primType == 0) {
         float3 a = gprt::load<float3>(vertices, primitiveID);
@@ -577,6 +795,7 @@ void ClosestPrimitiveQuery(
         if (isnan(a.x)) continue;
         dist = getTriangleDist2(queryOrigin, a, b, c);
       }
+      if (dist > pow(maxSearchRange, 2.f)) continue;
       if (dist >= payload.closestDistance) continue;
       
       // replace the closest primitive
@@ -598,7 +817,7 @@ GPRT_ANY_HIT_PROGRAM(ClosestPointAnyHit, (NNAccel, record), (NNPayload, payload)
 
   ClosestPrimitiveQuery(
     origin, superClusterID, 
-    record.numClusters, record.numPrims, 0,
+    record.numClusters, record.numPrims, 0, record.maxSearchRange,
     record.clusters, record.ids, record.points, gprt::Buffer(0,0), payload);
 
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
@@ -616,13 +835,16 @@ GPRT_ANY_HIT_PROGRAM(ClosestEdgeAnyHit, (NNAccel, record), (NNPayload, payload),
 
   ClosestPrimitiveQuery(
     origin, superClusterID, 
-    record.numClusters, record.numPrims, 1,
+    record.numClusters, record.numPrims, 1, record.maxSearchRange,
     record.clusters, record.ids, record.points, record.edges, payload);
 
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
 
 GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, payload), (ClosestPointAttributes, hitSuperCluster)) {
+  // gprt::ignoreHit();
+  // return;
+
   uint superClusterID = PrimitiveIndex();
   float3 origin = WorldRayOrigin();
 
@@ -632,10 +854,15 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
     return;
   }
 
+  // if (superClusterID == 0) {
+  //   printf("Max search range %f\n", record.maxSearchRange);
+  // }
+
   ClosestPrimitiveQuery(
     origin, superClusterID, 
-    record.numClusters, record.numPrims, 2,
+    record.numClusters, record.numPrims, 2, record.maxSearchRange,
     record.clusters, record.ids, record.points, record.triangles, payload);
 
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
+

@@ -30,6 +30,7 @@ embed_devicecode(
   OUTPUT_TARGET
     gprtDeviceCode
   HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
@@ -49,6 +50,7 @@ embed_devicecode(
   OUTPUT_TARGET
     lbvhDeviceCode
   HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_lbvh.h
@@ -60,6 +62,7 @@ embed_devicecode(
   OUTPUT_TARGET
     nnDeviceCode
   HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.h

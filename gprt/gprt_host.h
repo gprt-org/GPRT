@@ -119,60 +119,8 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
 using GPRTProgram = std::map<std::string, std::vector<uint8_t>>;
 
-namespace gprt {
-struct Buffer {
-  uint64_t x;
-  uint64_t y;
-};
-
-struct Accel {
-  uint64_t x;
-  uint64_t y;
-};
-
-// NOTE, struct must be synchronized with declaration in gprt_device.h
-struct NNAccel {
-    // input
-    alignas(4) uint32_t numPrims;
-    alignas(4) uint32_t numClusters;
-    alignas(4) uint32_t numSuperClusters;
-    alignas(4) float maxSearchRange;
-
-    alignas(16) gprt::Buffer points; 
-    alignas(16) gprt::Buffer edges; 
-    alignas(16) gprt::Buffer triangles;
-
-    // Hilbert codes of quantized primitive centroids
-    // One uint32_t per primitive
-    alignas(16) gprt::Buffer hilbertCodes;
-
-    // Primitive IDs that correspond to sorted hilbert codes. 
-    // One uint32_t per primitive
-    alignas(16) gprt::Buffer ids;
-
-    // Buffer containing the global AABB. Pair of two floats
-    alignas(16) gprt::Buffer aabb;
-
-    // Buffers of AABBs. Each aabb is a pair of float3.
-    alignas(16) gprt::Buffer clusters;
-
-    // Buffers of AABBs. Each AABB here contains clusters, but is also dialated by "maximum search range".
-    alignas(16) gprt::Buffer superClusters;
-
-    // An RT core tree
-    alignas(16) gprt::Accel accel;
-};
-
-struct Texture {
-  uint64_t x;
-  uint64_t y;
-};
-
-struct Sampler {
-  uint64_t x;
-  uint64_t y;
-};
-}   // namespace gprt
+// Shared internal data structures between GPU and CPU
+#include "gprt_shared.h"
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -1774,7 +1722,7 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
  *
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param buffer A buffer of 64-bit unsigned integers
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
@@ -1789,7 +1737,7 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param buffer A buffer of 64-bit unsigned integers
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
@@ -1805,8 +1753,8 @@ gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> sc
  * Radix sort requires a temporary "scratch" space
  *
  * @param context The GPRT context
- * @param keys A buffer of 32-bit unsigned integer keys
- * @param values A buffer of 32-bit values
+ * @param keys A buffer of 64-bit unsigned integer keys
+ * @param values A buffer of 64-bit values
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.

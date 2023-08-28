@@ -31,6 +31,8 @@
 
 #define alignas(alignment)
 
+#include "gprt_shared.h"
+
 struct PushConstants {
   uint64_t r[16];
 };
@@ -78,11 +80,6 @@ make_bgra(const float4 color) {
 //   uint64_t x;
 //   uint64_t y;
 // };
-
-// ideally this buffer type would be a struct...
-// but I'm running into a compiler bug reading one struct inside another one.
-// x stores pointer, y stores size.
-typedef uint64_t2 Buffer;
 
 template <typename T>
 T
@@ -142,9 +139,6 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
-// x stores pointer, y stores type
-typedef uint64_t2 Accel;
-
 [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 
 RaytracingAccelerationStructure
@@ -156,8 +150,6 @@ RWByteAddressBuffer
 getBufferHandle(Buffer buffer) {
   return buffers[buffer.y];
 }
-
-typedef uint64_t2 Texture;
 
 Texture1D
 getTexture1DHandle(gprt::Texture texture) {
@@ -174,7 +166,6 @@ getTexture3DHandle(gprt::Texture texture) {
   return texture3Ds[texture.x];
 }
 
-typedef uint64_t2 Sampler;
 
 SamplerState
 getSamplerHandle(gprt::Sampler sampler) {
@@ -192,39 +183,6 @@ getNumRayTypes() {
   // for now, we map PC 0 to ray type count
   return uint32_t(pc.r[0]);
 }
-
-// NOTE, struct must be synchronized with declaration in gprt_host.h
-struct NNAccel {
-    // input
-    alignas(4) uint32_t numPrims;
-    alignas(4) uint32_t numClusters;
-    alignas(4) uint32_t numSuperClusters;
-    alignas(4) float maxSearchRange;
-
-    alignas(16) gprt::Buffer points; 
-    alignas(16) gprt::Buffer edges; 
-    alignas(16) gprt::Buffer triangles;
-
-    // Hilbert codes of quantized primitive centroids
-    // One uint32_t per primitive
-    alignas(16) gprt::Buffer hilbertCodes;
-
-    // Primitive IDs that correspond to sorted hilbert codes. 
-    // One uint32_t per primitive
-    alignas(16) gprt::Buffer ids;
-
-    // Buffer containing the global AABB. Pair of two floats
-    alignas(16) gprt::Buffer aabb;
-
-    // Buffers of AABBs. Each aabb is a pair of float3.
-    alignas(16) gprt::Buffer clusters;
-
-    // Buffers of AABBs. Each AABB here contains clusters, but is also dialated by "maximum search range".
-    alignas(16) gprt::Buffer superClusters;
-
-    // An RT core tree
-    alignas(16) gprt::Accel accel;
-};
 
 };   // namespace gprt
 
