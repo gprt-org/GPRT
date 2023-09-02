@@ -1100,10 +1100,10 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
     float3 aabbMax = gprt::load<half3>(record.l2clusters, l2ClusterID * 2 + 1);
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     
-    // Skip superclusters outside the search radius
+    // Upward culling, skip superclusters outside the search radius
     if (minDist >= maxSearchRange * maxSearchRange) continue;
 
-    // Skip superclusters father than current closest primitive
+    // Upward culling, skip superclusters father than current closest primitive
     if (minDist >= payload.closestDistance) continue;
 
     // Insertion sort
@@ -1115,6 +1115,14 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
       half tmpDist = l2ClusterDistances[i-1]; l2ClusterDistances[i-1] = l2ClusterDistances[i]; l2ClusterDistances[i] = tmpDist;
       uint16_t tmpID = activeL2Clusters[i-1]; activeL2Clusters[i-1] = activeL2Clusters[i]; activeL2Clusters[i] = tmpID;
     }
+
+    // Downward culling... truncate closest distance to the pessemistic distance of this cluster
+    #ifdef ENABLE_DOWNAWARD_CULLING
+    if (payload.closestPrimitive != -1) {
+      float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+      if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
+    }
+    #endif
   }
 
   // Traverse clusters near to far
@@ -1159,6 +1167,14 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
         half tmpDist = l1ClusterDistances[i-1]; l1ClusterDistances[i-1] = l1ClusterDistances[i]; l1ClusterDistances[i] = tmpDist;
         uint16_t tmpID = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmpID;
       }
+
+      // Downward culling... truncate closest distance to the pessemistic distance of this cluster
+      #ifdef ENABLE_DOWNAWARD_CULLING
+      if (payload.closestPrimitive != -1) {
+        float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+        if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
+      }
+      #endif
     }
 
     // Traverse clusters near to far
@@ -1203,6 +1219,14 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
           half tmpDist = l0ClusterDistances[i-1]; l0ClusterDistances[i-1] = l0ClusterDistances[i]; l0ClusterDistances[i] = tmpDist;
           uint16_t tmpID = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmpID;
         }
+
+        // Downward culling... truncate closest distance to the pessemistic distance of this cluster
+        #ifdef ENABLE_DOWNAWARD_CULLING
+        if (payload.closestPrimitive != -1) {
+          float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+          if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
+        }
+        #endif
       }
 
       // Traverse clusters near to far
@@ -1235,10 +1259,10 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
           pos = (pos * (gaabbMax - gaabbMin)) + gaabbMin;
           float minDist = max(distance(pos, queryOrigin) - radius, 0.f);      
           
-          // Skip primitives outside the search radius
+          // Upward Culling: Skip primitives outside the search radius
           if (minDist >= maxSearchRange) continue;
 
-          // Skip clusters father than current closest primitive
+          // Upward Culling: Skip clusters father than current closest primitive
           if (minDist * minDist >= payload.closestDistance) continue;
 
           // Hilbert codes and primitive IDs interleaved in the same buffer

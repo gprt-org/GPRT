@@ -23,14 +23,14 @@
 
 #include "gprt.h"
 
-float rm(float p, float rp, float rq) {
+inline float rm(float p, float rp, float rq) {
     if (p <= (rp+rq)/2.f) {
         return rp;
     }
     return rq;
 }
 
-float rM(float p, float rp, float rq) {
+inline float rM(float p, float rp, float rq) {
     if (p >= (rp+rq)/2.f) {
         return rp;
     }
@@ -43,20 +43,24 @@ float rM(float p, float rp, float rq) {
 //
 // Implemented per Definition 4 of "Nearest Neighbor Queries" by
 // N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
-float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
-    float minmaxdist = 1e20f;
-    float S = 0.f;
-    for (int i = 0; i < 3; ++i) {
-        float d = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
-        S += d * d;
-    }    
-    for (int i = 0; i < 3; ++i) {
-        float d1 = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
-        float d2 = origin[i] - rm(origin[i], aabbMin[i], aabbMax[i]);
-        float d = S - d1*d1 + d2*d2;
-        if (d < minmaxdist) minmaxdist = d;
-    }
-    return minmaxdist;
+inline float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+  // by definition, MinMaxDist(p, r) =
+  // min{1<=k<=n}(|pk - rmk|^2 + sum{1<=i<=n, i != k}(|pi - rMi|^2))
+  // where rmk means, "distance to side nearest point"
+  // and rMk means, "distance to side farthest from point".
+
+  // In other words, for each dimension we take the distance to the closest side, 
+  // then add on the distances to the farthest sides of all other walls. 
+
+  // This is where the "MinMax" comes from.
+
+  // below is a linear time algorithm to compute the above.
+  float3 c = (aabbMin+aabbMax) * .5f;
+  float3 d1 = origin - select(origin >= c, aabbMin, aabbMax);
+  float S = dot(d1, d1);
+  float3 d2 = origin - select(origin <= c, aabbMin, aabbMax);
+  float3 d = float3(S, S, S) - d1 * d1 + d2 * d2;
+  return min(d.x, min(d.y, d.z));
 }
 
 // minDist computes the square of the distance from a point to a rectangle.
@@ -64,18 +68,16 @@ float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
 //
 // Implemented per Definition 2 of "Nearest Neighbor Queries" by
 // N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
-float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
-    float minDist = 0.0f;
-    for (int i = 0; i < 3; ++i) {
-        if (origin[i] < aabbMin[i]) {
-            float d = origin[i] - aabbMin[i];
-            minDist += d * d;
-        } else if (origin[i] > aabbMax[i]) {
-            float d = origin[i] - aabbMax[i];
-            minDist += d * d;
-        } 
-    }
-    return minDist;
+inline float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+  // For each dimension...
+  // Determine which side that "p" is on.
+  // Then, add the L2 distance to that side to our total
+  float3 d = select((origin < aabbMin), origin - aabbMin, origin - aabbMax);
+  return dot(d, d);
+}
+
+inline float2 getMinAndMinMaxDist(float3 p, float3 rp, float3 rq) {
+  return float2(getMinDist(p, rp, rq), getMinMaxDist(p, rp, rq));
 }
 
 float _dot2(float3 v ) { return dot(v,v); }

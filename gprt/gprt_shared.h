@@ -1,6 +1,20 @@
 #pragma once
 
-#define BRANCHING_FACTOR 10
+// The overall results I'm leaning from the below is that, the more culling you enable
+// by turning these features on, the more performance becomes dependent on how efficient
+// the culling primitives are...
+
+// Makes me wonder if bounding spheres over bounding boxes would be a better idea...
+
+// The higher this number is, the more clusters we're going to touch
+// relative to the number of primitives. 
+#define BRANCHING_FACTOR 14
+
+// Note, findings show that downward culling isn't helpful. It's much better to 
+// allow a depth first traversal down to the leaves of the tree, then cull with
+// upward culling than to prevent traversal from reaching the leaves in favor of 
+// traversing more internal nodes.
+// #define ENABLE_DOWNAWARD_CULLING
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
