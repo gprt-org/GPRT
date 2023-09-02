@@ -172,7 +172,7 @@ void TraceNN(float3 queryOrigin, in gprt::NNAccel knnAccel, out int closestPrimi
 
   closestPrimitive = payload.closestPrimitive;
   closestDistance = payload.closestDistance;
-  payload.stats.w++;
+  // payload.stats.w++;
   stats = payload.stats;
 }
 #endif

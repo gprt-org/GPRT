@@ -1,7 +1,6 @@
 #pragma once
 
-#define NUM_CLUSTERS_PER_SUPERCLUSTER 8
-#define NUM_PRIMS_PER_CLUSTER 8
+#define BRANCHING_FACTOR 10
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
@@ -36,8 +35,10 @@ namespace gprt{
     struct NNAccel {
         // input
         alignas(4) uint32_t numPrims;
-        alignas(4) uint32_t numClusters;
-        alignas(4) uint32_t numSuperClusters;
+        alignas(4) uint32_t numL0Clusters;
+        alignas(4) uint32_t numL1Clusters;
+        alignas(4) uint32_t numL2Clusters;
+        alignas(4) uint32_t numLeaves;
         alignas(4) float maxSearchRange;
 
         alignas(16) gprt::Buffer points; 
@@ -56,10 +57,12 @@ namespace gprt{
         alignas(16) gprt::Buffer aabb;
 
         // Buffers of AABBs. Each aabb is a pair of float3.
-        alignas(16) gprt::Buffer clusters;
-
-        // Buffers of AABBs. Each AABB here contains clusters, but is also dialated by "maximum search range".
-        alignas(16) gprt::Buffer superClusters;
+        // clusters contain primitives, superClusters contain clusters and leaves contain superClusters. 
+        // Leaves are additionally dialated by "maximum search range" when using RT cores for truncated traversal.
+        alignas(16) gprt::Buffer l0clusters;
+        alignas(16) gprt::Buffer l1clusters;
+        alignas(16) gprt::Buffer l2clusters;
+        alignas(16) gprt::Buffer leaves;
 
         // An RT core tree
         alignas(16) gprt::Accel accel;
@@ -81,10 +84,6 @@ namespace gprt{
         // numPrims-1 + numPrims long. Each aabb is a pair of float3.
         alignas(16) gprt::Buffer lbvhAabbs;
 
-
-        // Testing...
-        alignas(16) gprt::Buffer splitClusterAABBs;
-        alignas(16) gprt::Buffer splitClusterPositions; // uint16_t of split poses, one per cluster
     };
 
     
