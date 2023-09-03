@@ -8,6 +8,7 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
+// #define BRANCHING_FACTOR 14
 #define BRANCHING_FACTOR 14
 
 // Note, findings show that downward culling isn't helpful. It's much better to 
@@ -15,6 +16,10 @@
 // upward culling than to prevent traversal from reaching the leaves in favor of 
 // traversing more internal nodes.
 // #define ENABLE_DOWNAWARD_CULLING
+
+
+// Enables an LBVH reference, similar to Jakob and Guthe's knn:
+#define ENABLE_LBVH_REFERENCE
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{

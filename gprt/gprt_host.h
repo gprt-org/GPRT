@@ -28,6 +28,8 @@
  * SOFTWARE.
  */
 
+#pragma once
+
 #include <cstdalign>
 #include <vulkan/vulkan.h>
 

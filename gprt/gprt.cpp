@@ -75,6 +75,10 @@
 // For FFX radix sort
 #include "gprt_sort.h"
 
+// The software linear bvh builder included in GPRT. Useful for 
+// scenarios where full control over traversal is required
+#include "gprt_lbvh.h"
+
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
  * platforms.
@@ -4537,6 +4541,10 @@ struct Context {
     internalComputePrograms.insert({"ComputeL1Clusters", new Compute(logicalDevice, module, "ComputeL1Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2Clusters", new Compute(logicalDevice, module, "ComputeL2Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeLeaves", new Compute(logicalDevice, module, "ComputeLeaves", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeAABBCodes", new Compute(logicalDevice, module, "ComputeAABBCodes", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"MakeNodes", new Compute(logicalDevice, module, "MakeNodes", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"SplitNodes", new Compute(logicalDevice, module, "SplitNodes", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"BuildHierarchy", new Compute(logicalDevice, module, "BuildHierarchy", sizeof(gprt::NNAccel))});    
     
     nnPointsType = gprtGeomTypeCreate<gprt::NNAccel>((GPRTContext)this, GPRT_AABBS);
     gprtGeomTypeSetIntersectionProg(nnPointsType, 0, (GPRTModule)module, "ClosestNeighborIntersection");
@@ -4568,6 +4576,9 @@ struct Context {
     internalComputePrograms["ComputeL1Clusters"]->destroy();
     internalComputePrograms["ComputeL2Clusters"]->destroy();
     internalComputePrograms["ComputeLeaves"]->destroy();
+    internalComputePrograms["MakeNodes"]->destroy();
+    internalComputePrograms["SplitNodes"]->destroy();
+    internalComputePrograms["BuildHierarchy"]->destroy();
 
     delete internalComputePrograms["ComputePointBounds"];
     delete internalComputePrograms["ComputePointClusters"];
@@ -4583,6 +4594,9 @@ struct Context {
     delete internalComputePrograms["ComputeL1Clusters"];
     delete internalComputePrograms["ComputeL2Clusters"];
     delete internalComputePrograms["ComputeLeaves"];
+    delete internalComputePrograms["MakeNodes"];
+    delete internalComputePrograms["SplitNodes"];
+    delete internalComputePrograms["BuildHierarchy"];
 
     internalComputePrograms.erase("ComputePointBounds");
     internalComputePrograms.erase("ComputePointClusters");
@@ -4598,6 +4612,9 @@ struct Context {
     internalComputePrograms.erase("ComputeL1Clusters");
     internalComputePrograms.erase("ComputeL2Clusters");
     internalComputePrograms.erase("ComputeLeaves");
+    internalComputePrograms.erase("MakeNodes");
+    internalComputePrograms.erase("SplitNodes");
+    internalComputePrograms.erase("BuildHierarchy");
 
     gprtGeomTypeDestroy(nnPointsType);
     gprtGeomTypeDestroy(nnEdgesType);
@@ -7488,6 +7505,11 @@ struct NNTriangleAccel : public Accel {
   GPRTAccel geomAccel;
   GPRTAccel instanceAccel;
 
+  GPRTBufferOf<uint64_t> lbvhMortonCodes;
+  GPRTBufferOf<uint64_t> lbvhIds;
+  GPRTBufferOf<int4> lbvhNodes;
+  GPRTBufferOf<float3> lbvhAabbs;
+
   NNTriangleAccel(Context* context, size_t numGeometries, NNTriangleGeom *geometries)
       : Accel(context) {
     this->geometries.resize(numGeometries);
@@ -7503,8 +7525,6 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-
-    // TODO
     nnAccelHandle.numLeaves = (nnAccelHandle.numL2Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
 
     // create these
@@ -7515,6 +7535,13 @@ struct NNTriangleAccel : public Accel {
     l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
     leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
+
+    leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
+
+    lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numLeaves);
+    lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numLeaves);
+    lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numLeaves * 2 - 1);
+    lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numLeaves * 2 - 1));
 
     nnAccelHandle.maxSearchRange = 0.f; 
     
@@ -7531,6 +7558,11 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.l1clusters = gprtBufferGetHandle(l1clusters);
     nnAccelHandle.l2clusters = gprtBufferGetHandle(l2clusters);
     nnAccelHandle.leaves = gprtBufferGetHandle(leaves);
+
+    nnAccelHandle.lbvhMortonCodes = gprtBufferGetHandle(lbvhMortonCodes);
+    nnAccelHandle.lbvhIds = gprtBufferGetHandle(lbvhIds);
+    nnAccelHandle.lbvhNodes = gprtBufferGetHandle(lbvhNodes);
+    nnAccelHandle.lbvhAabbs = gprtBufferGetHandle(lbvhAabbs);
 
     gprtGeomSetParameters(geom, &nnAccelHandle);
     gprtAABBsSetPositions(geom, leaves, nnAccelHandle.numLeaves);
@@ -7633,6 +7665,11 @@ struct NNTriangleAccel : public Accel {
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeLeaves"], &nnAccelHandle);
+    
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["MakeNodes"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["SplitNodes"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["BuildHierarchy"], &nnAccelHandle);
 
     gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_COMPUTE);
 
@@ -7709,6 +7746,25 @@ struct NNTriangleAccel : public Accel {
     gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
     gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
 
+
+    // LBVH reference stuff
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numLeaves);
+    gprtBufferSortPayload((GPRTContext)context, lbvhMortonCodes, lbvhIds, scratch);
+
+    // gprtBufferMap(lbvhMortonCodes);
+    // uint64_t* gpuCodes = gprtBufferGetPointer(lbvhMortonCodes);
+    // for (uint32_t i = 0; i < nnAccelHandle.numLeaves; i++) {
+    //   std::cout<<gpuCodes[i]<<std::endl;
+    //   if (i > 0) {
+    //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
+    //   }
+    // }
+    // gprtBufferUnmap(lbvhMortonCodes);
+
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numLeaves * 2 - 1);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numLeaves - 1);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numLeaves);
+
     // debugging...
     // printOverlapStatistics();
 
@@ -7733,6 +7789,12 @@ struct NNTriangleAccel : public Accel {
     gprtBufferDestroy(l2clusters);
     gprtBufferDestroy(leaves);    
     gprtBufferDestroy(scratch);
+
+    gprtBufferDestroy(lbvhMortonCodes);
+    gprtBufferDestroy(lbvhIds);
+    gprtBufferDestroy(lbvhNodes);
+    gprtBufferDestroy(lbvhAabbs);
+
     gprtAccelDestroy(instanceAccel);
     gprtAccelDestroy(geomAccel);
     gprtGeomDestroy(geom);
