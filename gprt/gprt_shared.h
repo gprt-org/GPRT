@@ -8,18 +8,19 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-// #define BRANCHING_FACTOR 14
-#define BRANCHING_FACTOR 14
+#define BRANCHING_FACTOR 16
 
-// Note, findings show that downward culling isn't helpful. It's much better to 
-// allow a depth first traversal down to the leaves of the tree, then cull with
-// upward culling than to prevent traversal from reaching the leaves in favor of 
-// traversing more internal nodes.
-// #define ENABLE_DOWNAWARD_CULLING
+// Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
+// incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
+#define ENABLE_DOWNAWARD_CULLING
 
-
-// Enables an LBVH reference, similar to Jakob and Guthe's knn:
+// Enables an LBVH reference, similar to Jakob and Guthe's knn.
+// Note, we use this LBVH as a top level tree for our method, so 
+// this is just about if we're using RT cores or not
 #define ENABLE_LBVH_REFERENCE
+
+// Uses a quantized representation of bounding boxes
+#define ENABLE_QUANTIZATION
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
@@ -57,7 +58,7 @@ namespace gprt{
         alignas(4) uint32_t numL0Clusters;
         alignas(4) uint32_t numL1Clusters;
         alignas(4) uint32_t numL2Clusters;
-        alignas(4) uint32_t numLeaves;
+        alignas(4) uint32_t numL3Clusters;
         alignas(4) float maxSearchRange;
 
         alignas(16) gprt::Buffer points; 
@@ -81,7 +82,20 @@ namespace gprt{
         alignas(16) gprt::Buffer l0clusters;
         alignas(16) gprt::Buffer l1clusters;
         alignas(16) gprt::Buffer l2clusters;
-        alignas(16) gprt::Buffer leaves;
+        alignas(16) gprt::Buffer l3clusters;
+
+        alignas(16) gprt::Buffer clusters;
+         
+        // 3 floats for treelet aabb min, 
+        // 3 bytes for scale exponent, one unused 
+        // byte   15   14    13    12    11 10 9 8   7  6  5  4  3  2  1  0
+        //       [??]  [sz]  [sy]  [sx]  [  zmin  ]  [  ymin  ]  [  xmin  ]
+        alignas(16) gprt::Buffer treelets;
+
+        // 64-bit integers. 6 bytes for bounding box, 2 unused.
+        // byte   8    7   6     5     4     3     2     1           
+        //       [?]  [?]  [zh]  [yh]  [xh]  [zl]  [yl]  [xl]        
+        alignas(16) gprt::Buffer children; 
 
         // An RT core tree
         alignas(16) gprt::Accel accel;

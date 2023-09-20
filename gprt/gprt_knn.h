@@ -43,6 +43,64 @@ inline float rM(float p, float rp, float rq) {
 //
 // Implemented per Definition 4 of "Nearest Neighbor Queries" by
 // N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+// inline float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+//     float minmaxdist = 1e20f;
+//     float S = 0.f;
+//     for (int i = 0; i < 3; ++i) {
+//         float d = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
+//         S += d * d;
+//     }    
+//     for (int i = 0; i < 3; ++i) {
+//         float d1 = origin[i] - rM(origin[i], aabbMin[i], aabbMax[i]);
+//         float d2 = origin[i] - rm(origin[i], aabbMin[i], aabbMax[i]);
+//         float d = S - d1*d1 + d2*d2;
+//         if (d < minmaxdist) minmaxdist = d;
+//     }
+//     return minmaxdist;
+// }
+
+// minDist computes the square of the distance from a point to a rectangle.
+// If the point is contained in the rectangle then the distance is zero.
+//
+// Implemented per Definition 2 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+// inline float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+//     float minDist = 0.0f;
+//     for (int i = 0; i < 3; ++i) {
+//         if (origin[i] < aabbMin[i]) {
+//             float d = origin[i] - aabbMin[i];
+//             minDist += d * d;
+//         } else if (origin[i] > aabbMax[i]) {
+//             float d = origin[i] - aabbMax[i];
+//             minDist += d * d;
+//         } 
+//     }
+//     return minDist;
+// }
+
+
+// minDist computes the square of the distance from a point to a rectangle.
+// If the point is contained in the rectangle then the distance is zero.
+//
+// Implemented per Definition 2 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+inline float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
+  // For each dimension...
+  // Determine which side that "p" is on.
+  // Then, add the L2 distance to that side to our total
+  float3 d = select((origin < aabbMin), origin - aabbMin, 
+             select((origin > aabbMax), origin - aabbMax, 
+            float3(0.f, 0.f, 0.f))
+  );
+  return dot(d, d);
+}
+
+// minMaxDist computes the minimum of the maximum distances from p to points
+// on r. If r is the bounding box of some geometric objects, then there is
+// at least one object contained in r within minMaxDist(p, r) of p.
+//
+// Implemented per Definition 4 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
 inline float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
   // by definition, MinMaxDist(p, r) =
   // min{1<=k<=n}(|pk - rmk|^2 + sum{1<=i<=n, i != k}(|pi - rMi|^2))
@@ -61,23 +119,6 @@ inline float getMinMaxDist(float3 origin, float3 aabbMin, float3 aabbMax) {
   float3 d2 = origin - select(origin <= c, aabbMin, aabbMax);
   float3 d = float3(S, S, S) - d1 * d1 + d2 * d2;
   return min(d.x, min(d.y, d.z));
-}
-
-// minDist computes the square of the distance from a point to a rectangle.
-// If the point is contained in the rectangle then the distance is zero.
-//
-// Implemented per Definition 2 of "Nearest Neighbor Queries" by
-// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
-inline float getMinDist(float3 origin, float3 aabbMin, float3 aabbMax) {
-  // For each dimension...
-  // Determine which side that "p" is on.
-  // Then, add the L2 distance to that side to our total
-  float3 d = select((origin < aabbMin), origin - aabbMin, origin - aabbMax);
-  return dot(d, d);
-}
-
-inline float2 getMinAndMinMaxDist(float3 p, float3 rp, float3 rq) {
-  return float2(getMinDist(p, rp, rq), getMinMaxDist(p, rp, rq));
 }
 
 float _dot2(float3 v ) { return dot(v,v); }
@@ -637,10 +678,22 @@ inline float4 morton64_decode4D(uint64_t index)
   return c;
 }
 
-void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inout NNPayload payload) {
-  
+void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inout NNPayload payload, bool debug) {
   payload.stats.w++; // Count this as traversing a leaf
 
+  #ifdef ENABLE_QUANTIZATION
+  // Load treelet
+  float4 l3Treelet = gprt::load<float4>(record.treelets, leafID);
+  uint32_t l3Exponent32 = asuint(l3Treelet.w);
+  float3 l3Translate = l3Treelet.xyz;
+  float3 l3Scale = float3(
+    asfloat(((l3Exponent32 >>  0) & 255) << 23),
+    asfloat(((l3Exponent32 >>  8) & 255) << 23),
+    asfloat(((l3Exponent32 >> 16) & 255) << 23)
+  ) / (255.f - 1.f);
+  #endif
+  
+  int numL3Clusters = record.numL3Clusters;
   int numL2Clusters = record.numL2Clusters;
   int numL1Clusters = record.numL1Clusters;
   int numL0Clusters = record.numL0Clusters;
@@ -662,10 +715,25 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
 
   // Insert into active l0 list by distance far to near
   for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
+    float minDistCorrection = 0.f;
     int l2ClusterID = leafID * BRANCHING_FACTOR + l2;
-    if (l2ClusterID > numL0Clusters) break;
-    float3 aabbMin = gprt::load<half3>(record.l2clusters, l2ClusterID * 2 + 0);
-    float3 aabbMax = gprt::load<half3>(record.l2clusters, l2ClusterID * 2 + 1);
+    if (l2ClusterID > numL2Clusters) break;
+
+    #ifdef ENABLE_QUANTIZATION
+    uint64_t child = gprt::load<uint64_t>(record.children, numL3Clusters + l2ClusterID);
+    float3 aabbMin = float3(((child >>  0ull) & 255), 
+                             ((child >>  8ull) & 255), 
+                             ((child >> 16ull) & 255));
+    float3 aabbMax = float3(((child >> 24ull) & 255) + 1u, 
+                             ((child >> 32ull) & 255) + 1u, 
+                             ((child >> 40ull) & 255) + 1u);
+    aabbMin = aabbMin * l3Scale + l3Translate;
+    aabbMax = aabbMax * l3Scale + l3Translate;
+    #else
+    uint32_t offset = 2 * record.numL0Clusters + 2 * record.numL1Clusters;
+    float3 aabbMin = gprt::load<float3>(record.clusters, offset + l2ClusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.clusters, offset + l2ClusterID * 2 + 1);
+    #endif
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     
     // Upward culling, skip superclusters outside the search radius
@@ -686,10 +754,9 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
 
     // Downward culling... truncate closest distance to the pessemistic distance of this cluster
     #ifdef ENABLE_DOWNAWARD_CULLING
-    if (payload.closestPrimitive != -1) {
-      float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
-      if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
-    }
+    // note, *not* adding quantization error here, since quantized minmaxdist is overly conservative and therefore still correct
+    float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+    if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
     #endif
   }
 
@@ -702,6 +769,18 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
     if (minDist >= payload.closestDistance) break;   
     
     payload.stats.w++; // Count this as traversing a l2
+
+    #ifdef ENABLE_QUANTIZATION
+    // Load treelet
+    float4 l2Treelet = gprt::load<float4>(record.treelets, numL3Clusters + l2ClusterID);
+    uint32_t l2Exponent32 = asuint(l2Treelet.w);
+    float3 l2Translate = l2Treelet.xyz;
+    float3 l2Scale = float3(
+      asfloat(((l2Exponent32 >>  0) & 255) << 23),
+      asfloat(((l2Exponent32 >>  8) & 255) << 23),
+      asfloat(((l2Exponent32 >> 16) & 255) << 23)
+    ) / (255.f - 1.f);
+    #endif
 
     // Initialize active l1 list
     uint16_t activeL1Clusters[BRANCHING_FACTOR];
@@ -716,8 +795,21 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
     for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
       int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1;
       if (l1ClusterID > numL1Clusters) break;
-      float3 aabbMin = gprt::load<half3>(record.l1clusters, l1ClusterID * 2 + 0);
-      float3 aabbMax = gprt::load<half3>(record.l1clusters, l1ClusterID * 2 + 1);
+      #ifdef ENABLE_QUANTIZATION
+      uint64_t child = gprt::load<uint64_t>(record.children, numL3Clusters + numL2Clusters + l1ClusterID);
+      float3 aabbMin = float3(((child >>  0ull) & 255), 
+                              ((child >>  8ull) & 255), 
+                              ((child >> 16ull) & 255));
+      float3 aabbMax = float3(((child >> 24ull) & 255) + 1u, 
+                              ((child >> 32ull) & 255) + 1u, 
+                              ((child >> 40ull) & 255) + 1u);
+      aabbMin = aabbMin * l2Scale + l2Translate;
+      aabbMax = aabbMax * l2Scale + l2Translate;
+      #else
+      uint32_t offset = 2 * record.numL0Clusters;
+      float3 aabbMin = gprt::load<float3>(record.clusters, offset + l1ClusterID * 2 + 0);
+      float3 aabbMax = gprt::load<float3>(record.clusters, offset + l1ClusterID * 2 + 1);
+      #endif
       float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
       
       // Skip superclusters outside the search radius
@@ -738,10 +830,8 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
 
       // Downward culling... truncate closest distance to the pessemistic distance of this cluster
       #ifdef ENABLE_DOWNAWARD_CULLING
-      if (payload.closestPrimitive != -1) {
-        float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
-        if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
-      }
+      float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+      if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
       #endif
     }
 
@@ -754,6 +844,18 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
       if (minDist >= payload.closestDistance) break;   
       
       payload.stats.z++; // Count this as traversing a supercluster
+
+      #ifdef ENABLE_QUANTIZATION
+      // Load treelet
+      float4 l1Treelet = gprt::load<float4>(record.treelets, numL3Clusters + numL2Clusters + l1ClusterID);
+      uint32_t l1Exponent32 = asuint(l1Treelet.w);
+      float3 l1Translate = l1Treelet.xyz;
+      float3 l1Scale = float3(
+        asfloat(((l1Exponent32 >>  0) & 255) << 23),
+        asfloat(((l1Exponent32 >>  8) & 255) << 23),
+        asfloat(((l1Exponent32 >> 16) & 255) << 23)
+      ) / (255.f - 1.f);
+      #endif
 
       // Initialize active l0 cluster list
       uint16_t activeL0Clusters[BRANCHING_FACTOR];
@@ -768,8 +870,21 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
       for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
         int clusterID = l1ClusterID * BRANCHING_FACTOR + l0;
         if (clusterID > numL0Clusters) break;
-        float3 aabbMin = gprt::load<half3>(record.l0clusters, clusterID * 2 + 0);
-        float3 aabbMax = gprt::load<half3>(record.l0clusters, clusterID * 2 + 1);
+        #ifdef ENABLE_QUANTIZATION
+        uint64_t child = gprt::load<uint64_t>(record.children, numL3Clusters + numL2Clusters + numL1Clusters + clusterID);
+        float3 aabbMin = float3(((child >>  0ull) & 255), 
+                                ((child >>  8ull) & 255), 
+                                ((child >> 16ull) & 255));
+        float3 aabbMax = float3(((child >> 24ull) & 255) + 1u, 
+                                ((child >> 32ull) & 255) + 1u, 
+                                ((child >> 40ull) & 255) + 1u);
+        aabbMin = aabbMin * l1Scale + l1Translate;
+        aabbMax = aabbMax * l1Scale + l1Translate;
+        #else
+        uint32_t offset = 2 * record.numL0Clusters;
+        float3 aabbMin = gprt::load<float3>(record.clusters, clusterID * 2 + 0);
+        float3 aabbMax = gprt::load<float3>(record.clusters, clusterID * 2 + 1);
+        #endif
         float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
         
         // Skip clusters outside the search radius
@@ -790,10 +905,8 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
 
         // Downward culling... truncate closest distance to the pessemistic distance of this cluster
         #ifdef ENABLE_DOWNAWARD_CULLING
-        if (payload.closestPrimitive != -1) {
-          float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
-          if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
-        }
+        float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+        if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
         #endif
       }
 
@@ -875,7 +988,7 @@ void TraverseLeaf(float3 queryOrigin, uint leafID, in gprt::NNAccel record, inou
   }
 }
 
-void TraverseTree(float3 queryOrigin, in gprt::NNAccel record, inout NNPayload payload) {
+void TraverseTree(float3 queryOrigin, in gprt::NNAccel record, inout NNPayload payload, bool debug) {
   float dist = record.maxSearchRange * record.maxSearchRange;// 1e20f;
   uint stack[32];
   uint stackPtr = 0;
@@ -896,13 +1009,13 @@ void TraverseTree(float3 queryOrigin, in gprt::NNAccel record, inout NNPayload p
       };
 
       float3 leftAABB[2] = {
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 0) + record.maxSearchRange, 
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 1) - record.maxSearchRange, 
+          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 0), // + record.maxSearchRange, 
+          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 1), // - record.maxSearchRange, 
       };
 
       float3 rightAABB[2] = {
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 0) + record.maxSearchRange, 
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 1) - record.maxSearchRange, 
+          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 0), // + record.maxSearchRange, 
+          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 1), // - record.maxSearchRange, 
       };
 
       float distL = _dot2(max(max(leftAABB[0] - queryOrigin, float3(0.f, 0.f, 0.f)), queryOrigin - leftAABB[1]));
@@ -931,26 +1044,27 @@ void TraverseTree(float3 queryOrigin, in gprt::NNAccel record, inout NNPayload p
     if (gotoNext) continue;
 
     // Traverse leaf
+    uint32_t offset = 2 * record.numL0Clusters + 2 * record.numL1Clusters + 2 * record.numL2Clusters;
     int leafID = node.w;
-    float3 aabbMin = gprt::load<float3>(record.leaves, 2 * leafID + 0) + record.maxSearchRange;
-    float3 aabbMax = gprt::load<float3>(record.leaves, 2 * leafID + 1) - record.maxSearchRange;
+    float3 aabbMin = gprt::load<float3>(record.clusters, offset + 2 * leafID + 0); // + record.maxSearchRange;
+    float3 aabbMax = gprt::load<float3>(record.clusters, offset + 2 * leafID + 1); // - record.maxSearchRange;
 
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     if (minDist > dist) continue;
 
-    TraverseLeaf(queryOrigin, leafID, record, payload);
+    TraverseLeaf(queryOrigin, leafID, record, payload, debug);
     dist = min(dist, payload.closestDistance);
   }
 }
 
-void TraceNN(float3 queryOrigin, in gprt::NNAccel knnAccel, out int closestPrimitive, out float closestDistance, inout int4 stats) {
+void TraceNN(float3 queryOrigin, in gprt::NNAccel knnAccel, out int closestPrimitive, out float closestDistance, inout int4 stats, bool debug) {
   NNPayload payload;
   payload.closestPrimitive = -1;
-  payload.closestDistance = 1e20f;
+  payload.closestDistance = knnAccel.maxSearchRange * knnAccel.maxSearchRange;
   payload.stats = stats;
 
   if (knnAccel.maxSearchRange > 0.f) {
-
+    #ifndef ENABLE_LBVH_REFERENCE
     RayDesc rayDesc;
     rayDesc.Origin = queryOrigin;
     rayDesc.Direction = float3(1.f, 1.f, 1.f);
@@ -966,8 +1080,9 @@ void TraceNN(float3 queryOrigin, in gprt::NNAccel knnAccel, out int closestPrimi
             rayDesc,                 // the ray to trace
             payload                  // the payload IO
     );
-
-    // TraverseTree(queryOrigin, knnAccel, payload);
+    #else
+    TraverseTree(queryOrigin, knnAccel, payload, debug);
+    #endif
   }
 
     // to do... figure out how to determine type, or upload it yourself.

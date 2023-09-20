@@ -172,9 +172,17 @@ gprtRaise_impl(std::string str) {
 #define LOG_API_CALL() std::cout << "% " << __FUNCTION__ << "(...)" << std::endl;
 #endif
 
+#define LOG_VERBOSE(message)                                                                                              \
+  if (RequestedFeatures::logging())                                                                                    \
+  std::cout << GPRT_TERMINAL_CYAN << "#gprt verbose:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
+
 #define LOG_INFO(message)                                                                                              \
   if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
+
+#define LOG_PRINTF(message)                                                                                              \
+  if (RequestedFeatures::logging())                                                                                    \
+  std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
   if (RequestedFeatures::logging())                                                                                    \
@@ -237,39 +245,24 @@ VKAPI_ATTR VkBool32 VKAPI_CALL
 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                             VkDebugUtilsMessageTypeFlagsEXT messageType,
                             const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData) {
-  // Select prefix depending on flags passed to the callback
-  std::string prefix("");
-
   if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-    prefix = "VERBOSE: ";
+    LOG_VERBOSE(pCallbackData->pMessage);
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-    prefix = "INFO: ";
+    // Check to see if it's a GPU printf
+    std::string message = std::string(pCallbackData->pMessage);
+    if (message.find("[ UNASSIGNED-DEBUG-PRINTF ]") != std::string::npos) {
+      // if so, remove all the junk at the front...
+      // This is currently very kludgy... we should use a regex...
+      message = message.substr(143);
+      LOG_PRINTF(message.c_str());
+    } else {
+      LOG_INFO(pCallbackData->pMessage);
+    }
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-    prefix = "WARNING: ";
+    LOG_WARNING(pCallbackData->pMessage);
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    prefix = "ERROR: ";
+    LOG_ERROR(pCallbackData->pMessage);
   }
-
-  // Display message to default output (console/logcat)
-  std::stringstream debugMessage;
-  // debugMessage << prefix << "[" << pCallbackData->messageIdNumber << "][" <<
-  // pCallbackData->pMessageIdName << "] : " << pCallbackData->pMessage;
-  debugMessage << pCallbackData->pMessage;
-
-#if defined(__ANDROID__)
-  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    LOGE("%s", debugMessage.str().c_str());
-  } else {
-    LOGD("%s", debugMessage.str().c_str());
-  }
-#else
-  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-    std::cerr << debugMessage.str() << "\n";
-  } else {
-    std::cout << debugMessage.str() << "\n";
-  }
-  fflush(stdout);
-#endif
 
   // The return value of this callback controls whether the Vulkan call that
   // caused the validation message will be aborted or not We return VK_FALSE as
@@ -320,9 +313,10 @@ PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
 VkDebugUtilsMessengerEXT debugUtilsMessenger;
 
-PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
-PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
-VkDebugReportCallbackEXT debugReportCallback;
+// Note, the following were deprecated and shouldn't be used
+// PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
+// PFN_vkDestroyDebugReportCallbackEXT vkDestroyDebugReportCallbackEXT;
+// VkDebugReportCallbackEXT debugReportCallback;
 }   // namespace gprt
 
 struct Stage {
@@ -1902,6 +1896,10 @@ struct Compute : public SBTEntry {
 std::vector<Compute *> Compute::computes;
 
 struct RayGen : public SBTEntry {
+  // Our own virtual "raygen address space".
+  uint32_t address = -1;
+  static std::vector<RayGen *> raygens;
+
   VkShaderModule shaderModule;
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -1909,6 +1907,20 @@ struct RayGen : public SBTEntry {
   std::string entryPoint;
 
   RayGen(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    // Hunt for an existing free address for this raygen kernel
+    for (uint32_t i = 0; i < RayGen::raygens.size(); ++i) {
+      if (RayGen::raygens[i] == nullptr) {
+        RayGen::raygens[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      RayGen::raygens.push_back(this);
+      address = (uint32_t)RayGen::raygens.size() - 1;
+    }
+
     entryPoint = std::string("__raygen__") + std::string(_entryPoint);
     auto binary = module->getBinary("RAYGEN");
 
@@ -1934,12 +1946,21 @@ struct RayGen : public SBTEntry {
   }
   ~RayGen() {}
   void destroy() {
+    // Free raygen slot for use by subsequently made raygen kernels
+    RayGen::raygens[address] = nullptr;
+
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
 };
 
+std::vector<RayGen *> RayGen::raygens;
+
 struct Miss : public SBTEntry {
+  // Our own virtual "miss address space".
+  uint32_t address = -1;
+  static std::vector<Miss *> misses;
+
   VkShaderModule shaderModule;
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -1947,6 +1968,20 @@ struct Miss : public SBTEntry {
   std::string entryPoint;
 
   Miss(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    // Hunt for an existing free address for this miss kernel
+    for (uint32_t i = 0; i < Miss::misses.size(); ++i) {
+      if (Miss::misses[i] == nullptr) {
+        Miss::misses[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      Miss::misses.push_back(this);
+      address = (uint32_t)Miss::misses.size() - 1;
+    }
+
     entryPoint = std::string("__miss__") + std::string(_entryPoint);
     auto binary = module->getBinary("MISS");
 
@@ -1970,10 +2005,15 @@ struct Miss : public SBTEntry {
   }
   ~Miss() {}
   void destroy() {
+    // Free miss slot for use by subsequently made miss kernels
+    Miss::misses[address] = nullptr;
+
     vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
 };
+
+std::vector<Miss *> Miss::misses;
 
 /* An abstraction for any sort of geometry type - describes the
     programs to use, and structure of the SBT records, when building
@@ -3086,24 +3126,23 @@ struct Context {
       }
     }
 
-    // Number of validation layers allowed
-    instanceCreateInfo.enabledLayerCount = 0;
-
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
     instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    if (validation()) {
-      instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
+    // We'll always be using this extension.. Printf's are very useful.
+    instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     if (instanceExtensions.size() > 0) {
       instanceCreateInfo.enabledExtensionCount = (uint32_t) instanceExtensions.size();
       instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     }
 
-    instanceCreateInfo.ppEnabledLayerNames = nullptr;
-    instanceCreateInfo.enabledLayerCount = 0;
+    
+    // need this for printf to work
+    const char* layerNames[1] = {"VK_LAYER_KHRONOS_validation"};
+    instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
+    instanceCreateInfo.enabledLayerCount = 1;
 
     VkResult err;
 
@@ -3129,28 +3168,30 @@ struct Context {
       glfwPollEvents();
     }
 
+    // Setup debug printf callback
+    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debugUtilsMessengerCI.messageSeverity = 
+        // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+      // | VK_DEBUG_REPORT_WARNING_BIT_EXT
+      // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+      // | VK_DEBUG_REPORT_ERROR_BIT_EXT
+      VK_DEBUG_REPORT_DEBUG_BIT_EXT
+      ;
+    debugUtilsMessengerCI.messageType =
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+    VkResult result =
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+    assert(result == VK_SUCCESS);
+
     /// 2. Select a Physical Device
-
-    // If requested, we enable the default validation layers for debugging
-    if (validation()) {
-      gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-      gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
-
-      VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-      debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-      debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                              VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
-                                              VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
-      debugUtilsMessengerCI.messageType =
-          VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-      debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-      VkResult result =
-          gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
-      assert(result == VK_SUCCESS);
-    }
-
+    
     // Physical device
     uint32_t gpuCount = 0;
     // Get number of available physical devices
@@ -4540,7 +4581,11 @@ struct Context {
     internalComputePrograms.insert({"ComputeTriangleMortonCodes", new Compute(logicalDevice, module, "ComputeTriangleMortonCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeL1Clusters", new Compute(logicalDevice, module, "ComputeL1Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2Clusters", new Compute(logicalDevice, module, "ComputeL2Clusters", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeLeaves", new Compute(logicalDevice, module, "ComputeLeaves", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL3Clusters", new Compute(logicalDevice, module, "ComputeL3Clusters", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"CopyClusters", new Compute(logicalDevice, module, "CopyClusters", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL3Treelets", new Compute(logicalDevice, module, "ComputeL3Treelets", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL2Treelets", new Compute(logicalDevice, module, "ComputeL2Treelets", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL1Treelets", new Compute(logicalDevice, module, "ComputeL1Treelets", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeAABBCodes", new Compute(logicalDevice, module, "ComputeAABBCodes", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"MakeNodes", new Compute(logicalDevice, module, "MakeNodes", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"SplitNodes", new Compute(logicalDevice, module, "SplitNodes", sizeof(gprt::NNAccel))});    
@@ -4575,7 +4620,11 @@ struct Context {
     internalComputePrograms["ComputeTriangleMortonCodes"]->destroy();
     internalComputePrograms["ComputeL1Clusters"]->destroy();
     internalComputePrograms["ComputeL2Clusters"]->destroy();
-    internalComputePrograms["ComputeLeaves"]->destroy();
+    internalComputePrograms["ComputeL3Clusters"]->destroy();
+    internalComputePrograms["CopyClusters"]->destroy();
+    internalComputePrograms["ComputeL3Treelets"]->destroy();
+    internalComputePrograms["ComputeL2Treelets"]->destroy();
+    internalComputePrograms["ComputeL1Treelets"]->destroy();
     internalComputePrograms["MakeNodes"]->destroy();
     internalComputePrograms["SplitNodes"]->destroy();
     internalComputePrograms["BuildHierarchy"]->destroy();
@@ -4593,7 +4642,11 @@ struct Context {
     delete internalComputePrograms["ComputeTriangleMortonCodes"];
     delete internalComputePrograms["ComputeL1Clusters"];
     delete internalComputePrograms["ComputeL2Clusters"];
-    delete internalComputePrograms["ComputeLeaves"];
+    delete internalComputePrograms["ComputeL3Clusters"];
+    delete internalComputePrograms["CopyClusters"];
+    delete internalComputePrograms["ComputeL3Treelets"];
+    delete internalComputePrograms["ComputeL2Treelets"];
+    delete internalComputePrograms["ComputeL1Treelets"];
     delete internalComputePrograms["MakeNodes"];
     delete internalComputePrograms["SplitNodes"];
     delete internalComputePrograms["BuildHierarchy"];
@@ -4611,7 +4664,11 @@ struct Context {
     internalComputePrograms.erase("ComputeTriangleMortonCodes");
     internalComputePrograms.erase("ComputeL1Clusters");
     internalComputePrograms.erase("ComputeL2Clusters");
-    internalComputePrograms.erase("ComputeLeaves");
+    internalComputePrograms.erase("ComputeL3Clusters");
+    internalComputePrograms.erase("CopyClusters");
+    internalComputePrograms.erase("ComputeL3Treelets");
+    internalComputePrograms.erase("ComputeL2Treelets");
+    internalComputePrograms.erase("ComputeL1Treelets");
     internalComputePrograms.erase("MakeNodes");
     internalComputePrograms.erase("SplitNodes");
     internalComputePrograms.erase("BuildHierarchy");
@@ -7494,10 +7551,17 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<uint64_t> codes;
   GPRTBufferOf<uint64_t> ids;
   GPRTBufferOf<float3> aabb;
+
   GPRTBufferOf<float3> l0clusters;
   GPRTBufferOf<float3> l1clusters;
   GPRTBufferOf<float3> l2clusters;
-  GPRTBufferOf<float3> leaves;
+  GPRTBufferOf<float3> l3clusters;
+  
+  // numPrims + numPrims / BF + numPrims / BF^2 + ...
+  GPRTBufferOf<float3> clusters;
+
+  GPRTBufferOf<float4> treelets;
+  GPRTBufferOf<uint64_t> children;
 
   GPRTBufferOf<uint8_t> scratch;
 
@@ -7525,23 +7589,43 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    nnAccelHandle.numLeaves = (nnAccelHandle.numL2Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    nnAccelHandle.numL3Clusters = (nnAccelHandle.numL2Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
 
     // create these
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     ids = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
+
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
     l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
-    leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
+    l3clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL3Clusters);
+    
+    clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 
+      2 * nnAccelHandle.numL0Clusters + 
+      2 * nnAccelHandle.numL1Clusters + 
+      2 * nnAccelHandle.numL2Clusters + 
+      2 * nnAccelHandle.numL3Clusters 
+    );
 
-    leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
+    treelets = gprtDeviceBufferCreate<float4>((GPRTContext)context, 
+      2 * nnAccelHandle.numL0Clusters + 
+      2 * nnAccelHandle.numL1Clusters + 
+      2 * nnAccelHandle.numL2Clusters + 
+      2 * nnAccelHandle.numL3Clusters 
+    );
 
-    lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numLeaves);
-    lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numLeaves);
-    lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numLeaves * 2 - 1);
-    lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numLeaves * 2 - 1));
+    children = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, 
+      2 * nnAccelHandle.numL0Clusters + 
+      2 * nnAccelHandle.numL1Clusters + 
+      2 * nnAccelHandle.numL2Clusters + 
+      2 * nnAccelHandle.numL3Clusters
+    );
+
+    lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
+    lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
+    lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL3Clusters * 2 - 1);
+    lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL3Clusters * 2 - 1));
 
     nnAccelHandle.maxSearchRange = 0.f; 
     
@@ -7557,7 +7641,12 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.l0clusters = gprtBufferGetHandle(l0clusters);
     nnAccelHandle.l1clusters = gprtBufferGetHandle(l1clusters);
     nnAccelHandle.l2clusters = gprtBufferGetHandle(l2clusters);
-    nnAccelHandle.leaves = gprtBufferGetHandle(leaves);
+    nnAccelHandle.l3clusters = gprtBufferGetHandle(l3clusters);
+    
+    nnAccelHandle.clusters = gprtBufferGetHandle(clusters);
+    
+    nnAccelHandle.treelets = gprtBufferGetHandle(treelets);
+    nnAccelHandle.children = gprtBufferGetHandle(children);
 
     nnAccelHandle.lbvhMortonCodes = gprtBufferGetHandle(lbvhMortonCodes);
     nnAccelHandle.lbvhIds = gprtBufferGetHandle(lbvhIds);
@@ -7565,7 +7654,7 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.lbvhAabbs = gprtBufferGetHandle(lbvhAabbs);
 
     gprtGeomSetParameters(geom, &nnAccelHandle);
-    gprtAABBsSetPositions(geom, leaves, nnAccelHandle.numLeaves);
+    gprtAABBsSetPositions(geom, l3clusters, nnAccelHandle.numL3Clusters);
   };
 
   ~NNTriangleAccel(){};
@@ -7578,80 +7667,80 @@ struct NNTriangleAccel : public Accel {
   };
 
   void printOverlapStatistics() {
-    gprtBufferMap(aabb);
-    gprtBufferMap(l0clusters);
-    gprtBufferMap(l1clusters);
-    gprtBufferMap(leaves);
+    // gprtBufferMap(aabb);
+    // gprtBufferMap(l0clusters);
+    // gprtBufferMap(l1clusters);
+    // gprtBufferMap(l3clusters);
 
-    float3* aabbPtr = gprtBufferGetPointer(aabb);
-    float3* clusterPtr = gprtBufferGetPointer(l0clusters);
-    float3* superClusterPtr = gprtBufferGetPointer(l1clusters);
-    float3* leafPtr = gprtBufferGetPointer(leaves);
+    // float3* aabbPtr = gprtBufferGetPointer(aabb);
+    // float3* clusterPtr = gprtBufferGetPointer(l0clusters);
+    // float3* superClusterPtr = gprtBufferGetPointer(l1clusters);
+    // float3* leafPtr = gprtBufferGetPointer(l3clusters);
 
-    float3 ABBoxMin = aabbPtr[0];
-    float3 ABBoxMax = aabbPtr[1];
-    float3 diagonal = ABBoxMax - ABBoxMin;
-    double sceneVolume = diagonal.x * diagonal.y * diagonal.z;
+    // float3 ABBoxMin = aabbPtr[0];
+    // float3 ABBoxMax = aabbPtr[1];
+    // float3 diagonal = ABBoxMax - ABBoxMin;
+    // double sceneVolume = diagonal.x * diagonal.y * diagonal.z;
 
-    double avg = 0.f;
-    uint64_t N = 0;
-    double overlap = 0.f;
-    std::cout<<"Computing overlap..." << std::endl;
-    // For each cluster    
-    for (uint32_t i = 0; i < nnAccelHandle.numL0Clusters; ++i) {
-      if ((i % 10 )== 0) {
-        std::cout<< '\r' << i << "/" << nnAccelHandle.numL0Clusters<< ", avg overlap: " << avg << " projected overall overlap: " << (overlap / i) * nnAccelHandle.numL0Clusters;
-      }
+    // double avg = 0.f;
+    // uint64_t N = 0;
+    // double overlap = 0.f;
+    // std::cout<<"Computing overlap..." << std::endl;
+    // // For each cluster    
+    // for (uint32_t i = 0; i < nnAccelHandle.numL0Clusters; ++i) {
+    //   if ((i % 10 )== 0) {
+    //     std::cout<< '\r' << i << "/" << nnAccelHandle.numL0Clusters<< ", avg overlap: " << avg << " projected overall overlap: " << (overlap / i) * nnAccelHandle.numL0Clusters;
+    //   }
 
-      float3 ABBoxMin = clusterPtr[i * 2 + 0];
-      float3 ABBoxMax = clusterPtr[i * 2 + 1];
-      // Compute our volume
-      float3 diagonal = ABBoxMax - ABBoxMin;
-      double AVolume = diagonal.x * diagonal.y * diagonal.z;
-      if (AVolume <= 0.f) {
-        continue;
-      }
-      float relativeBBoxOverlap = 0.f;
+    //   float3 ABBoxMin = clusterPtr[i * 2 + 0];
+    //   float3 ABBoxMax = clusterPtr[i * 2 + 1];
+    //   // Compute our volume
+    //   float3 diagonal = ABBoxMax - ABBoxMin;
+    //   double AVolume = diagonal.x * diagonal.y * diagonal.z;
+    //   if (AVolume <= 0.f) {
+    //     continue;
+    //   }
+    //   float relativeBBoxOverlap = 0.f;
 
-      // Check to see what other clusters overlap this one...
-      for (uint32_t j = 0; j < nnAccelHandle.numL0Clusters; ++j) {
-        if (i == j) continue; // skip testing self...
-        float3 BBBoxMin = clusterPtr[j * 2 + 0];
-        float3 BBBoxMax = clusterPtr[j * 2 + 1];
+    //   // Check to see what other clusters overlap this one...
+    //   for (uint32_t j = 0; j < nnAccelHandle.numL0Clusters; ++j) {
+    //     if (i == j) continue; // skip testing self...
+    //     float3 BBBoxMin = clusterPtr[j * 2 + 0];
+    //     float3 BBBoxMax = clusterPtr[j * 2 + 1];
 
-        if (linalg::all( linalg::gequal(ABBoxMax,  BBBoxMin) ) && linalg::all(linalg::gequal(BBBoxMax, ABBoxMin)) ) {
-          // Clip B to A
-          float3 clippedAABBMin = max(ABBoxMin, BBBoxMin);
-          float3 clippedAABBMax = min(ABBoxMax, BBBoxMax);
-          // Compute it's volume...
-          float3 diagonal = clippedAABBMax - clippedAABBMin;
-          double BVolume = diagonal.x * diagonal.y * diagonal.z;
-          if (BVolume <= 0.f) continue;
+    //     if (linalg::all( linalg::gequal(ABBoxMax,  BBBoxMin) ) && linalg::all(linalg::gequal(BBBoxMax, ABBoxMin)) ) {
+    //       // Clip B to A
+    //       float3 clippedAABBMin = max(ABBoxMin, BBBoxMin);
+    //       float3 clippedAABBMax = min(ABBoxMax, BBBoxMax);
+    //       // Compute it's volume...
+    //       float3 diagonal = clippedAABBMax - clippedAABBMin;
+    //       double BVolume = diagonal.x * diagonal.y * diagonal.z;
+    //       if (BVolume <= 0.f) continue;
 
-          // Add the amount of normalized overlap to score.
-          relativeBBoxOverlap += (BVolume / AVolume);
+    //       // Add the amount of normalized overlap to score.
+    //       relativeBBoxOverlap += (BVolume / AVolume);
 
-          // Without double counting, add intersected volume
-          if (j > i) {
-            overlap += BVolume / sceneVolume;
-          }
-        }
-      }
+    //       // Without double counting, add intersected volume
+    //       if (j > i) {
+    //         overlap += BVolume / sceneVolume;
+    //       }
+    //     }
+    //   }
 
-      N=N+1;
-      double a = 1.f / N;
-      double b = 1.f - a;
-      avg = a * relativeBBoxOverlap + b * avg; 
-    }
-    std::cout<<" - done " << std::endl;
+    //   N=N+1;
+    //   double a = 1.f / N;
+    //   double b = 1.f - a;
+    //   avg = a * relativeBBoxOverlap + b * avg; 
+    // }
+    // std::cout<<" - done " << std::endl;
 
-    std::cout<<"Average number of boxes overlapping boxes: " << avg << std::endl;
-    std::cout<<"Total relative overlapping volume of boxes: " << overlap << std::endl;
+    // std::cout<<"Average number of boxes overlapping boxes: " << avg << std::endl;
+    // std::cout<<"Total relative overlapping volume of boxes: " << overlap << std::endl;
 
-    gprtBufferUnmap(aabb);
-    gprtBufferUnmap(l0clusters);
-    gprtBufferUnmap(l1clusters);
-    gprtBufferUnmap(leaves);
+    // gprtBufferUnmap(aabb);
+    // gprtBufferUnmap(l0clusters);
+    // gprtBufferUnmap(l1clusters);
+    // gprtBufferUnmap(leaves);
   }
 
   #include "hilbert.h"
@@ -7664,7 +7753,15 @@ struct NNTriangleAccel : public Accel {
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeLeaves"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], &nnAccelHandle);
+
+    // temporary kernel for unified cluster buffer migration
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["CopyClusters"], &nnAccelHandle);
+    
+    // For tree quantization
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3Treelets"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Treelets"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Treelets"], &nnAccelHandle);
     
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["MakeNodes"], &nnAccelHandle);
@@ -7734,13 +7831,17 @@ struct NNTriangleAccel : public Accel {
 
     // Now compute cluster bounding boxes...
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleClusters"], nnAccelHandle.numL0Clusters);
-
-    // ... then compute super cluster bounding boxes
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL1Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], nnAccelHandle.numL3Clusters);
     
-    // ... ... and finally the leaves for our RT core tree
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeLeaves"], nnAccelHandle.numLeaves);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["CopyClusters"], nnAccelHandle.numL0Clusters);
+
+    #ifdef ENABLE_QUANTIZATION
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Treelets"], nnAccelHandle.numL3Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Treelets"], nnAccelHandle.numL2Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Treelets"], nnAccelHandle.numL1Clusters);
+    #endif
     
     // Now we can build our underlying RT core tree
     gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
@@ -7748,12 +7849,12 @@ struct NNTriangleAccel : public Accel {
 
 
     // LBVH reference stuff
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numLeaves);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL3Clusters);
     gprtBufferSortPayload((GPRTContext)context, lbvhMortonCodes, lbvhIds, scratch);
 
     // gprtBufferMap(lbvhMortonCodes);
     // uint64_t* gpuCodes = gprtBufferGetPointer(lbvhMortonCodes);
-    // for (uint32_t i = 0; i < nnAccelHandle.numLeaves; i++) {
+    // for (uint32_t i = 0; i < nnAccelHandle.numL3Clusters; i++) {
     //   std::cout<<gpuCodes[i]<<std::endl;
     //   if (i > 0) {
     //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
@@ -7761,9 +7862,9 @@ struct NNTriangleAccel : public Accel {
     // }
     // gprtBufferUnmap(lbvhMortonCodes);
 
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numLeaves * 2 - 1);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numLeaves - 1);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numLeaves);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numL3Clusters * 2 - 1);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numL3Clusters - 1);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL3Clusters);
 
     // debugging...
     // printOverlapStatistics();
@@ -7787,7 +7888,12 @@ struct NNTriangleAccel : public Accel {
     gprtBufferDestroy(l0clusters);
     gprtBufferDestroy(l1clusters);
     gprtBufferDestroy(l2clusters);
-    gprtBufferDestroy(leaves);    
+    gprtBufferDestroy(l3clusters);    
+
+    gprtBufferDestroy(treelets);
+    gprtBufferDestroy(children);
+
+    gprtBufferDestroy(clusters);
     gprtBufferDestroy(scratch);
 
     gprtBufferDestroy(lbvhMortonCodes);
@@ -7843,7 +7949,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
-  if (shaderGroups.size() > 0) {
+  if (RayGen::raygens.size() > 0) {
     const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
     const uint32_t sbtSize = groupCount * handleSize;
 
@@ -8907,7 +9013,7 @@ void Context::buildPipeline() {
       }
     }
 
-    if (shaderStages.size() > 0) {
+    if (RayGen::raygens.size() > 0) {
       /*
         Create the ray tracing pipeline
       */
@@ -11129,12 +11235,18 @@ gprtEndProfile(GPRTContext _context) {
     LOG_ERROR("Requested profile data without calling gprtBeginProfile");
   context->queryRequested = false;
 
-  uint64_t buffer[2];
+  uint64_t timestampsResults[2];
   VkResult result = vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2,
-                                          buffer, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+                                          timestampsResults, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
   if (result != VK_SUCCESS)
     LOG_ERROR("Failed to receive query results!");
-  uint64_t timeResults = buffer[1] - buffer[0];
-  float time = (float(timeResults) * (context->deviceProperties.limits.timestampPeriod / 1000000000.0f));
-  return time;
+
+  VkPhysicalDeviceProperties deviceProperties;
+  vkGetPhysicalDeviceProperties(context->physicalDevice, &deviceProperties);
+  float nanosecondsInTimestamp = deviceProperties.limits.timestampPeriod;
+  float timestampValueInMilliseconds = ((timestampsResults[1] - timestampsResults[0]) * nanosecondsInTimestamp) / 1000000.f;
+
+  // I'm not sure why, but the results above seem to change a lot between windows and linux...
+  // They seem accurate above for windows systems.
+  return timestampValueInMilliseconds;
 }

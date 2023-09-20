@@ -401,8 +401,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleClusters, (NNAccel, record), (1,1,1)) {
     clusterAabbMax = max(aabbMax, clusterAabbMax);
   }
 
-  gprt::store<half3>(record.l0clusters, 2 * clusterID + 0, half3(clusterAabbMin));
-  gprt::store<half3>(record.l0clusters, 2 * clusterID + 1, half3(clusterAabbMax));
+  gprt::store<float3>(record.l0clusters, 2 * clusterID + 0, float3(clusterAabbMin));
+  gprt::store<float3>(record.l0clusters, 2 * clusterID + 1, float3(clusterAabbMax));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL1Clusters, (NNAccel, record), (1,1,1)) {
@@ -415,15 +415,15 @@ GPRT_COMPUTE_PROGRAM(ComputeL1Clusters, (NNAccel, record), (1,1,1)) {
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t clusterID = BRANCHING_FACTOR * l1ClusterID + i;
     if (clusterID >= numL0Clusters) continue;
-    float3 aabbMin = gprt::load<half3>(record.l0clusters, clusterID * 2 + 0);
-    float3 aabbMax = gprt::load<half3>(record.l0clusters, clusterID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.l0clusters, clusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l0clusters, clusterID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
     l1ClusterAabbMin = min(aabbMin, l1ClusterAabbMin);
     l1ClusterAabbMax = max(aabbMax, l1ClusterAabbMax);
   }
 
-  gprt::store<half3>(record.l1clusters, 2 * l1ClusterID + 0, half3(l1ClusterAabbMin));
-  gprt::store<half3>(record.l1clusters, 2 * l1ClusterID + 1, half3(l1ClusterAabbMax));
+  gprt::store<float3>(record.l1clusters, 2 * l1ClusterID + 0, float3(l1ClusterAabbMin));
+  gprt::store<float3>(record.l1clusters, 2 * l1ClusterID + 1, float3(l1ClusterAabbMax));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL2Clusters, (NNAccel, record), (1,1,1)) {
@@ -436,20 +436,20 @@ GPRT_COMPUTE_PROGRAM(ComputeL2Clusters, (NNAccel, record), (1,1,1)) {
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t clusterID = BRANCHING_FACTOR * l2ClusterID + i;
     if (clusterID >= numL1Clusters) continue;
-    float3 aabbMin = gprt::load<half3>(record.l1clusters, clusterID * 2 + 0);
-    float3 aabbMax = gprt::load<half3>(record.l1clusters, clusterID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.l1clusters, clusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l1clusters, clusterID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
     l2ClusterAabbMin = min(aabbMin, l2ClusterAabbMin);
     l2ClusterAabbMax = max(aabbMax, l2ClusterAabbMax);
   }
 
-  gprt::store<half3>(record.l2clusters, 2 * l2ClusterID + 0, half3(l2ClusterAabbMin));
-  gprt::store<half3>(record.l2clusters, 2 * l2ClusterID + 1, half3(l2ClusterAabbMax));
+  gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 0, float3(l2ClusterAabbMin));
+  gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 1, float3(l2ClusterAabbMax));
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeLeaves, (NNAccel, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(ComputeL3Clusters, (NNAccel, record), (1,1,1)) {
   int leafID = DispatchThreadID.x;
-  if (leafID >= record.numLeaves) return;
+  if (leafID >= record.numL3Clusters) return;
   uint32_t numL2Clusters = record.numL2Clusters;
 
   float3 leafAabbMin = float3(1e20f, 1e20f, 1e20f); 
@@ -457,17 +457,247 @@ GPRT_COMPUTE_PROGRAM(ComputeLeaves, (NNAccel, record), (1,1,1)) {
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t clusterID = BRANCHING_FACTOR * leafID + i;
     if (clusterID >= numL2Clusters) continue;
-    float3 aabbMin = gprt::load<half3>(record.l2clusters, clusterID * 2 + 0);
-    float3 aabbMax = gprt::load<half3>(record.l2clusters, clusterID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.l2clusters, clusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l2clusters, clusterID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
     leafAabbMin = min(aabbMin, leafAabbMin);
     leafAabbMax = max(aabbMax, leafAabbMax);
   }
 
-  // Dialate by the max search range
-  gprt::store<float3>(record.leaves, 2 * leafID + 0, leafAabbMin - record.maxSearchRange);
-  gprt::store<float3>(record.leaves, 2 * leafID + 1, leafAabbMax + record.maxSearchRange);
+  // Dialate by the max search range // Temporarily disabling
+  gprt::store<float3>(record.l3clusters, 2 * leafID + 0, leafAabbMin/* - record.maxSearchRange*/);
+  gprt::store<float3>(record.l3clusters, 2 * leafID + 1, leafAabbMax/* + record.maxSearchRange*/);
 }
+
+GPRT_COMPUTE_PROGRAM(CopyClusters, (NNAccel, record), (1,1,1)) {
+  uint32_t offset = 0;
+
+  int l0ID = DispatchThreadID.x;
+  if (l0ID >= record.numL0Clusters) return;
+
+  float3 l0Min = gprt::load<float3>(record.l0clusters, 2 * l0ID + 0);
+  float3 l0Max = gprt::load<float3>(record.l0clusters, 2 * l0ID + 1);
+  gprt::store<float3>(record.clusters, offset + 2 * l0ID + 0, l0Min);
+  gprt::store<float3>(record.clusters, offset + 2 * l0ID + 1, l0Max);
+  offset += 2 * record.numL0Clusters;
+
+  int l1ID = l0ID;
+  if (l1ID >= record.numL1Clusters) return;
+
+  float3 l1Min = gprt::load<float3>(record.l1clusters, 2 * l1ID + 0);
+  float3 l1Max = gprt::load<float3>(record.l1clusters, 2 * l1ID + 1);
+  gprt::store<float3>(record.clusters, offset + 2 * l1ID + 0, l1Min);
+  gprt::store<float3>(record.clusters, offset + 2 * l1ID + 1, l1Max);
+  offset += 2 * record.numL1Clusters;
+
+  int l2ID = l1ID;
+  if (l2ID >= record.numL2Clusters) return;
+
+  float3 l2Min = gprt::load<float3>(record.l2clusters, 2 * l2ID + 0);
+  float3 l2Max = gprt::load<float3>(record.l2clusters, 2 * l2ID + 1);
+  gprt::store<float3>(record.clusters, offset + 2 * l2ID + 0, l2Min);
+  gprt::store<float3>(record.clusters, offset + 2 * l2ID + 1, l2Max);
+  offset += 2 * record.numL2Clusters;
+
+  int l3ID = l2ID;
+  if (l3ID >= record.numL3Clusters) return;
+
+  float3 l3Min = gprt::load<float3>(record.l3clusters, 2 * l3ID + 0);
+  float3 l3Max = gprt::load<float3>(record.l3clusters, 2 * l3ID + 1);
+  gprt::store<float3>(record.clusters, offset + 2 * l3ID + 0, l3Min);
+  gprt::store<float3>(record.clusters, offset + 2 * l3ID + 1, l3Max);
+  offset += 2 * record.numL3Clusters;
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeL3Treelets, (NNAccel, record), (1,1,1)) {
+  int l3ID = DispatchThreadID.x;
+  if (l3ID >= record.numL3Clusters) return;
+
+  int numL3Clusters = record.numL3Clusters;
+  int numL2Clusters = record.numL2Clusters;
+
+  float3 l3Min = gprt::load<float3>(record.l3clusters, 2 * l3ID + 0);
+  float3 l3Max = gprt::load<float3>(record.l3clusters, 2 * l3ID + 1);
+
+  // 1) Compute the treelet
+
+  // Note, doubling to increment exponent by 1. This is important, since 
+  // we need all children after being scaled to be smaller than their parent
+  // and therefore within a 0-1 scale. We drop the mantissa for compression,
+  // so as a consequence we need to make the exponent slightly more conservative.
+  float3 exactScale = (l3Max - l3Min) * 2.f; 
+  uint3 exponent;
+  exponent.x = asuint(exactScale.x) >> 23;
+  exponent.y = asuint(exactScale.y) >> 23;
+  exponent.z = asuint(exactScale.z) >> 23;
+  uint32_t exponent32 = (exponent.z << 16) | 
+                        (exponent.y <<  8) | 
+                        (exponent.x <<  0);
+  float4 l3Treelet;
+  l3Treelet.xyz = l3Min;
+  l3Treelet.w = asfloat(exponent32);
+  gprt::store<float4>(record.treelets, l3ID, l3Treelet);
+  
+  // Similar quantization scheme as Cline et al, but 
+  // using just the exponent for additional compression, 
+  // and also restoring precision at every level.
+
+  // Also reversed translation and took reciprical of scale 
+  // so that the decompression is a fused multiply and accumulate
+  float3 scale = float3(
+    asfloat(((exponent32 >>  0) & 255) << 23),
+    asfloat(((exponent32 >>  8) & 255) << 23),
+    asfloat(((exponent32 >> 16) & 255) << 23)
+  ) / (255.f - 1.f);
+  float3 translate = l3Min;
+
+  // 2) Quantize the children
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l2ID = l3ID * BRANCHING_FACTOR + i;
+    if (l2ID > numL2Clusters) break;
+    float3 l2Min = gprt::load<float3>(record.l2clusters, 2 * l2ID + 0);
+    float3 l2Max = gprt::load<float3>(record.l2clusters, 2 * l2ID + 1);
+    l2Min = (l2Min - translate) / scale;
+    l2Max = (l2Max - translate) / scale;
+    uint64_t child = ((uint64_t(l2Min.x) & 255ull) <<  0ull)
+                   | ((uint64_t(l2Min.y) & 255ull) <<  8ull)
+                   | ((uint64_t(l2Min.z) & 255ull) << 16ull)
+                   | ((uint64_t(l2Max.x) & 255ull) << 24ull)
+                   | ((uint64_t(l2Max.y) & 255ull) << 32ull)
+                   | ((uint64_t(l2Max.z) & 255ull) << 40ull);
+    gprt::store<uint64_t>(record.children, numL3Clusters + l2ID, child);   
+  }
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeL2Treelets, (NNAccel, record), (1,1,1)) {
+  int l2ID = DispatchThreadID.x;
+  if (l2ID >= record.numL2Clusters) return;
+
+  int numL1Clusters = record.numL1Clusters;
+  int numL2Clusters = record.numL2Clusters;
+  int numL3Clusters = record.numL3Clusters;
+
+  float3 l2Min = gprt::load<float3>(record.l2clusters, 2 * l2ID + 0);
+  float3 l2Max = gprt::load<float3>(record.l2clusters, 2 * l2ID + 1);
+  float3 exactScale = (l2Max - l2Min) * 2.f; 
+  uint3 exponent;
+  exponent.x = asuint(exactScale.x) >> 23;
+  exponent.y = asuint(exactScale.y) >> 23;
+  exponent.z = asuint(exactScale.z) >> 23;
+  uint32_t exponent32 = (exponent.z << 16) | 
+                        (exponent.y <<  8) | 
+                        (exponent.x <<  0);
+  float4 l2Treelet;
+  l2Treelet.xyz = l2Min;
+  l2Treelet.w = asfloat(exponent32);
+  gprt::store<float4>(record.treelets, numL3Clusters + l2ID, l2Treelet);
+  
+  float3 scale = float3(
+    asfloat(((exponent32 >>  0) & 255) << 23),
+    asfloat(((exponent32 >>  8) & 255) << 23),
+    asfloat(((exponent32 >> 16) & 255) << 23)
+  ) / (255.f - 1.f);
+  float3 translate = l2Min;
+
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l1ID = l2ID * BRANCHING_FACTOR + i;
+    if (l1ID > numL1Clusters) break;
+    float3 l1Min = gprt::load<float3>(record.l1clusters, 2 * l1ID + 0);
+    float3 l1Max = gprt::load<float3>(record.l1clusters, 2 * l1ID + 1);
+    l1Min = (l1Min - translate) / scale;
+    l1Max = (l1Max - translate) / scale;
+    uint64_t child = ((uint64_t(l1Min.x) & 255ull) <<  0ull)
+                   | ((uint64_t(l1Min.y) & 255ull) <<  8ull)
+                   | ((uint64_t(l1Min.z) & 255ull) << 16ull)
+                   | ((uint64_t(l1Max.x) & 255ull) << 24ull)
+                   | ((uint64_t(l1Max.y) & 255ull) << 32ull)
+                   | ((uint64_t(l1Max.z) & 255ull) << 40ull);
+    gprt::store<uint64_t>(record.children, numL3Clusters + numL2Clusters + l1ID, child);   
+  }
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeL1Treelets, (NNAccel, record), (1,1,1)) {
+  int l1ID = DispatchThreadID.x;
+  if (l1ID >= record.numL1Clusters) return;
+
+  int numL0Clusters = record.numL0Clusters;
+  int numL1Clusters = record.numL1Clusters;
+  int numL2Clusters = record.numL2Clusters;
+  int numL3Clusters = record.numL3Clusters;
+
+  float3 l1Min = gprt::load<float3>(record.l1clusters, 2 * l1ID + 0);
+  float3 l1Max = gprt::load<float3>(record.l1clusters, 2 * l1ID + 1);
+  float3 exactScale = (l1Max - l1Min) * 2.f; 
+  uint3 exponent;
+  exponent.x = asuint(exactScale.x) >> 23;
+  exponent.y = asuint(exactScale.y) >> 23;
+  exponent.z = asuint(exactScale.z) >> 23;
+  uint32_t exponent32 = (exponent.z << 16) | 
+                        (exponent.y <<  8) | 
+                        (exponent.x <<  0);
+  float4 l1Treelet;
+  l1Treelet.xyz = l1Min;
+  l1Treelet.w = asfloat(exponent32);
+  gprt::store<float4>(record.treelets, numL3Clusters + numL2Clusters + l1ID, l1Treelet);
+  
+  float3 scale = float3(
+    asfloat(((exponent32 >>  0) & 255) << 23),
+    asfloat(((exponent32 >>  8) & 255) << 23),
+    asfloat(((exponent32 >> 16) & 255) << 23)
+  ) / (255.f - 1.f);
+  float3 translate = l1Min;
+
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l0ID = l1ID * BRANCHING_FACTOR + i;
+    if (l0ID > numL0Clusters) break;
+    float3 l0Min = gprt::load<float3>(record.l0clusters, 2 * l0ID + 0);
+    float3 l0Max = gprt::load<float3>(record.l0clusters, 2 * l0ID + 1);
+    l0Min = (l0Min - translate) / scale;
+    l0Max = (l0Max - translate) / scale;
+    uint64_t child = ((uint64_t(l0Min.x) & 255ull) <<  0ull)
+                   | ((uint64_t(l0Min.y) & 255ull) <<  8ull)
+                   | ((uint64_t(l0Min.z) & 255ull) << 16ull)
+                   | ((uint64_t(l0Max.x) & 255ull) << 24ull)
+                   | ((uint64_t(l0Max.y) & 255ull) << 32ull)
+                   | ((uint64_t(l0Max.z) & 255ull) << 40ull);
+    gprt::store<uint64_t>(record.children, numL3Clusters + numL2Clusters + numL1Clusters + l0ID, child);   
+  }
+}
+
+    // uint32_t exponent32 = asuint(l3Treelet.w);
+    // // float3 scale = float3(
+    // //   asfloat(((exponent32 >>  0) & 255) << 23) * 256.f,
+    // //   asfloat(((exponent32 >>  8) & 255) << 23) * 256.f,
+    // //   asfloat(((exponent32 >> 16) & 255) << 23) * 256.f
+    // // );
+    // // float3 translate = l3Treelet.xyz;
+
+    // if (l3ID == 0 && i == 0) {
+    //   printf("Decoded translate: %f, %f, %f scale: %f %f %f\n", 
+    //     translate.x, translate.y, translate.z, 
+    //     scale.x, scale.y, scale.z);
+    // }
+
+    // float3 lo = float3( (child >>  0ull) & 255, 
+    //                     (child >>  8ull) & 255, 
+    //                     (child >> 16ull) & 255);
+    // float3 hi = float3(((child >> 24ull) & 255) + 1u, 
+    //                    ((child >> 32ull) & 255) + 1u, 
+    //                    ((child >> 40ull) & 255) + 1u);
+    // lo = lo * scale + translate;
+    // hi = hi * scale + translate;
+    // float3 error = scale * float(1u);
+
+    // if (l3ID == 0 && i == 0) {
+    //   printf("Decompressed min: %f %f %f, max %f %f %f\n", 
+    //     lo.x, lo.y, lo.z, 
+    //     hi.x, hi.y, hi.z);
+    // }
+
+    // if (l3ID == 0 && i == 0) {
+    //   printf("Error: %f %f %f\n", 
+    //     error.x, error.y, error.z);
+    // }
 
 uint clz(uint x) {
   if (firstbithigh(x) == -1) return 32;
@@ -577,10 +807,10 @@ int loadNodeLeaf(gprt::Buffer buffer, int address) {
 
 GPRT_COMPUTE_PROGRAM(ComputeAABBCodes, (NNAccel, record), (1, 1, 1)) {
   int aabbID = DispatchThreadID.x;
-  if (aabbID >= record.numLeaves) return;
+  if (aabbID >= record.numL3Clusters) return;
 
-  float3 aabbMin = gprt::load<float3>(record.leaves, aabbID * 2 + 0);
-  float3 aabbMax = gprt::load<float3>(record.leaves, aabbID * 2 + 1);
+  float3 aabbMin = gprt::load<float3>(record.l3clusters, aabbID * 2 + 0);
+  float3 aabbMax = gprt::load<float3>(record.l3clusters, aabbID * 2 + 1);
   
   if (isnan(aabbMin.x) || all(aabbMax < aabbMin)) {
     gprt::store<uint>(record.codes, aabbID, -1);
@@ -601,18 +831,18 @@ GPRT_COMPUTE_PROGRAM(ComputeAABBCodes, (NNAccel, record), (1, 1, 1)) {
 
 GPRT_COMPUTE_PROGRAM(MakeNodes, (NNAccel, record), (1, 1, 1)) {
   int nodeID = DispatchThreadID.x;
-  if (nodeID >= (record.numLeaves * 2 - 1)) return;
+  if (nodeID >= (record.numL3Clusters * 2 - 1)) return;
   storeNode(record.lbvhNodes, nodeID, int4(-1,-1,-1,-1));
   gprt::store<float3>(record.lbvhAabbs, nodeID * 2 + 0,  float3(1e20f, 1e20f, 1e20f));
   gprt::store<float3>(record.lbvhAabbs, nodeID * 2 + 1, -float3(1e20f, 1e20f, 1e20f));
 }
 
 GPRT_COMPUTE_PROGRAM(SplitNodes, (NNAccel, record), (1, 1, 1)) {
-  int num_leaves = record.numLeaves;
-  int num_codes = record.numLeaves;
+  int num_leaves = record.numL3Clusters;
+  int num_codes = record.numL3Clusters;
   gprt::Buffer morton_codes = record.lbvhMortonCodes;
   int index = DispatchThreadID.x;
-  int numInner = record.numLeaves - 1;
+  int numInner = record.numL3Clusters - 1;
 
   if (index < numInner)
   {
@@ -663,16 +893,16 @@ GPRT_COMPUTE_PROGRAM(SplitNodes, (NNAccel, record), (1, 1, 1)) {
 
 GPRT_COMPUTE_PROGRAM(BuildHierarchy, (NNAccel, record), (1, 1, 1)) {
   int index = DispatchThreadID.x;
-  uint numLeaves = record.numLeaves;
+  uint numLeaves = record.numL3Clusters;
   if (index >= numLeaves) return;
 
   uint id = uint32_t(gprt::load<uint64_t>(record.lbvhIds, index));
-  float3 aabbMin = gprt::load<float3>(record.leaves, id * 2 + 0);
-  float3 aabbMax = gprt::load<float3>(record.leaves, id * 2 + 1);
+  float3 aabbMin = gprt::load<float3>(record.l3clusters, id * 2 + 0);
+  float3 aabbMax = gprt::load<float3>(record.l3clusters, id * 2 + 1);
   // getTriangleBounds(record.triangles, record.positions, id, aabbMin, aabbMax); // Change to AABBs
 
   // Leaf's bounding box
-  int leafAddr = index + (record.numLeaves - 1);
+  int leafAddr = index + (record.numL3Clusters - 1);
   gprt::store<float3>(record.lbvhAabbs, leafAddr * 2 + 0, aabbMin);
   gprt::store<float3>(record.lbvhAabbs, leafAddr * 2 + 1, aabbMax);
 
@@ -698,8 +928,8 @@ struct ClosestPointAttributes {
 
 GPRT_INTERSECTION_PROGRAM(ClosestNeighborIntersection, (NNAccel, record)) {
   uint leafID = PrimitiveIndex();
-  float3 aabbMin = gprt::load<float3>(record.leaves, 2 * leafID + 0) + record.maxSearchRange;
-  float3 aabbMax = gprt::load<float3>(record.leaves, 2 * leafID + 1) - record.maxSearchRange;
+  float3 aabbMin = gprt::load<float3>(record.numL3Clusters, 2 * leafID + 0) + record.maxSearchRange;
+  float3 aabbMax = gprt::load<float3>(record.numL3Clusters, 2 * leafID + 1) - record.maxSearchRange;
   float3 origin = WorldRayOrigin();
 
   float minDist = getMinDist(origin, aabbMin, aabbMax);
@@ -782,7 +1012,7 @@ GPRT_ANY_HIT_PROGRAM(ClosestTriangleAnyHit, (NNAccel, record), (NNPayload, paylo
     return;
   }
 
-  TraverseLeaf(queryOrigin, leafID, record, payload);
+  TraverseLeaf(queryOrigin, leafID, record, payload, false);
 
   gprt::ignoreHit(); // forces traversal to continue to next supercluster
 }
