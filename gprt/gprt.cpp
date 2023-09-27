@@ -7582,7 +7582,8 @@ struct NNTriangleAccel : public Accel {
     
     // some logic here for rounding up
     nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    nnAccelHandle.numLeaves = ((nnAccelHandle.numPrims + PRIMS_PER_LEAF - 1) / PRIMS_PER_LEAF);
+    nnAccelHandle.numL0Clusters = (nnAccelHandle.numLeaves + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL3Clusters = (nnAccelHandle.numL2Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
@@ -7591,7 +7592,11 @@ struct NNTriangleAccel : public Accel {
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
 
-    primBounds  = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numPrims);
+    #ifdef ENABLE_OBBS
+    primBounds = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numPrims);
+    #else
+    primBounds = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numPrims);
+    #endif
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
     l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
@@ -7615,7 +7620,7 @@ struct NNTriangleAccel : public Accel {
       nnAccelHandle.numL2Clusters + 
       nnAccelHandle.numL1Clusters + 
       nnAccelHandle.numL0Clusters + 
-      nnAccelHandle.numPrims
+      nnAccelHandle.numLeaves
     );
 
     lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
@@ -7780,51 +7785,8 @@ struct NNTriangleAccel : public Accel {
     // Use global bounds to compute codes
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], nnAccelHandle.numPrims);
 
-    // // debugging...
-    // gprtBufferMap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    // gprtBufferMap((GPRTBuffer)this->geometries[0]->index.buffer);
-    // gprtBufferMap(codes);
-    // gprtBufferMap(ids);
-    // gprtBufferMap(aabb);
-    // aabbPtr = gprtBufferGetPointer(aabb);
-    
-    // float3* vertices = (float3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    // uint3* indices = (uint3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->index.buffer);
-    // uint64_t* gpuCodes = gprtBufferGetPointer(codes);
-    // uint64_t* gpuIds = gprtBufferGetPointer(ids);
-    // for (uint32_t i = 0; i < nnAccelHandle.numPrims; i++) {
-    //   uint3 triangle = indices[i];
-    //   float3 v1 = vertices[triangle.x];
-    //   float3 v2 = vertices[triangle.y];
-    //   float3 v3 = vertices[triangle.z];
-    //   float3 c = (v1 + v2 + v3) / 3.f;
-    //   float3 aabbMin = aabbPtr[0];
-    //   float3 aabbMax = aabbPtr[1];
-    //   c = (c - aabbMin) / (aabbMax - aabbMin);
-    //   uint32_t code = hilbert_encode3D(c.x, c.y, c.z);
-
-    //   if (code != gpuCodes[i]) {
-    //     std::cout<<"mismatching codes! CPU: " << code << " GPU: " << gpuCodes[i] << std::endl;
-    //   }
-    // }
-    // gprtBufferUnmap(aabb);
-    // gprtBufferUnmap(codes);
-    // gprtBufferUnmap(ids);
-    // gprtBufferUnmap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    // gprtBufferUnmap((GPRTBuffer)this->geometries[0]->index.buffer);
-    
     // Sort the primitive codes
     gprtBufferSort((GPRTContext)context, codes, scratch);
-
-    // gprtBufferMap(codes);
-    // uint64_t* gpuCodes = gprtBufferGetPointer(codes);
-    // for (uint32_t i = 0; i < nnAccelHandle.numPrims; i++) {
-    //   std::cout<<gpuCodes[i]<<std::endl;
-    //   if (i > 0) {
-    //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
-    //   }
-    // }
-    // gprtBufferUnmap(codes);
 
     // Now compute cluster bounding boxes...   
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0Clusters"], nnAccelHandle.numL0Clusters);
@@ -7834,17 +7796,19 @@ struct NNTriangleAccel : public Accel {
     
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["CopyClusters"], nnAccelHandle.numL0Clusters);
 
-    #ifdef ENABLE_QUANTIZATION
+    // #ifdef ENABLE_QUANTIZATION
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Treelets"], nnAccelHandle.numL3Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Treelets"], nnAccelHandle.numL2Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Treelets"], nnAccelHandle.numL1Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0Treelets"], nnAccelHandle.numL0Clusters);
-    #endif
+    // #endif
     
     // Now we can build our underlying RT core tree
-    gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-    gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-
+    // This needs some updating, so commenting out for now...
+    // gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+    // gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+    // Handle might have changed, so update here
+    // nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
 
     // LBVH reference stuff
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL3Clusters);
@@ -7865,10 +7829,7 @@ struct NNTriangleAccel : public Accel {
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL3Clusters);
 
     // debugging...
-    // printOverlapStatistics();
-
-    // Handle might have changed, so update here
-    nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
+    // printOverlapStatistics();    
   }
 
   void update() {

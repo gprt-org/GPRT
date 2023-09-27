@@ -22,6 +22,7 @@
 
 #include "gprt_knn.h"
 
+#include "svd.hlsli"
 
 bool getPointBounds(gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
 {
@@ -135,57 +136,60 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleBounds, (NNAccel, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
 
-  float3 aabbMin; 
-  float3 aabbMax;
-  bool invalid = false;
-
+  float3 aabbMin =  float3(1e20f, 1e20f, 1e20f);
+  float3 aabbMax = -float3(1e20f, 1e20f, 1e20f);
+  bool invalid = true;
   uint3 tri = gprt::load<uint3>(record.triangles, primID);
   float3 a, b, c;
   a = gprt::load<float3>(record.points, tri.x);
   if (isnan(a.x)) {
-    invalid = true;
-    aabbMin = float3(1e20f, 1e20f, 1e20f);
-    aabbMax = -float3(1e20f, 1e20f, 1e20f);
+    #ifdef ENABLE_OBBS
+    gprt::store<float3>(record.primBounds, primID * 5 + 0, float3(1e20f, 1e20f, 1e20f));
+    gprt::store<float3>(record.primBounds, primID * 5 + 1, -float3(1e20f, 1e20f, 1e20f));
+    gprt::store<float3>(record.primBounds, primID * 5 + 2, float3(0, 0, 0));
+    gprt::store<float3>(record.primBounds, primID * 5 + 3, float3(0, 0, 0));
+    gprt::store<float3>(record.primBounds, primID * 5 + 4, float3(0, 0, 0));
+    #else
+    gprt::store<float3>(record.primBounds, primID * 2 + 0, float3(1e20f, 1e20f, 1e20f));
+    gprt::store<float3>(record.primBounds, primID * 2 + 1, -float3(1e20f, 1e20f, 1e20f));
+    #endif
   } else {
+    invalid = false;
     b = gprt::load<float3>(record.points, tri.y);
     c = gprt::load<float3>(record.points, tri.z);
     aabbMin = min(min(a, b), c);
     aabbMax = max(max(a, b), c);
-  }
 
-  #ifdef ENABLE_BOUNDING_BALLS
-  float4 ball;
-  if (invalid) {
-    ball = float4(0.f, 0.f, 0.f, -1.f); 
-  }
-  else {
-    // Calculate relative distances
-    float A = length(b - c);
-    float B = length(c - a);
-    float C = length(a - b);
+    #ifdef ENABLE_OBBS
+    float3 points[3] = {a, b, c}; 
+    float3 center = (points[0] + points[1] + points[2]) / 3.f;
 
-    // Re-orient triangle (make A longest side)
-    if (B < C) swap(B, C), swap(b, c); 
-    if (A < B) swap(A, B), swap(a, b); 
-
-    // If obtuse, just use longest diameter, otherwise circumscribe
-    if ((B*B) + (C*C) <= (A*A)) {
-      ball.w = A / 2.f;
-      ball.xyz = (b + c) / 2.f;
-    } else {
-      // http://en.wikipedia.org/wiki/Circumscribed_circle
-      float cos_a = (B*B + C*C - A*A) / (B*C*2);
-      ball.w = A / (sqrt(1 - cos_a*cos_a)*2.f);
-      float3 alpha = a - c, beta = b - c;
-      ball.xyz = cross((beta * _dot2(alpha) - alpha * _dot2(beta)), cross(alpha, beta)) /
-        (_dot2(cross(alpha, beta)) * 2.f) + c;
+    float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
+    for(int i=0; i < 3 /*number of points*/; i++) {
+      float3 p = points[i] - center;
+      covariance += outerProduct(p, p);
     }
+    covariance /= 3.f; // num points;
+
+    float3x3 rot = svd(covariance).V;
+
+    float3 obbMin =  float3(1e20f, 1e20f, 1e20f);
+    float3 obbMax = -float3(1e20f, 1e20f, 1e20f);
+    for(int i=0; i < 3 /*number of points*/; i++) {
+      float3 p = mul(rot, points[i] - center) + center;
+      obbMin = min(obbMin, p);
+      obbMax = max(obbMax, p);
+    }
+    float3 obbRot = mat3_to_eul(rot);
+    gprt::store<float3>(record.primBounds, primID * 3 + 0, obbMin);
+    gprt::store<float3>(record.primBounds, primID * 3 + 1, obbMax);
+    gprt::store<float3>(record.primBounds, primID * 3 + 2, obbRot);
+
+    #else
+    gprt::store<float3>(record.primBounds, primID * 2 + 0, aabbMin);
+    gprt::store<float3>(record.primBounds, primID * 2 + 1, aabbMax);
+    #endif
   }
-  gprt::store<float4>(record.primBounds, primID, ball);  
-  #else
-  gprt::store<float3>(record.primBounds, primID * 2 + 0, aabbMin);
-  gprt::store<float3>(record.primBounds, primID * 2 + 1, aabbMax);
-  #endif
   if (invalid) return;
 
   // Compute world bounding box
@@ -324,39 +328,14 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleCodes, (NNAccel, record), (1, 1, 1)) {
     distance(c, p2),
     distance(c, p3)
   );
-  float radius = min(min(d.x, d.y), d.z);
-
   float3 aabbMin = gprt::load<float3>(record.aabb, 0);
   float3 aabbMax = gprt::load<float3>(record.aabb, 1);
   float diagonal = distance(aabbMax, aabbMin);
-
   c = (c - aabbMin) / (aabbMax - aabbMin);
-
-  // uint64_t code = morton64_encode4D(c.x, c.y, c.z, radius / diagonal); 
-  // uint64_t code = morton64_encode4D(c.x, c.y, c.z, radius / diagonal); 
-
   uint64_t code = 0;
   code |= uint64_t(primID); 
   code |= (uint64_t(hilbert_encode3D(c.x, c.y, c.z)) << 32ull);
   gprt::store<uint64_t>(record.codes, primID, code);
-
-  // if(primID == 0) {
-  //   printf("Prim %d coded ID %d\n",
-  //     primID, uint32_t(code)
-  //   );
-  // }
-
-  // uint64_t primitive = 0;
-  // primitive |= uint64_t(morton_encode3D(c.x, c.y, c.z));
-  // primitive |= (uint64_t(asuint(radius)) << 32ull);
-
-  //uint64_t(morton_encode4D(c.x, c.y, c.z, radius / diagonal)) | (uint64_t(hilbert_encode3D(c.x, c.y, c.z)) << 32ull);
-  // if (primID == 0) {
-  //   float3 test = hilbert64_decode3D(code);
-  //   printf("Original: %f %f %f, quantized %f %f %f\n", c.x, c.y, c.z, test.x, test.y, test.z);
-  // }
-  
-  // gprt::store<uint64_t>(record.ids, primID, primitive);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (NNAccel, record), (1, 1, 1)) {
@@ -465,29 +444,38 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
   int l0ClusterID = DispatchThreadID.x;
   if (l0ClusterID >= record.numL0Clusters) return;
 
+  uint32_t numLeaves = record.numLeaves;
   uint32_t numPrims = record.numPrims;
 
   float3 l0ClusterAabbMin = float3(1e20f, 1e20f, 1e20f); 
   float3 l0ClusterAabbMax = -float3(1e20f, 1e20f, 1e20f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t primID = BRANCHING_FACTOR * l0ClusterID + i;
-    if (primID >= numPrims) continue;
-    uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.codes, primID)); 
-    #ifdef ENABLE_BOUNDING_BALLS
-
-    uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
-    float3 a, b, c;
-    a = gprt::load<float3>(record.points, tri.x);
-    if (isnan(a.x)) continue;
-    b = gprt::load<float3>(record.points, tri.y);
-    c = gprt::load<float3>(record.points, tri.z);
-    float3 aabbMin = min(min(a, b), c);
-    float3 aabbMax = max(max(a, b), c);
-    #else
-    float3 aabbMin = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 1);
+    uint32_t leafID = BRANCHING_FACTOR * l0ClusterID + i;
+    if (leafID >= numLeaves) continue;
+    float3 aabbMin = float3(1e20f, 1e20f, 1e20f);
+    float3 aabbMax = -float3(1e20f, 1e20f, 1e20f);
+    for (uint32_t j = 0; j < PRIMS_PER_LEAF; ++j) {
+      uint32_t primID = leafID * PRIMS_PER_LEAF + j;
+      uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.codes, primID)); 
+      #ifdef ENABLE_OBBS
+      float3 obbMin = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 0);
+      float3 obbMax = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 1);
+      float3 obbRot = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 2);
+      float3x3 obbRotMat = eul_to_mat3(obbRot);      
+      float3 obbC = (obbMin + obbMax) * .5f;
+      float3x3 rot = transpose(obbRotMat);
+      obbMin = mul(rot, obbMin - obbC) + obbC;
+      obbMax = mul(rot, obbMax - obbC) + obbC;
+      aabbMin = min(aabbMin, min(obbMin, obbMax));
+      aabbMax = max(aabbMax, max(obbMin, obbMax));
+      #else
+      float3 primAabbMin = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 0);
+      float3 primAabbMax = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 1);
+      aabbMin = min(aabbMin, primAabbMin);
+      aabbMax = max(aabbMax, primAabbMax);
+      #endif
+    }
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
-    #endif
     l0ClusterAabbMin = min(aabbMin, l0ClusterAabbMin);
     l0ClusterAabbMax = max(aabbMax, l0ClusterAabbMax);
   }
@@ -639,7 +627,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL3Treelets, (NNAccel, record), (1,1,1)) {
     asfloat(((exponent32 >>  0) & 255) << 23),
     asfloat(((exponent32 >>  8) & 255) << 23),
     asfloat(((exponent32 >> 16) & 255) << 23)
-  ) / (255.f - 1.f);
+  ) / 255.f;
   float3 translate = l3Min;
 
   // 2) Quantize the children
@@ -687,7 +675,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2Treelets, (NNAccel, record), (1,1,1)) {
     asfloat(((exponent32 >>  0) & 255) << 23),
     asfloat(((exponent32 >>  8) & 255) << 23),
     asfloat(((exponent32 >> 16) & 255) << 23)
-  ) / (255.f - 1.f);
+  ) / 255.f;
   float3 translate = l2Min;
 
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
@@ -735,7 +723,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL1Treelets, (NNAccel, record), (1,1,1)) {
     asfloat(((exponent32 >>  0) & 255) << 23),
     asfloat(((exponent32 >>  8) & 255) << 23),
     asfloat(((exponent32 >> 16) & 255) << 23)
-  ) / (255.f - 1.f);
+  ) / 255.f;
   float3 translate = l1Min;
 
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
@@ -761,6 +749,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Treelets, (NNAccel, record), (1,1,1)) {
   if (l0ID >= record.numL0Clusters) return;
 
   int numPrims = record.numPrims;
+  int numLeaves = record.numLeaves;
   int numL0Clusters = record.numL0Clusters;
   int numL1Clusters = record.numL1Clusters;
   int numL2Clusters = record.numL2Clusters;
@@ -785,37 +774,38 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Treelets, (NNAccel, record), (1,1,1)) {
     asfloat(((exponent32 >>  0) & 255) << 23),
     asfloat(((exponent32 >>  8) & 255) << 23),
     asfloat(((exponent32 >> 16) & 255) << 23)
-  ) / (255.f - 1.f);
+  ) / (255.f);
   float3 translate = l0Min;
 
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t itemID = l0ID * BRANCHING_FACTOR + i;
-    if (itemID > numPrims) break;
-    uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
-    #ifdef ENABLE_BOUNDING_BALLS
-    float4 ball = gprt::load<float4>(record.primBounds, itemID);
-    if (ball.w < 0.f) continue;
-    ball.xyz = (ball.xyz - translate) / scale;
-    ball.w = ball.w / max(scale.x, max(scale.y, scale.z));
-    uint32_t child = ((uint32_t(ball.xyz.x) & 255ul) <<  0ul)
-                   | ((uint32_t(ball.xyz.y) & 255ul) <<  8ul)
-                   | ((uint32_t(ball.xyz.z) & 255ul) << 16ul)
-                   | ((uint32_t(ball.w) & 255ul) << 24ul);
-    gprt::store<uint32_t>(record.children, 2 * (numL2Clusters + numL1Clusters + numL0Clusters) + itemID, child);   
-    #else 
-    float3 aabbMin = gprt::load<float3>(record.primBounds, itemID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.primBounds, itemID * 2 + 1);
+    uint32_t leafID = l0ID * BRANCHING_FACTOR + i;
+    if (leafID > numLeaves) break;
+
+    float3 aabbMin = float3(1e20f, 1e20f, 1e20f);
+    float3 aabbMax = -float3(1e20f, 1e20f, 1e20f);
+
+    for (uint32_t j = 0; j < PRIMS_PER_LEAF; ++j) {
+      uint32_t primID = leafID * PRIMS_PER_LEAF + j;
+      if (primID >= numPrims) continue;
+
+      uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.codes, primID)); 
+      if (primitiveAddress > numPrims) continue;
+      
+      float3 primAabbMin = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 0);
+      float3 primAabbMax = gprt::load<float3>(record.primBounds, primitiveAddress * 2 + 1);
+      aabbMin = min(aabbMin, primAabbMin);
+      aabbMax = max(aabbMax, primAabbMax);
+    }
     if (any(aabbMax < aabbMin)) continue;
     aabbMin = (aabbMin - translate) / scale;
     aabbMax = (aabbMax - translate) / scale;
     uint64_t child = ((uint64_t(aabbMin.x) & 255ull) <<  0ull)
-                   | ((uint64_t(aabbMin.y) & 255ull) <<  8ull)
-                   | ((uint64_t(aabbMin.z) & 255ull) << 16ull)
-                   | ((uint64_t(aabbMax.x) & 255ull) << 24ull)
-                   | ((uint64_t(aabbMax.y) & 255ull) << 32ull)
-                   | ((uint64_t(aabbMax.z) & 255ull) << 40ull);
-    gprt::store<uint64_t>(record.children, numL2Clusters + numL1Clusters + numL0Clusters + itemID, child);   
-    #endif
+                  | ((uint64_t(aabbMin.y) & 255ull) <<  8ull)
+                  | ((uint64_t(aabbMin.z) & 255ull) << 16ull)
+                  | ((uint64_t(aabbMax.x) & 255ull) << 24ull)
+                  | ((uint64_t(aabbMax.y) & 255ull) << 32ull)
+                  | ((uint64_t(aabbMax.z) & 255ull) << 40ull);
+    gprt::store<uint64_t>(record.children, numL2Clusters + numL1Clusters + numL0Clusters + leafID, child);   
   }
 }
 

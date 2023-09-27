@@ -4,15 +4,19 @@
 // by turning these features on, the more performance becomes dependent on how efficient
 // the culling primitives are...
 
-// Makes me wonder if bounding spheres over bounding boxes would be a better idea...
-
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
 #define BRANCHING_FACTOR 10
 
+// The number of primitives to traverse when hitting a leaf
+#define PRIMS_PER_LEAF 1
+
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
-// Edit edit: Downward pruning seems to fall apart when nodes are quantized. 
+// Edit edit: Downward pruning seems to fall apart when nodes are quantized. The reason 
+// for why is because the nearest face might differ between the quantized and unquantized boxes.
+// Nearest face only matches when quantized box is just a scaling up or down of the original. 
+// It's very rare that this happens, but also, the performance improvements from this aren't very good.
 // #define ENABLE_DOWNAWARD_CULLING
 
 // Enables an LBVH reference, similar to Jakob and Guthe's knn.
@@ -21,24 +25,23 @@
 #define ENABLE_LBVH_REFERENCE
 
 // Uses a quantized representation of bounding boxes
-#define ENABLE_QUANTIZATION
+// #define ENABLE_QUANTIZATION
 
 // Uses a quantized representation for the active cluster queue
 // I've bounced back and forth on if this helps or not. 
 //   For untruncated queries, the ultimate bottleneck is when tree traversal fails and many prims 
-//   are all approximately the same distance. There, its better to have an accurate queue for culling
-// 
+//   are all approximately the same distance. There, its better to have an accurate queue for culling. 
+//   However, I suspect the issue with culling has more to do with using AABBs over something tigher fitting
 // #define ENABLE_QUEUE_QUANTIZATION
 
 
-// Bounding boxes have some unappealing culling properties for neighbor search, namely  
-// that their corners tend to be hit without the primitive itself being hit.
-// Bounding balls could to better, but computing the minimum enclosing ball is a hard problem. 
-// Still, brute force computing minimum enclosing balls for leaves is fast enough. 
-// So, this flag uses quantized bounding balls instead of bounding boxes for the leaves.
-// In theory, this should help improve culling, especially for odd configurations where
-// a min and max range are selected. 
-// #define ENABLE_BOUNDING_BALLS
+// Enables oriented bounding boxes in an attempt to improve culling performance. 
+// Prior experiments seem to suggest that the minimum distance to an axis aligned bounding 
+// box tends to be a poor fit for the minimum distance to the contained primitive. This
+// issue seems to become more and more extreme as primitives are clustered together.
+// This mode uses a singular value decomposition to compute the orientation of a bounding box 
+// that best fits the underlying primitive distribution
+// #define ENABLE_OBBS
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
@@ -73,6 +76,7 @@ namespace gprt{
     struct NNAccel {
         // input
         alignas(4) uint32_t numPrims;
+        alignas(4) uint32_t numLeaves;
         alignas(4) uint32_t numL0Clusters;
         alignas(4) uint32_t numL1Clusters;
         alignas(4) uint32_t numL2Clusters;
@@ -94,10 +98,9 @@ namespace gprt{
         alignas(16) gprt::Buffer aabb;
 
         // Buffers of bounding primitives. 
-        // If bounding boxes, each aabb is a pair of float3.
-        // If bounding balls, each ball is a single float4 (xyzr).
-        // Clusters contain primitives, superClusters contain clusters and leaves contain superClusters. 
-        // Leaves are additionally dialated by "maximum search range" when using RT cores for truncated traversal.
+        // If axis aligned bounding boxes, each is a pair of float3.
+        // If bounding balls, each is a single float4 (xyzr).
+        // If oriented bounding boxes, each is a triplet of float3s.
         alignas(16) gprt::Buffer primBounds;
         alignas(16) gprt::Buffer l0clusters;
         alignas(16) gprt::Buffer l1clusters;

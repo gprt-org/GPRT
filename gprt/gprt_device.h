@@ -76,6 +76,15 @@ make_bgra(const float4 color) {
          (make_8bit(color.w) << 24);
 }
 
+float4 over(float4 a, float4 b) {
+  float4 result;
+  result.a = a.a + b.a * (1.f - a.a);
+  if (result.a == 0.f)
+    return a; // avoid NaN
+  result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
+  return result;
+}
+
 // struct Buffer {
 //   uint64_t x;
 //   uint64_t y;
@@ -94,9 +103,21 @@ load(in Buffer buffer, uint64_t index) {
 }
 
 template <typename T>
+T
+loadRaw(in Buffer buffer, uint64_t address) {
+  return vk::RawBufferLoad<T>(buffer.x + address);
+}
+
+template <typename T>
 void
 store(in Buffer buffer, uint64_t index, in T value) {
   vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
+}
+
+template <typename T>
+void
+storeRaw(in Buffer buffer, uint64_t address, in T value) {
+  vk::RawBufferStore<T>(buffer.x + address, value);
 }
 
 // note, below  atomics are translated from
