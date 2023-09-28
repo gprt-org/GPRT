@@ -41,7 +41,10 @@
 // issue seems to become more and more extreme as primitives are clustered together.
 // This mode uses a singular value decomposition to compute the orientation of a bounding box 
 // that best fits the underlying primitive distribution
-// #define ENABLE_OBBS
+#define ENABLE_OBBS
+
+// // Also enables using OBBs for internal nodes of the tree
+#define ENABLE_OBBS_INTERNAL
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
@@ -106,8 +109,6 @@ namespace gprt{
         alignas(16) gprt::Buffer l1clusters;
         alignas(16) gprt::Buffer l2clusters;
         alignas(16) gprt::Buffer l3clusters;
-
-        alignas(16) gprt::Buffer clusters;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
@@ -115,13 +116,19 @@ namespace gprt{
         //       [??]  [sz]  [sy]  [sx]  [  zmin  ]  [  ymin  ]  [  xmin  ]
         alignas(16) gprt::Buffer treelets;
 
-        // If a "bounding box", 64-bit integers, 6 bytes for bounding box, 2 unused.
+        // If an "axis aligned bounding box", 64-bit integers, 6 bytes for bounding box, 2 unused.
         // byte   8    7   6     5     4     3     2     1           
         //       [?]  [?]  [zh]  [yh]  [xh]  [zl]  [yl]  [xl]        
 
         // If a "bounding ball", 32-bit integers, 3 bytes for center, 1 for radius.
         // byte   4    3    2    1           
         //       [r]  [z]  [y]  [x]        
+
+        // If an "oriented bounding box", we use a 128-bit integer. 
+        // 6 bytes for bounding box, 2 unused. 
+        // Then 20 bits for Euler rotations in X, Y, then Z. 4 bits unused.
+        //        15 14 13 12 11 10 9 8   7   6   5     4     3    2    1    0
+        //       [ zr ]  [ yr ]  [ xr ]   [?] [?] [zh]  [yh]  [xh]  [zl]  [yl]  [xl]
         alignas(16) gprt::Buffer children; 
 
         // An RT core tree

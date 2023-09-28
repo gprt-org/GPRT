@@ -728,6 +728,17 @@ float3x3 outerProduct(float3 a, float3 b) {
   return float3x3(a * b.x, a * b.y, a * b.z);
 }
 
+float3 getCorner(float3 aabbMin, float3 aabbMax, int cornerID) {
+  int x = ((cornerID & (1 << 0)) != 0) ? 1 : 0;
+  int y = ((cornerID & (1 << 1)) != 0) ? 1 : 0;
+  int z = ((cornerID & (1 << 2)) != 0) ? 1 : 0;
+  return float3(
+    (x == 0) ? aabbMin.x : aabbMax.x,
+    (y == 0) ? aabbMin.y : aabbMax.y,
+    (z == 0) ? aabbMin.z : aabbMax.z
+  );
+}
+
 #define _EPSILON .00001f
 #define _PI 3.14159265358979323846264f
 
@@ -973,9 +984,8 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     aabbMin = aabbMin * l3Scale + l3Translate;
     aabbMax = aabbMax * l3Scale + l3Translate;
     #else
-    uint32_t offset = 2 * record.numL0Clusters + 2 * record.numL1Clusters;
-    float3 aabbMin = gprt::load<float3>(record.clusters, offset + l2ClusterID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.clusters, offset + l2ClusterID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 1);
     #endif
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
@@ -1086,9 +1096,8 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
       aabbMin = aabbMin * l2Scale + l2Translate;
       aabbMax = aabbMax * l2Scale + l2Translate;
       #else
-      uint32_t offset = 2 * record.numL0Clusters;
-      float3 aabbMin = gprt::load<float3>(record.clusters, offset + l1ClusterID * 2 + 0);
-      float3 aabbMax = gprt::load<float3>(record.clusters, offset + l1ClusterID * 2 + 1);
+      float3 aabbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 0);
+      float3 aabbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 1);
       #endif
       float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
       float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
@@ -1188,7 +1197,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
         int clusterID = l1ClusterID * BRANCHING_FACTOR + l0;
         if (clusterID > numL0Clusters) break;
         #ifdef ENABLE_QUANTIZATION
-        uint64_t child = gprt::load<uint64_t>(record.children, numL2Clusters + numL1Clusters + clusterID);
+        uint64_t child = gprt::load<uint64_t>(record.children, numL2Clusters + numL1Clusters + clusterID);        
         float3 aabbMin = float3(((child >>  0ull) & 255), 
                                 ((child >>  8ull) & 255), 
                                 ((child >> 16ull) & 255));
@@ -1198,13 +1207,28 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
         aabbMin = aabbMin * l1Scale + l1Translate;
         aabbMax = aabbMax * l1Scale + l1Translate;
         #else
-        uint32_t offset = 2 * record.numL0Clusters;
-        float3 aabbMin = gprt::load<float3>(record.clusters, clusterID * 2 + 0);
-        float3 aabbMax = gprt::load<float3>(record.clusters, clusterID * 2 + 1);
+        #ifdef ENABLE_OBBS_INTERNAL
+        float3 obbMin = gprt::load<float3>(record.l0clusters, clusterID * 3 + 0);
+        float3 obbMax = gprt::load<float3>(record.l0clusters, clusterID * 3 + 1);
+        float3 obbEul = gprt::load<float3>(record.l0clusters, clusterID * 3 + 2);
+        float3x3 obbRot = eul_to_mat3(obbEul);
+        float3 obbC = (obbMin + obbMax) * .5f;
+        #else
+        float3 aabbMin = gprt::load<float3>(record.l0clusters, clusterID * 2 + 0);
+        float3 aabbMax = gprt::load<float3>(record.l0clusters, clusterID * 2 + 1);
         #endif
+        #endif
+
+        #ifdef ENABLE_OBBS_INTERNAL 
+        float3 obbQueryOrigin = mul(obbRot, queryOrigin - obbC) + obbC;
+        float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+        float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+        float minMaxDist = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
+        #else
         float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
         float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
         float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+        #endif
 
         // Range Culling: Pessimistic distance closer than min range
         if (maxDist <= tmin * tmin) continue;
@@ -1301,6 +1325,25 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
           if (itemID > numPrims) break;
 
           #ifdef ENABLE_QUANTIZATION
+          #ifdef ENABLE_OBBS
+          uint64_t2 child;
+          child.x = gprt::load<uint64_t>(record.children, numL2Clusters + numL1Clusters + numL0Clusters + itemID * 2 + 0);
+          child.y = gprt::load<uint64_t>(record.children, numL2Clusters + numL1Clusters + numL0Clusters + itemID * 2 + 1);
+          float3 obbMin = float3(((child.x >>  0ull) & 255ull), 
+                                 ((child.x >>  8ull) & 255ull), 
+                                 ((child.x >> 16ull) & 255ull));
+          float3 obbMax = float3(((child.x >> 24ull) & 255ull) + 1u, 
+                                 ((child.x >> 32ull) & 255ull) + 1u, 
+                                 ((child.x >> 40ull) & 255ull) + 1u);
+          float3 obbEul = float3(((child.y >>  0ull) & 1048575ull),
+                                 ((child.y >> 20ull) & 1048575ull),
+                                 ((child.y >> 40ull) & 1048575ull));
+          obbMin = obbMin * l0Scale + l0Translate;
+          obbMax = obbMax * l0Scale + l0Translate;
+          float3 obbC = (obbMin + obbMax) * .5f;
+          obbEul = ((obbEul / 1048576.f) * radians(360)) - radians(180);
+          float3x3 obbRot = eul_to_mat3(obbEul);
+          #else
           uint64_t child = gprt::load<uint64_t>(record.children, numL2Clusters + numL1Clusters + numL0Clusters + itemID);
           float3 aabbMin = float3(((child >>  0ull) & 255ull), 
                                   ((child >>  8ull) & 255ull), 
@@ -1310,13 +1353,14 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
                                   ((child >> 40ull) & 255ull) + 1u);
           aabbMin = aabbMin * l0Scale + l0Translate;
           aabbMax = aabbMax * l0Scale + l0Translate;
+          #endif
           #else
           uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
           #ifdef ENABLE_OBBS    
           float3 obbMin = gprt::load<float3>(record.primBounds, primitiveID * 3 + 0);
           float3 obbMax = gprt::load<float3>(record.primBounds, primitiveID * 3 + 1);
-          float3 obbRot = gprt::load<float3>(record.primBounds, primitiveID * 3 + 2);
-          float3x3 obbRotMat = eul_to_mat3(obbRot);
+          float3 obbEul = gprt::load<float3>(record.primBounds, primitiveID * 3 + 2);
+          float3x3 obbRot = eul_to_mat3(obbEul);
           float3 obbC = (obbMin + obbMax) * .5f;
           #else
           float3 aabbMin = gprt::load<float3>(record.primBounds, primitiveID * 2 + 0);
@@ -1325,7 +1369,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
           #endif
 
           #ifdef ENABLE_OBBS 
-          float3 obbQueryOrigin = mul(obbRotMat, queryOrigin - obbC) + obbC;
+          float3 obbQueryOrigin = mul(obbRot, queryOrigin - obbC) + obbC;
           float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
           float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
           #else
@@ -1390,12 +1434,12 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
           // Upward culling
           if (minDist >= payload.closestDistance) continue;
 
-          payload.stats.x++; // Count this as traversing a primitive
           uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + idx;
-
           for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
             uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
             if (itemID >= numPrims) continue;
+
+            payload.stats.x++; // Count this as traversing a primitive
         
             uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
             int3 tri = gprt::load<int3>(record.triangles, primitiveID);
@@ -1491,10 +1535,9 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     if (gotoNext) continue;
 
     // Traverse leaf
-    uint32_t offset = 2 * record.numL0Clusters + 2 * record.numL1Clusters + 2 * record.numL2Clusters;
     int leafID = node.w;
-    float3 aabbMin = gprt::load<float3>(record.clusters, offset + 2 * leafID + 0); // + record.maxSearchRange;
-    float3 aabbMax = gprt::load<float3>(record.clusters, offset + 2 * leafID + 1); // - record.maxSearchRange;
+    float3 aabbMin = gprt::load<float3>(record.l3clusters, leafID * 2 + 0); // + record.maxSearchRange;
+    float3 aabbMax = gprt::load<float3>(record.l3clusters, leafID * 2 + 1); // - record.maxSearchRange;
 
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     if (minDist > dist) continue;
