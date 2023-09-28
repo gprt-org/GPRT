@@ -484,7 +484,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
       covariance += outerProduct(p, p);
     }
   }
-  covariance /= (numDataPoints * 8);
+  covariance /= numDataPoints;
 
   // Compute SVD
   float3x3 l0Rot = svd(covariance).V;
