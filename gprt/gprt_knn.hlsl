@@ -450,6 +450,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
   float3 pObbMins[BRANCHING_FACTOR * PRIMS_PER_LEAF];
   float3 pObbMaxs[BRANCHING_FACTOR * PRIMS_PER_LEAF];
   float3 pObbRots[BRANCHING_FACTOR * PRIMS_PER_LEAF];
+  float3 pObbCens[BRANCHING_FACTOR * PRIMS_PER_LEAF];
   float3 l0Center = float3(0.f, 0.f, 0.f);
   uint32_t numDataPoints = 0;
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
@@ -458,70 +459,61 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
     for (uint32_t j = 0; j < PRIMS_PER_LEAF; ++j) {
       uint32_t primID = leafID * PRIMS_PER_LEAF + j;
       uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.codes, primID)); 
-      pObbMins[i * PRIMS_PER_LEAF + j] = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 0);
-      pObbMaxs[i * PRIMS_PER_LEAF + j] = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 1);
-      pObbRots[i * PRIMS_PER_LEAF + j] = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 2);
-      l0Center += (pObbMins[i * PRIMS_PER_LEAF + j] + pObbMaxs[i * PRIMS_PER_LEAF + j]) * .5f;
+      float3 obbMin = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 0);
+      float3 obbMax = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 1);
+      float3 obbRot = gprt::load<float3>(record.primBounds, primitiveAddress * 3 + 2);
+      float3 obbCen = (obbMin + obbMax) * .5f;
+      pObbMins[i * PRIMS_PER_LEAF + j] = obbMin;
+      pObbMaxs[i * PRIMS_PER_LEAF + j] = obbMax;
+      pObbRots[i * PRIMS_PER_LEAF + j] = obbRot;
+      pObbCens[i * PRIMS_PER_LEAF + j] = obbCen;
+      l0Center += obbCen;
       numDataPoints++;
     }
   }
   l0Center /= numDataPoints;
 
   // Compute covariance
-  numDataPoints = 0;
   float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t leafID = BRANCHING_FACTOR * l0ClusterID + i;
     if (leafID >= numLeaves) continue;
     for (uint32_t j = 0; j < PRIMS_PER_LEAF; ++j) {
-      float3 obbMin = pObbMins[i * PRIMS_PER_LEAF + j];
-      float3 obbMax = pObbMaxs[i * PRIMS_PER_LEAF + j];
-      float3 obbCenter = (obbMin + obbMax) * .5f;
-      float3x3 obbRot = transpose(eul_to_mat3(pObbRots[i * PRIMS_PER_LEAF + j]));
-      obbMin = mul(obbRot, obbMin - obbCenter) + obbCenter;
-      
-      // I'm not entirely sure why, but only considering one corner seems to work best...
-      // Maybe something to do with correlation?
-      float3 p = obbMin - l0Center;
+      float3 obbCen = pObbCens[i * PRIMS_PER_LEAF + j];
+      float3 p = obbCen - l0Center;
       covariance += outerProduct(p, p);
-      numDataPoints++;
     }
   }
-  covariance /= numDataPoints;
+  covariance /= (numDataPoints * 8);
 
   // Compute SVD
   float3x3 l0Rot = svd(covariance).V;
-  float3 obbRot = mat3_to_eul(l0Rot);
+  float3 l0obbRot = mat3_to_eul(l0Rot);
 
   // Compute OBB
-  float3 obbMin =  float3(1e20f, 1e20f, 1e20f);
-  float3 obbMax = -float3(1e20f, 1e20f, 1e20f);
+  float3 l0obbMin =  float3(1e20f, 1e20f, 1e20f);
+  float3 l0obbMax = -float3(1e20f, 1e20f, 1e20f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t leafID = BRANCHING_FACTOR * l0ClusterID + i;
     if (leafID >= numLeaves) continue;
     for (uint32_t j = 0; j < PRIMS_PER_LEAF; ++j) {
-      float3 obbCenter = (pObbMins[i * PRIMS_PER_LEAF + j] + pObbMaxs[i * PRIMS_PER_LEAF + j]) * .5f;
-      for (int z = 0; z < 1; ++z) {
-      for (int y = 0; y < 1; ++y) {
-      for (int x = 0; x < 1; ++x) {
-        float3 obbCorner = float3(
-          (x == 0) ? pObbMins[i * PRIMS_PER_LEAF + j].x : pObbMaxs[i * PRIMS_PER_LEAF + j].x,
-          (y == 0) ? pObbMins[i * PRIMS_PER_LEAF + j].y : pObbMaxs[i * PRIMS_PER_LEAF + j].y,
-          (z == 0) ? pObbMins[i * PRIMS_PER_LEAF + j].z : pObbMaxs[i * PRIMS_PER_LEAF + j].z
-        );
-        float3x3 obbRot = transpose(eul_to_mat3(pObbRots[i * PRIMS_PER_LEAF + j]));
-        obbCorner = mul(obbRot, obbCorner - obbCenter) + obbCenter;
+      float3 obbCen = pObbCens[i * PRIMS_PER_LEAF + j];
+      float3 obbMin = pObbMins[i * PRIMS_PER_LEAF + j];
+      float3 obbMax = pObbMaxs[i * PRIMS_PER_LEAF + j];
+      float3x3 obbRot = transpose(eul_to_mat3(pObbRots[i * PRIMS_PER_LEAF + j]));
+      for (int k = 0; k < 8; ++k) {
+        float3 obbCorner = getCorner(obbMin, obbMax, k);
+        obbCorner = mul(obbRot, obbCorner - obbCen) + obbCen;
         obbCorner = mul(l0Rot, obbCorner - l0Center) + l0Center;
-
-        obbMin = min(obbMin, obbCorner);
-        obbMax = max(obbMax, obbCorner);
-      }}}
+        l0obbMin = min(l0obbMin, obbCorner);
+        l0obbMax = max(l0obbMax, obbCorner);
+      }
     }
   }
 
-  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 0, float3(obbMin));
-  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 1, float3(obbMax));
-  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 2, float3(obbRot));
+  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 0, float3(l0obbMin));
+  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 1, float3(l0obbMax));
+  gprt::store<float3>(record.l0clusters, l0ClusterID * 3 + 2, float3(l0obbRot));
 
   #else
 
