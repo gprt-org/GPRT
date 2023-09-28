@@ -501,13 +501,12 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
       float3 obbMin = pObbMins[i * PRIMS_PER_LEAF + j];
       float3 obbMax = pObbMaxs[i * PRIMS_PER_LEAF + j];
       float3x3 obbRot = transpose(eul_to_mat3(pObbRots[i * PRIMS_PER_LEAF + j]));
-      for (int k = 0; k < 8; ++k) {
-        float3 obbCorner = getCorner(obbMin, obbMax, k);
-        obbCorner = mul(obbRot, obbCorner - obbCen) + obbCen;
-        obbCorner = mul(l0Rot, obbCorner - l0Center) + l0Center;
-        l0obbMin = min(l0obbMin, obbCorner);
-        l0obbMax = max(l0obbMax, obbCorner);
-      }
+      obbMin = mul(obbRot, obbMin - obbCen) + obbCen;
+      obbMax = mul(obbRot, obbMax - obbCen) + obbCen;
+      obbMin = mul(l0Rot, obbMin - l0Center) + l0Center;
+      obbMax = mul(l0Rot, obbMax - l0Center) + l0Center;
+      l0obbMin = min(l0obbMin, min(obbMin, obbMax));
+      l0obbMax = max(l0obbMax, max(obbMin, obbMax));
     }
   }
 
