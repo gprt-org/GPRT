@@ -46,7 +46,7 @@ main(int ac, char **av) {
     std::random_device r;
     std::default_random_engine e1(r());
     auto rng = std::default_random_engine { r() };
-    std::uniform_real_distribution<float> uniform_dist(-1e20f, 1e20f);
+    std::uniform_real_distribution<float> uniform_dist(-1e38f, 1e38f);
 
     // Generate a bunch of random points
     std::vector<float3> points(42); 

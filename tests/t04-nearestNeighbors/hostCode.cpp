@@ -158,7 +158,7 @@ main(int ac, char **av) {
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
-      float closestDistance = 1e20f;
+      float closestDistance = 1e38f;
       int closestPrim = -1;
       for (uint32_t j = 0; j < primitiveModel.vertices.size(); ++j) {
         float distance = getPointDist2(queryPoint, primitiveModel.vertices[j]);
@@ -272,7 +272,7 @@ main(int ac, char **av) {
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
-      float closestDistance = 1e20f;
+      float closestDistance = 1e38f;
       for (uint32_t j = 0; j < primitiveModel.edges.size(); ++j) {
         uint2 edge = primitiveModel.edges[j];
         float distance = getEdgeDist2(queryPoint, primitiveModel.vertices[edge.x], primitiveModel.vertices[edge.y]);
@@ -385,7 +385,7 @@ main(int ac, char **av) {
       }
       
       /* Second, confirm this is indeed a candidate closest primitive */
-      float closestDistance = 1e20f;
+      float closestDistance = 1e38f;
       for (uint32_t j = 0; j < primitiveModel.triangles.size(); ++j) {
         uint3 triangle = primitiveModel.triangles[j];
         float distance = getTriangleDist2(queryPoint, primitiveModel.vertices[triangle.x], primitiveModel.vertices[triangle.y], primitiveModel.vertices[triangle.z]);

@@ -76,7 +76,7 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
   rayDesc.Direction =
       normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
   rayDesc.TMin = 0.0;
-  rayDesc.TMax = 1e20f;
+  rayDesc.TMax = 1e38f;
 
   // compute the spreading angle of the ray to determine the sampling footprint
   float phi = record.camera.fovy;

@@ -4574,7 +4574,8 @@ struct Context {
     internalComputePrograms.insert({"ComputeEdgeClusters", new Compute(logicalDevice, module, "ComputeEdgeClusters", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeEdgeHilbertCodes", new Compute(logicalDevice, module, "ComputeEdgeHilbertCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeEdgeMortonCodes", new Compute(logicalDevice, module, "ComputeEdgeMortonCodes", sizeof(gprt::NNAccel))});
-    internalComputePrograms.insert({"ComputeTriangleBounds", new Compute(logicalDevice, module, "ComputeTriangleBounds", sizeof(gprt::NNAccel))});
+    internalComputePrograms.insert({"ComputeTriangleRootBounds", new Compute(logicalDevice, module, "ComputeTriangleRootBounds", sizeof(gprt::NNAccel))});
+    internalComputePrograms.insert({"ComputeTriangleLeaves", new Compute(logicalDevice, module, "ComputeTriangleLeaves", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeTriangleHilbertCodes", new Compute(logicalDevice, module, "ComputeTriangleHilbertCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeTriangleCodes", new Compute(logicalDevice, module, "ComputeTriangleCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeTriangleMortonCodes", new Compute(logicalDevice, module, "ComputeTriangleMortonCodes", sizeof(gprt::NNAccel))});
@@ -4582,10 +4583,6 @@ struct Context {
     internalComputePrograms.insert({"ComputeL1Clusters", new Compute(logicalDevice, module, "ComputeL1Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2Clusters", new Compute(logicalDevice, module, "ComputeL2Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL3Clusters", new Compute(logicalDevice, module, "ComputeL3Clusters", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL3Treelets", new Compute(logicalDevice, module, "ComputeL3Treelets", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL2Treelets", new Compute(logicalDevice, module, "ComputeL2Treelets", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL1Treelets", new Compute(logicalDevice, module, "ComputeL1Treelets", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL0Treelets", new Compute(logicalDevice, module, "ComputeL0Treelets", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeAABBCodes", new Compute(logicalDevice, module, "ComputeAABBCodes", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"MakeNodes", new Compute(logicalDevice, module, "MakeNodes", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"SplitNodes", new Compute(logicalDevice, module, "SplitNodes", sizeof(gprt::NNAccel))});    
@@ -4613,7 +4610,8 @@ struct Context {
     internalComputePrograms["ComputeEdgeBounds"]->destroy();
     internalComputePrograms["ComputeEdgeClusters"]->destroy();
     internalComputePrograms["ComputeEdgeHilbertCodes"]->destroy();
-    internalComputePrograms["ComputeTriangleBounds"]->destroy();
+    internalComputePrograms["ComputeTriangleRootBounds"]->destroy();
+    internalComputePrograms["ComputeTriangleLeaves"]->destroy();
     internalComputePrograms["ComputeTriangleHilbertCodes"]->destroy();
     internalComputePrograms["ComputeTriangleCodes"]->destroy();
     internalComputePrograms["ComputeTriangleMortonCodes"]->destroy();
@@ -4621,10 +4619,6 @@ struct Context {
     internalComputePrograms["ComputeL1Clusters"]->destroy();
     internalComputePrograms["ComputeL2Clusters"]->destroy();
     internalComputePrograms["ComputeL3Clusters"]->destroy();
-    internalComputePrograms["ComputeL3Treelets"]->destroy();
-    internalComputePrograms["ComputeL2Treelets"]->destroy();
-    internalComputePrograms["ComputeL1Treelets"]->destroy();
-    internalComputePrograms["ComputeL0Treelets"]->destroy();
     internalComputePrograms["MakeNodes"]->destroy();
     internalComputePrograms["SplitNodes"]->destroy();
     internalComputePrograms["BuildHierarchy"]->destroy();
@@ -4635,7 +4629,8 @@ struct Context {
     delete internalComputePrograms["ComputeEdgeBounds"];
     delete internalComputePrograms["ComputeEdgeClusters"];
     delete internalComputePrograms["ComputeEdgeHilbertCodes"];
-    delete internalComputePrograms["ComputeTriangleBounds"];
+    delete internalComputePrograms["ComputeTriangleRootBounds"];
+    delete internalComputePrograms["ComputeTriangleLeaves"];
     delete internalComputePrograms["ComputeTriangleHilbertCodes"];
     delete internalComputePrograms["ComputeTriangleCodes"];
     delete internalComputePrograms["ComputeTriangleMortonCodes"];
@@ -4643,10 +4638,6 @@ struct Context {
     delete internalComputePrograms["ComputeL1Clusters"];
     delete internalComputePrograms["ComputeL2Clusters"];
     delete internalComputePrograms["ComputeL3Clusters"];
-    delete internalComputePrograms["ComputeL3Treelets"];
-    delete internalComputePrograms["ComputeL2Treelets"];
-    delete internalComputePrograms["ComputeL1Treelets"];
-    delete internalComputePrograms["ComputeL0Treelets"];
     delete internalComputePrograms["MakeNodes"];
     delete internalComputePrograms["SplitNodes"];
     delete internalComputePrograms["BuildHierarchy"];
@@ -4657,7 +4648,8 @@ struct Context {
     internalComputePrograms.erase("ComputeEdgeBounds");
     internalComputePrograms.erase("ComputeEdgeClusters");
     internalComputePrograms.erase("ComputeEdgeHilbertCodes");
-    internalComputePrograms.erase("ComputeTriangleBounds");
+    internalComputePrograms.erase("ComputeTriangleRootBounds");
+    internalComputePrograms.erase("ComputeTriangleLeaves");
     internalComputePrograms.erase("ComputeTriangleHilbertCodes");
     internalComputePrograms.erase("ComputeTriangleCodes");
     internalComputePrograms.erase("ComputeTriangleMortonCodes");
@@ -4665,10 +4657,6 @@ struct Context {
     internalComputePrograms.erase("ComputeL1Clusters");
     internalComputePrograms.erase("ComputeL2Clusters");
     internalComputePrograms.erase("ComputeL3Clusters");
-    internalComputePrograms.erase("ComputeL3Treelets");
-    internalComputePrograms.erase("ComputeL2Treelets");
-    internalComputePrograms.erase("ComputeL1Treelets");
-    internalComputePrograms.erase("ComputeL0Treelets");
     internalComputePrograms.erase("MakeNodes");
     internalComputePrograms.erase("SplitNodes");
     internalComputePrograms.erase("BuildHierarchy");
@@ -7543,14 +7531,11 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<uint64_t> codes;
   GPRTBufferOf<float3> aabb;
 
-  GPRTBufferOf<float3> primBounds;
+  GPRTBufferOf<float3> leaves;
   GPRTBufferOf<float3> l0clusters;
   GPRTBufferOf<float3> l1clusters;
   GPRTBufferOf<float3> l2clusters;
   GPRTBufferOf<float3> l3clusters;
-
-  GPRTBufferOf<float4> treelets;
-  GPRTBufferOf<uint64_t> children;
 
   GPRTBufferOf<uint8_t> scratch;
 
@@ -7586,41 +7571,16 @@ struct NNTriangleAccel : public Accel {
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
 
     #ifdef ENABLE_OBBS
-    primBounds = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numPrims);
-    #else
-    primBounds = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numPrims);
-    #endif
-
-    #ifdef ENABLE_OBBS_INTERNAL
+    leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numLeaves);
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL0Clusters);
     #else
+    leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
     #endif
+
     l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
     l3clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL3Clusters);
-
-    treelets = gprtDeviceBufferCreate<float4>((GPRTContext)context, 
-      2 * nnAccelHandle.numL0Clusters + 
-      2 * nnAccelHandle.numL1Clusters + 
-      2 * nnAccelHandle.numL2Clusters + 
-      2 * nnAccelHandle.numL3Clusters 
-    );
-
-    children = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, 
-      nnAccelHandle.numL2Clusters + 
-      nnAccelHandle.numL1Clusters + 
-      #ifdef ENABLE_OBBS_INTERNAL
-      nnAccelHandle.numL0Clusters * 2 + 
-      #else
-      nnAccelHandle.numL0Clusters + 
-      #endif
-      #ifdef ENABLE_OBBS
-      nnAccelHandle.numLeaves * 2
-      #else
-      nnAccelHandle.numLeaves
-      #endif
-    );
 
     lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
     lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
@@ -7637,14 +7597,11 @@ struct NNTriangleAccel : public Accel {
     
     nnAccelHandle.codes = gprtBufferGetHandle(codes);
     nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
-    nnAccelHandle.primBounds = gprtBufferGetHandle(primBounds);
+    nnAccelHandle.leaves = gprtBufferGetHandle(leaves);
     nnAccelHandle.l0clusters = gprtBufferGetHandle(l0clusters);
     nnAccelHandle.l1clusters = gprtBufferGetHandle(l1clusters);
     nnAccelHandle.l2clusters = gprtBufferGetHandle(l2clusters);
     nnAccelHandle.l3clusters = gprtBufferGetHandle(l3clusters);
-    
-    nnAccelHandle.treelets = gprtBufferGetHandle(treelets);
-    nnAccelHandle.children = gprtBufferGetHandle(children);
 
     nnAccelHandle.lbvhMortonCodes = gprtBufferGetHandle(lbvhMortonCodes);
     nnAccelHandle.lbvhIds = gprtBufferGetHandle(lbvhIds);
@@ -7746,18 +7703,13 @@ struct NNTriangleAccel : public Accel {
     
     typedef uint32_t uint;
 
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleBounds"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleLeaves"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL0Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], &nnAccelHandle);
-    
-    // For tree quantization
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3Treelets"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Treelets"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Treelets"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL0Treelets"], &nnAccelHandle);
     
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["MakeNodes"], &nnAccelHandle);
@@ -7774,7 +7726,7 @@ struct NNTriangleAccel : public Accel {
     gprtBufferUnmap(aabb);
 
     // Compute the global bounds
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleBounds"], nnAccelHandle.numPrims);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"], nnAccelHandle.numPrims);
 
     // Use global bounds to compute codes
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], nnAccelHandle.numPrims);
@@ -7783,17 +7735,11 @@ struct NNTriangleAccel : public Accel {
     gprtBufferSort((GPRTContext)context, codes, scratch);
 
     // Now compute cluster bounding boxes...   
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleLeaves"], nnAccelHandle.numLeaves);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0Clusters"], nnAccelHandle.numL0Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL1Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
     gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], nnAccelHandle.numL3Clusters);
-    
-    // #ifdef ENABLE_QUANTIZATION
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Treelets"], nnAccelHandle.numL3Clusters);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Treelets"], nnAccelHandle.numL2Clusters);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Treelets"], nnAccelHandle.numL1Clusters);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0Treelets"], nnAccelHandle.numL0Clusters);
-    // #endif
     
     // Now we can build our underlying RT core tree
     // This needs some updating, so commenting out for now...
@@ -7835,14 +7781,11 @@ struct NNTriangleAccel : public Accel {
   void destroy() {
     gprtBufferDestroy(codes);
     gprtBufferDestroy(aabb);
-    gprtBufferDestroy(primBounds);
+    gprtBufferDestroy(leaves);
     gprtBufferDestroy(l0clusters);
     gprtBufferDestroy(l1clusters);
     gprtBufferDestroy(l2clusters);
-    gprtBufferDestroy(l3clusters);    
-
-    gprtBufferDestroy(treelets);
-    gprtBufferDestroy(children);
+    gprtBufferDestroy(l3clusters);
 
     gprtBufferDestroy(scratch);
 

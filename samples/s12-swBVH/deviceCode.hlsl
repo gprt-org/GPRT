@@ -176,7 +176,7 @@ float2 interiorMap(in LBVHData lbvh, float3 pos)
 
     // float3 p = (pos - aabbMin) / (aabbMax - aabbMin);
 
-    float dist = 1e20f;
+    float dist = 1e38f;
     float s = -1.f;
 
     uint stack[32];

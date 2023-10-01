@@ -6,10 +6,11 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 10
+#define BRANCHING_FACTOR 8
 
-// The number of primitives to traverse when hitting a leaf
-#define PRIMS_PER_LEAF 1
+// The number of primitives to traverse when hitting a leaf. 
+// More than one seems beneficial for OBBs.
+#define PRIMS_PER_LEAF 8
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -17,15 +18,22 @@
 // for why is because the nearest face might differ between the quantized and unquantized boxes.
 // Nearest face only matches when quantized box is just a scaling up or down of the original. 
 // It's very rare that this happens, but also, the performance improvements from this aren't very good.
-// #define ENABLE_DOWNAWARD_CULLING
+//
+// Edit edit edit: When using OBBs, it seems like the maximal distance to the box gives good performance 
+// improvements. Still, some odd issues seemingly to do with numerical precision... For a KNN case, this
+// also might not be worth the hastle...
+
+// More updates, the "minMaxDistance" metric doesn't work for internal OBB nodes, since internal faces aren't guaranteed
+// to contain primitives. Only OBB leaves can guarantee this. So, for internal nodes, we instead use the "maxDistance"
+// for downward culling.
+
+// Theoretically that should work... But I am still noticing unacceptable artifacting from culling true positives...
+// #define ENABLE_DOWNAWARD_CULLING 
 
 // Enables an LBVH reference, similar to Jakob and Guthe's knn.
 // Note, we use this LBVH as a top level tree for our method, so 
 // this is just about if we're using RT cores or not
 #define ENABLE_LBVH_REFERENCE
-
-// Uses a quantized representation of bounding boxes
-// #define ENABLE_QUANTIZATION
 
 // Uses a quantized representation for the active cluster queue
 // I've bounced back and forth on if this helps or not. 
@@ -43,8 +51,9 @@
 // that best fits the underlying primitive distribution
 #define ENABLE_OBBS
 
-// // Also enables using OBBs for internal nodes of the tree
-#define ENABLE_OBBS_INTERNAL
+// Honestly I don't see much improvement by avoiding square roots. I don't think this is what the bottleneck is
+// at least on my problems... Just going to take square roots for simplicity...
+// #define USE_SQUARED_DISTS
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
@@ -104,7 +113,7 @@ namespace gprt{
         // If axis aligned bounding boxes, each is a pair of float3.
         // If bounding balls, each is a single float4 (xyzr).
         // If oriented bounding boxes, each is a triplet of float3s.
-        alignas(16) gprt::Buffer primBounds;
+        alignas(16) gprt::Buffer leaves;
         alignas(16) gprt::Buffer l0clusters;
         alignas(16) gprt::Buffer l1clusters;
         alignas(16) gprt::Buffer l2clusters;
@@ -114,7 +123,7 @@ namespace gprt{
         // 3 bytes for scale exponent, one unused 
         // byte   15   14    13    12    11 10 9 8   7  6  5  4  3  2  1  0
         //       [??]  [sz]  [sy]  [sx]  [  zmin  ]  [  ymin  ]  [  xmin  ]
-        alignas(16) gprt::Buffer treelets;
+        // alignas(16) gprt::Buffer treelets;
 
         // If an "axis aligned bounding box", 64-bit integers, 6 bytes for bounding box, 2 unused.
         // byte   8    7   6     5     4     3     2     1           
@@ -129,7 +138,7 @@ namespace gprt{
         // Then 20 bits for Euler rotations in X, Y, then Z. 4 bits unused.
         //        15 14 13 12 11 10 9 8   7   6   5     4     3    2    1    0
         //       [ zr ]  [ yr ]  [ xr ]   [?] [?] [zh]  [yh]  [xh]  [zl]  [yl]  [xl]
-        alignas(16) gprt::Buffer children; 
+        // alignas(16) gprt::Buffer children; 
 
         // An RT core tree
         alignas(16) gprt::Accel accel;
