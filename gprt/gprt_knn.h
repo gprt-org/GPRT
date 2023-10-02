@@ -1055,23 +1055,23 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
       int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1;
       if (l1ClusterID > numL1Clusters) break;
-      #ifdef ENABLE_QUANTIZATION
-      uint64_t child = gprt::load<uint64_t>(record.children, numL2Clusters + l1ClusterID);
-      float3 aabbMin = float3(((child >>  0ull) & 255), 
-                              ((child >>  8ull) & 255), 
-                              ((child >> 16ull) & 255));
-      float3 aabbMax = float3(((child >> 24ull) & 255) + 1u, 
-                              ((child >> 32ull) & 255) + 1u, 
-                              ((child >> 40ull) & 255) + 1u);
-      aabbMin = aabbMin * l2Scale + l2Translate;
-      aabbMax = aabbMax * l2Scale + l2Translate;
+
+      #ifdef ENABLE_OBBS 
+      float3 obbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 0);
+      float3 obbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 1);
+      float3 obbEul = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 2);
+      float3x3 obbRot = eul_to_mat3(obbEul);
+      float3 obbQueryOrigin = mul(obbRot, queryOrigin);
+      float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+      float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+      float pessimisticDistance = maxDist;
       #else
       float3 aabbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 0);
       float3 aabbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 1);
-      #endif
       float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
       float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
-      float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+      float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+      #endif
 
       // Range Culling: Pessimistic distance closer than min range
       if (maxDist < tmin) continue;
@@ -1151,21 +1151,21 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
 
       // Insert into active cluster list by distance far to near
       for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-        int clusterID = l1ClusterID * BRANCHING_FACTOR + l0;
-        if (clusterID > numL0Clusters) break;
+        int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0;
+        if (l0ClusterID > numL0Clusters) break;
 
         #ifdef ENABLE_OBBS 
-        float3 obbMin = gprt::load<float3>(record.l0clusters, clusterID * 3 + 0);
-        float3 obbMax = gprt::load<float3>(record.l0clusters, clusterID * 3 + 1);
-        float3 obbEul = gprt::load<float3>(record.l0clusters, clusterID * 3 + 2);
+        float3 obbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 0);
+        float3 obbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 1);
+        float3 obbEul = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 2);
         float3x3 obbRot = eul_to_mat3(obbEul);
         float3 obbQueryOrigin = mul(obbRot, queryOrigin);
         float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
         float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
         float pessimisticDistance = maxDist;
         #else
-        float3 aabbMin = gprt::load<float3>(record.l0clusters, clusterID * 2 + 0);
-        float3 aabbMax = gprt::load<float3>(record.l0clusters, clusterID * 2 + 1);
+        float3 aabbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 0);
+        float3 aabbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 1);
         float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
         float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
         float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);

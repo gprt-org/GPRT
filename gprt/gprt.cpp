@@ -7573,12 +7573,13 @@ struct NNTriangleAccel : public Accel {
     #ifdef ENABLE_OBBS
     leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numLeaves);
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL0Clusters);
+    l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL1Clusters);
     #else
     leaves = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
     l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
+    l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     #endif
 
-    l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
     l3clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL3Clusters);
 

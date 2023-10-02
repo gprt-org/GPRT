@@ -569,57 +569,142 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
 GPRT_COMPUTE_PROGRAM(ComputeL1Clusters, (NNAccel, record), (1,1,1)) {
   int l1ClusterID = DispatchThreadID.x;
   if (l1ClusterID >= record.numL1Clusters) return;
+
   uint32_t numL0Clusters = record.numL0Clusters;
+  
+  #ifdef ENABLE_OBBS
+
+  // This isn't very optimal. I think it could be improved by making execution concurrent over 
+  // the child OBBs rather than the parent, then using some shared memory and atomics?.
+
+  // Load all obb corners into registers, pre-transforming them into world space
+  float3 obbCorners[N_POINTS_PER_CLUSTER];
+  float3 l1Center = float3(0.f, 0.f, 0.f);
+  uint32_t numDataPoints = 0;
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l0ClusterID = BRANCHING_FACTOR * l1ClusterID + i;
+    if (l0ClusterID >= numL0Clusters) continue;    
+    float3 obbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 0);
+    float3 obbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 1);
+    float3 obbEul = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 2);
+    float3x3 obbRot = transpose(eul_to_mat3(obbEul));
+    for (uint32_t j = 0; j < 8; ++j) {
+      float3 obbCor = getCorner(obbMin, obbMax, j);
+      obbCor = mul(obbRot, obbCor);
+      obbCorners[i * 8 + j] = obbCor;
+      l1Center += obbCor;
+      numDataPoints++;
+    }
+  }
+  l1Center /= numDataPoints;
+
+  // Compute covariance
+  float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l0ClusterID = BRANCHING_FACTOR * l1ClusterID + i;
+    if (l0ClusterID >= numL0Clusters) continue;    
+    for (uint32_t j = 0; j < 8; ++j) {
+      float3 obbCor = obbCorners[i * 8 + j];
+      float3 p = obbCor - l1Center;
+      covariance += outerProduct(p, p);
+    }
+  }
+  covariance /= numDataPoints;
+
+  // Compute SVD
+  SVD_mats svd_result = svd(covariance);
+  float3x3 l1Rot = svd_result.V;
+  float3 l1obbRot = mat3_to_eul(l1Rot);
+  l1Rot = eul_to_mat3(l1obbRot);
+  
+  // Compute OBB
+  float3 l1obbMin =  float3(1e38f, 1e38f, 1e38f);
+  float3 l1obbMax = -float3(1e38f, 1e38f, 1e38f);
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t l0ClusterID = BRANCHING_FACTOR * l1ClusterID + i;
+    if (l0ClusterID >= numL0Clusters) continue;    
+    for (uint32_t j = 0; j < 8; ++j) {
+      float3 obbCor = obbCorners[i * 8 + j];
+      obbCor = mul(l1Rot, obbCor);
+      l1obbMin = min(l1obbMin, obbCor);
+      l1obbMax = max(l1obbMax, obbCor);
+    }
+  }
+
+  gprt::store<float3>(record.l1clusters, l1ClusterID * 3 + 0, float3(l1obbMin));
+  gprt::store<float3>(record.l1clusters, l1ClusterID * 3 + 1, float3(l1obbMax));
+  gprt::store<float3>(record.l1clusters, l1ClusterID * 3 + 2, float3(l1obbRot));
+
+  #else
 
   float3 l1ClusterAabbMin = float3(1e38f, 1e38f, 1e38f); 
   float3 l1ClusterAabbMax = -float3(1e38f, 1e38f, 1e38f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t clusterID = BRANCHING_FACTOR * l1ClusterID + i;
-    if (clusterID >= numL0Clusters) continue;
-    #ifdef ENABLE_OBBS
-    float3 obbMin = gprt::load<float3>(record.l0clusters, clusterID * 3 + 0);
-    float3 obbMax = gprt::load<float3>(record.l0clusters, clusterID * 3 + 1);
-    float3 obbEul = gprt::load<float3>(record.l0clusters, clusterID * 3 + 2);
-    if (any(obbMax < obbMin)) continue; // invalid cluster
-    float3x3 obbRotInv = transpose(eul_to_mat3(obbEul));
-    for (int k = 0; k < 8; ++k) {
-      float3 obbCor = getCorner(obbMin, obbMax, k);
-      obbCor = mul(obbRotInv, obbCor);
-      l1ClusterAabbMin = min(l1ClusterAabbMin, obbCor);
-      l1ClusterAabbMax = max(l1ClusterAabbMax, obbCor);
-    }
-    #else
-    float3 aabbMin = gprt::load<float3>(record.l0clusters, clusterID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.l0clusters, clusterID * 2 + 1);
+    uint32_t l0ClusterID = BRANCHING_FACTOR * l1ClusterID + i;
+    if (l0ClusterID >= numL0Clusters) continue;    
+    float3 aabbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
-    l1ClusterAabbMin = min(l1ClusterAabbMin, aabbMin);
-    l1ClusterAabbMax = max(l1ClusterAabbMax, aabbMax);
-    #endif
+    l1ClusterAabbMin = min(aabbMin, l1ClusterAabbMin);
+    l1ClusterAabbMax = max(aabbMax, l1ClusterAabbMax);
   }
-
   gprt::store<float3>(record.l1clusters, 2 * l1ClusterID + 0, float3(l1ClusterAabbMin));
   gprt::store<float3>(record.l1clusters, 2 * l1ClusterID + 1, float3(l1ClusterAabbMax));
+  #endif
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL2Clusters, (NNAccel, record), (1,1,1)) {
   int l2ClusterID = DispatchThreadID.x;
-  if (l2ClusterID >= record.numL1Clusters) return;
+  if (l2ClusterID >= record.numL2Clusters) return;
   uint32_t numL1Clusters = record.numL1Clusters;
 
   float3 l2ClusterAabbMin = float3(1e38f, 1e38f, 1e38f); 
   float3 l2ClusterAabbMax = -float3(1e38f, 1e38f, 1e38f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t clusterID = BRANCHING_FACTOR * l2ClusterID + i;
-    if (clusterID >= numL1Clusters) continue;
-    float3 aabbMin = gprt::load<float3>(record.l1clusters, clusterID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.l1clusters, clusterID * 2 + 1);
+    uint32_t l0ClusterID = BRANCHING_FACTOR * l2ClusterID + i;
+    if (l0ClusterID >= numL1Clusters) continue;
+    #ifdef ENABLE_OBBS
+    float3 obbMin = gprt::load<float3>(record.l1clusters, l0ClusterID * 3 + 0);
+    float3 obbMax = gprt::load<float3>(record.l1clusters, l0ClusterID * 3 + 1);
+    float3 obbEul = gprt::load<float3>(record.l1clusters, l0ClusterID * 3 + 2);
+    if (any(obbMax < obbMin)) continue; // invalid cluster
+    float3x3 obbRotInv = transpose(eul_to_mat3(obbEul));
+    for (int k = 0; k < 8; ++k) {
+      float3 obbCor = getCorner(obbMin, obbMax, k);
+      obbCor = mul(obbRotInv, obbCor);
+      l2ClusterAabbMin = min(l2ClusterAabbMin, obbCor);
+      l2ClusterAabbMax = max(l2ClusterAabbMax, obbCor);
+    }
+    #else
+    float3 aabbMin = gprt::load<float3>(record.l1clusters, l0ClusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l1clusters, l0ClusterID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
-    l2ClusterAabbMin = min(aabbMin, l2ClusterAabbMin);
-    l2ClusterAabbMax = max(aabbMax, l2ClusterAabbMax);
+    l2ClusterAabbMin = min(l2ClusterAabbMin, aabbMin);
+    l2ClusterAabbMax = max(l2ClusterAabbMax, aabbMax);
+    #endif
   }
 
   gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 0, float3(l2ClusterAabbMin));
   gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 1, float3(l2ClusterAabbMax));
+  
+  // int l2ClusterID = DispatchThreadID.x;
+  // if (l2ClusterID >= record.numL1Clusters) return;
+  // uint32_t numL1Clusters = record.numL1Clusters;
+
+  // float3 l2ClusterAabbMin = float3(1e38f, 1e38f, 1e38f); 
+  // float3 l2ClusterAabbMax = -float3(1e38f, 1e38f, 1e38f);
+  // for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+  //   uint32_t clusterID = BRANCHING_FACTOR * l2ClusterID + i;
+  //   if (clusterID >= numL1Clusters) continue;
+  //   float3 aabbMin = gprt::load<float3>(record.l1clusters, clusterID * 2 + 0);
+  //   float3 aabbMax = gprt::load<float3>(record.l1clusters, clusterID * 2 + 1);
+  //   if (any(aabbMax < aabbMin)) continue; // invalid cluster
+  //   l2ClusterAabbMin = min(aabbMin, l2ClusterAabbMin);
+  //   l2ClusterAabbMax = max(aabbMax, l2ClusterAabbMax);
+  // }
+
+  // gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 0, float3(l2ClusterAabbMin));
+  // gprt::store<float3>(record.l2clusters, 2 * l2ClusterID + 1, float3(l2ClusterAabbMax));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL3Clusters, (NNAccel, record), (1,1,1)) {
