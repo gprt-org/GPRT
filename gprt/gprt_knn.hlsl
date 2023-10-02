@@ -461,9 +461,9 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleLeaves, (NNAccel, record), (1,1,1)) {
     b = gprt::load<float3>(record.points, tri.y);
     c = gprt::load<float3>(record.points, tri.z);
 
-    a = mul(rot, a - obbCen) + obbCen;
-    b = mul(rot, b - obbCen) + obbCen;
-    c = mul(rot, c - obbCen) + obbCen;
+    a = mul(rot, a);
+    b = mul(rot, b);
+    c = mul(rot, c);
 
     obbMin = min(obbMin, a); obbMax = max(obbMax, a);
     obbMin = min(obbMin, b); obbMax = max(obbMax, b);
@@ -497,15 +497,14 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
     float3 obbMin = gprt::load<float3>(record.leaves, leafID * 3 + 0);
     float3 obbMax = gprt::load<float3>(record.leaves, leafID * 3 + 1);
     float3 obbEul = gprt::load<float3>(record.leaves, leafID * 3 + 2);
-    float3 obbCen = (obbMin + obbMax) * .5f;      
     float3x3 obbRot = transpose(eul_to_mat3(obbEul));
     for (uint32_t j = 0; j < 8; ++j) {
       float3 obbCor = getCorner(obbMin, obbMax, j);
-      obbCor = mul(obbRot, obbCor - obbCen) + obbCen;
+      obbCor = mul(obbRot, obbCor);
       obbCorners[i * 8 + j] = obbCor;
+      l0Center += obbCor;
+      numDataPoints++;
     }
-    l0Center += obbCen;
-    numDataPoints++;
   }
   l0Center /= numDataPoints;
 
@@ -520,7 +519,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
       covariance += outerProduct(p, p);
     }
   }
-  covariance /= (numDataPoints * 8);
+  covariance /= numDataPoints;
 
   // Compute SVD
   SVD_mats svd_result = svd(covariance);
@@ -539,7 +538,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
     if (leafID >= numLeaves) continue;    
     for (uint32_t j = 0; j < 8; ++j) {
       float3 obbCor = obbCorners[i * 8 + j];
-      obbCor = mul(l0Rot, obbCor - l0Center) + l0Center;
+      obbCor = mul(l0Rot, obbCor);
       l0obbMin = min(l0obbMin, obbCor);
       l0obbMax = max(l0obbMax, obbCor);
     }
@@ -583,10 +582,9 @@ GPRT_COMPUTE_PROGRAM(ComputeL1Clusters, (NNAccel, record), (1,1,1)) {
     float3 obbEul = gprt::load<float3>(record.l0clusters, clusterID * 3 + 2);
     if (any(obbMax < obbMin)) continue; // invalid cluster
     float3x3 obbRotInv = transpose(eul_to_mat3(obbEul));
-    float3 obbC = (obbMin + obbMax) * .5f;
     for (int k = 0; k < 8; ++k) {
       float3 obbCor = getCorner(obbMin, obbMax, k);
-      obbCor = mul(obbRotInv, obbCor - obbC) + obbC;
+      obbCor = mul(obbRotInv, obbCor);
       l1ClusterAabbMin = min(l1ClusterAabbMin, obbCor);
       l1ClusterAabbMax = max(l1ClusterAabbMax, obbCor);
     }

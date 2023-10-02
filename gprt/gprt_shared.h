@@ -6,11 +6,11 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 8
+#define BRANCHING_FACTOR 10
 
 // The number of primitives to traverse when hitting a leaf. 
 // More than one seems beneficial for OBBs.
-#define PRIMS_PER_LEAF 8
+#define PRIMS_PER_LEAF 2
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -20,15 +20,11 @@
 // It's very rare that this happens, but also, the performance improvements from this aren't very good.
 //
 // Edit edit edit: When using OBBs, it seems like the maximal distance to the box gives good performance 
-// improvements. Still, some odd issues seemingly to do with numerical precision... For a KNN case, this
-// also might not be worth the hastle...
-
+// improvements.
 // More updates, the "minMaxDistance" metric doesn't work for internal OBB nodes, since internal faces aren't guaranteed
 // to contain primitives. Only OBB leaves can guarantee this. So, for internal nodes, we instead use the "maxDistance"
 // for downward culling.
-
-// Theoretically that should work... But I am still noticing unacceptable artifacting from culling true positives...
-// #define ENABLE_DOWNAWARD_CULLING 
+#define ENABLE_DOWNAWARD_CULLING 
 
 // Enables an LBVH reference, similar to Jakob and Guthe's knn.
 // Note, we use this LBVH as a top level tree for our method, so 
