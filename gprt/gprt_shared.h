@@ -10,7 +10,7 @@
 
 // The number of primitives to traverse when hitting a leaf. 
 // More than one seems beneficial for OBBs.
-#define PRIMS_PER_LEAF 2
+#define PRIMS_PER_LEAF 1
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -45,7 +45,7 @@
 // issue seems to become more and more extreme as primitives are clustered together.
 // This mode uses a singular value decomposition to compute the orientation of a bounding box 
 // that best fits the underlying primitive distribution
-// #define ENABLE_OBBS
+#define ENABLE_OBBS
 
 // Honestly I don't see much improvement by avoiding square roots. I don't think this is what the bottleneck is
 // at least on my problems... Just going to take square roots for simplicity...
