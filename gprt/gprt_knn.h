@@ -746,6 +746,13 @@ float getVolume(float3 aabbMin, float3 aabbMax) {
   return w * h * d;
 }
 
+float getSurfaceArea(float3 aabbMin, float3 aabbMax) {
+  float w = aabbMax.x - aabbMin.x;
+  float h = aabbMax.y - aabbMin.y;
+  float d = aabbMax.z - aabbMin.z;
+  return 2 * w * h + 2 * w * d + 2 * h * d;
+}
+
 #define _EPSILON .00001f
 #define _PI 3.14159265358979323846264f
 
@@ -939,6 +946,37 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
   int numL0Clusters = record.numL0Clusters;
   int numLeaves = record.numLeaves;
   int numPrims = record.numPrims;
+
+  #ifdef ENABLE_OBBS
+  float3 obbMin = gprt::load<float3>(record.l3clusters, leafID * 3 + 0);
+  float3 obbMax = gprt::load<float3>(record.l3clusters, leafID * 3 + 1);
+  float3 obbEul = gprt::load<float3>(record.l3clusters, leafID * 3 + 2);
+  float3x3 obbRot = eul_to_mat3(obbEul);
+  float3 obbQueryOrigin = mul(obbRot, queryOrigin);
+  float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+  float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+  float pessimisticDistance = maxDist;
+  #else
+  float3 aabbMin = gprt::load<float3>(record.l3clusters, leafID * 2 + 0); // + record.maxSearchRange;
+  float3 aabbMax = gprt::load<float3>(record.l3clusters, leafID * 2 + 1); // - record.maxSearchRange;
+  float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
+  float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
+  float pessimisticDistance = maxDist;
+  #endif
+
+  // Range Culling: Farthest corner closer than min range
+  if (maxDist < tmin) return;
+  
+  // Range Culling: skip superclusters outside the search radius
+  if (minDist >= tmax) return;
+
+  // Upward Culling: skip superclusters father than current closest primitive
+  if (minDist > payload.closestDistance) return;
+
+  // Downward culling... truncate closest distance to the pessimistic distance of this cluster
+  #ifdef ENABLE_DOWNAWARD_CULLING
+  if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
+  #endif
   
   // Initialize active l2 list
   #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
@@ -968,12 +1006,23 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     int l2ClusterID = leafID * BRANCHING_FACTOR + l2;
     if (l2ClusterID > numL2Clusters) break;
 
+    #ifdef ENABLE_OBBS 
+    float3 obbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 0);
+    float3 obbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 1);
+    float3 obbEul = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 2);
+    float3x3 obbRot = eul_to_mat3(obbEul);
+    float3 obbQueryOrigin = mul(obbRot, queryOrigin);
+    float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+    float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+    float pessimisticDistance = maxDist;
+    #else
     float3 aabbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 0);
     float3 aabbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 1);
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
-    float minMaxDist = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
-    
+    float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+    #endif
+
     // Range Culling: Farthest corner closer than min range
     if (maxDist < tmin) continue;
     
@@ -1002,10 +1051,10 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     }
     #endif
 
-    // Downward culling... truncate closest distance to the pessemistic distance of this cluster
-    // #ifdef ENABLE_DOWNAWARD_CULLING
-    // if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
-    // #endif
+    // Downward culling... truncate closest distance to the pessimistic distance of this cluster
+    #ifdef ENABLE_DOWNAWARD_CULLING
+    if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
+    #endif
   }
 
   // Traverse clusters near to far
@@ -1101,9 +1150,9 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
       }
       #endif
 
-      // #ifdef ENABLE_DOWNAWARD_CULLING
-      // if (minMaxDist < payload.closestDistance) payload.closestDistance = minMaxDist;
-      // #endif
+      #ifdef ENABLE_DOWNAWARD_CULLING
+      if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
+      #endif
     }
 
     // Traverse clusters near to far
@@ -1199,7 +1248,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
         }
         #endif
 
-        // Downward culling... truncate closest distance to the pessemistic distance of this cluster
+        // Downward culling... truncate closest distance to the pessimistic distance of this cluster
         #ifdef ENABLE_DOWNAWARD_CULLING
         if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
         #endif
@@ -1302,7 +1351,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
           }
           #endif
 
-          // Downward culling... truncate closest distance to the pessemistic distance of this cluster
+          // Downward culling... truncate closest distance to the pessimistic distance of this cluster
           #ifdef ENABLE_DOWNAWARD_CULLING
           if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
           #endif
@@ -1431,12 +1480,6 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
 
     // Traverse leaf
     int leafID = node.w;
-    float3 aabbMin = gprt::load<float3>(record.l3clusters, leafID * 2 + 0); // + record.maxSearchRange;
-    float3 aabbMax = gprt::load<float3>(record.l3clusters, leafID * 2 + 1); // - record.maxSearchRange;
-
-    float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
-    if (minDist > dist) continue;
-
     TraverseLeaf(record, NNFlags, queryOrigin, tmin, tmax, leafID, payload, debug);
     dist = min(dist, payload.closestDistance);
   }
