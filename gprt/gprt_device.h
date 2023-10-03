@@ -135,6 +135,14 @@ atomicMin32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
+float3 atomicMin32f(in Buffer buffer, uint32_t index, float3 value) {
+  float3 result;
+  result.x = atomicMin32f(buffer, index * 3 + 0, value.x);
+  result.y = atomicMin32f(buffer, index * 3 + 1, value.y);
+  result.z = atomicMin32f(buffer, index * 3 + 2, value.z);
+  return result;
+}
+
 float
 atomicMax32f(in Buffer buffer, uint32_t index, float value) {
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
@@ -145,6 +153,14 @@ atomicMax32f(in Buffer buffer, uint32_t index, float value) {
       break;
   }
   return asfloat(ret_i);
+}
+
+float3 atomicMax32f(in Buffer buffer, uint32_t index, float3 value) {
+  float3 result;
+  result.x = atomicMax32f(buffer, index * 3 + 0, value.x);
+  result.y = atomicMax32f(buffer, index * 3 + 1, value.y);
+  result.z = atomicMax32f(buffer, index * 3 + 2, value.z);
+  return result;
 }
 
 float
@@ -158,6 +174,32 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   } while (ret_i != old);
 
   return asfloat(ret_i);
+}
+
+float3
+atomicAdd32f(in Buffer buffer, uint32_t index, float3 value) {
+  float3 result;
+  result.x = atomicAdd32f(buffer, index * 3 + 0, value.x);
+  result.y = atomicAdd32f(buffer, index * 3 + 1, value.y);
+  result.z = atomicAdd32f(buffer, index * 3 + 2, value.z);
+  return result;
+}
+
+float3x3
+atomicAdd32f(in Buffer buffer, uint32_t index, float3x3 value) {
+  float3x3 result;
+  result._11 = atomicAdd32f(buffer, index * 9 + 0, value._11);
+  result._12 = atomicAdd32f(buffer, index * 9 + 1, value._12);
+  result._13 = atomicAdd32f(buffer, index * 9 + 2, value._13);
+
+  result._21 = atomicAdd32f(buffer, index * 9 + 3, value._21);
+  result._22 = atomicAdd32f(buffer, index * 9 + 4, value._22);
+  result._23 = atomicAdd32f(buffer, index * 9 + 5, value._23);
+
+  result._31 = atomicAdd32f(buffer, index * 9 + 6, value._31);
+  result._32 = atomicAdd32f(buffer, index * 9 + 7, value._32);
+  result._33 = atomicAdd32f(buffer, index * 9 + 8, value._33);
+  return result;
 }
 
 [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);

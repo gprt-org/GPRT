@@ -1,5 +1,7 @@
 #pragma once
 
+#define COLLECT_STATS
+
 // The overall results I'm leaning from the below is that, the more culling you enable
 // by turning these features on, the more performance becomes dependent on how efficient
 // the culling primitives are...
@@ -9,8 +11,11 @@
 #define BRANCHING_FACTOR 10
 
 // The number of primitives to traverse when hitting a leaf. 
-// More than one seems beneficial for OBBs.
-#define PRIMS_PER_LEAF 1
+// More than one seems beneficial for OBBs. 8 seems to be a sweet spot at the moment...
+// #define PRIMS_PER_LEAF 8
+#define PRIMS_PER_LEAF 8
+
+// #define PRIMS_PER_LEAF 1
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -24,6 +29,8 @@
 // More updates, the "minMaxDistance" metric doesn't work for internal OBB nodes, since internal faces aren't guaranteed
 // to contain primitives. Only OBB leaves can guarantee this. So, for internal nodes, we instead use the "maxDistance"
 // for downward culling.
+// More more updates... So long as internal OBBs are built to tightly fit the underlying primitives, then minMaxDist is
+// "free game".
 #define ENABLE_DOWNAWARD_CULLING 
 
 // Enables an LBVH reference, similar to Jakob and Guthe's knn.
@@ -114,6 +121,20 @@ namespace gprt{
         alignas(16) gprt::Buffer l1clusters;
         alignas(16) gprt::Buffer l2clusters;
         alignas(16) gprt::Buffer l3clusters;
+
+        // For OBBs, buffers of center points.
+        alignas(16) gprt::Buffer llcenters;
+        alignas(16) gprt::Buffer l0centers;
+        alignas(16) gprt::Buffer l1centers;
+        alignas(16) gprt::Buffer l2centers;
+        alignas(16) gprt::Buffer l3centers;
+
+        // For OBBs, buffers of covariance matrices
+        alignas(16) gprt::Buffer llcovariances;
+        alignas(16) gprt::Buffer l0covariances;
+        alignas(16) gprt::Buffer l1covariances;
+        alignas(16) gprt::Buffer l2covariances;
+        alignas(16) gprt::Buffer l3covariances;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 

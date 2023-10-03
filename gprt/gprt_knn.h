@@ -36,6 +36,15 @@ enum NN_FLAG : uint32_t
   NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE = 0x08,  
 };
 
+struct NNStats {
+  float primsHit;
+  float leavesHit;
+  float l0Hit;
+  float l1Hit;
+  float l2Hit;
+  float l3Hit;
+};
+
 inline float rm(float p, float rp, float rq) {
     if (p <= (rp+rq)/2.f) {
         return rp;
@@ -207,7 +216,14 @@ float2 getTriangleDist2( float3 p, float3 a, float3 b, float3 c )
 struct [raypayload] NNPayload {
   float closestDistance : read(anyhit, caller) : write(anyhit, caller);
   int closestPrimitive : read(anyhit, caller) : write(anyhit, caller);
-  int4 stats : read(anyhit, caller) : write(anyhit, caller);
+  #ifdef COLLECT_STATS
+  int primsHit : read(anyhit, caller) : write(anyhit, caller);
+  int leavesHit : read(anyhit, caller) : write(anyhit, caller);
+  int l0Hit : read(anyhit, caller) : write(anyhit, caller);
+  int l1Hit : read(anyhit, caller) : write(anyhit, caller);
+  int l2Hit : read(anyhit, caller) : write(anyhit, caller);
+  int l3Hit : read(anyhit, caller) : write(anyhit, caller);
+  #endif
 };
 
 
@@ -728,6 +744,11 @@ float3x3 outerProduct(float3 a, float3 b) {
   return float3x3(a * b.x, a * b.y, a * b.z);
 }
 
+// outer product of a vector with itself
+float3x3 outer2(float3 a) {
+  return outerProduct(a,a);
+}
+
 float3 getCorner(float3 aabbMin, float3 aabbMax, int cornerID) {
   int x = ((cornerID & (1 << 0)) != 0) ? 1 : 0;
   int y = ((cornerID & (1 << 1)) != 0) ? 1 : 0;
@@ -938,7 +959,9 @@ float3x3 mat3_from_quat(float4 q) {
 }
 
 void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, uint leafID, inout NNPayload payload, bool debug) {
-  payload.stats.w++; // Count this as traversing a leaf
+  #ifdef COLLECT_STATS
+  payload.l3Hit++; // Count this as traversing a leaf
+  #endif
 
   int numL3Clusters = record.numL3Clusters;
   int numL2Clusters = record.numL2Clusters;
@@ -955,13 +978,13 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
   float3 obbQueryOrigin = mul(obbRot, queryOrigin);
   float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
   float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
-  float pessimisticDistance = maxDist;
+  float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
   #else
   float3 aabbMin = gprt::load<float3>(record.l3clusters, leafID * 2 + 0); // + record.maxSearchRange;
   float3 aabbMax = gprt::load<float3>(record.l3clusters, leafID * 2 + 1); // - record.maxSearchRange;
   float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
   float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
-  float pessimisticDistance = maxDist;
+  float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
   #endif
 
   // Range Culling: Farthest corner closer than min range
@@ -1014,7 +1037,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     float3 obbQueryOrigin = mul(obbRot, queryOrigin);
     float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
     float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
-    float pessimisticDistance = maxDist;
+    float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
     #else
     float3 aabbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 0);
     float3 aabbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 1);
@@ -1074,7 +1097,9 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     // Upward culling
     if (clusterDist > payload.closestDistance) continue;
     
-    payload.stats.w++; // Count this as traversing a l2
+    #ifdef COLLECT_STATS
+    payload.l2Hit++; // Count this as traversing a l2
+    #endif
     
     int l2ClusterID = leafID * BRANCHING_FACTOR + l2Index;
 
@@ -1113,7 +1138,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
       float3 obbQueryOrigin = mul(obbRot, queryOrigin);
       float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
       float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
-      float pessimisticDistance = maxDist;
+      float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
       #else
       float3 aabbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 0);
       float3 aabbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 1);
@@ -1172,7 +1197,9 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
       // Upward culling
       if (clusterDist > payload.closestDistance) continue;
       
-      payload.stats.z++; // Count this as traversing a supercluster
+      #ifdef COLLECT_STATS
+      payload.l1Hit++; // Count this as traversing a supercluster
+      #endif
 
       int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
 
@@ -1211,7 +1238,7 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
         float3 obbQueryOrigin = mul(obbRot, queryOrigin);
         float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
         float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
-        float pessimisticDistance = maxDist;
+        float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
         #else
         float3 aabbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 0);
         float3 aabbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 1);
@@ -1271,7 +1298,9 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
         // Upward Culling
         if (clusterDist > payload.closestDistance) continue;
         
-        payload.stats.y++; // Count this as traversing a cluster
+        #ifdef COLLECT_STATS
+        payload.l0Hit++; // Count this as traversing a cluster
+        #endif
 
         int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0Index;
         
@@ -1378,12 +1407,14 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
           uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + idx;
           if (leafID > numLeaves) break;
 
-          payload.stats.x++; // Count this as traversing a leaf
+          #ifdef COLLECT_STATS
+          payload.leavesHit++; // Count this as traversing a leaf
+          #endif
 
           for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
             uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
             if (itemID >= numPrims) continue;
-        
+
             uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
             int3 tri = gprt::load<int3>(record.triangles, primitiveID);
             float3 a = gprt::load<float3>(record.points, tri.x);
@@ -1406,6 +1437,10 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
             
             // Primitive farther than furthest
             if (dists.x > payload.closestDistance) continue;
+
+            #ifdef COLLECT_STATS
+            payload.primsHit++; // Count this as traversing a primitive
+            #endif
             
             // Newly found closest primitive
             payload.closestDistance = dists.x;
@@ -1492,12 +1527,23 @@ void TraceNN(
   float tMin, 
   float tMax, 
   out int closestPrimitive, 
-  out float closestDistance, inout int4 stats, bool debug) 
+  out float closestDistance, 
+  #ifdef COLLECT_STATS
+  inout NNStats stats,
+  #endif 
+  bool debug) 
 {
   NNPayload payload;
   payload.closestPrimitive = -1;
   payload.closestDistance = tMax * tMax; //knnAccel.maxSearchRange * knnAccel.maxSearchRange;
-  payload.stats = stats;
+  #ifdef COLLECT_STATS
+  payload.primsHit = stats.primsHit;
+  payload.leavesHit = stats.leavesHit;
+  payload.l0Hit = stats.l0Hit;
+  payload.l1Hit = stats.l1Hit;
+  payload.l2Hit = stats.l2Hit;
+  payload.l3Hit = stats.l3Hit;
+  #endif
 
   if (tMax > 0.f) {
     #ifndef ENABLE_LBVH_REFERENCE
@@ -1551,7 +1597,13 @@ void TraceNN(
   if (closestDistance < tMax)
     closestDistance = closestDistance;
 
-  // payload.stats.w++;
-  stats = payload.stats;
+  #ifdef COLLECT_STATS
+  stats.primsHit = payload.primsHit;
+  stats.leavesHit = payload.leavesHit;
+  stats.l0Hit = payload.l0Hit;
+  stats.l1Hit = payload.l1Hit;
+  stats.l2Hit = payload.l2Hit;
+  stats.l3Hit = payload.l3Hit;
+  #endif
 }
 #endif
