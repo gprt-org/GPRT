@@ -43,6 +43,8 @@ struct NNStats {
   float l1Hit;
   float l2Hit;
   float l3Hit;
+  float l4Hit;
+  float tmp;
 };
 
 inline float rm(float p, float rp, float rq) {
@@ -223,6 +225,7 @@ struct [raypayload] NNPayload {
   int l1Hit : read(anyhit, caller) : write(anyhit, caller);
   int l2Hit : read(anyhit, caller) : write(anyhit, caller);
   int l3Hit : read(anyhit, caller) : write(anyhit, caller);
+  int l4Hit : read(anyhit, caller) : write(anyhit, caller);
   #endif
 };
 
@@ -958,11 +961,10 @@ float3x3 mat3_from_quat(float4 q) {
   return m;
 }
 
-void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, uint leafID, inout NNPayload payload, bool debug) {
-  #ifdef COLLECT_STATS
-  payload.l3Hit++; // Count this as traversing a leaf
-  #endif
+void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
+  payload.closestDistance = tmax;
 
+  int numL4Clusters = record.numL4Clusters;
   int numL3Clusters = record.numL3Clusters;
   int numL2Clusters = record.numL2Clusters;
   int numL1Clusters = record.numL1Clusters;
@@ -970,77 +972,33 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
   int numLeaves = record.numLeaves;
   int numPrims = record.numPrims;
 
-  #ifdef ENABLE_OBBS
-  float3 obbMin = gprt::load<float3>(record.l3clusters, leafID * 3 + 0);
-  float3 obbMax = gprt::load<float3>(record.l3clusters, leafID * 3 + 1);
-  float3 obbEul = gprt::load<float3>(record.l3clusters, leafID * 3 + 2);
-  float3x3 obbRot = eul_to_mat3(obbEul);
-  float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-  float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
-  float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
-  float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
-  #else
-  float3 aabbMin = gprt::load<float3>(record.l3clusters, leafID * 2 + 0); // + record.maxSearchRange;
-  float3 aabbMax = gprt::load<float3>(record.l3clusters, leafID * 2 + 1); // - record.maxSearchRange;
-  float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
-  float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
-  float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
-  #endif
-
-  // Range Culling: Farthest corner closer than min range
-  if (maxDist < tmin) return;
-  
-  // Range Culling: skip superclusters outside the search radius
-  if (minDist >= tmax) return;
-
-  // Upward Culling: skip superclusters father than current closest primitive
-  if (minDist > payload.closestDistance) return;
-
-  // Downward culling... truncate closest distance to the pessimistic distance of this cluster
-  #ifdef ENABLE_DOWNAWARD_CULLING
-  if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
-  #endif
-  
-  // Initialize active l2 list
-  #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-  //       15-8    7-0
-  // bits: [ID] [Distance]
-  // Quantizing by the distance to the farthest corner of the treelet. An ID of 255 means "empty".
-  float l2QueueTranslate = getMinDist(queryOrigin, l3Treelet.xyz, l3Treelet.xyz + l3Span);
-  float l2QueueScale = getMaxDist(queryOrigin, l3Treelet.xyz, l3Treelet.xyz + l3Span) - l2QueueTranslate;
-  uint16_t activeL2Clusters[BRANCHING_FACTOR];
+  // Initialize active l4 list
+  uint32_t activeL4Clusters[BRANCHING_FACTOR];
+  float l4ClusterMinDists[BRANCHING_FACTOR];
   [unroll]
-  for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-    activeL2Clusters[l2] = 255 << 8 | 255;
+  for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
+    activeL4Clusters[l4] = -1;
+    l4ClusterMinDists[l4] = FLT_MAX;
   }
-  #else
-  uint32_t activeL2Clusters[BRANCHING_FACTOR];
-  float l2ClusterMinDists[BRANCHING_FACTOR];
-  [unroll]
-  for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-    activeL2Clusters[l2] = -1;
-    l2ClusterMinDists[l2] = FLT_MAX;
-  }
-  #endif
 
-  // Insert into active l0 list by distance far to near
-  for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
+  // Insert into active l4 list by distance far to near
+  for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
     float minDistCorrection = 0.f;
-    int l2ClusterID = leafID * BRANCHING_FACTOR + l2;
-    if (l2ClusterID > numL2Clusters) break;
+    int l4ClusterID = l4;
+    if (l4ClusterID > numL4Clusters) break;
 
     #ifdef ENABLE_OBBS 
-    float3 obbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 0);
-    float3 obbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 1);
-    float3 obbEul = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 2);
+    float3 obbMin = gprt::load<float3>(record.l4clusters, l4ClusterID * 3 + 0);
+    float3 obbMax = gprt::load<float3>(record.l4clusters, l4ClusterID * 3 + 1);
+    float3 obbEul = gprt::load<float3>(record.l4clusters, l4ClusterID * 3 + 2);
     float3x3 obbRot = eul_to_mat3(obbEul);
     float3 obbQueryOrigin = mul(obbRot, queryOrigin);
     float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
     float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
     float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
     #else
-    float3 aabbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.l4clusters, l4ClusterID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.l4clusters, l4ClusterID * 2 + 1);
     float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
     float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
     float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
@@ -1056,24 +1014,15 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
     if (minDist > payload.closestDistance) continue;
 
     // Insertion sort
-    #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-    activeL2Clusters[0] = (uint16_t(l2) << 8) | uint16_t(((minDist - l2QueueTranslate) / l2QueueScale) * 255.f);
+    l4ClusterMinDists[0] = minDist;
+    activeL4Clusters[0] = l4;
     [unroll]
     for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-      if ((activeL2Clusters[i-1] & 255) >= (activeL2Clusters[i] & 255)) break;
-      uint16_t tmpID = activeL2Clusters[i-1]; activeL2Clusters[i-1] = activeL2Clusters[i]; activeL2Clusters[i] = tmpID;
+      if (l4ClusterMinDists[i-1] >= l4ClusterMinDists[i]) break;
+      float tmpDist = l4ClusterMinDists[i-1]; l4ClusterMinDists[i-1] = l4ClusterMinDists[i]; l4ClusterMinDists[i] = tmpDist;
+      uint32_t tmpID = activeL4Clusters[i-1]; activeL4Clusters[i-1] = activeL4Clusters[i]; activeL4Clusters[i] = tmpID;
     }
-    #else
-    l2ClusterMinDists[0] = minDist;
-    activeL2Clusters[0] = l2;
-    [unroll]
-    for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-      if (l2ClusterMinDists[i-1] >= l2ClusterMinDists[i]) break;
-      float tmpDist = l2ClusterMinDists[i-1]; l2ClusterMinDists[i-1] = l2ClusterMinDists[i]; l2ClusterMinDists[i] = tmpDist;
-      uint32_t tmpID = activeL2Clusters[i-1]; activeL2Clusters[i-1] = activeL2Clusters[i]; activeL2Clusters[i] = tmpID;
-    }
-    #endif
-
+    
     // Downward culling... truncate closest distance to the pessimistic distance of this cluster
     #ifdef ENABLE_DOWNAWARD_CULLING
     if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
@@ -1081,200 +1030,147 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
   }
 
   // Traverse clusters near to far
-  for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-    #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-    uint16_t tmp = activeL2Clusters[BRANCHING_FACTOR - 1 - l2];
-    float clusterDist = ((tmp & 255) / 255.f) * l2QueueScale + l2QueueTranslate;
-    int l2Index = (tmp >> 8);
-    #else
-    float clusterDist = l2ClusterMinDists[BRANCHING_FACTOR - 1 - l2];
-    int l2Index = activeL2Clusters[BRANCHING_FACTOR - 1 - l2];
-    #endif
-
+  for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
+    float clusterDist = l4ClusterMinDists[BRANCHING_FACTOR - 1 - l4];
+    int l4Index = activeL4Clusters[BRANCHING_FACTOR - 1 - l4];
+    
     // break out when all superclusters from here on are too far
-    if (l2Index >= BRANCHING_FACTOR) break;
+    if (l4Index >= BRANCHING_FACTOR) break;
 
     // Upward culling
     if (clusterDist > payload.closestDistance) continue;
     
     #ifdef COLLECT_STATS
-    payload.l2Hit++; // Count this as traversing a l2
-    #endif
-    
-    int l2ClusterID = leafID * BRANCHING_FACTOR + l2Index;
-
-    // Initialize active l1 list
-    #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-    //       15-8    7-0
-    // bits: [ID] [Distance]
-    // Quantizing by the distance to the farthest corner of the treelet. An ID of 255 means "empty".
-    float l1QueueTranslate = getMinDist(queryOrigin, l2Treelet.xyz, l2Treelet.xyz + l2Span);
-    float l1QueueScale = getMaxDist(queryOrigin, l2Treelet.xyz, l2Treelet.xyz + l2Span) - l2QueueTranslate;
-    uint16_t activeL1Clusters[BRANCHING_FACTOR];
-    [unroll]
-    for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-      activeL1Clusters[l1] = 255 << 8 | 255;
-    }
-    #else
-    uint32_t activeL1Clusters[BRANCHING_FACTOR];
-    float l1ClusterMinDists[BRANCHING_FACTOR];
-    [unroll]
-    for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-      activeL1Clusters[l1] = BRANCHING_FACTOR + 1;
-      l1ClusterMinDists[l1] = FLT_MAX;
-    }
+    payload.l4Hit++; // Count this as traversing a l4
     #endif
 
-    // Insert into active l1 list by distance far to near
-    for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-      int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1;
-      if (l1ClusterID > numL1Clusters) break;
+    int l4ClusterID = l4Index;
+
+    // Initialize active l3 list
+    uint32_t activeL3Clusters[BRANCHING_FACTOR];
+    float l3ClusterMinDists[BRANCHING_FACTOR];
+    [unroll]
+    for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
+      activeL3Clusters[l3] = BRANCHING_FACTOR + 1;
+      l3ClusterMinDists[l3] = FLT_MAX;
+    }
+
+    // Insert into active l3 list by distance far to near
+    for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
+      float minDistCorrection = 0.f;
+      int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3;
+      if (l3ClusterID > numL3Clusters) break;
 
       #ifdef ENABLE_OBBS 
-      float3 obbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 0);
-      float3 obbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 1);
-      float3 obbEul = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 2);
+      float3 obbMin = gprt::load<float3>(record.l3clusters, l3ClusterID * 3 + 0);
+      float3 obbMax = gprt::load<float3>(record.l3clusters, l3ClusterID * 3 + 1);
+      float3 obbEul = gprt::load<float3>(record.l3clusters, l3ClusterID * 3 + 2);
       float3x3 obbRot = eul_to_mat3(obbEul);
       float3 obbQueryOrigin = mul(obbRot, queryOrigin);
       float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
       float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
       float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
       #else
-      float3 aabbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 0);
-      float3 aabbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 1);
+      float3 aabbMin = gprt::load<float3>(record.l3clusters, l3ClusterID * 2 + 0);
+      float3 aabbMax = gprt::load<float3>(record.l3clusters, l3ClusterID * 2 + 1);
       float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
       float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
       float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
       #endif
 
-      // Range Culling: Pessimistic distance closer than min range
+      // Range Culling: Farthest corner closer than min range
       if (maxDist < tmin) continue;
       
-      // Range Culling: Skip superclusters outside the search radius
+      // Range Culling: skip superclusters outside the search radius
       if (minDist >= tmax) continue;
 
-      // Upward Culling: Skip superclusters father than current closest primitive
+      // Upward Culling: skip superclusters father than current closest primitive
       if (minDist > payload.closestDistance) continue;
 
       // Insertion sort
-      #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-      activeL1Clusters[0] = (uint16_t(l1) << 8) | uint16_t(((minDist - l1QueueTranslate) / l1QueueScale) * 255.f);
+      l3ClusterMinDists[0] = minDist;
+      activeL3Clusters[0] = l3;
       [unroll]
       for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-        if ((activeL1Clusters[i-1] & 255) >= (activeL1Clusters[i] & 255)) break;
-        uint16_t tmpID = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmpID;
+        if (l3ClusterMinDists[i-1] >= l3ClusterMinDists[i]) break;
+        float tmpDist = l3ClusterMinDists[i-1]; l3ClusterMinDists[i-1] = l3ClusterMinDists[i]; l3ClusterMinDists[i] = tmpDist;
+        uint32_t tmpID = activeL3Clusters[i-1]; activeL3Clusters[i-1] = activeL3Clusters[i]; activeL3Clusters[i] = tmpID;
       }
-      #else
-      l1ClusterMinDists[0] = minDist;
-      activeL1Clusters[0] = l1;
-      [unroll]
-      for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-        if (l1ClusterMinDists[i-1] >= l1ClusterMinDists[i]) break;
-        float tmpDist = l1ClusterMinDists[i-1]; l1ClusterMinDists[i-1] = l1ClusterMinDists[i]; l1ClusterMinDists[i] = tmpDist;
-        uint32_t tmpID = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmpID;
-      }
-      #endif
-
+      
+      // Downward culling... truncate closest distance to the pessimistic distance of this cluster
       #ifdef ENABLE_DOWNAWARD_CULLING
       if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
       #endif
     }
 
     // Traverse clusters near to far
-    for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-      #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-      uint16_t tmp = activeL1Clusters[BRANCHING_FACTOR - 1 - l1];
-      float clusterDist = ((tmp & 255) / 255.f) * l1QueueScale + l1QueueTranslate;
-      int l1Index = (tmp >> 8);
-      #else
-      float clusterDist = l1ClusterMinDists[BRANCHING_FACTOR - 1 - l1];
-      int l1Index = activeL1Clusters[BRANCHING_FACTOR - 1 - l1];
-      #endif
+    for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
+      float clusterDist = l3ClusterMinDists[BRANCHING_FACTOR - 1 - l3];
+      int l3Index = activeL3Clusters[BRANCHING_FACTOR - 1 - l3];
       
       // break out when all superclusters from here on are too far
-      if (l1Index >= BRANCHING_FACTOR) break;
+      if (l3Index >= BRANCHING_FACTOR) break;
 
       // Upward culling
       if (clusterDist > payload.closestDistance) continue;
-      
+    
       #ifdef COLLECT_STATS
-      payload.l1Hit++; // Count this as traversing a supercluster
+      payload.l3Hit++; // Count this as traversing a leaf
       #endif
 
-      int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
+      int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
 
-      // Initialize active l0 cluster list
-      #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-      //       15-8    7-0
-      // bits: [ID] [Distance]
-      // Quantizing by the distance to the farthest corner of the treelet. An ID of 255 means "empty".
-      float l0QueueTranslate = getMinDist(queryOrigin, l1Treelet.xyz, l1Treelet.xyz + l1Span);
-      float l0QueueScale = getMaxDist(queryOrigin, l1Treelet.xyz, l1Treelet.xyz + l1Span) - l0QueueTranslate;
-      uint16_t activeL0Clusters[BRANCHING_FACTOR];
+      // Initialize active l2 list
+      uint32_t activeL2Clusters[BRANCHING_FACTOR];
+      float l2ClusterMinDists[BRANCHING_FACTOR];
       [unroll]
-      for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-        activeL0Clusters[l0] = 255 << 8 | 255;
+      for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
+        activeL2Clusters[l2] = -1;
+        l2ClusterMinDists[l2] = FLT_MAX;
       }
-      #else
-      uint32_t activeL0Clusters[BRANCHING_FACTOR];
-      float l0ClusterMinDists[BRANCHING_FACTOR];
-      [unroll]
-      for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-        activeL0Clusters[l0] = BRANCHING_FACTOR + 1;
-        l0ClusterMinDists[l0] = FLT_MAX;
-      }
-      #endif
-
-      // Insert into active cluster list by distance far to near
-      for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-        int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0;
-        if (l0ClusterID > numL0Clusters) break;
+      
+      // Insert into active l2 list by distance far to near
+      for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
+        float minDistCorrection = 0.f;
+        int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2;
+        if (l2ClusterID > numL2Clusters) break;
 
         #ifdef ENABLE_OBBS 
-        float3 obbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 0);
-        float3 obbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 1);
-        float3 obbEul = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 2);
+        float3 obbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 0);
+        float3 obbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 1);
+        float3 obbEul = gprt::load<float3>(record.l2clusters, l2ClusterID * 3 + 2);
         float3x3 obbRot = eul_to_mat3(obbEul);
         float3 obbQueryOrigin = mul(obbRot, queryOrigin);
         float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
         float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
         float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
         #else
-        float3 aabbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 0);
-        float3 aabbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 1);
+        float3 aabbMin = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 0);
+        float3 aabbMax = gprt::load<float3>(record.l2clusters, l2ClusterID * 2 + 1);
         float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
         float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
         float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
         #endif
 
-        // Range Culling: Pessimistic distance closer than min range
-        if (maxDist <= tmin) continue;
+        // Range Culling: Farthest corner closer than min range
+        if (maxDist < tmin) continue;
         
-        // Range Culling: Skip clusters outside the search radius
+        // Range Culling: skip superclusters outside the search radius
         if (minDist >= tmax) continue;
 
-        // Upward Culling, Skip clusters father than current closest primitive
+        // Upward Culling: skip superclusters father than current closest primitive
         if (minDist > payload.closestDistance) continue;
 
         // Insertion sort
-        #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-        activeL0Clusters[0] = (uint16_t(l0) << 8) | uint16_t(((minDist - l0QueueTranslate) / l0QueueScale) * 255.f);
+        l2ClusterMinDists[0] = minDist;
+        activeL2Clusters[0] = l2;
         [unroll]
         for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-          if ((activeL0Clusters[i-1] & 255) >= (activeL0Clusters[i] & 255)) break;
-          uint16_t tmpID = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmpID;
+          if (l2ClusterMinDists[i-1] >= l2ClusterMinDists[i]) break;
+          float tmpDist = l2ClusterMinDists[i-1]; l2ClusterMinDists[i-1] = l2ClusterMinDists[i]; l2ClusterMinDists[i] = tmpDist;
+          uint32_t tmpID = activeL2Clusters[i-1]; activeL2Clusters[i-1] = activeL2Clusters[i]; activeL2Clusters[i] = tmpID;
         }
-        #else
-        l0ClusterMinDists[0] = minDist;
-        activeL0Clusters[0] = l0;
-        [unroll]
-        for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-          if (l0ClusterMinDists[i-1] >= l0ClusterMinDists[i]) break;
-          float tmpDist = l0ClusterMinDists[i-1]; l0ClusterMinDists[i-1] = l0ClusterMinDists[i]; l0ClusterMinDists[i] = tmpDist;
-          uint32_t tmpID = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmpID;
-        }
-        #endif
-
+        
         // Downward culling... truncate closest distance to the pessimistic distance of this cluster
         #ifdef ENABLE_DOWNAWARD_CULLING
         if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
@@ -1282,175 +1178,325 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
       }
 
       // Traverse clusters near to far
-      for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-        #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-        uint16_t tmp = activeL0Clusters[BRANCHING_FACTOR - 1 - l0];
-        float clusterDist = ((tmp & 255) / 255.f) * l0QueueScale + l0QueueTranslate;
-        int l0Index = (tmp >> 8);
-        #else
-        float clusterDist = l0ClusterMinDists[BRANCHING_FACTOR - 1 - l0];
-        int l0Index = activeL0Clusters[BRANCHING_FACTOR - 1 - l0];
-        #endif
+      for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
+        float clusterDist = l2ClusterMinDists[BRANCHING_FACTOR - 1 - l2];
+        int l2Index = activeL2Clusters[BRANCHING_FACTOR - 1 - l2];
+        
+        // break out when all superclusters from here on are too far
+        if (l2Index >= BRANCHING_FACTOR) break;
 
-        // break out when all clusters from here on are invalid
-        if (l0Index >= BRANCHING_FACTOR) break;
-
-        // Upward Culling
+        // Upward culling
         if (clusterDist > payload.closestDistance) continue;
         
         #ifdef COLLECT_STATS
-        payload.l0Hit++; // Count this as traversing a cluster
+        payload.l2Hit++; // Count this as traversing a l2
         #endif
-
-        int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0Index;
         
-        // Initialize active primitive list
-        #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-        //       15-8    7-0
-        // bits: [ID] [Distance]
-        // Quantizing by the distance to the farthest corner of the treelet. An ID of 255 means "empty".
-        float primQueueTranslate = getMinDist(queryOrigin, l0Treelet.xyz, l0Treelet.xyz + l0Span);
-        float primQueueScale = getMaxDist(queryOrigin, l0Treelet.xyz, l0Treelet.xyz + l0Span) - primQueueTranslate;
-        uint16_t activePrimitives[BRANCHING_FACTOR];
-        [unroll]
-        for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-          activePrimitives[l0] = 255 << 8 | 255;
-        }
-        #else
-        uint32_t activePrimitives[BRANCHING_FACTOR];
-        float primitiveMinDists[BRANCHING_FACTOR];
-        [unroll]
-        for (int lp = 0; lp < BRANCHING_FACTOR; ++lp) {
-          activePrimitives[lp] = BRANCHING_FACTOR + 1;
-          primitiveMinDists[lp] = FLT_MAX;
-        }
-        #endif
+        int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
 
-        // Insert into active leaf list by distance far to near
-        for (int ll = 0; ll < BRANCHING_FACTOR; ++ll) {
-          uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + ll;
-          if (leafID > numLeaves) break;
-          #ifdef ENABLE_OBBS    
-          float3 obbMin = gprt::load<float3>(record.leaves, leafID * 3 + 0);
-          float3 obbMax = gprt::load<float3>(record.leaves, leafID * 3 + 1);
-          float3 obbEul = gprt::load<float3>(record.leaves, leafID * 3 + 2);
+        // Initialize active l1 list
+        uint32_t activeL1Clusters[BRANCHING_FACTOR];
+        float l1ClusterMinDists[BRANCHING_FACTOR];
+        [unroll]
+        for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
+          activeL1Clusters[l1] = BRANCHING_FACTOR + 1;
+          l1ClusterMinDists[l1] = FLT_MAX;
+        }
+        
+        // Insert into active l1 list by distance far to near
+        for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
+          int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1;
+          if (l1ClusterID > numL1Clusters) break;
+
+          #ifdef ENABLE_OBBS 
+          float3 obbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 0);
+          float3 obbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 1);
+          float3 obbEul = gprt::load<float3>(record.l1clusters, l1ClusterID * 3 + 2);
           float3x3 obbRot = eul_to_mat3(obbEul);
           float3 obbQueryOrigin = mul(obbRot, queryOrigin);
           float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
           float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
           float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
           #else
-          float3 aabbMin = gprt::load<float3>(record.leaves, leafID * 2 + 0);
-          float3 aabbMax = gprt::load<float3>(record.leaves, leafID * 2 + 1);
+          float3 aabbMin = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 0);
+          float3 aabbMax = gprt::load<float3>(record.l1clusters, l1ClusterID * 2 + 1);
           float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
           float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
           float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
           #endif
 
           // Range Culling: Pessimistic distance closer than min range
-          if (maxDist <= tmin) continue;
-
-          // Range Culling: Skip primitives outside the search radius
+          if (maxDist < tmin) continue;
+          
+          // Range Culling: Skip superclusters outside the search radius
           if (minDist >= tmax) continue;
 
-          // Upward Culling: Skip clusters father than current closest primitive
+          // Upward Culling: Skip superclusters father than current closest primitive
           if (minDist > payload.closestDistance) continue;
-
-          if (minDist >= 0.f && (NNFlags & NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE) != 0) {
-            payload.closestDistance = minDist;
-            continue;
-          }
 
           // Insertion sort
           #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
-          activePrimitives[0] = (uint16_t(ll) << 8) | uint16_t(((minDist - primQueueTranslate) / primQueueScale) * 255.f);
+          activeL1Clusters[0] = (uint16_t(l1) << 8) | uint16_t(((minDist - l1QueueTranslate) / l1QueueScale) * 255.f);
           [unroll]
           for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-            if ((activePrimitives[i-1] & 255) >= (activePrimitives[i] & 255)) break;
-            uint16_t tmpID = activePrimitives[i-1]; activePrimitives[i-1] = activePrimitives[i]; activePrimitives[i] = tmpID;
+            if ((activeL1Clusters[i-1] & 255) >= (activeL1Clusters[i] & 255)) break;
+            uint16_t tmpID = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmpID;
           }
           #else
-          primitiveMinDists[0] = minDist;
-          activePrimitives[0] = ll;
+          l1ClusterMinDists[0] = minDist;
+          activeL1Clusters[0] = l1;
           [unroll]
           for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-            if (primitiveMinDists[i-1] >= primitiveMinDists[i]) break;
-            float tmpDist = primitiveMinDists[i-1]; primitiveMinDists[i-1] = primitiveMinDists[i]; primitiveMinDists[i] = tmpDist;
-            uint32_t tmpID = activePrimitives[i-1]; activePrimitives[i-1] = activePrimitives[i]; activePrimitives[i] = tmpID;
+            if (l1ClusterMinDists[i-1] >= l1ClusterMinDists[i]) break;
+            float tmpDist = l1ClusterMinDists[i-1]; l1ClusterMinDists[i-1] = l1ClusterMinDists[i]; l1ClusterMinDists[i] = tmpDist;
+            uint32_t tmpID = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmpID;
           }
           #endif
 
-          // Downward culling... truncate closest distance to the pessimistic distance of this cluster
           #ifdef ENABLE_DOWNAWARD_CULLING
           if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
           #endif
         }
 
-        // Traverse all leaves in this cluster from near to far
-        [unroll]
-        for (int ll = 0; ll < BRANCHING_FACTOR; ++ll) {
-          #if defined(ENABLE_QUEUE_QUANTIZATION)
-          uint16_t tmp = activePrimitives[BRANCHING_FACTOR - 1 - ll];
-          float minDist = ((tmp & 255) / 255.f) * primQueueScale + primQueueTranslate;
-          int idx = (tmp >> 8);
+        // Traverse clusters near to far
+        for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
+          #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
+          uint16_t tmp = activeL1Clusters[BRANCHING_FACTOR - 1 - l1];
+          float clusterDist = ((tmp & 255) / 255.f) * l1QueueScale + l1QueueTranslate;
+          int l1Index = (tmp >> 8);
           #else
-          float minDist = primitiveMinDists[BRANCHING_FACTOR - 1 - ll];
-          int idx = activePrimitives[BRANCHING_FACTOR - 1 - ll];
+          float clusterDist = l1ClusterMinDists[BRANCHING_FACTOR - 1 - l1];
+          int l1Index = activeL1Clusters[BRANCHING_FACTOR - 1 - l1];
           #endif
-
-          // break out when all primitives from here on are too far
-          if (idx >= BRANCHING_FACTOR) break;
           
+          // break out when all superclusters from here on are too far
+          if (l1Index >= BRANCHING_FACTOR) break;
+
           // Upward culling
-          if (minDist > payload.closestDistance) continue;
-
-          uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + idx;
-          if (leafID > numLeaves) break;
-
+          if (clusterDist > payload.closestDistance) continue;
+          
           #ifdef COLLECT_STATS
-          payload.leavesHit++; // Count this as traversing a leaf
+          payload.l1Hit++; // Count this as traversing a supercluster
           #endif
 
-          for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
-            uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
-            if (itemID >= numPrims) continue;
+          int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
 
-            uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
-            int3 tri = gprt::load<int3>(record.triangles, primitiveID);
-            float3 a = gprt::load<float3>(record.points, tri.x);
-            float3 b = gprt::load<float3>(record.points, tri.y);
-            float3 c = gprt::load<float3>(record.points, tri.z);
-            if (isnan(a.x)) continue;
+          // Initialize active l0 cluster list
+          #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
+          //       15-8    7-0
+          // bits: [ID] [Distance]
+          // Quantizing by the distance to the farthest corner of the treelet. An ID of 255 means "empty".
+          float l0QueueTranslate = getMinDist(queryOrigin, l1Treelet.xyz, l1Treelet.xyz + l1Span);
+          float l0QueueScale = getMaxDist(queryOrigin, l1Treelet.xyz, l1Treelet.xyz + l1Span) - l0QueueTranslate;
+          uint16_t activeL0Clusters[BRANCHING_FACTOR];
+          [unroll]
+          for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
+            activeL0Clusters[l0] = 255 << 8 | 255;
+          }
+          #else
+          uint32_t activeL0Clusters[BRANCHING_FACTOR];
+          float l0ClusterMinDists[BRANCHING_FACTOR];
+          [unroll]
+          for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
+            activeL0Clusters[l0] = BRANCHING_FACTOR + 1;
+            l0ClusterMinDists[l0] = FLT_MAX;
+          }
+          #endif
 
-            float2 dists = getTriangleDist2(queryOrigin, a, b, c);
+          // Insert into active cluster list by distance far to near
+          for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
+            int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0;
+            if (l0ClusterID > numL0Clusters) break;
 
-            // Closest primitive distance farther than max range
-            if (dists.x > tmax) continue;
+            #ifdef ENABLE_OBBS 
+            float3 obbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 0);
+            float3 obbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 1);
+            float3 obbEul = gprt::load<float3>(record.l0clusters, l0ClusterID * 3 + 2);
+            float3x3 obbRot = eul_to_mat3(obbEul);
+            float3 obbQueryOrigin = mul(obbRot, queryOrigin);
+            float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+            float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+            float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
+            #else
+            float3 aabbMin = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 0);
+            float3 aabbMax = gprt::load<float3>(record.l0clusters, l0ClusterID * 2 + 1);
+            float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
+            float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
+            float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+            #endif
 
-            // Farthest primitive distance closer than min range
-            if (dists.y <= tmin) continue;
+            // Range Culling: Pessimistic distance closer than min range
+            if (maxDist <= tmin) continue;
+            
+            // Range Culling: Skip clusters outside the search radius
+            if (minDist >= tmax) continue;
 
-            // Primitive intersects tmin sphere
-            if (dists.x <= tmin && dists.y > tmin){
-              dists.x = tmin;
+            // Upward Culling, Skip clusters father than current closest primitive
+            if (minDist > payload.closestDistance) continue;
+
+            // Insertion sort
+            #if defined(ENABLE_QUEUE_QUANTIZATION) && defined(ENABLE_QUANTIZATION)
+            activeL0Clusters[0] = (uint16_t(l0) << 8) | uint16_t(((minDist - l0QueueTranslate) / l0QueueScale) * 255.f);
+            [unroll]
+            for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+              if ((activeL0Clusters[i-1] & 255) >= (activeL0Clusters[i] & 255)) break;
+              uint16_t tmpID = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmpID;
+            }
+            #else
+            l0ClusterMinDists[0] = minDist;
+            activeL0Clusters[0] = l0;
+            [unroll]
+            for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+              if (l0ClusterMinDists[i-1] >= l0ClusterMinDists[i]) break;
+              float tmpDist = l0ClusterMinDists[i-1]; l0ClusterMinDists[i-1] = l0ClusterMinDists[i]; l0ClusterMinDists[i] = tmpDist;
+              uint32_t tmpID = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmpID;
+            }
+            #endif
+
+            // Downward culling... truncate closest distance to the pessimistic distance of this cluster
+            #ifdef ENABLE_DOWNAWARD_CULLING
+            if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
+            #endif
+          }
+
+          // Traverse clusters near to far
+          for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
+            float clusterDist = l0ClusterMinDists[BRANCHING_FACTOR - 1 - l0];
+            int l0Index = activeL0Clusters[BRANCHING_FACTOR - 1 - l0];
+            
+            // break out when all clusters from here on are invalid
+            if (l0Index >= BRANCHING_FACTOR) break;
+
+            // Upward Culling
+            if (clusterDist > payload.closestDistance) continue;
+            
+            #ifdef COLLECT_STATS
+            payload.l0Hit++; // Count this as traversing a cluster
+            #endif
+
+            int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0Index;
+            
+            // Initialize active primitive list
+            uint32_t activePrimitives[BRANCHING_FACTOR];
+            float primitiveMinDists[BRANCHING_FACTOR];
+            [unroll]
+            for (int lp = 0; lp < BRANCHING_FACTOR; ++lp) {
+              activePrimitives[lp] = BRANCHING_FACTOR + 1;
+              primitiveMinDists[lp] = FLT_MAX;
             }
             
-            // Primitive farther than furthest
-            if (dists.x > payload.closestDistance) continue;
+            // Insert into active leaf list by distance far to near
+            for (int ll = 0; ll < BRANCHING_FACTOR; ++ll) {
+              uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + ll;
+              if (leafID > numLeaves) break;
+              #ifdef ENABLE_OBBS    
+              float3 obbMin = gprt::load<float3>(record.leaves, leafID * 3 + 0);
+              float3 obbMax = gprt::load<float3>(record.leaves, leafID * 3 + 1);
+              float3 obbEul = gprt::load<float3>(record.leaves, leafID * 3 + 2);
+              float3x3 obbRot = eul_to_mat3(obbEul);
+              float3 obbQueryOrigin = mul(obbRot, queryOrigin);
+              float minDist = getMinDist(obbQueryOrigin, obbMin, obbMax);
+              float maxDist = getMaxDist(obbQueryOrigin, obbMin, obbMax);
+              float pessimisticDistance = getMinMaxDist(obbQueryOrigin, obbMin, obbMax);
+              #else
+              float3 aabbMin = gprt::load<float3>(record.leaves, leafID * 2 + 0);
+              float3 aabbMax = gprt::load<float3>(record.leaves, leafID * 2 + 1);
+              float minDist = getMinDist(queryOrigin, aabbMin, aabbMax);
+              float maxDist = getMaxDist(queryOrigin, aabbMin, aabbMax);
+              float pessimisticDistance = getMinMaxDist(queryOrigin, aabbMin, aabbMax);
+              #endif
 
-            #ifdef COLLECT_STATS
-            payload.primsHit++; // Count this as traversing a primitive
-            #endif
-            
-            // Newly found closest primitive
-            payload.closestDistance = dists.x;
-            payload.closestPrimitive = primitiveID;
+              // Range Culling: Pessimistic distance closer than min range
+              if (maxDist <= tmin) continue;
 
-            // If we're accepting the first hit, stop traversal now.
-            if ((NNFlags & NN_FLAG_ACCEPT_FIRST_NEIGHBOR_AND_END_SEARCH) != 0) return;
+              // Range Culling: Skip primitives outside the search radius
+              if (minDist >= tmax) continue;
 
-            // Stop now if we've found something that hits tmin.
-            if (payload.closestDistance == tmin) return;
+              // Upward Culling: Skip clusters father than current closest primitive
+              if (minDist > payload.closestDistance) continue;
+
+              if (minDist >= 0.f && (NNFlags & NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE) != 0) {
+                payload.closestDistance = minDist;
+                continue;
+              }
+
+              // Insertion sort
+              primitiveMinDists[0] = minDist;
+              activePrimitives[0] = ll;
+              [unroll]
+              for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+                if (primitiveMinDists[i-1] >= primitiveMinDists[i]) break;
+                float tmpDist = primitiveMinDists[i-1]; primitiveMinDists[i-1] = primitiveMinDists[i]; primitiveMinDists[i] = tmpDist;
+                uint32_t tmpID = activePrimitives[i-1]; activePrimitives[i-1] = activePrimitives[i]; activePrimitives[i] = tmpID;
+              }
+              
+              // Downward culling... truncate closest distance to the pessimistic distance of this cluster
+              #ifdef ENABLE_DOWNAWARD_CULLING
+              if (pessimisticDistance < payload.closestDistance) payload.closestDistance = pessimisticDistance;
+              #endif
+            }
+
+            // Traverse all leaves in this cluster from near to far
+            [unroll]
+            for (int ll = 0; ll < BRANCHING_FACTOR; ++ll) {
+              float minDist = primitiveMinDists[BRANCHING_FACTOR - 1 - ll];
+              int idx = activePrimitives[BRANCHING_FACTOR - 1 - ll];
+              
+              // break out when all primitives from here on are too far
+              if (idx >= BRANCHING_FACTOR) break;
+              
+              // Upward culling
+              if (minDist > payload.closestDistance) continue;
+
+              uint32_t leafID = l0ClusterID * BRANCHING_FACTOR + idx;
+              if (leafID > numLeaves) break;
+
+              #ifdef COLLECT_STATS
+              payload.leavesHit++; // Count this as traversing a leaf
+              #endif
+
+              for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
+                uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
+                if (itemID >= numPrims) continue;
+
+                uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
+                int3 tri = gprt::load<int3>(record.triangles, primitiveID);
+                float3 a = gprt::load<float3>(record.points, tri.x);
+                float3 b = gprt::load<float3>(record.points, tri.y);
+                float3 c = gprt::load<float3>(record.points, tri.z);
+                if (isnan(a.x)) continue;
+
+                float2 dists = getTriangleDist2(queryOrigin, a, b, c);
+
+                // Closest primitive distance farther than max range
+                if (dists.x > tmax) continue;
+
+                // Farthest primitive distance closer than min range
+                if (dists.y <= tmin) continue;
+
+                // Primitive intersects tmin sphere
+                if (dists.x <= tmin && dists.y > tmin){
+                  dists.x = tmin;
+                }
+                
+                // Primitive farther than furthest
+                if (dists.x > payload.closestDistance) continue;
+
+                #ifdef COLLECT_STATS
+                payload.primsHit++; // Count this as traversing a primitive
+                #endif
+                
+                // Newly found closest primitive
+                payload.closestDistance = dists.x;
+                payload.closestPrimitive = primitiveID;
+
+                // If we're accepting the first hit, stop traversal now.
+                if ((NNFlags & NN_FLAG_ACCEPT_FIRST_NEIGHBOR_AND_END_SEARCH) != 0) return;
+
+                // Stop now if we've found something that hits tmin.
+                if (payload.closestDistance == tmin) return;
+              }
+            }
           }
         }
       }
@@ -1458,67 +1504,67 @@ void TraverseLeaf(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
   }
 }
 
-void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
-  float dist = tmax;
-  uint stack[32];
-  uint stackPtr = 0;
-  stackPtr ++;
-  stack[stackPtr] = 0; // root
+// void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
+//   float dist = tmax;
+//   uint stack[32];
+//   uint stackPtr = 0;
+//   stackPtr ++;
+//   stack[stackPtr] = 0; // root
 
-  while (stackPtr > 0)
-  {
-    bool gotoNext = false;
-    int4 node = gprt::load<int4>(record.lbvhNodes, stack[stackPtr]);
-    stackPtr = stackPtr - 1;
+//   while (stackPtr > 0)
+//   {
+//     bool gotoNext = false;
+//     int4 node = gprt::load<int4>(record.lbvhNodes, stack[stackPtr]);
+//     stackPtr = stackPtr - 1;
 
-    // while left and right contain children
-    while (node.x != -1 && node.y != -1) {
-      int4 children[2] = { 
-          gprt::load<int4>(record.lbvhNodes, node.x), 
-          gprt::load<int4>(record.lbvhNodes, node.y) 
-      };
+//     // while left and right contain children
+//     while (node.x != -1 && node.y != -1) {
+//       int4 children[2] = { 
+//           gprt::load<int4>(record.lbvhNodes, node.x), 
+//           gprt::load<int4>(record.lbvhNodes, node.y) 
+//       };
 
-      float3 leftAABB[2] = {
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 0), // + record.maxSearchRange, 
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 1), // - record.maxSearchRange, 
-      };
+//       float3 leftAABB[2] = {
+//           gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 0), // + record.maxSearchRange, 
+//           gprt::load<float3>(record.lbvhAabbs, 2 * node.x + 1), // - record.maxSearchRange, 
+//       };
 
-      float3 rightAABB[2] = {
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 0), // + record.maxSearchRange, 
-          gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 1), // - record.maxSearchRange, 
-      };
+//       float3 rightAABB[2] = {
+//           gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 0), // + record.maxSearchRange, 
+//           gprt::load<float3>(record.lbvhAabbs, 2 * node.y + 1), // - record.maxSearchRange, 
+//       };
 
-      float distL = sqrt(_dot2(max(max(leftAABB[0] - queryOrigin, float3(0.f, 0.f, 0.f)), queryOrigin - leftAABB[1])));
-      float distR = sqrt(_dot2(max(max(rightAABB[0] - queryOrigin, float3(0.f, 0.f, 0.f)), queryOrigin - rightAABB[1])));
-      if (distL < dist && distR < dist) {
-        if (distL < distR) {
-          stackPtr++;
-          stack[stackPtr] = node.y;
-          node = children[0];
-        }
-        else {
-          stackPtr++;
-          stack[stackPtr] = node.x;
-          node = children[1];
-        }
-      }
-      else if (distL < dist)
-        node = children[0];
-      else if (distR < dist)
-        node = children[1];
-      else {
-        gotoNext = true;
-        break;
-      }
-    }
-    if (gotoNext) continue;
+//       float distL = sqrt(_dot2(max(max(leftAABB[0] - queryOrigin, float3(0.f, 0.f, 0.f)), queryOrigin - leftAABB[1])));
+//       float distR = sqrt(_dot2(max(max(rightAABB[0] - queryOrigin, float3(0.f, 0.f, 0.f)), queryOrigin - rightAABB[1])));
+//       if (distL < dist && distR < dist) {
+//         if (distL < distR) {
+//           stackPtr++;
+//           stack[stackPtr] = node.y;
+//           node = children[0];
+//         }
+//         else {
+//           stackPtr++;
+//           stack[stackPtr] = node.x;
+//           node = children[1];
+//         }
+//       }
+//       else if (distL < dist)
+//         node = children[0];
+//       else if (distR < dist)
+//         node = children[1];
+//       else {
+//         gotoNext = true;
+//         break;
+//       }
+//     }
+//     if (gotoNext) continue;
 
-    // Traverse leaf
-    int leafID = node.w;
-    TraverseLeaf(record, NNFlags, queryOrigin, tmin, tmax, leafID, payload, debug);
-    dist = min(dist, payload.closestDistance);
-  }
-}
+//     // Traverse leaf
+//     int leafID = node.w;
+//     TraverseLeaf(record, NNFlags, queryOrigin, tmin, tmax, leafID, payload, debug);
+//     dist = min(dist, payload.closestDistance);
+//   }
+// }
 
 void TraceNN(
   in gprt::NNAccel knnAccel, 
@@ -1535,7 +1581,7 @@ void TraceNN(
 {
   NNPayload payload;
   payload.closestPrimitive = -1;
-  payload.closestDistance = tMax * tMax; //knnAccel.maxSearchRange * knnAccel.maxSearchRange;
+  payload.closestDistance = tMax;
   #ifdef COLLECT_STATS
   payload.primsHit = stats.primsHit;
   payload.leavesHit = stats.leavesHit;
@@ -1543,6 +1589,7 @@ void TraceNN(
   payload.l1Hit = stats.l1Hit;
   payload.l2Hit = stats.l2Hit;
   payload.l3Hit = stats.l3Hit;
+  payload.l4Hit = stats.l4Hit;
   #endif
 
   if (tMax > 0.f) {
@@ -1604,6 +1651,7 @@ void TraceNN(
   stats.l1Hit = payload.l1Hit;
   stats.l2Hit = payload.l2Hit;
   stats.l3Hit = payload.l3Hit;
+  stats.l4Hit = payload.l4Hit;
   #endif
 }
 #endif
