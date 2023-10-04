@@ -151,31 +151,31 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (1,1,1)) {
 }
 
 int getPrimsInLL(int llID, int numLeaves, int numPrimitives) {
-  return (llID == (numLeaves - 1)) ? (numPrimitives % PRIMS_PER_LEAF) : PRIMS_PER_LEAF;
+  return (llID == (numLeaves - 1)) ? (numPrimitives % BRANCHING_FACTOR) : BRANCHING_FACTOR;
 }
 
 int getPrimsInL0(int l0ID, int numL0, int numPrimitives) {
-  int maxPrimsInL0 = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, 1);
+  int maxPrimsInL0 = pow(BRANCHING_FACTOR, 2);
   return (l0ID == (numL0 - 1)) ? (numPrimitives % maxPrimsInL0) : maxPrimsInL0;
 }
 
 int getPrimsInL1(int l1ID, int numL1, int numPrimitives) {
-  int maxPrimsInL1 = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, 2);
+  int maxPrimsInL1 = pow(BRANCHING_FACTOR, 3);
   return (l1ID == (numL1 - 1)) ? (numPrimitives % maxPrimsInL1) : maxPrimsInL1;
 }
 
 int getPrimsInL2(int l2ID, int numL2, int numPrimitives) {
-  int maxPrimsInL2 = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, 3);
+  int maxPrimsInL2 = pow(BRANCHING_FACTOR, 4);
   return (l2ID == (numL2 - 1)) ? (numPrimitives % maxPrimsInL2) : maxPrimsInL2;
 }
 
 int getPrimsInL3(int l3ID, int numL3, int numPrimitives) {
-  int maxPrimsInL3 = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, 4);
+  int maxPrimsInL3 = pow(BRANCHING_FACTOR, 5);
   return (l3ID == (numL3 - 1)) ? (numPrimitives % maxPrimsInL3) : maxPrimsInL3;
 }
 
 int getPrimsInL4(int l4ID, int numL4, int numPrimitives) {
-  int maxPrimsInL4 = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, 5);
+  int maxPrimsInL4 = pow(BRANCHING_FACTOR, 6);
   return (l4ID == (numL4 - 1)) ? (numPrimitives % maxPrimsInL4) : maxPrimsInL4;
 }
 
@@ -254,7 +254,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
   c = gprt::load<float3>(record.points, tri.z);
 
   // Accumulate vertices for centroids
-  uint32_t llID = lpID / PRIMS_PER_LEAF;
+  uint32_t llID = lpID / BRANCHING_FACTOR;
   uint32_t ppll = getPrimsInLL(llID, record.numLeaves, record.numPrims);
   gprt::atomicAdd32f(record.llcenters, llID, (a + b + c) / (3 * ppll));
 }
@@ -348,7 +348,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) 
   c = gprt::load<float3>(record.points, tri.z);
 
   // Compute outer products for covariances
-  uint32_t llID = lpID / PRIMS_PER_LEAF;
+  uint32_t llID = lpID / BRANCHING_FACTOR;
   float3 llcenter = gprt::load<float3>(record.llcenters, llID);
   float3x3 llpartialcovar = outer2(a - llcenter) + outer2(b - llcenter) + outer2(c - llcenter);
   uint32_t ppll = getPrimsInLL(llID, record.numLeaves, record.numPrims);
@@ -546,7 +546,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
   else if (tid - (NL + N0 + N1 + N2 + N3) < N4)
     covariance = gprt::load<float3x3>(record.l4covariances, tid - (NL + N0 + N1 + N2 + N3));
 
-  float3 obbEul = mat3_to_eul(svd(covariance).V);
+  float3 obbEul = mat3_to_eul(symmetric_eigenanalysis(covariance));
 
   if (tid < NL)
     gprt::store<float3>(record.leaves, (tid) * 3 + 2, obbEul);
@@ -562,10 +562,10 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
     gprt::store<float3>(record.l4clusters, (tid - (NL + N0 + N1 + N2 + N3)) * 3 + 2, obbEul);
 }
 
-// Launch this PRIMS_PER_LEAF times. Helps reduce atomic pressure.
+// Launch this BRANCHING_FACTOR times. Helps reduce atomic pressure.
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
   int llID = DispatchThreadID.x;
-  int lpID = llID * PRIMS_PER_LEAF + record.iteration; 
+  int lpID = llID * BRANCHING_FACTOR + record.iteration; 
   if (lpID >= record.numPrims) return;
 
   // Get address from sorted codes
@@ -577,7 +577,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
   b = gprt::load<float3>(record.points, tri.y);
   c = gprt::load<float3>(record.points, tri.z);
 
-  // uint32_t llID = lpID / PRIMS_PER_LEAF;
+  // uint32_t llID = lpID / BRANCHING_FACTOR;
   uint32_t l0ID = llID / BRANCHING_FACTOR;
   uint32_t l1ID = l0ID / BRANCHING_FACTOR;
   uint32_t l2ID = l1ID / BRANCHING_FACTOR;
@@ -890,8 +890,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleLeaves, (NNAccel, record), (1,1,1)) {
   float3 aabbMin =  float3(1e38f, 1e38f, 1e38f);
   float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
   
-  for (uint32_t pid = 0; pid < PRIMS_PER_LEAF; ++pid) {
-    uint32_t primID = leafID * PRIMS_PER_LEAF + pid;
+  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    uint32_t primID = leafID * BRANCHING_FACTOR + pid;
     uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.codes, primID)); 
     uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
     float3 a, b, c;
@@ -1340,7 +1340,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL4Clusters, (NNAccel, record), (1,1,1)) {
   
 // //   #else
   
-//   #if PRIMS_PER_LEAF != 1
+//   #if BRANCHING_FACTOR != 1
 //   #error "Update ComputeL0Treelets to use more than 1 primitive per leaf"
 //   #endif
 

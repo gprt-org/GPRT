@@ -10,12 +10,6 @@
 // relative to the number of primitives. 
 #define BRANCHING_FACTOR 10
 
-// The number of primitives to traverse when hitting a leaf. 
-// More than one seems beneficial for OBBs. 8 seems to be a sweet spot at the moment... Wishing it was 10 though...
-#define PRIMS_PER_LEAF 8
-
-// #define PRIMS_PER_LEAF 1
-
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
 // Edit edit: Downward pruning seems to fall apart when nodes are quantized. The reason 

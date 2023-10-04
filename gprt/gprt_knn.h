@@ -1455,8 +1455,8 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
               payload.leavesHit++; // Count this as traversing a leaf
               #endif
 
-              for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
-                uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
+              for (uint32_t primID = 0; primID < BRANCHING_FACTOR; ++primID) {
+                uint32_t itemID = leafID * BRANCHING_FACTOR + primID;
                 if (itemID >= numPrims) continue;
 
                 uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
