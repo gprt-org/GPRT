@@ -179,67 +179,6 @@ int getPrimsInL4(int l4ID, int numL4, int numPrimitives) {
   return (l4ID == (numL4 - 1)) ? (numPrimitives % maxPrimsInL4) : maxPrimsInL4;
 }
 
-GPRT_COMPUTE_PROGRAM(ClearOBBClusters, (NNAccel, record), (1,1,1)) {
-  int tid = DispatchThreadID.x;
-  int NL = record.numLeaves;
-  int N0 = record.numL0Clusters;
-  int N1 = record.numL1Clusters;
-  int N2 = record.numL2Clusters;
-  int N3 = record.numL3Clusters;
-  int N4 = record.numL4Clusters;
-  int totalClusters = NL + N0 + N1 + N2 + N3 + N4;
-  if (tid >= totalClusters) return;
-
-  if (tid < NL) {
-    uint32_t llID = tid;
-    gprt::store<float3>(record.llcenters, llID, float3(0,0,0));
-    gprt::store<float3x3>(record.llcovariances, llID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.leaves, llID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.leaves, llID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.leaves, llID * 3 + 2, float3(0,0,0));
-  }
-  else if (tid - NL < N0) {
-    uint32_t l0ID = tid - (NL);
-    gprt::store<float3>(record.l0centers, l0ID, float3(0,0,0));
-    gprt::store<float3x3>(record.l0covariances, l0ID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.l0clusters, l0ID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l0clusters, l0ID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l0clusters, l0ID * 3 + 2, float3(0,0,0));
-  }
-  else if (tid - (NL + N0) < N1) {
-    uint32_t l1ID = tid - (NL + N0);
-    gprt::store<float3>(record.l1centers, l1ID, float3(0,0,0));
-    gprt::store<float3x3>(record.l1covariances, l1ID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.l1clusters, l1ID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l1clusters, l1ID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l1clusters, l1ID * 3 + 2, float3(0,0,0));
-  } 
-  else if (tid - (NL + N0 + N1) < N2) {
-    uint32_t l2ID = tid - (NL + N0 + N1);
-    gprt::store<float3>(record.l2centers, l2ID, float3(0,0,0));
-    gprt::store<float3x3>(record.l2covariances, l2ID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.l2clusters, l2ID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l2clusters, l2ID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l2clusters, l2ID * 3 + 2, float3(0,0,0));
-  }
-  else if (tid - (NL + N0 + N1 + N2) < N3) {
-    uint32_t l3ID = tid - (NL + N0 + N1 + N2);
-    gprt::store<float3>(record.l3centers, l3ID, float3(0,0,0));
-    gprt::store<float3x3>(record.l3covariances, l3ID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.l3clusters, l3ID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l3clusters, l3ID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l3clusters, l3ID * 3 + 2, float3(0,0,0));
-  }
-  else if (tid - (NL + N0 + N1 + N2 + N3) < N4) {
-    uint32_t l4ID = tid - (NL + N0 + N1 + N2 + N3);
-    gprt::store<float3>(record.l4centers, l4ID, float3(0,0,0));
-    gprt::store<float3x3>(record.l4covariances, l4ID, float3x3(0,0,0,0,0,0,0,0,0));
-    gprt::store<float3>(record.l4clusters, l4ID * 3 + 0, float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l4clusters, l4ID * 3 + 1, -float3(1e38f,1e38f,1e38f));
-    gprt::store<float3>(record.l4clusters, l4ID * 3 + 2, float3(0,0,0));
-  }
-}
-
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
   int lpID = DispatchThreadID.x;
   if (lpID >= record.numPrims) return;
@@ -352,7 +291,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) 
   float3 llcenter = gprt::load<float3>(record.llcenters, llID);
   float3x3 llpartialcovar = outer2(a - llcenter) + outer2(b - llcenter) + outer2(c - llcenter);
   uint32_t ppll = getPrimsInLL(llID, record.numLeaves, record.numPrims);
-  gprt::atomicAdd32f(record.llcovariances, llID, llpartialcovar / (3 * ppll));
+  gprt::atomicAdd32f(record.llclusters, llID, llpartialcovar / (3 * ppll));
 }
 
 // Using law of total covariance: https://en.wikipedia.org/wiki/Law_of_total_covariance
@@ -370,7 +309,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0OBBCovariances, (NNAccel, record), (1,1,1)) {
     int llID = l0ID * BRANCHING_FACTOR + i;
     if (llID >= record.numLeaves) break;
     int ppll = getPrimsInLL(llID, record.numLeaves, record.numPrims);
-    float3x3 leafCovariance = gprt::load<float3x3>(record.llcovariances, llID);
+    float3x3 leafCovariance = gprt::load<float3x3>(record.llclusters, llID);
     llCenters[i] = gprt::load<float3>(record.llcenters, llID);
     llAvgCenter += llCenters[i];
     l0CovarianceLH += leafCovariance * ppll;
@@ -386,7 +325,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL0OBBCovariances, (NNAccel, record), (1,1,1)) {
   l0CovarianceRH /= totalLeaves;
   // Law of total covariance
   float3x3 L0Covariance = l0CovarianceLH + l0CovarianceRH;
-  gprt::store<float3x3>(record.l0covariances, l0ID, L0Covariance);
+  gprt::store<float3x3>(record.l0clusters, l0ID, L0Covariance);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL1OBBCovariances, (NNAccel, record), (1,1,1)) {
@@ -403,7 +342,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL1OBBCovariances, (NNAccel, record), (1,1,1)) {
     int l0ID = l1ID * BRANCHING_FACTOR + i;
     if (l0ID >= record.numL0Clusters) break;
     int ppl0 = getPrimsInL0(l0ID, record.numL0Clusters, record.numPrims);
-    float3x3 l0Covariance = gprt::load<float3x3>(record.l0covariances, l0ID);
+    float3x3 l0Covariance = gprt::load<float3x3>(record.l0clusters, l0ID);
     l0Centers[i] = gprt::load<float3>(record.l0centers, l0ID);
     l0AvgCenter += l0Centers[i];
     l1CovarianceLH += l0Covariance * ppl0;
@@ -419,7 +358,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL1OBBCovariances, (NNAccel, record), (1,1,1)) {
   l1CovarianceRH /= totalL0;
   // Law of total covariance
   float3x3 L1Covariance = l1CovarianceLH + l1CovarianceRH;
-  gprt::store<float3x3>(record.l1covariances, l1ID, L1Covariance);
+  gprt::store<float3x3>(record.l1clusters, l1ID, L1Covariance);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL2OBBCovariances, (NNAccel, record), (1,1,1)) {
@@ -436,7 +375,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2OBBCovariances, (NNAccel, record), (1,1,1)) {
     int l1ID = l2ID * BRANCHING_FACTOR + i;
     if (l1ID >= record.numL1Clusters) break;
     int ppl1 = getPrimsInL1(l1ID, record.numL1Clusters, record.numPrims);
-    float3x3 l1Covariance = gprt::load<float3x3>(record.l1covariances, l1ID);
+    float3x3 l1Covariance = gprt::load<float3x3>(record.l1clusters, l1ID);
     l1Centers[i] = gprt::load<float3>(record.l1centers, l1ID);
     l1AvgCenter += l1Centers[i];
     l2CovarianceLH += l1Covariance * ppl1;
@@ -452,7 +391,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2OBBCovariances, (NNAccel, record), (1,1,1)) {
   l2CovarianceRH /= totalL1;
   // Law of total covariance
   float3x3 L2Covariance = l2CovarianceLH + l2CovarianceRH;
-  gprt::store<float3x3>(record.l2covariances, l2ID, L2Covariance);
+  gprt::store<float3x3>(record.l2clusters, l2ID, L2Covariance);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL3OBBCovariances, (NNAccel, record), (1,1,1)) {
@@ -469,7 +408,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL3OBBCovariances, (NNAccel, record), (1,1,1)) {
     int l2ID = l3ID * BRANCHING_FACTOR + i;
     if (l2ID >= record.numL2Clusters) break;
     int ppl2 = getPrimsInL2(l2ID, record.numL2Clusters, record.numPrims);
-    float3x3 l2Covariance = gprt::load<float3x3>(record.l2covariances, l2ID);
+    float3x3 l2Covariance = gprt::load<float3x3>(record.l2clusters, l2ID);
     l2Centers[i] = gprt::load<float3>(record.l2centers, l2ID);
     l2AvgCenter += l2Centers[i];
     l3CovarianceLH += l2Covariance * ppl2;
@@ -485,7 +424,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL3OBBCovariances, (NNAccel, record), (1,1,1)) {
   l3CovarianceRH /= totalL2;
   // Law of total covariance
   float3x3 L3Covariance = l3CovarianceLH + l3CovarianceRH;
-  gprt::store<float3x3>(record.l3covariances, l3ID, L3Covariance);
+  gprt::store<float3x3>(record.l3clusters, l3ID, L3Covariance);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeL4OBBCovariances, (NNAccel, record), (1,1,1)) {
@@ -502,7 +441,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL4OBBCovariances, (NNAccel, record), (1,1,1)) {
     int l3ID = l4ID * BRANCHING_FACTOR + i;
     if (l3ID >= record.numL3Clusters) break;
     int ppl3 = getPrimsInL3(l3ID, record.numL3Clusters, record.numPrims);
-    float3x3 l3Covariance = gprt::load<float3x3>(record.l3covariances, l3ID);
+    float3x3 l3Covariance = gprt::load<float3x3>(record.l3clusters, l3ID);
     l3Centers[i] = gprt::load<float3>(record.l3centers, l3ID);
     l3AvgCenter += l3Centers[i];
     l4CovarianceLH += l3Covariance * ppl3;
@@ -518,7 +457,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL4OBBCovariances, (NNAccel, record), (1,1,1)) {
   l4CovarianceRH /= totalL3;
   // Law of total covariance
   float3x3 L4Covariance = l4CovarianceLH + l4CovarianceRH;
-  gprt::store<float3x3>(record.l4covariances, l4ID, L4Covariance);
+  gprt::store<float3x3>(record.l4clusters, l4ID, L4Covariance);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
@@ -534,32 +473,50 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
 
   float3x3 covariance;
   if (tid < NL)
-    covariance = gprt::load<float3x3>(record.llcovariances, tid);
+    covariance = gprt::load<float3x3>(record.llclusters, tid);
   else if (tid - NL < N0)
-    covariance = gprt::load<float3x3>(record.l0covariances, tid - (NL));
+    covariance = gprt::load<float3x3>(record.l0clusters, tid - (NL));
   else if (tid - (NL + N0) < N1)
-    covariance = gprt::load<float3x3>(record.l1covariances, tid - (NL + N0));
+    covariance = gprt::load<float3x3>(record.l1clusters, tid - (NL + N0));
   else if (tid - (NL + N0 + N1) < N2)
-    covariance = gprt::load<float3x3>(record.l2covariances, tid - (NL + N0 + N1));
+    covariance = gprt::load<float3x3>(record.l2clusters, tid - (NL + N0 + N1));
   else if (tid - (NL + N0 + N1 + N2) < N3)
-    covariance = gprt::load<float3x3>(record.l3covariances, tid - (NL + N0 + N1 + N2));
+    covariance = gprt::load<float3x3>(record.l3clusters, tid - (NL + N0 + N1 + N2));
   else if (tid - (NL + N0 + N1 + N2 + N3) < N4)
-    covariance = gprt::load<float3x3>(record.l4covariances, tid - (NL + N0 + N1 + N2 + N3));
+    covariance = gprt::load<float3x3>(record.l4clusters, tid - (NL + N0 + N1 + N2 + N3));
 
   float3 obbEul = mat3_to_eul(symmetric_eigenanalysis(covariance));
 
-  if (tid < NL)
-    gprt::store<float3>(record.leaves, (tid) * 3 + 2, obbEul);
-  else if (tid - NL < N0)
+  if (tid < NL) {
+    gprt::store<float3>(record.llclusters, (tid) * 3 + 0,  float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.llclusters, (tid) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.llclusters, (tid) * 3 + 2, obbEul);
+  }
+  else if (tid - NL < N0){
+    gprt::store<float3>(record.l0clusters, (tid - (NL)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.l0clusters, (tid - (NL)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
     gprt::store<float3>(record.l0clusters, (tid - (NL)) * 3 + 2, obbEul);
-  else if (tid - (NL + N0) < N1)
+  }
+  else if (tid - (NL + N0) < N1) {
+    gprt::store<float3>(record.l1clusters, (tid - (NL + N0)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.l1clusters, (tid - (NL + N0)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
     gprt::store<float3>(record.l1clusters, (tid - (NL + N0)) * 3 + 2, obbEul);
-  else if (tid - (NL + N0 + N1) < N2)
+  }
+  else if (tid - (NL + N0 + N1) < N2) {
+    gprt::store<float3>(record.l2clusters, (tid - (NL + N0 + N1)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.l2clusters, (tid - (NL + N0 + N1)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
     gprt::store<float3>(record.l2clusters, (tid - (NL + N0 + N1)) * 3 + 2, obbEul);
-  else if (tid - (NL + N0 + N1 + N2) < N3)
+  }
+  else if (tid - (NL + N0 + N1 + N2) < N3) {
+    gprt::store<float3>(record.l3clusters, (tid - (NL + N0 + N1 + N2)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.l3clusters, (tid - (NL + N0 + N1 + N2)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
     gprt::store<float3>(record.l3clusters, (tid - (NL + N0 + N1 + N2)) * 3 + 2, obbEul);
-  else if (tid - (NL + N0 + N1 + N2 + N3) < N4)
+  }
+  else if (tid - (NL + N0 + N1 + N2 + N3) < N4) {
+    gprt::store<float3>(record.l4clusters, (tid - (NL + N0 + N1 + N2 + N3)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
+    gprt::store<float3>(record.l4clusters, (tid - (NL + N0 + N1 + N2 + N3)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
     gprt::store<float3>(record.l4clusters, (tid - (NL + N0 + N1 + N2 + N3)) * 3 + 2, obbEul);
+  }
 }
 
 // Launch this BRANCHING_FACTOR times. Helps reduce atomic pressure.
@@ -585,7 +542,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
   uint32_t l4ID = l3ID / BRANCHING_FACTOR;
 
   // load rotations  
-  float3 llEul = gprt::load<float3>(record.leaves, llID * 3 + 2);
+  float3 llEul = gprt::load<float3>(record.llclusters, llID * 3 + 2);
   float3x3 llRot = eul_to_mat3(llEul);
 
   float3 l0Eul = gprt::load<float3>(record.l0clusters, l0ID * 3 + 2);
@@ -624,8 +581,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
 
   // Atomically expand OBB bounds. Note, interlocked compare and exchange only 
   // occurs when given value would change the previously known result. 
-  gprt::atomicMin32f(record.leaves, llID * 3 + 0, llPMin);
-  gprt::atomicMax32f(record.leaves, llID * 3 + 1, llPMax);
+  gprt::atomicMin32f(record.llclusters, llID * 3 + 0, llPMin);
+  gprt::atomicMax32f(record.llclusters, llID * 3 + 1, llPMax);
   
   gprt::atomicMin32f(record.l0clusters, l0ID * 3 + 0, l0PMin);
   gprt::atomicMax32f(record.l0clusters, l0ID * 3 + 1, l0PMax);
@@ -903,8 +860,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleLeaves, (NNAccel, record), (1,1,1)) {
     aabbMax = max(aabbMax, max(max(a, b), c));
   }
 
-  gprt::store<float3>(record.leaves, leafID * 2 + 0, aabbMin);
-  gprt::store<float3>(record.leaves, leafID * 2 + 1, aabbMax);
+  gprt::store<float3>(record.llclusters, leafID * 2 + 0, aabbMin);
+  gprt::store<float3>(record.llclusters, leafID * 2 + 1, aabbMax);
   #endif
 }
 
@@ -921,8 +878,8 @@ GPRT_COMPUTE_PROGRAM(ComputeL0Clusters, (NNAccel, record), (1,1,1)) {
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t leafID = BRANCHING_FACTOR * l0ClusterID + i;
     if (leafID >= numLeaves) continue;
-    float3 aabbMin = gprt::load<float3>(record.leaves, leafID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(record.leaves, leafID * 2 + 1);
+    float3 aabbMin = gprt::load<float3>(record.llclusters, leafID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(record.llclusters, leafID * 2 + 1);
     if (any(aabbMax < aabbMin)) continue; // invalid cluster
     l0ClusterAabbMin = min(aabbMin, l0ClusterAabbMin);
     l0ClusterAabbMax = max(aabbMax, l0ClusterAabbMax);

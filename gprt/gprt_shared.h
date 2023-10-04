@@ -36,7 +36,7 @@
 //   For untruncated queries, the ultimate bottleneck is when tree traversal fails and many prims 
 //   are all approximately the same distance. There, its better to have an accurate queue for culling. 
 //   However, I suspect the issue with culling has more to do with using AABBs over something tigher fitting
-// #define ENABLE_QUEUE_QUANTIZATION
+#define ENABLE_QUEUE_QUANTIZATION
 
 
 // Enables oriented bounding boxes in an attempt to improve culling performance. 
@@ -110,7 +110,8 @@ namespace gprt{
         // If axis aligned bounding boxes, each is a pair of float3.
         // If bounding balls, each is a single float4 (xyzr).
         // If oriented bounding boxes, each is a triplet of float3s.
-        alignas(16) gprt::Buffer leaves;
+        //   - note, also reused for temporarily storing covariance matrices
+        alignas(16) gprt::Buffer llclusters;
         alignas(16) gprt::Buffer l0clusters;
         alignas(16) gprt::Buffer l1clusters;
         alignas(16) gprt::Buffer l2clusters;
@@ -124,14 +125,6 @@ namespace gprt{
         alignas(16) gprt::Buffer l2centers;
         alignas(16) gprt::Buffer l3centers;
         alignas(16) gprt::Buffer l4centers;
-
-        // For OBBs, buffers of covariance matrices
-        alignas(16) gprt::Buffer llcovariances;
-        alignas(16) gprt::Buffer l0covariances;
-        alignas(16) gprt::Buffer l1covariances;
-        alignas(16) gprt::Buffer l2covariances;
-        alignas(16) gprt::Buffer l3covariances;
-        alignas(16) gprt::Buffer l4covariances;
 
         // An internal iteration parameter for construction
         alignas(4) uint32_t iteration;
