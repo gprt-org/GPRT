@@ -8,12 +8,12 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 10
+#define BRANCHING_FACTOR 8
 
 // The number of primitives to traverse when hitting a leaf. 
 // More than one seems beneficial for OBBs. 8 seems to be a sweet spot at the moment...
 // #define PRIMS_PER_LEAF 8
-#define PRIMS_PER_LEAF 8
+#define PRIMS_PER_LEAF BRANCHING_FACTOR
 
 // #define PRIMS_PER_LEAF 1
 
@@ -135,6 +135,9 @@ namespace gprt{
         alignas(16) gprt::Buffer l1covariances;
         alignas(16) gprt::Buffer l2covariances;
         alignas(16) gprt::Buffer l3covariances;
+
+        // An internal iteration parameter for construction
+        alignas(4) uint32_t iteration;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
