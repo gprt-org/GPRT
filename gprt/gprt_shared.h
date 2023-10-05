@@ -103,8 +103,11 @@ namespace gprt{
         // One uint64_t per primitive
         alignas(16) gprt::Buffer codes;
 
+        // bounding balls for leaf-level primitive sorting / culling. 
+        alignas(16) gprt::Buffer bballs;
+
         // Buffer containing the global AABB. Pair of two floats
-        alignas(16) gprt::Buffer aabb;
+        alignas(16) gprt::Buffer aabb;        
 
         // Buffers of bounding primitives. 
         // If axis aligned bounding boxes, each is a pair of float3.

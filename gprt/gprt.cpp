@@ -7565,8 +7565,9 @@ struct NNTriangleAccel : public Accel {
   std::vector<NNTriangleGeom *> geometries;
 
   GPRTBufferOf<uint64_t> codes;
-  GPRTBufferOf<float3> aabb;
+  GPRTBufferOf<float4> aabb;
 
+  GPRTBufferOf<float4> bballs;
   GPRTBufferOf<float3> llclusters;
   GPRTBufferOf<float3> l0clusters;
   GPRTBufferOf<float3> l1clusters;
@@ -7616,7 +7617,8 @@ struct NNTriangleAccel : public Accel {
 
     // create these
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
+    bballs = gprtDeviceBufferCreate<float4>((GPRTContext)context, nnAccelHandle.numPrims);
+    aabb = gprtDeviceBufferCreate<float4>((GPRTContext)context, 2);
 
     #ifdef ENABLE_OBBS
     llclusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numLeaves);
@@ -7654,6 +7656,7 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
     
     nnAccelHandle.codes = gprtBufferGetHandle(codes);
+    nnAccelHandle.bballs = gprtBufferGetHandle(bballs);
     nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
     nnAccelHandle.llclusters = gprtBufferGetHandle(llclusters);
     nnAccelHandle.l0clusters = gprtBufferGetHandle(l0clusters);
@@ -7799,9 +7802,9 @@ struct NNTriangleAccel : public Accel {
 
     // initialize root AABB
     gprtBufferMap(aabb);
-    float3* aabbPtr = gprtBufferGetPointer(aabb);
-    aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
-    aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
+    float4* aabbPtr = gprtBufferGetPointer(aabb);
+    aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = aabbPtr[0].w = std::numeric_limits<float>::max();
+    aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = aabbPtr[1].w = -std::numeric_limits<float>::max();
     gprtBufferUnmap(aabb);
 
     // Compute the global bounds

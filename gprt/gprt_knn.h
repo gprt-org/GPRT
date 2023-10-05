@@ -966,6 +966,9 @@ float3x3 mat3_from_quat(float4 q) {
 }
 
 void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
+  float4 rootAabbMin = gprt::load<float4>(record.aabb, 0);
+  float4 rootAabbMax = gprt::load<float4>(record.aabb, 1);
+  
   payload.closestDistance = tmax;
 
   int numL4Clusters = record.numL4Clusters;
@@ -1328,11 +1331,11 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
 
             int l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0Index;
             
-            // Initialize active primitive list
-            uint32_t activePrimitives[BRANCHING_FACTOR];
+            // Initialize active leaves list
+            uint32_t activeLeaves[BRANCHING_FACTOR];
             [unroll]
             for (int lp = 0; lp < BRANCHING_FACTOR; ++lp) {
-              activePrimitives[lp] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
+              activeLeaves[lp] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
             }
             
             // Insert into active leaf list by distance far to near
@@ -1365,17 +1368,12 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
               // Upward Culling: Skip clusters father than current closest primitive
               if (minDist > payload.closestDistance) continue;
 
-              if (minDist >= 0.f && (NNFlags & NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE) != 0) {
-                payload.closestDistance = minDist;
-                continue;
-              }
-
               // Insertion sort
-              activePrimitives[0] = uint32_t(ll << 16) | uint32_t(asuint16(half(minDist)));
+              activeLeaves[0] = uint32_t(ll << 16) | uint32_t(asuint16(half(minDist)));
               [unroll]
               for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-                if (asfloat16(uint16_t(activePrimitives[i-1] & 65535)) >= asfloat16(uint16_t(activePrimitives[i] & 65535))) break;
-                uint32_t tmp = activePrimitives[i-1]; activePrimitives[i-1] = activePrimitives[i]; activePrimitives[i] = tmp;
+                if (asfloat16(uint16_t(activeLeaves[i-1] & 65535)) >= asfloat16(uint16_t(activeLeaves[i] & 65535))) break;
+                uint32_t tmp = activeLeaves[i-1]; activeLeaves[i-1] = activeLeaves[i]; activeLeaves[i] = tmp;
               }
               
               // Downward culling... truncate closest distance to the pessimistic distance of this cluster
@@ -1387,7 +1385,7 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
             // Traverse all leaves in this cluster from near to far
             [unroll]
             for (int ll = 0; ll < BRANCHING_FACTOR; ++ll) {
-              uint32_t llPair = activePrimitives[BRANCHING_FACTOR - 1 - ll];
+              uint32_t llPair = activeLeaves[BRANCHING_FACTOR - 1 - ll];
               float minDist = float(asfloat16(uint16_t(llPair & 65535)));
               int idx = llPair >> 16;
               
@@ -1403,10 +1401,24 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
               #ifdef COLLECT_STATS
               payload.leavesHit++; // Count this as traversing a leaf
               #endif
-
+              
               for (uint32_t primID = 0; primID < BRANCHING_FACTOR; ++primID) {
                 uint32_t itemID = leafID * BRANCHING_FACTOR + primID;
                 if (itemID >= numPrims) continue;
+
+                #ifdef COLLECT_STATS
+                payload.primsHit++; // Count this as traversing a primitive
+                #endif
+
+                // In some cases, a lower bounding estimate is acceptable.
+                // If so, clip the minimum distance to approximating bounding spheres to the leaf 
+                // OBB and return that.
+                if (NNFlags & NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE) {
+                  float4 bball = gprt::load<float4>(record.bballs, itemID);
+                  float bballMinDist = max(distance(bball.xyz, queryOrigin) - bball.w, minDist);
+                  payload.closestDistance = min(payload.closestDistance, bballMinDist);
+                  continue;
+                }
 
                 uint32_t primitiveID = uint32_t(gprt::load<uint64_t>(record.codes, itemID)); 
                 int3 tri = gprt::load<int3>(record.triangles, primitiveID);
@@ -1431,10 +1443,6 @@ void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, flo
                 // Primitive farther than furthest
                 if (dists.x > payload.closestDistance) continue;
 
-                #ifdef COLLECT_STATS
-                payload.primsHit++; // Count this as traversing a primitive
-                #endif
-                
                 // Newly found closest primitive
                 payload.closestDistance = dists.x;
                 payload.closestPrimitive = primitiveID;

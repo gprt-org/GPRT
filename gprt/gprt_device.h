@@ -143,6 +143,15 @@ float3 atomicMin32f(in Buffer buffer, uint32_t index, float3 value) {
   return result;
 }
 
+float4 atomicMin32f(in Buffer buffer, uint32_t index, float4 value) {
+  float4 result;
+  result.x = atomicMin32f(buffer, index * 4 + 0, value.x);
+  result.y = atomicMin32f(buffer, index * 4 + 1, value.y);
+  result.z = atomicMin32f(buffer, index * 4 + 2, value.z);
+  result.w = atomicMin32f(buffer, index * 4 + 3, value.w);
+  return result;
+}
+
 float
 atomicMax32f(in Buffer buffer, uint32_t index, float value) {
   uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
@@ -160,6 +169,15 @@ float3 atomicMax32f(in Buffer buffer, uint32_t index, float3 value) {
   result.x = atomicMax32f(buffer, index * 3 + 0, value.x);
   result.y = atomicMax32f(buffer, index * 3 + 1, value.y);
   result.z = atomicMax32f(buffer, index * 3 + 2, value.z);
+  return result;
+}
+
+float4 atomicMax32f(in Buffer buffer, uint32_t index, float4 value) {
+  float4 result;
+  result.x = atomicMax32f(buffer, index * 4 + 0, value.x);
+  result.y = atomicMax32f(buffer, index * 4 + 1, value.y);
+  result.z = atomicMax32f(buffer, index * 4 + 2, value.z);
+  result.w = atomicMax32f(buffer, index * 4 + 3, value.w);
   return result;
 }
 

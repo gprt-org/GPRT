@@ -129,12 +129,41 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (NNAccel, record), (1,1,1)) {
   gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
 }
 
-void swap(inout float a, inout float b) { float tmp = a; a = b; b = tmp; }
-void swap(inout float3 a, inout float3 b) { float3 tmp = a; a = b; b = tmp; }
+float dot2(float3 v) {return dot(v, v);}
+void swap(inout float3 a, inout float3 b) { float3 tmp = a; a = b; b = tmp;}
+void swap(inout float a, inout float b) { float tmp = a; a = b; b = tmp;}
+float4 makeMinimumBoundingSphere(in float3 p1, in float3 p2, in float3 p3) {
+  float4 s;
+
+  // Calculate relative distances
+  float A = length(p1 - p2);
+  float B = length(p2 - p3);
+  float C = length(p3 - p1);
+
+  // Re-orient triangle (make A longest side)
+  float3 a = p3, b = p1, c = p2;
+  if (B < C) swap(B, C), swap(b, c); 
+  if (A < B) swap(A, B), swap(a, b); 
+
+  // If obtuse, just use longest diameter, otherwise circumscribe
+  if ((B*B) + (C*C) <= (A*A)) {
+    s.w = A / 2.f;
+    s.xyz = (b + c) / 2.f;
+  } else {
+    // http://en.wikipedia.org/wiki/Circumscribed_circle
+    float cos_a = (B*B + C*C - A*A) / (B*C*2);
+    s.w = A / (sqrt(1 - cos_a*cos_a)*2.f);
+    float3 alpha = a - c, beta = b - c;
+    s.xyz = cross((beta * dot2(alpha) - alpha * dot2(beta)), (cross(alpha, beta))) /
+      ((dot2(cross(alpha, beta))) * 2.f) + c;
+  }
+  return s;
+}
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= record.numPrims) return;
+
   uint3 tri = gprt::load<uint3>(record.triangles, primID);
   float3 a, b, c;
   a = gprt::load<float3>(record.points, tri.x);
@@ -142,8 +171,9 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (1,1,1)) {
   b = gprt::load<float3>(record.points, tri.y);
   c = gprt::load<float3>(record.points, tri.z);
 
-  float3 aabbMin = min(min(a, b), c);
-  float3 aabbMax = max(max(a, b), c);
+  float4 sphere = makeMinimumBoundingSphere(a,b,c);
+  float4 aabbMin = float4(min(min(a, b), c), sphere.w);
+  float4 aabbMax = float4(max(max(a, b), c), sphere.w);
 
   // Compute world bounding box
   gprt::atomicMin32f(record.aabb, 0, aabbMin);
@@ -191,6 +221,10 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
   if (isnan(a.x)) return;
   b = gprt::load<float3>(record.points, tri.y);
   c = gprt::load<float3>(record.points, tri.z);
+
+  // while here, store approximate bounding ball
+  float4 s = makeMinimumBoundingSphere(a,b,c);
+  gprt::store<float4>(record.bballs, lpID, s);
 
   // Accumulate vertices for centroids
   uint32_t llID = lpID / BRANCHING_FACTOR;
@@ -722,19 +756,35 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleCodes, (NNAccel, record), (1, 1, 1)) {
   float3 p2 = gprt::load<float3>(record.points, tri.y);
   float3 p3 = gprt::load<float3>(record.points, tri.z);
   float3 c = (p1 + p2 + p3) / 3.f;
-  float3 d = float3(
-    distance(c, p1),
-    distance(c, p2),
-    distance(c, p3)
-  );
-  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
-  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+  
+  float4 aabbMin = gprt::load<float4>(record.aabb, 0);
+  float4 aabbMax = gprt::load<float4>(record.aabb, 1);
+
   float diagonal = distance(aabbMax, aabbMin);
-  c = (c - aabbMin) / (aabbMax - aabbMin);
-  uint64_t code = 0;
-  code |= uint64_t(primID); 
-  code |= (uint64_t(hilbert_encode3D(c.x, c.y, c.z)) << 32ull);
+  c = (c - aabbMin.xyz) / (aabbMax.xyz - aabbMin.xyz);
+  uint64_t code = uint64_t(primID) | (uint64_t(hilbert_encode3D(c.x, c.y, c.z)) << 32ull);
   gprt::store<uint64_t>(record.codes, primID, code);
+
+
+  // uint64_t bball = morton64_encode3D(qs.x, qs.y, qs.z); 
+  // gprt::store<uint64_t>(record.bballs, primID, bball);
+  //(asuint(s.w) | (morton_encode3D(qs.x, qs.y, qs.z) << 32ull));
+
+  // float4 qs = (s - aabbMin) / (aabbMax - aabbMin);
+  // uint64_t bball = morton64_encode4D(qs.x, qs.y, qs.z, qs.w);
+
+
+  // if (primID == 0) {
+  //   float4 ball = morton64_decode4D(bball);
+  //   ball = (ball * (aabbMax - aabbMin)) + aabbMin;
+  //   printf("min and max sphere scales: %f %f\n", aabbMin.w, aabbMax.w);
+
+  //   printf("triangle (%f %f %f)\n", p1.x, p1.y, p1.z);
+  //   printf("triangle (%f %f %f)\n", p2.x, p2.y, p2.z);
+  //   printf("triangle (%f %f %f)\n", p3.x, p3.y, p3.z);
+  //   printf("sphere (%f %f %f : %f)\n", s.x, s.y, s.z, s.w);
+  //   printf("decoded sphere (%f %f %f : %f)\n", ball.x, ball.y, ball.z, ball.w);
+  // }
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (NNAccel, record), (1, 1, 1)) {
