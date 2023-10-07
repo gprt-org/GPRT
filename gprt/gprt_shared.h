@@ -8,7 +8,7 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 7
+#define BRANCHING_FACTOR 8
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -92,6 +92,7 @@ namespace gprt{
         alignas(4) uint32_t numL2Clusters;
         alignas(4) uint32_t numL3Clusters;
         alignas(4) uint32_t numL4Clusters;
+        alignas(4) uint32_t numL5Clusters;
         alignas(4) float maxSearchRange;
 
         alignas(16) gprt::Buffer points; 
@@ -127,6 +128,7 @@ namespace gprt{
         alignas(16) gprt::Buffer l2obbs;
         alignas(16) gprt::Buffer l3obbs;
         alignas(16) gprt::Buffer l4obbs;
+        alignas(16) gprt::Buffer l5obbs;
 
         alignas(16) gprt::Buffer llaabbs;
         alignas(16) gprt::Buffer l0aabbs;
@@ -134,6 +136,7 @@ namespace gprt{
         alignas(16) gprt::Buffer l2aabbs;
         alignas(16) gprt::Buffer l3aabbs;
         alignas(16) gprt::Buffer l4aabbs;
+        alignas(16) gprt::Buffer l5aabbs;
 
         // For OBBs, buffers of center points.
         alignas(16) gprt::Buffer llcenters;
@@ -142,6 +145,7 @@ namespace gprt{
         alignas(16) gprt::Buffer l2centers;
         alignas(16) gprt::Buffer l3centers;
         alignas(16) gprt::Buffer l4centers;
+        alignas(16) gprt::Buffer l5centers;
 
         // An internal iteration parameter for construction
         alignas(4) uint32_t iteration;
