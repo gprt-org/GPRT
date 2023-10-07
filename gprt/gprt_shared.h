@@ -8,7 +8,7 @@
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 10
+#define BRANCHING_FACTOR 7
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -23,8 +23,8 @@
 // to contain primitives. Only OBB leaves can guarantee this. So, for internal nodes, we instead use the "maxDistance"
 // for downward culling.
 // More more updates... So long as internal OBBs are built to tightly fit the underlying primitives, then minMaxDist is
-// "free game".
-#define ENABLE_DOWNAWARD_CULLING 
+// "free game". However, it introduces some compute complexity which doesn't seem worth the effort
+// #define ENABLE_DOWNAWARD_CULLING 
 
 // Enables an LBVH reference, similar to Jakob and Guthe's knn.
 // Note, we use this LBVH as a top level tree for our method, so 
@@ -46,6 +46,8 @@
 // This mode uses a singular value decomposition to compute the orientation of a bounding box 
 // that best fits the underlying primitive distribution
 #define ENABLE_OBBS
+
+#define ENABLE_AABBS
 
 // Honestly I don't see much improvement by avoiding square roots. I don't think this is what the bottleneck is
 // at least on my problems... Just going to take square roots for simplicity...
@@ -99,9 +101,14 @@ namespace gprt{
         alignas(16) gprt::Buffer edges; 
         alignas(16) gprt::Buffer triangles;
 
+        // A sorted list of triangle indices, meant to be traversed
+        // linearly from the leaves
+        alignas(16) gprt::Buffer triangleLists;
+
         // Hilbert codes of quantized primitive centroids
         // One uint64_t per primitive
         alignas(16) gprt::Buffer codes;
+        alignas(16) gprt::Buffer ids;
 
         // bounding balls for leaf-level primitive sorting / culling. 
         alignas(16) gprt::Buffer bballs;
@@ -114,12 +121,19 @@ namespace gprt{
         // If bounding balls, each is a single float4 (xyzr).
         // If oriented bounding boxes, each is a triplet of float3s.
         //   - note, also reused for temporarily storing covariance matrices
-        alignas(16) gprt::Buffer llclusters;
-        alignas(16) gprt::Buffer l0clusters;
-        alignas(16) gprt::Buffer l1clusters;
-        alignas(16) gprt::Buffer l2clusters;
-        alignas(16) gprt::Buffer l3clusters;
-        alignas(16) gprt::Buffer l4clusters;
+        alignas(16) gprt::Buffer llobbs;
+        alignas(16) gprt::Buffer l0obbs;
+        alignas(16) gprt::Buffer l1obbs;
+        alignas(16) gprt::Buffer l2obbs;
+        alignas(16) gprt::Buffer l3obbs;
+        alignas(16) gprt::Buffer l4obbs;
+
+        alignas(16) gprt::Buffer llaabbs;
+        alignas(16) gprt::Buffer l0aabbs;
+        alignas(16) gprt::Buffer l1aabbs;
+        alignas(16) gprt::Buffer l2aabbs;
+        alignas(16) gprt::Buffer l3aabbs;
+        alignas(16) gprt::Buffer l4aabbs;
 
         // For OBBs, buffers of center points.
         alignas(16) gprt::Buffer llcenters;

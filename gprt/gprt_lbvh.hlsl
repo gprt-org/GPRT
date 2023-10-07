@@ -22,9 +22,6 @@
 
 #include "gprt_lbvh.h"
 
-#define FLT_MAX 3.402823466e+38
-#define FLT_MIN 1.175494351e-38
-
 uint separate_bits(uint n)
 {
     n &= 0x000003FF;
