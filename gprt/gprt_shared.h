@@ -86,13 +86,13 @@ namespace gprt{
     struct NNAccel {
         // input
         alignas(4) uint32_t numPrims;
-        alignas(4) uint32_t numLeaves;
         alignas(4) uint32_t numL0Clusters;
         alignas(4) uint32_t numL1Clusters;
         alignas(4) uint32_t numL2Clusters;
         alignas(4) uint32_t numL3Clusters;
         alignas(4) uint32_t numL4Clusters;
         alignas(4) uint32_t numL5Clusters;
+        alignas(4) uint32_t numL6Clusters;
         alignas(4) float maxSearchRange;
 
         alignas(16) gprt::Buffer points; 
@@ -122,30 +122,30 @@ namespace gprt{
         // If bounding balls, each is a single float4 (xyzr).
         // If oriented bounding boxes, each is a triplet of float3s.
         //   - note, also reused for temporarily storing covariance matrices
-        alignas(16) gprt::Buffer llobbs;
         alignas(16) gprt::Buffer l0obbs;
         alignas(16) gprt::Buffer l1obbs;
         alignas(16) gprt::Buffer l2obbs;
         alignas(16) gprt::Buffer l3obbs;
         alignas(16) gprt::Buffer l4obbs;
         alignas(16) gprt::Buffer l5obbs;
+        alignas(16) gprt::Buffer l6obbs;
 
-        alignas(16) gprt::Buffer llaabbs;
         alignas(16) gprt::Buffer l0aabbs;
         alignas(16) gprt::Buffer l1aabbs;
         alignas(16) gprt::Buffer l2aabbs;
         alignas(16) gprt::Buffer l3aabbs;
         alignas(16) gprt::Buffer l4aabbs;
         alignas(16) gprt::Buffer l5aabbs;
+        alignas(16) gprt::Buffer l6aabbs;
 
         // For OBBs, buffers of center points.
-        alignas(16) gprt::Buffer llcenters;
         alignas(16) gprt::Buffer l0centers;
         alignas(16) gprt::Buffer l1centers;
         alignas(16) gprt::Buffer l2centers;
         alignas(16) gprt::Buffer l3centers;
         alignas(16) gprt::Buffer l4centers;
         alignas(16) gprt::Buffer l5centers;
+        alignas(16) gprt::Buffer l6centers;
 
         // An internal iteration parameter for construction
         alignas(4) uint32_t iteration;

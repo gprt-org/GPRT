@@ -4579,26 +4579,26 @@ struct Context {
     internalComputePrograms.insert({"ComputeTriangleHilbertCodes", new Compute(logicalDevice, module, "ComputeTriangleHilbertCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeTriangleCodes", new Compute(logicalDevice, module, "ComputeTriangleCodes", sizeof(gprt::NNAccel))});
     internalComputePrograms.insert({"ComputeTriangleMortonCodes", new Compute(logicalDevice, module, "ComputeTriangleMortonCodes", sizeof(gprt::NNAccel))});
-    internalComputePrograms.insert({"ComputeL0Clusters", new Compute(logicalDevice, module, "ComputeL0Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL1Clusters", new Compute(logicalDevice, module, "ComputeL1Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2Clusters", new Compute(logicalDevice, module, "ComputeL2Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL3Clusters", new Compute(logicalDevice, module, "ComputeL3Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL4Clusters", new Compute(logicalDevice, module, "ComputeL4Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL5Clusters", new Compute(logicalDevice, module, "ComputeL5Clusters", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL6Clusters", new Compute(logicalDevice, module, "ComputeL6Clusters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleOBBCenters", new Compute(logicalDevice, module, "ComputeTriangleOBBCenters", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL0OBBCenters", new Compute(logicalDevice, module, "ComputeL0OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL1OBBCenters", new Compute(logicalDevice, module, "ComputeL1OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2OBBCenters", new Compute(logicalDevice, module, "ComputeL2OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL3OBBCenters", new Compute(logicalDevice, module, "ComputeL3OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL4OBBCenters", new Compute(logicalDevice, module, "ComputeL4OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL5OBBCenters", new Compute(logicalDevice, module, "ComputeL5OBBCenters", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL6OBBCenters", new Compute(logicalDevice, module, "ComputeL6OBBCenters", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleOBBCovariances", new Compute(logicalDevice, module, "ComputeTriangleOBBCovariances", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeL0OBBCovariances", new Compute(logicalDevice, module, "ComputeL0OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL1OBBCovariances", new Compute(logicalDevice, module, "ComputeL1OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL2OBBCovariances", new Compute(logicalDevice, module, "ComputeL2OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL3OBBCovariances", new Compute(logicalDevice, module, "ComputeL3OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL4OBBCovariances", new Compute(logicalDevice, module, "ComputeL4OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeL5OBBCovariances", new Compute(logicalDevice, module, "ComputeL5OBBCovariances", sizeof(gprt::NNAccel))});    
+    internalComputePrograms.insert({"ComputeL6OBBCovariances", new Compute(logicalDevice, module, "ComputeL6OBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleOBBAngles", new Compute(logicalDevice, module, "ComputeTriangleOBBAngles", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleOBBBounds", new Compute(logicalDevice, module, "ComputeTriangleOBBBounds", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleLists", new Compute(logicalDevice, module, "ComputeTriangleLists", sizeof(gprt::NNAccel))});    
@@ -7335,14 +7335,14 @@ struct NNPointAccel : public Accel {
     
     // // some logic here for rounding up
     // nnAccelHandle.numPrims = this->geometries[0]->vertex.count;
-    // nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    // nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
 
     // // create these
     // codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     // aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
-    // l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
-    // l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
+    // l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
+    // l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
 
     // nnAccelHandle.maxSearchRange = 0.f; 
     
@@ -7357,7 +7357,7 @@ struct NNPointAccel : public Accel {
     // nnAccelHandle.l1clusters = gprtBufferGetHandle(l1clusters);
     
     // gprtGeomSetParameters(geom, &nnAccelHandle);
-    // gprtAABBsSetPositions(geom, l1clusters, nnAccelHandle.numL1Clusters);
+    // gprtAABBsSetPositions(geom, l1clusters, nnAccelHandle.numL2Clusters);
   };
 
   ~NNPointAccel(){};
@@ -7398,11 +7398,11 @@ struct NNPointAccel : public Accel {
     gprtBufferSort((GPRTContext)context, codes, scratch);
 
     // Now compute cluster bounding boxes...
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputePointClusters"], nnAccelHandle.numL0Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputePointClusters"], nnAccelHandle.numL1Clusters);
 
     // ... and then compute super cluster bounding boxes
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL1Clusters);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL1Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL2Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
     
     // Now we can build our underlying RT core tree
     gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
@@ -7463,14 +7463,14 @@ struct NNEdgeAccel : public Accel {
     
     // // some logic here for rounding up
     // nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    // nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    // nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
 
     // // create these
     // codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     // aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
-    // clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
-    // superClusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
+    // clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
+    // superClusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
 
     // nnAccelHandle.maxSearchRange = 0.f; 
     
@@ -7486,7 +7486,7 @@ struct NNEdgeAccel : public Accel {
     // nnAccelHandle.l1clusters = gprtBufferGetHandle(superClusters);
     
     // gprtGeomSetParameters(geom, &nnAccelHandle);
-    // gprtAABBsSetPositions(geom, superClusters, nnAccelHandle.numL1Clusters);
+    // gprtAABBsSetPositions(geom, superClusters, nnAccelHandle.numL2Clusters);
   };
 
   ~NNEdgeAccel(){};
@@ -7527,11 +7527,11 @@ struct NNEdgeAccel : public Accel {
     gprtBufferSort((GPRTContext)context, codes, scratch);
 
     // Now compute cluster bounding boxes...
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeEdgeClusters"], nnAccelHandle.numL0Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeEdgeClusters"], nnAccelHandle.numL1Clusters);
 
     // ... and then compute super cluster bounding boxes
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL1Clusters);
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL1Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL2Clusters);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
     
     // Now we can build our underlying RT core tree
     gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
@@ -7577,29 +7577,29 @@ struct NNTriangleAccel : public Accel {
 
   GPRTBufferOf<float4> bballs;
 
-  GPRTBufferOf<float3> llaabbs;
   GPRTBufferOf<float3> l0aabbs;
   GPRTBufferOf<float3> l1aabbs;
   GPRTBufferOf<float3> l2aabbs;
-  GPRTBufferOf<float3> l3aabbs;  
-  GPRTBufferOf<float3> l4aabbs;
+  GPRTBufferOf<float3> l3aabbs;
+  GPRTBufferOf<float3> l4aabbs;  
   GPRTBufferOf<float3> l5aabbs;
+  GPRTBufferOf<float3> l6aabbs;
 
-  GPRTBufferOf<float3> llobbs;
   GPRTBufferOf<float3> l0obbs;
   GPRTBufferOf<float3> l1obbs;
   GPRTBufferOf<float3> l2obbs;
-  GPRTBufferOf<float3> l3obbs;  
-  GPRTBufferOf<float3> l4obbs;
+  GPRTBufferOf<float3> l3obbs;
+  GPRTBufferOf<float3> l4obbs;  
   GPRTBufferOf<float3> l5obbs;
+  GPRTBufferOf<float3> l6obbs;
 
-  GPRTBufferOf<float3> llcenters;
   GPRTBufferOf<float3> l0centers;
   GPRTBufferOf<float3> l1centers;
   GPRTBufferOf<float3> l2centers;
-  GPRTBufferOf<float3> l3centers;  
-  GPRTBufferOf<float3> l4centers;
+  GPRTBufferOf<float3> l3centers;
+  GPRTBufferOf<float3> l4centers;  
   GPRTBufferOf<float3> l5centers;
+  GPRTBufferOf<float3> l6centers;
 
   GPRTBufferOf<uint8_t> scratch;
 
@@ -7624,15 +7624,15 @@ struct NNTriangleAccel : public Accel {
     
     // some logic here for rounding up
     nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    nnAccelHandle.numLeaves = ((nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR);
-    nnAccelHandle.numL0Clusters = (nnAccelHandle.numLeaves + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    nnAccelHandle.numL0Clusters = (nnAccelHandle.numPrims      + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL1Clusters = (nnAccelHandle.numL0Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL3Clusters = (nnAccelHandle.numL2Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL4Clusters = (nnAccelHandle.numL3Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     nnAccelHandle.numL5Clusters = (nnAccelHandle.numL4Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    nnAccelHandle.numL6Clusters = (nnAccelHandle.numL5Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
 
-    if (nnAccelHandle.numL5Clusters > BRANCHING_FACTOR)
+    if (nnAccelHandle.numL6Clusters > BRANCHING_FACTOR)
       throw std::runtime_error("Too many prims in tree!");
 
     // create these
@@ -7642,34 +7642,34 @@ struct NNTriangleAccel : public Accel {
     aabb = gprtDeviceBufferCreate<float4>((GPRTContext)context, 2);
 
     // #ifdef ENABLE_OBBS
-    llobbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numLeaves);
     l0obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL0Clusters);
     l1obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL1Clusters);
     l2obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL2Clusters);
     l3obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL3Clusters);
     l4obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL4Clusters);
     l5obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL5Clusters);
-    llcenters = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numLeaves);
+    l6obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL6Clusters);
     l0centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL0Clusters);
     l1centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL1Clusters);
     l2centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL2Clusters);
     l3centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL3Clusters);
     l4centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     l5centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL5Clusters);
+    l6centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL6Clusters);
     // #else
-    llaabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numLeaves);
     l0aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
     l1aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
     l2aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
     l3aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL3Clusters);
     l4aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL4Clusters);
     l5aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL5Clusters);
+    l6aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL6Clusters);
     // #endif
 
-    // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
-    // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL3Clusters);
-    // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL3Clusters * 2 - 1);
-    // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL3Clusters * 2 - 1));
+    // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
+    // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
+    // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL4Clusters * 2 - 1);
+    // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL4Clusters * 2 - 1));
     triangleLists = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numPrims * 7);
 
     nnAccelHandle.maxSearchRange = 0.f; 
@@ -7686,30 +7686,30 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.ids = gprtBufferGetHandle(ids);
     nnAccelHandle.bballs = gprtBufferGetHandle(bballs);
     nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
-    nnAccelHandle.llobbs = gprtBufferGetHandle(llobbs);
     nnAccelHandle.l0obbs = gprtBufferGetHandle(l0obbs);
     nnAccelHandle.l1obbs = gprtBufferGetHandle(l1obbs);
     nnAccelHandle.l2obbs = gprtBufferGetHandle(l2obbs);
     nnAccelHandle.l3obbs = gprtBufferGetHandle(l3obbs);
     nnAccelHandle.l4obbs = gprtBufferGetHandle(l4obbs);
     nnAccelHandle.l5obbs = gprtBufferGetHandle(l5obbs);
+    nnAccelHandle.l6obbs = gprtBufferGetHandle(l6obbs);
 
-    nnAccelHandle.llaabbs = gprtBufferGetHandle(llaabbs);
     nnAccelHandle.l0aabbs = gprtBufferGetHandle(l0aabbs);
     nnAccelHandle.l1aabbs = gprtBufferGetHandle(l1aabbs);
     nnAccelHandle.l2aabbs = gprtBufferGetHandle(l2aabbs);
     nnAccelHandle.l3aabbs = gprtBufferGetHandle(l3aabbs);
     nnAccelHandle.l4aabbs = gprtBufferGetHandle(l4aabbs);
     nnAccelHandle.l5aabbs = gprtBufferGetHandle(l5aabbs);
+    nnAccelHandle.l6aabbs = gprtBufferGetHandle(l6aabbs);
 
     #ifdef ENABLE_OBBS
-    nnAccelHandle.llcenters = gprtBufferGetHandle(llcenters);
     nnAccelHandle.l0centers = gprtBufferGetHandle(l0centers);
     nnAccelHandle.l1centers = gprtBufferGetHandle(l1centers);
     nnAccelHandle.l2centers = gprtBufferGetHandle(l2centers);
     nnAccelHandle.l3centers = gprtBufferGetHandle(l3centers);
     nnAccelHandle.l4centers = gprtBufferGetHandle(l4centers);
     nnAccelHandle.l5centers = gprtBufferGetHandle(l5centers);
+    nnAccelHandle.l6centers = gprtBufferGetHandle(l6centers);
     #endif
 
     // nnAccelHandle.lbvhMortonCodes = gprtBufferGetHandle(lbvhMortonCodes);
@@ -7718,7 +7718,7 @@ struct NNTriangleAccel : public Accel {
     // nnAccelHandle.lbvhAabbs = gprtBufferGetHandle(lbvhAabbs);
 
     // gprtGeomSetParameters(geom, &nnAccelHandle);
-    // gprtAABBsSetPositions(geom, l4clusters, nnAccelHandle.numL4Clusters);
+    // gprtAABBsSetPositions(geom, l4clusters, nnAccelHandle.numL5Clusters);
   };
 
   ~NNTriangleAccel(){};
@@ -7751,9 +7751,9 @@ struct NNTriangleAccel : public Accel {
     // double overlap = 0.f;
     // std::cout<<"Computing overlap..." << std::endl;
     // // For each cluster    
-    // for (uint32_t i = 0; i < nnAccelHandle.numL0Clusters; ++i) {
+    // for (uint32_t i = 0; i < nnAccelHandle.numL1Clusters; ++i) {
     //   if ((i % 10 )== 0) {
-    //     std::cout<< '\r' << i << "/" << nnAccelHandle.numL0Clusters<< ", avg overlap: " << avg << " projected overall overlap: " << (overlap / i) * nnAccelHandle.numL0Clusters;
+    //     std::cout<< '\r' << i << "/" << nnAccelHandle.numL1Clusters<< ", avg overlap: " << avg << " projected overall overlap: " << (overlap / i) * nnAccelHandle.numL1Clusters;
     //   }
 
     //   float3 ABBoxMin = clusterPtr[i * 2 + 0];
@@ -7767,7 +7767,7 @@ struct NNTriangleAccel : public Accel {
     //   float relativeBBoxOverlap = 0.f;
 
     //   // Check to see what other clusters overlap this one...
-    //   for (uint32_t j = 0; j < nnAccelHandle.numL0Clusters; ++j) {
+    //   for (uint32_t j = 0; j < nnAccelHandle.numL1Clusters; ++j) {
     //     if (i == j) continue; // skip testing self...
     //     float3 BBBoxMin = clusterPtr[j * 2 + 0];
     //     float3 BBBoxMax = clusterPtr[j * 2 + 1];
@@ -7815,27 +7815,27 @@ struct NNTriangleAccel : public Accel {
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleLeaves"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL0Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL4Clusters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL5Clusters"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL6Clusters"], &nnAccelHandle);
 
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCenters"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL0OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL4OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL5OBBCenters"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL6OBBCenters"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL0OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL3OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL4OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL5OBBCovariances"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL6OBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBAngles"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleLists"], &nnAccelHandle);
@@ -7859,16 +7859,16 @@ struct NNTriangleAccel : public Accel {
     gprtBufferSortPayload((GPRTContext)context, codes, ids, scratch);
 
     // Use sorted primitive codes to optimize triangle indices
-    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleLists"], nnAccelHandle.numLeaves);
+    gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleLists"], nnAccelHandle.numL0Clusters);
 
     // #ifdef ENABLE_OBBS
-    uint32_t totalClusters = nnAccelHandle.numLeaves + 
-                             nnAccelHandle.numL0Clusters + 
+    uint32_t totalClusters = nnAccelHandle.numL0Clusters + 
                              nnAccelHandle.numL1Clusters + 
                              nnAccelHandle.numL2Clusters + 
                              nnAccelHandle.numL3Clusters + 
                              nnAccelHandle.numL4Clusters + 
-                             nnAccelHandle.numL5Clusters;
+                             nnAccelHandle.numL5Clusters + 
+                             nnAccelHandle.numL6Clusters;
 
     float totalTime = 0.f;
     float clearOBBsTime = 0.f;
@@ -7877,28 +7877,28 @@ struct NNTriangleAccel : public Accel {
     float computeAnglesTime = 0.f;
     float computeBoundsTime = 0.f;
     for (int i = 0; i < 100; ++i) {
-      gprtBufferClear(llobbs); gprtBufferClear(llcenters);
       gprtBufferClear(l0obbs); gprtBufferClear(l0centers);
       gprtBufferClear(l1obbs); gprtBufferClear(l1centers);
       gprtBufferClear(l2obbs); gprtBufferClear(l2centers);
       gprtBufferClear(l3obbs); gprtBufferClear(l3centers);
       gprtBufferClear(l4obbs); gprtBufferClear(l4centers);
       gprtBufferClear(l5obbs); gprtBufferClear(l5centers);
+      gprtBufferClear(l6obbs); gprtBufferClear(l6centers);
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCenters"], nnAccelHandle.numPrims);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0OBBCenters"], nnAccelHandle.numL0Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1OBBCenters"], nnAccelHandle.numL1Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2OBBCenters"], nnAccelHandle.numL2Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3OBBCenters"], nnAccelHandle.numL3Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL4OBBCenters"], nnAccelHandle.numL4Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL5OBBCenters"], nnAccelHandle.numL5Clusters);
+      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL6OBBCenters"], nnAccelHandle.numL6Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"], nnAccelHandle.numPrims);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0OBBCovariances"], nnAccelHandle.numL0Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1OBBCovariances"], nnAccelHandle.numL1Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2OBBCovariances"], nnAccelHandle.numL2Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3OBBCovariances"], nnAccelHandle.numL3Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL4OBBCovariances"], nnAccelHandle.numL4Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL5OBBCovariances"], nnAccelHandle.numL5Clusters);
+      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL6OBBCovariances"], nnAccelHandle.numL6Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBAngles"], totalClusters);
       for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
         nnAccelHandle.iteration = pid;
@@ -7933,13 +7933,13 @@ struct NNTriangleAccel : public Accel {
     for (int i = 0; i < 100; ++i) {
       gprtBeginProfile((GPRTContext)context);
       // Now compute cluster bounding boxes...   
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleLeaves"], nnAccelHandle.numLeaves);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL0Clusters"], nnAccelHandle.numL0Clusters);
+      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleLeaves"], nnAccelHandle.numL0Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL1Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL3Clusters"], nnAccelHandle.numL3Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL4Clusters"], nnAccelHandle.numL4Clusters);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL5Clusters"], nnAccelHandle.numL5Clusters);
+      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL6Clusters"], nnAccelHandle.numL6Clusters);
       totalTime += gprtEndProfile((GPRTContext)context);
     }
     std::cout<<"Time to build AABBs in ms: " << totalTime/100.f << std::endl;
@@ -7956,7 +7956,7 @@ struct NNTriangleAccel : public Accel {
 
     // gprtBufferMap(lbvhMortonCodes);
     // uint64_t* gpuCodes = gprtBufferGetPointer(lbvhMortonCodes);
-    // for (uint32_t i = 0; i < nnAccelHandle.numL3Clusters; i++) {
+    // for (uint32_t i = 0; i < nnAccelHandle.numL4Clusters; i++) {
     //   std::cout<<gpuCodes[i]<<std::endl;
     //   if (i > 0) {
     //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
@@ -7964,11 +7964,11 @@ struct NNTriangleAccel : public Accel {
     // }
     // gprtBufferUnmap(lbvhMortonCodes);
 
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL3Clusters);
+    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL4Clusters);
     // gprtBufferSortPayload((GPRTContext)context, lbvhMortonCodes, lbvhIds, scratch);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numL3Clusters * 2 - 1);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numL3Clusters - 1);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL3Clusters);
+    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numL4Clusters * 2 - 1);
+    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numL4Clusters - 1);
+    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL4Clusters);
 
     // debugging...
     // printOverlapStatistics();    
@@ -7986,20 +7986,20 @@ struct NNTriangleAccel : public Accel {
     gprtBufferDestroy(codes);
     gprtBufferDestroy(ids);
     gprtBufferDestroy(aabb);
-    gprtBufferDestroy(llobbs);
     gprtBufferDestroy(l0obbs);
     gprtBufferDestroy(l1obbs);
     gprtBufferDestroy(l2obbs);
     gprtBufferDestroy(l3obbs);
     gprtBufferDestroy(l4obbs);
     gprtBufferDestroy(l5obbs);
-    gprtBufferDestroy(llaabbs);
+    gprtBufferDestroy(l6obbs);
     gprtBufferDestroy(l0aabbs);
     gprtBufferDestroy(l1aabbs);
     gprtBufferDestroy(l2aabbs);
     gprtBufferDestroy(l3aabbs);
     gprtBufferDestroy(l4aabbs);
     gprtBufferDestroy(l5aabbs);
+    gprtBufferDestroy(l6aabbs);
 
     gprtBufferDestroy(scratch);
 
