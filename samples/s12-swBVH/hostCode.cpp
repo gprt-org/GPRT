@@ -298,8 +298,6 @@ main(int ac, char **av) {
 
   rayGenData->lbvh = lbvh.handle;
 
-  rayGenData->cuttingPlane = 0.f;
-
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
@@ -307,6 +305,8 @@ main(int ac, char **av) {
   // ##################################################################
 
   LOG("launching ...");
+
+  PushConstants pc;
 
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
@@ -350,38 +350,27 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      float3 camera_pos = lookFrom;
-      float3 camera_d00 = normalize(lookAt - lookFrom);
+      pc.camera.pos = lookFrom;
+      pc.camera.dir_00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
-      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
-      camera_d00 -= 0.5f * camera_ddu;
-      camera_d00 -= 0.5f * camera_ddv;
-
-      // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
+      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
+      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
 
       iFrame = 0;
     }
 
     if (lstate == GPRT_PRESS || firstFrame) {
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->cuttingPlane = float(xpos / fbSize.x) * 2.f - 1.0f;
+      pc.cuttingPlane = float(xpos / fbSize.x) * 2.f - 1.0f;
       iFrame = 0;
     }
     
-    rayGenData->iTime = (float)gprtGetTime(context) * .5f;
-    rayGenData->iFrame = iFrame;
-
-    // Use this to upload all set parameters to our ray tracing device
-    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+    pc.iTime = (float)gprtGetTime(context) * .5f;
+    pc.iFrame = iFrame;
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

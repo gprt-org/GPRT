@@ -85,11 +85,6 @@
 
 #include "gprt_shared.h"
 
-struct PushConstants {
-  uint64_t r[16];
-};
-[[vk::push_constant]] PushConstants pc;
-
 // Descriptor binding, then set number.
 // Currently, 0, N is used for textures
 // Then, 1, N is used for record data passed
@@ -309,12 +304,6 @@ SamplerState
 getDefaultSampler() {
   // We assume that there is a default sampler at address 0 here
   return samplers[0];
-}
-
-uint32_t
-getNumRayTypes() {
-  // for now, we map PC 0 to ray type count
-  return uint32_t(pc.r[0]);
 }
 
 };   // namespace gprt

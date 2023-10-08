@@ -1,5 +1,7 @@
 #include "sharedCode.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 GPRT_VERTEX_PROGRAM(backgroundVertex, (BackgroundData, record)) {
   uint32_t vertexID = VertexIndex();
   float3 position = gprt::load<float3>(record.vertex, vertexID);
@@ -15,8 +17,8 @@ GPRT_PIXEL_PROGRAM(backgroundPixel, (BackgroundData, record)) {
 
 GPRT_VERTEX_PROGRAM(simpleVertex, (TrianglesGeomData, record)) {
   uint32_t vertexID = VertexIndex();
-  float4x4 view = record.view;
-  float4x4 proj = record.proj;
+  float4x4 view = pc.view;
+  float4x4 proj = pc.proj;
   float4 position = float4(gprt::load<float3>(record.vertex, vertexID), 1.f);
   position = mul(view, position);
   position = mul(proj, position);
