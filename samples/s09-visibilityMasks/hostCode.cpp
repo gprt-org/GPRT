@@ -125,6 +125,8 @@ main(int ac, char **av) {
   GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s09_deviceCode);
 
+  PushConstants pc;
+
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
@@ -145,10 +147,6 @@ main(int ac, char **av) {
   // Setup pixel frame buffer
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
-
-  // Here, we'll setup our initial light position and color
-  rayGenData->lightPos = lightPos;
-  rayGenData->lightColor = lightColor;
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -250,6 +248,10 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
+  // Here, we'll setup our initial light position and color
+  pc.lightPos = lightPos;
+  pc.lightColor = lightColor;
+
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -290,30 +292,20 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      float3 camera_pos = lookFrom;
-      float3 camera_d00 = normalize(lookAt - lookFrom);
+      pc.camera.pos = lookFrom;
+      pc.camera.dir_00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
-      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
-      camera_d00 -= 0.5f * camera_ddu;
-      camera_d00 -= 0.5f * camera_ddv;
-
-      // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
-
-      // Use this to upload all set parameters to our ray tracing device
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
+      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
     }
 
-    rayGenData->lightPos = float3(3.f * sin((float)gprtGetTime(context)), 3.f, 3.f * cos((float)gprtGetTime(context)));
-    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+    pc.lightPos = float3(3.f * sin((float)gprtGetTime(context)), 3.f, 3.f * cos((float)gprtGetTime(context)));
+    pc.lightColor = lightColor;
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

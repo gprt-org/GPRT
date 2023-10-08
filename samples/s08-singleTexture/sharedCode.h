@@ -28,8 +28,6 @@ struct TransformData {
   /*! array/buffer of instance transforms */
   alignas(16) gprt::Buffer transforms;
   alignas(4) int numTransforms;
-  /*! the current time */
-  alignas(4) float now;
 };
 
 /* variables for the triangle mesh geometry */
@@ -44,16 +42,22 @@ struct TrianglesGeomData {
   alignas(16) gprt::Texture texture;
   /*! an array of texture samplers to use */
   alignas(16) gprt::Sampler samplers[12];
-  /*! the current time */
-  alignas(8) float now;
 };
 
 struct RayGenData {
   alignas(16) gprt::Accel world;
   alignas(16) gprt::Buffer framebuffer;
-
   alignas(8) int2 fbSize;
+};
 
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
+};
+
+/* Constants that change each frame */
+struct PushConstants {
   struct {
     alignas(16) float3 pos;
     alignas(16) float3 dir_00;
@@ -61,10 +65,7 @@ struct RayGenData {
     alignas(16) float3 dir_dv;
     alignas(4) float fovy;
   } camera;
-};
 
-/* variables for the miss program */
-struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  /*! the current time */
+  alignas(8) float now;
 };

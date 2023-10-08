@@ -94,6 +94,8 @@ main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s08_deviceCode);
+  PushConstants pc;
+  pc.now = 0.f;
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -164,7 +166,6 @@ main(int ac, char **av) {
   planeData->vertex = gprtBufferGetHandle(vertexBuffer);
   planeData->texcoord = gprtBufferGetHandle(texcoordBuffer);
   planeData->texture = gprtTextureGetHandle(texture);
-  planeData->now = 0.0;
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
@@ -172,11 +173,10 @@ main(int ac, char **av) {
   GPRTBufferOf<float4x4> transformBuffer = gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
 
   TransformData *transformData = gprtComputeGetParameters(transformProgram);
-  transformData->now = 0.0;
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = (uint32_t)samplers.size();
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context, transformProgram, (uint32_t)samplers.size());
+  gprtComputeLaunch1D(context, transformProgram, (uint32_t)samplers.size(), pc);
 
   GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, 1, &plane);
 
@@ -247,38 +247,23 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      float3 camera_pos = lookFrom;
-      float3 camera_d00 = normalize(lookAt - lookFrom);
+      pc.camera.pos = lookFrom;
+      pc.camera.dir_00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
-      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
-      camera_d00 -= 0.5f * camera_ddu;
-      camera_d00 -= 0.5f * camera_ddv;
-
-      // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
-      raygenData->camera.fovy = cosFovy;
-
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
+      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
+      pc.camera.fovy = cosFovy;
     }
 
     // Animate transforms
-    TransformData *transformData = gprtComputeGetParameters(transformProgram);
-    transformData->now = .5f * (float)gprtGetTime(context);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-    gprtComputeLaunch1D(context, transformProgram, instances.size());
+    pc.now = .5f * (float)gprtGetTime(context);
+    gprtComputeLaunch1D(context, transformProgram, instances.size(), pc);
     gprtAccelUpdate(context, trianglesTLAS);
-    
-    TrianglesGeomData *planeMeshData = gprtGeomGetParameters(plane);
-    planeMeshData->now = (float)gprtGetTime(context);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

@@ -191,6 +191,8 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
+  PushConstants pc;
+
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -234,13 +236,8 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float4x4 lookAtMatrix = lookat_matrix(position.xyz(), pivot.xyz(), lookUp);
-      float4x4 perspectiveMatrix = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f);
-
-      tridata->view = lookAtMatrix;
-      tridata->proj = perspectiveMatrix;
-
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
+      pc.view = lookat_matrix(position.xyz(), pivot.xyz(), lookUp);
+      pc.proj = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f);
     }
 
     // Draw our background and triangle
@@ -248,11 +245,11 @@ main(int ac, char **av) {
     gprtTextureClear(colorAttachment);
 
     std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
-    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data());
+    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data(), 0, nullptr, pc);
     gprtTextureClear(depthAttachment);
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
-    gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data());
+    gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data(), 0, nullptr, pc);
     gprtTextureClear(depthAttachment);
 
     // Set our ImGui state
@@ -268,7 +265,7 @@ main(int ac, char **av) {
 
     // Finally, composite the gui onto the screen.
     std::vector<GPRTGeomOf<GUIData>> drawList3 = {guiGeom};
-    gprtGeomTypeRasterize(context, guiGeomType, drawList3.size(), drawList3.data());
+    gprtGeomTypeRasterize(context, guiGeomType, drawList3.size(), drawList3.data(), 0, nullptr, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);

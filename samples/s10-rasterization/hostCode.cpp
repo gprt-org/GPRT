@@ -154,6 +154,8 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
+  PushConstants pc;
+
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -194,24 +196,28 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float4x4 lookAtMatrix = lookat_matrix(position.xyz(), pivot.xyz(), lookUp);
-      float4x4 perspectiveMatrix = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f);
-
-      tridata->view = lookAtMatrix;
-      tridata->proj = perspectiveMatrix;
-
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
+      pc.view = lookat_matrix(position.xyz(), pivot.xyz(), lookUp);
+      pc.proj = perspective_matrix(cosFovy, aspect, 0.1f, 1000.f);
     }
 
     gprtTextureClear(depthAttachment);
     gprtTextureClear(colorAttachment);
 
     std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
-    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data());
+    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data(), 
+      0, nullptr, pc);
     gprtTextureClear(depthAttachment);
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
-    gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data());
+    gprtGeomTypeRasterize(context, 
+      /* Where to pull "raster" programs from */
+      trianglesGeomType, 
+      /* The objects we want to rasterize, and in the order to rasterize them in */
+      drawList2.size(), drawList2.data(), 
+      /* How many instances of each object we want to rasterize (will explore in a future sample)*/
+      0, nullptr, 
+      /* Parameters to send to each program, without updating the shader binding table */
+      pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);

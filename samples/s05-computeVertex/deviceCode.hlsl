@@ -22,6 +22,8 @@
 
 #include "sharedCode.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 float3
 getPos(float px, float py, float k, float width, float depth, float height, float now) {
   float x = lerp(-1.f, 1.f, px);
@@ -34,7 +36,6 @@ getPos(float px, float py, float k, float width, float depth, float height, floa
 GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record), (1, 1, 1)) {
   uint gridSize = record.gridSize;
   int TriID = DispatchThreadID.x;
-  float now = record.now;
 
   bool even = (TriID % 2) == 0;
 
@@ -53,13 +54,13 @@ GPRT_COMPUTE_PROGRAM(Vertex, (TrianglesGeomData, record), (1, 1, 1)) {
   float k = 20.f;
 
   if (even) {
-    v0 = getPos(gx, gy, k, width, depth, height, now);
-    v1 = getPos(gx + dx, gy, k, width, depth, height, now);
-    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, now);
+    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
+    v1 = getPos(gx + dx, gy, k, width, depth, height, pc.now);
+    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
   } else {
-    v0 = getPos(gx, gy, k, width, depth, height, now);
-    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, now);
-    v2 = getPos(gx, gy + dy, k, width, depth, height, now);
+    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
+    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
+    v2 = getPos(gx, gy + dy, k, width, depth, height, pc.now);
   }
 
   gprt::store(record.index, TriID, index);
@@ -78,9 +79,9 @@ GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record)) {
   uint2 fbSize = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
