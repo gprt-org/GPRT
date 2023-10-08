@@ -8531,7 +8531,7 @@ gprtGeomSetParameters(GPRTGeom _geometry, void *parameters, int deviceID) {
 
 void
 gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry,
-                      uint32_t rasterType, uint32_t *instanceCounts) {
+                      uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
 
   Context *context = (Context *) _context;
@@ -8591,6 +8591,12 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   renderPassBeginInfo.framebuffer = geometryType->raster[rasterType].frameBuffer;
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+
+  if (pushConstantsSize > 0) {
+    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    vkCmdPushConstants(context->graphicsCommandBuffer, geometryType->raster[rasterType].pipelineLayout,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushConstantsSize, pushConstants);
+  }
 
   // Transition our attachments into optimal attachment formats
   geometryType->raster[rasterType].colorAttachment->setImageLayout(
@@ -9861,19 +9867,19 @@ gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
 }
 
 GPRT_API void
-gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x) {
+gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1);
+  gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void
-gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y) {
+gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1);
+  gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void
-gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
+gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
   assert(_rayGen);
 
@@ -9900,14 +9906,14 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                     context->raytracingPipeline);
 
-  struct PushConstants {
-    uint64_t pad[16] = {requestedFeatures.numRayTypes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  } pushConstants;
-  vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
-                     VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_RAYGEN_BIT_KHR,
-                     0, sizeof(PushConstants), &pushConstants);
+  if (pushConstantsSize > 0) {
+    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
+                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                          VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                          VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+                      0, pushConstantsSize, pushConstants);
+  }
 
   auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t {
     VkBufferDeviceAddressInfoKHR bufferDeviceAI{};
@@ -10000,7 +10006,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 }
 
 void
-gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
+gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, size_t pushConstantsSize, void* pushConstants) {
   assert(_compute);
 
   Context *context = (Context *) _context;
@@ -10054,11 +10060,11 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
               std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[2]) + ")\n");
   }
 
-  struct PushConstants {
-    uint64_t pad[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  } pushConstants;
-  vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                     sizeof(PushConstants), &pushConstants);
+  if (pushConstantsSize > 0) {
+    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout,
+                      VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantsSize, pushConstants);
+  }
 
   vkCmdDispatch(context->graphicsCommandBuffer, dims_x, dims_y, dims_z);
 
@@ -10090,21 +10096,21 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
 }
 
 GPRT_API void
-gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x) {
+gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, 1, 1);
+  gprtComputeLaunch(_context, _compute, dims_x, 1, 1, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void
-gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y) {
+gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, dims_y, 1);
+  gprtComputeLaunch(_context, _compute, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void
-gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
+gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, size_t pushConstantsSize, void* pushConstants) {
   LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, dims_y, dims_z);
+  gprtComputeLaunch(_context, _compute, dims_x, dims_y, dims_z, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void

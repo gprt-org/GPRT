@@ -119,6 +119,11 @@ main(int ac, char **av) {
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s06_deviceCode);
 
+  // Structure of parameters that change each frame. We can edit these 
+  // without rebuilding the shader binding table.
+  PushConstants pc;
+  pc.now = 0.f;
+
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
@@ -180,13 +185,12 @@ main(int ac, char **av) {
   TransformData *transformData = gprtComputeGetParameters(transformProgram);
   transformData->transforms = gprtBufferGetHandle(transformBuffer);
   transformData->numTransforms = numInstances;
-  transformData->now = 0.f;
 
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch1D(context, transformProgram, numInstances);
+  gprtComputeLaunch1D(context, transformProgram, numInstances, pc);
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
@@ -256,33 +260,23 @@ main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      float3 camera_pos = lookFrom;
-      float3 camera_d00 = normalize(lookAt - lookFrom);
+      pc.camera.pos = lookFrom;
+      pc.camera.dir_00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
-      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
-      camera_d00 -= 0.5f * camera_ddu;
-      camera_d00 -= 0.5f * camera_ddv;
-
-      // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
-
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
+      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
+      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
     }
 
     // update time to move instance transforms. Then, update only instance
     // accel.
-    transformData->now = float(gprtGetTime(context));
-    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-    gprtComputeLaunch1D(context, transformProgram, numInstances);
+    pc.now = float(gprtGetTime(context));
+    gprtComputeLaunch1D(context, transformProgram, numInstances, pc);
     gprtAccelUpdate(context, world);
 
     // Now, trace rays
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

@@ -33,9 +33,17 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   alignas(16) gprt::Buffer frameBuffer;
-
   alignas(16) gprt::Accel world;
+};
 
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
+};
+
+/* Constants that change each frame */
+struct PushConstants {
   struct {
     alignas(16) float3 pos;
     alignas(16) float3 dir_00;
@@ -45,10 +53,4 @@ struct RayGenData {
 
   alignas(16) float3 lightColor;
   alignas(16) float3 lightPos;
-};
-
-/* variables for the miss program */
-struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
 };

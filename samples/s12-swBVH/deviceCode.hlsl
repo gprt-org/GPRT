@@ -24,6 +24,8 @@
 
 #include "rng.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 // A bounding box, I think.
 // https://iquilezles.org/articles/boxfunctions
 float2 iBox(float3 ro, float3 rd, float3 rad)
@@ -476,13 +478,13 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
     uint2 pixelID = DispatchRaysIndex().xy;
     uint2 fbSize = DispatchRaysDimensions().xy;
 
-    LCGRand rng = get_rng(record.iFrame, pixelID, fbSize);
+    LCGRand rng = get_rng(pc.iFrame, pixelID, fbSize);
 
     // if (all(pixelID == uint2(fbSize / 2))) {
     //     // printf("seed %d\n", seed);
     // }
     
-    // printf("ID %d %d Frame %d\n", pixelID.x, pixelID.y, record.iFrame);
+    // printf("ID %d %d Frame %d\n", pixelID.x, pixelID.y, pc.iFrame);
 
     LBVHData lbvh = record.lbvh;
     if (all(pixelID == (fbSize / 2))) lbvh.tmp = 1;
@@ -490,16 +492,16 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
 
     float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
     RayDesc rayDesc;
-    rayDesc.Origin = record.camera.pos;
+    rayDesc.Origin = pc.camera.pos;
     rayDesc.Direction =
-        normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+        normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
 
     float2 fragCoord = pixelID;
     float2 iResolution = fbSize;
 
-    float cuttingPlane = record.cuttingPlane;
+    float cuttingPlane = pc.cuttingPlane;
 
     // render
     bool isInterior = false;
@@ -517,7 +519,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
 
     col = pow(col, 0.4545);
 
-    int frame = record.iFrame;
+    int frame = pc.iFrame;
     const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
     float4 prev = gprt::load<float4>(record.accumBuffer, fbOfs);
     float4 newCol = prev * (frame / (frame + 1.f)) + float4(col, 1.0f) * (1.f / (frame + 1.f));

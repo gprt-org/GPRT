@@ -31,10 +31,10 @@
 
 #define alignas(alignment)
 
-struct PushConstants {
-  uint64_t r[16];
-};
-[[vk::push_constant]] PushConstants pc;
+// struct PushConstants {
+//   uint64_t r[16];
+// };
+// [[vk::push_constant]] PushConstants pc;
 
 // Descriptor binding, then set number.
 // Currently, 0, N is used for textures
@@ -187,11 +187,6 @@ getDefaultSampler() {
   return samplers[0];
 }
 
-uint32_t
-getNumRayTypes() {
-  // for now, we map PC 0 to ray type count
-  return uint32_t(pc.r[0]);
-}
 };   // namespace gprt
 
 /*

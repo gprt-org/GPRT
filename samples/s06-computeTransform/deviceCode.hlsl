@@ -22,6 +22,8 @@
 
 #include "sharedCode.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   int numTransforms = record.numTransforms;
   int length = sqrt(numTransforms);
@@ -32,8 +34,6 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   float px = float(xid) / float(length);
   float py = float(yid) / float(length);
 
-  float now = record.now;
-
   float height = .1;
   float width = 4.0;
   float depth = 4.0;
@@ -41,7 +41,7 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
 
   float x = lerp(-1.f, 1.f, px);
   float y = lerp(-1.f, 1.f, py);
-  float z = sin(now + k * x) * cos(now + k * y);
+  float z = sin(pc.now + k * x) * cos(pc.now + k * y);
   float zoffset = x + y;
 
   float4 transforma = float4(0.04, 0.0, 0.0, x * width);
@@ -64,9 +64,9 @@ GPRT_RAYGEN_PROGRAM(RayGen, (RayGenData, record)) {
   uint2 fbSize = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);

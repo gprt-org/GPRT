@@ -160,6 +160,10 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
+  // Structure of parameters that change each frame. We can edit these 
+  // without rebuilding the shader binding table.
+  PushConstants pc;
+
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -209,18 +213,14 @@ main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
-
-      // Use this to upload all set parameters to our ray tracing device
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+      pc.camera.pos = camera_pos;
+      pc.camera.dir_00 = camera_d00;
+      pc.camera.dir_du = camera_ddu;
+      pc.camera.dir_dv = camera_ddv;
     }
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

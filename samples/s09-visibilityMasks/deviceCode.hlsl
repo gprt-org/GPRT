@@ -22,6 +22,8 @@
 
 #include "sharedCode.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 struct [raypayload] Payload {
   float4 color  : read(caller) : write(closesthit, miss);
   float3 normal : read(caller) : write(closesthit, miss);
@@ -43,9 +45,9 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -99,7 +101,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
 
     // note, adding a normal offset to avoid self-intersections
     rayDesc.Origin = hitPos + .001f * normal;
-    rayDesc.Direction = normalize(record.lightPos);
+    rayDesc.Direction = normalize(pc.lightPos);
 
     // Trace our primary visibility ray
     TraceRay(world,                   // the tree
@@ -117,7 +119,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
 
     // We hit the light
     if (payload.hitT == -1.f) {
-      litColor += color * max(dot(normal, rayDesc.Direction), 0.0f) * (1.f - ambient) * record.lightColor;
+      litColor += color * max(dot(normal, rayDesc.Direction), 0.0f) * (1.f - ambient) * pc.lightColor;
     }
 
     shadedColor = over(transparentColor, float4(litColor, 1.f));

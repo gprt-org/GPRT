@@ -27,9 +27,17 @@
 struct RayGenData {
   alignas(16) gprt::Buffer frameBuffer;
   alignas(16) gprt::Buffer accumBuffer;
-
   LBVHData lbvh;
+};
 
+/* variables for the miss program */
+struct MissProgData {
+  alignas(16) float3 color0;
+  alignas(16) float3 color1;
+};
+
+/* Constants that change each frame */
+struct PushConstants {
   alignas(4) float iTime;
   alignas(4) int iFrame;
   alignas(4) float cuttingPlane;
@@ -40,10 +48,4 @@ struct RayGenData {
     alignas(16) float3 dir_du;
     alignas(16) float3 dir_dv;
   } camera;
-};
-
-/* variables for the miss program */
-struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
 };

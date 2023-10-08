@@ -22,6 +22,8 @@
 
 #include "sharedCode.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 struct [raypayload] Payload {
   float spreadAngle : read(closesthit) : write(caller);
   float3 color : read(caller) : write(closesthit, miss);
@@ -50,7 +52,7 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   int transformY = transformID % 2;
 
   int numTransforms = record.numTransforms;
-  float angle = record.now;
+  float angle = pc.now;
   float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
   float4 transforma = float4(aa[0], lerp(-5, 5, transformX / float((numTransforms / 2) - 1)));
@@ -72,14 +74,14 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
 
   // Generate ray
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 1e20f;
 
   // compute the spreading angle of the ray to determine the sampling footprint
-  float phi = record.camera.fovy;
+  float phi = pc.camera.fovy;
   float H = dims.y;
   payload.spreadAngle = atan(2.f * tan(phi / 2.f) / H);
 
@@ -141,7 +143,7 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
     float w, h;
     texture.GetDimensions(w, h);
     int levels = log2(max(w, h));
-    color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(record.now))));
+    color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(pc.now))));
   }
 
   // For the 3rd and 4th textures, we want to zoom in to show the magnification filter.
