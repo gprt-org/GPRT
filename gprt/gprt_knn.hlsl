@@ -24,6 +24,8 @@
 
 #include "svd.hlsli"
 
+[[vk::push_constant]] gprt::NNConstants pc;
+
 bool getPointBounds(gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
 {
   float3 p = gprt::load<float3>(points, primID);
@@ -254,94 +256,22 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
   gprt::atomicAdd32f(record.l0centers, l0ID, (a + b + c) / (3 * ppl0));
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeL1OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l1ID = DispatchThreadID.x;
-  if (l1ID >= record.numL1Clusters) return;
+GPRT_COMPUTE_PROGRAM(ComputeOBBCenters, (NNAccel, record), (1,1,1)) {
+  int lNID = DispatchThreadID.x;
+  int level = pc.iteration;
+  int numPrims = pc.numPrims;
+  int numClusters = getNumNodesInLevel(level, numPrims);
+  if (lNID >= numClusters) return;
   int total = 0;
-  float3 l1Center = float3(0.f, 0.f, 0.f);
+  float3 lNCenter = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l0ID = l1ID * BRANCHING_FACTOR + i;
-    uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
-    float3 l0Center = gprt::load<float3>(record.l0centers, l0ID);
-    l1Center += l0Center * ppl0;
-    total += ppl0;
+    uint32_t lMID = lNID * BRANCHING_FACTOR + i;
+    uint32_t pplM = getPrimsInNode(level - 1, lMID, numPrims);
+    float3 lMCenter = gprt::load<float3>(pc.mcenters, lMID);
+    lNCenter += lMCenter * pplM;
+    total += pplM;
   }
-  gprt::store<float3>(record.l1centers, l1ID, l1Center / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeL2OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l2ID = DispatchThreadID.x;
-  if (l2ID >= record.numL2Clusters) return;
-  int total = 0;
-  float3 l2Center = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l1ID = l2ID * BRANCHING_FACTOR + i;
-    uint32_t ppl1 = getPrimsInNode(1, l1ID, record.numPrims);
-    float3 l1Center = gprt::load<float3>(record.l1centers, l1ID);
-    l2Center += l1Center * ppl1;
-    total += ppl1;
-  }
-  gprt::store<float3>(record.l2centers, l2ID, l2Center / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeL3OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l3ID = DispatchThreadID.x;
-  if (l3ID >= record.numL3Clusters) return;
-  int total = 0;
-  float3 l3Center = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l2ID = l3ID * BRANCHING_FACTOR + i;
-    uint32_t ppl2 = getPrimsInNode(2, l2ID,record.numPrims);
-    float3 l2Center = gprt::load<float3>(record.l2centers, l2ID);
-    l3Center += l2Center * ppl2;
-    total += ppl2;
-  }
-  gprt::store<float3>(record.l3centers, l3ID, l3Center / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeL4OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l4ID = DispatchThreadID.x;
-  if (l4ID >= record.numL4Clusters) return;
-  int total = 0;
-  float3 l4Center = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l3ID = l4ID * BRANCHING_FACTOR + i;
-    uint32_t ppl3 = getPrimsInNode(3, l3ID, record.numPrims);
-    float3 l3Center = gprt::load<float3>(record.l3centers, l3ID);
-    l4Center += l3Center * ppl3;
-    total += ppl3;
-  }
-  gprt::store<float3>(record.l4centers, l4ID, l4Center / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeL5OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l5ID = DispatchThreadID.x;
-  if (l5ID >= record.numL5Clusters) return;
-  int total = 0;
-  float3 l5Center = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l4ID = l5ID * BRANCHING_FACTOR + i;
-    uint32_t ppl4 = getPrimsInNode(4, l4ID, record.numPrims);
-    float3 l4Center = gprt::load<float3>(record.l4centers, l4ID);
-    l5Center += l4Center * ppl4;
-    total += ppl4;
-  }
-  gprt::store<float3>(record.l5centers, l5ID, l5Center / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeL6OBBCenters, (NNAccel, record), (1,1,1)) {
-  int l6ID = DispatchThreadID.x;
-  if (l6ID >= record.numL6Clusters) return;
-  int total = 0;
-  float3 l6Center = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t l5ID = l6ID * BRANCHING_FACTOR + i;
-    uint32_t ppl5 = getPrimsInNode(5, l5ID, record.numPrims);
-    float3 l5Center = gprt::load<float3>(record.l5centers, l5ID);
-    l6Center += l5Center * ppl5;
-    total += ppl5;
-  }
-  gprt::store<float3>(record.l6centers, l6ID, l6Center / total);
+  gprt::store<float3>(pc.ncenters, lNID, lNCenter / total);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) {
@@ -634,7 +564,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
 // Launch this BRANCHING_FACTOR times. Helps reduce atomic pressure.
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
   int l0ID = DispatchThreadID.x;
-  int lpID = l0ID * BRANCHING_FACTOR + record.iteration; 
+  int lpID = l0ID * BRANCHING_FACTOR + pc.iteration; 
   if (lpID >= record.numPrims) return;
 
   // Get address from sorted codes

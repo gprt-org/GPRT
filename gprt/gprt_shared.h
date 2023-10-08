@@ -146,9 +146,6 @@ namespace gprt{
         alignas(16) gprt::Buffer l4centers;
         alignas(16) gprt::Buffer l5centers;
         alignas(16) gprt::Buffer l6centers;
-
-        // An internal iteration parameter for construction
-        alignas(4) uint32_t iteration;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
@@ -193,5 +190,11 @@ namespace gprt{
 
     };
 
-    
+    struct NNConstants {
+        // An internal iteration parameter for construction
+        alignas(4) uint32_t iteration;
+        alignas(4) uint32_t numPrims;
+        alignas(16) gprt::Buffer ncenters; // level n
+        alignas(16) gprt::Buffer mcenters; // level n-1
+    };
 };
