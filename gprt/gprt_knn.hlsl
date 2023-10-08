@@ -329,71 +329,15 @@ GPRT_COMPUTE_PROGRAM(ComputeOBBCovariances, (NNAccel, record), (1,1,1)) {
   gprt::store<float3x3>(pc.nobbs, NID, nCovariance);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBAngles, (NNAccel, record), (1,1,1)) {
-  int tid = DispatchThreadID.x;
-  int N0 = record.numL0Clusters;
-  int N1 = record.numL1Clusters;
-  int N2 = record.numL2Clusters;
-  int N3 = record.numL3Clusters;
-  int N4 = record.numL4Clusters;
-  int N5 = record.numL5Clusters;
-  int N6 = record.numL6Clusters;
-  int totalClusters = N0 + N1 + N2 + N3 + N4 + N5 + N6;
-  if (tid >= totalClusters) return;
-
-  float3x3 covariance;
-  if (tid < N0)
-    covariance = gprt::load<float3x3>(record.l0obbs, tid);
-  else if (tid - N0 < N1)
-    covariance = gprt::load<float3x3>(record.l1obbs, tid - (N0));
-  else if (tid - (N0 + N1) < N2)
-    covariance = gprt::load<float3x3>(record.l2obbs, tid - (N0 + N1));
-  else if (tid - (N0 + N1 + N2) < N3)
-    covariance = gprt::load<float3x3>(record.l3obbs, tid - (N0 + N1 + N2));
-  else if (tid - (N0 + N1 + N2 + N3) < N4)
-    covariance = gprt::load<float3x3>(record.l4obbs, tid - (N0 + N1 + N2 + N3));
-  else if (tid - (N0 + N1 + N2 + N3 + N4) < N5)
-    covariance = gprt::load<float3x3>(record.l5obbs, tid - (N0 + N1 + N2 + N3 + N4));
-  else if (tid - (N0 + N1 + N2 + N3 + N4 + N5) < N6)
-    covariance = gprt::load<float3x3>(record.l6obbs, tid - (N0 + N1 + N2 + N3 + N4 + N5));
-
+GPRT_COMPUTE_PROGRAM(ComputeOBBAngles, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.iteration, pc.numPrims);
+  if (NID >= numNClusters) return;
+  float3x3 covariance = gprt::load<float3x3>(pc.nobbs, NID);
   float3 obbEul = mat3_to_eul(symmetric_eigenanalysis(covariance));
-
-  if (tid < N0) {
-    gprt::store<float3>(record.l0obbs, (tid) * 3 + 0,  float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l0obbs, (tid) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l0obbs, (tid) * 3 + 2, obbEul);
-  }
-  else if (tid - N0 < N1){
-    gprt::store<float3>(record.l1obbs, (tid - (N0)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l1obbs, (tid - (N0)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l1obbs, (tid - (N0)) * 3 + 2, obbEul);
-  }
-  else if (tid - (N0 + N1) < N2) {
-    gprt::store<float3>(record.l2obbs, (tid - (N0 + N1)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l2obbs, (tid - (N0 + N1)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l2obbs, (tid - (N0 + N1)) * 3 + 2, obbEul);
-  }
-  else if (tid - (N0 + N1 + N2) < N3) {
-    gprt::store<float3>(record.l3obbs, (tid - (N0 + N1 + N2)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l3obbs, (tid - (N0 + N1 + N2)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l3obbs, (tid - (N0 + N1 + N2)) * 3 + 2, obbEul);
-  }
-  else if (tid - (N0 + N1 + N2 + N3) < N4) {
-    gprt::store<float3>(record.l4obbs, (tid - (N0 + N1 + N2 + N3)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l4obbs, (tid - (N0 + N1 + N2 + N3)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l4obbs, (tid - (N0 + N1 + N2 + N3)) * 3 + 2, obbEul);
-  }
-  else if (tid - (N0 + N1 + N2 + N3 + N4) < N5) {
-    gprt::store<float3>(record.l5obbs, (tid - (N0 + N1 + N2 + N3 + N4)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l5obbs, (tid - (N0 + N1 + N2 + N3 + N4)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l5obbs, (tid - (N0 + N1 + N2 + N3 + N4)) * 3 + 2, obbEul);
-  }
-  else if (tid - (N0 + N1 + N2 + N3 + N4 + N5) < N6) {
-    gprt::store<float3>(record.l6obbs, (tid - (N0 + N1 + N2 + N3 + N4 + N5)) * 3 + 0, float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l6obbs, (tid - (N0 + N1 + N2 + N3 + N4 + N5)) * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-    gprt::store<float3>(record.l6obbs, (tid - (N0 + N1 + N2 + N3 + N4 + N5)) * 3 + 2, obbEul);
-  }
+  gprt::store<float3>(pc.nobbs, NID * 3 + 0,  float3(1e38f, 1e38f, 1e38f));
+  gprt::store<float3>(pc.nobbs, NID * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
+  gprt::store<float3>(pc.nobbs, NID * 3 + 2, obbEul);
 }
 
 // Launch this BRANCHING_FACTOR times. Helps reduce atomic pressure.
