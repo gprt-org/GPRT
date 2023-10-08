@@ -29,6 +29,11 @@ typedef struct VkAccelerationStructureInstanceKHR {
 }
 VkAccelerationStructureInstanceKHR;
 
+struct PushConstants {
+  uint64_t r[16];
+};
+[[vk::push_constant]] PushConstants pc;
+
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void
