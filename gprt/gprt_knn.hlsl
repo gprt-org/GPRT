@@ -202,39 +202,33 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleLists, (NNAccel, record), (1,1,1)) {
 
 }
 
-int getPrimsInL0(int l0ID, int numL0, int numPrimitives) {
-  int maxPrimsInL0 = pow(BRANCHING_FACTOR, 1);
-  return (l0ID == (numL0 - 1)) ? (numPrimitives % maxPrimsInL0) : maxPrimsInL0;
+int getNumNodesInLevel(int level, int numPrimitives) {
+  // For level -1, the number of "nodes" is just the number of primitives
+  int numNodes = numPrimitives;
+  // When level is 0 or higher, we repeatedly divide the number of primitives per
+  // node, rounding up. 
+  for (int i = 0; i < (level + 1); ++i) {
+    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+  }
+  return numNodes;
 }
 
-int getPrimsInL1(int l1ID, int numL1, int numPrimitives) {
-  int maxPrimsInL1 = pow(BRANCHING_FACTOR, 2);
-  return (l1ID == (numL1 - 1)) ? (numPrimitives % maxPrimsInL1) : maxPrimsInL1;
-}
-
-int getPrimsInL2(int l2ID, int numL2, int numPrimitives) {
-  int maxPrimsInL2 = pow(BRANCHING_FACTOR, 3);
-  return (l2ID == (numL2 - 1)) ? (numPrimitives % maxPrimsInL2) : maxPrimsInL2;
-}
-
-int getPrimsInL3(int l3ID, int numL3, int numPrimitives) {
-  int maxPrimsInL3 = pow(BRANCHING_FACTOR, 4);
-  return (l3ID == (numL3 - 1)) ? (numPrimitives % maxPrimsInL3) : maxPrimsInL3;
-}
-
-int getPrimsInL4(int l4ID, int numL4, int numPrimitives) {
-  int maxPrimsInL4 = pow(BRANCHING_FACTOR, 5);
-  return (l4ID == (numL4 - 1)) ? (numPrimitives % maxPrimsInL4) : maxPrimsInL4;
-}
-
-int getPrimsInL5(int l5ID, int numL5, int numPrimitives) {
-  int maxPrimsInL5 = pow(BRANCHING_FACTOR, 6);
-  return (l5ID == (numL5 - 1)) ? (numPrimitives % maxPrimsInL5) : maxPrimsInL5;
-}
-
-int getPrimsInL6(int l6ID, int numL6, int numPrimitives) {
-  int maxPrimsInL6 = pow(BRANCHING_FACTOR, 7);
-  return (l6ID == (numL6 - 1)) ? (numPrimitives % maxPrimsInL6) : maxPrimsInL6;
+/**
+ * @brief Returns the number of primitives in a given node in our "complete" tree 
+ * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
+ * @param index What node are we asking about relative to the given level?
+ * @param numPrimitives How many primitives in total are there in the tree?
+ */
+int getPrimsInNode(
+  int level,   
+  int index,    
+  int numPrimitives
+) {
+  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
+  // Theoretical maximum primitives in the level
+  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
+  // Account for when primitive counts don't exactly match a multiple of the branching factor
+  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
@@ -256,7 +250,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
 
   // Accumulate vertices for centroids
   uint32_t l0ID = lpID / BRANCHING_FACTOR;
-  uint32_t ppl0 = getPrimsInL0(l0ID, record.numL0Clusters, record.numPrims);
+  uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
   gprt::atomicAdd32f(record.l0centers, l0ID, (a + b + c) / (3 * ppl0));
 }
 
@@ -267,7 +261,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL1OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l1Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l0ID = l1ID * BRANCHING_FACTOR + i;
-    uint32_t ppl0 = getPrimsInL0(l0ID, record.numL0Clusters, record.numPrims);
+    uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
     float3 l0Center = gprt::load<float3>(record.l0centers, l0ID);
     l1Center += l0Center * ppl0;
     total += ppl0;
@@ -282,7 +276,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l2Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l1ID = l2ID * BRANCHING_FACTOR + i;
-    uint32_t ppl1 = getPrimsInL1(l1ID, record.numL1Clusters, record.numPrims);
+    uint32_t ppl1 = getPrimsInNode(1, l1ID, record.numL1Clusters, record.numPrims);
     float3 l1Center = gprt::load<float3>(record.l1centers, l1ID);
     l2Center += l1Center * ppl1;
     total += ppl1;
@@ -297,7 +291,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL3OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l3Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l2ID = l3ID * BRANCHING_FACTOR + i;
-    uint32_t ppl2 = getPrimsInL2(l2ID, record.numL2Clusters, record.numPrims);
+    uint32_t ppl2 = getPrimsInNode(2, l2ID,record.numPrims);
     float3 l2Center = gprt::load<float3>(record.l2centers, l2ID);
     l3Center += l2Center * ppl2;
     total += ppl2;
@@ -312,7 +306,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL4OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l4Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l3ID = l4ID * BRANCHING_FACTOR + i;
-    uint32_t ppl3 = getPrimsInL3(l3ID, record.numL3Clusters, record.numPrims);
+    uint32_t ppl3 = getPrimsInNode(3, l3ID, record.numPrims);
     float3 l3Center = gprt::load<float3>(record.l3centers, l3ID);
     l4Center += l3Center * ppl3;
     total += ppl3;
@@ -327,7 +321,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL5OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l5Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l4ID = l5ID * BRANCHING_FACTOR + i;
-    uint32_t ppl4 = getPrimsInL4(l4ID, record.numL4Clusters, record.numPrims);
+    uint32_t ppl4 = getPrimsInNode(4, l4ID, record.numPrims);
     float3 l4Center = gprt::load<float3>(record.l4centers, l4ID);
     l5Center += l4Center * ppl4;
     total += ppl4;
@@ -342,7 +336,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL6OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l6Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l5ID = l6ID * BRANCHING_FACTOR + i;
-    uint32_t ppl5 = getPrimsInL5(l5ID, record.numL5Clusters, record.numPrims);
+    uint32_t ppl5 = getPrimsInNode(5, l5ID, record.numPrims);
     float3 l5Center = gprt::load<float3>(record.l5centers, l5ID);
     l6Center += l5Center * ppl5;
     total += ppl5;
@@ -367,7 +361,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) 
   uint32_t l0ID = lpID / BRANCHING_FACTOR;
   float3 l0center = gprt::load<float3>(record.l0centers, l0ID);
   float3x3 l0partialcovar = outer2(a - l0center) + outer2(b - l0center) + outer2(c - l0center);
-  uint32_t ppl0 = getPrimsInL0(l0ID, record.numL0Clusters, record.numPrims);
+  uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
   gprt::atomicAdd32f(record.l0obbs, l0ID, l0partialcovar / (3 * ppl0));
 }
 
@@ -385,7 +379,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL1OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l0ID = l1ID * BRANCHING_FACTOR + i;
     if (l0ID >= record.numL0Clusters) break;
-    int ppl0 = getPrimsInL0(l0ID, record.numL0Clusters, record.numPrims);
+    int ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
     float3x3 l0Covariance = gprt::load<float3x3>(record.l0obbs, l0ID);
     l0Centers[i] = gprt::load<float3>(record.l0centers, l0ID);
     l0AvgCenter += l0Centers[i];
@@ -418,7 +412,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l1ID = l2ID * BRANCHING_FACTOR + i;
     if (l1ID >= record.numL1Clusters) break;
-    int ppl1 = getPrimsInL1(l1ID, record.numL1Clusters, record.numPrims);
+    int ppl1 = getPrimsInNode(1, l1ID, record.numPrims);
     float3x3 l1Covariance = gprt::load<float3x3>(record.l1obbs, l1ID);
     l1Centers[i] = gprt::load<float3>(record.l1centers, l1ID);
     l1AvgCenter += l1Centers[i];
@@ -451,7 +445,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL3OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l2ID = l3ID * BRANCHING_FACTOR + i;
     if (l2ID >= record.numL2Clusters) break;
-    int ppl2 = getPrimsInL2(l2ID, record.numL2Clusters, record.numPrims);
+    int ppl2 = getPrimsInNode(2, l2ID, record.numPrims);
     float3x3 l2Covariance = gprt::load<float3x3>(record.l2obbs, l2ID);
     l2Centers[i] = gprt::load<float3>(record.l2centers, l2ID);
     l2AvgCenter += l2Centers[i];
@@ -484,7 +478,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL4OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l3ID = l4ID * BRANCHING_FACTOR + i;
     if (l3ID >= record.numL3Clusters) break;
-    int ppl3 = getPrimsInL3(l3ID, record.numL3Clusters, record.numPrims);
+    int ppl3 = getPrimsInNode(3, l3ID, record.numPrims);
     float3x3 l3Covariance = gprt::load<float3x3>(record.l3obbs, l3ID);
     l3Centers[i] = gprt::load<float3>(record.l3centers, l3ID);
     l3AvgCenter += l3Centers[i];
@@ -517,7 +511,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL5OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l4ID = l5ID * BRANCHING_FACTOR + i;
     if (l4ID >= record.numL4Clusters) break;
-    int ppl4 = getPrimsInL4(l4ID, record.numL4Clusters, record.numPrims);
+    int ppl4 = getPrimsInNode(4, l4ID, record.numPrims);
     float3x3 l4Covariance = gprt::load<float3x3>(record.l4obbs, l4ID);
     l4Centers[i] = gprt::load<float3>(record.l4centers, l4ID);
     l4AvgCenter += l4Centers[i];
@@ -550,7 +544,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL6OBBCovariances, (NNAccel, record), (1,1,1)) {
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int l5ID = l6ID * BRANCHING_FACTOR + i;
     if (l5ID >= record.numL5Clusters) break;
-    int ppl5 = getPrimsInL5(l5ID, record.numL5Clusters, record.numPrims);
+    int ppl5 = getPrimsInNode(5, l5ID, record.numPrims);
     float3x3 l5Covariance = gprt::load<float3x3>(record.l5obbs, l5ID);
     l5Centers[i] = gprt::load<float3>(record.l5centers, l5ID);
     l5AvgCenter += l5Centers[i];
