@@ -276,7 +276,7 @@ GPRT_COMPUTE_PROGRAM(ComputeL2OBBCenters, (NNAccel, record), (1,1,1)) {
   float3 l2Center = float3(0.f, 0.f, 0.f);
   for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
     uint32_t l1ID = l2ID * BRANCHING_FACTOR + i;
-    uint32_t ppl1 = getPrimsInNode(1, l1ID, record.numL1Clusters, record.numPrims);
+    uint32_t ppl1 = getPrimsInNode(1, l1ID, record.numPrims);
     float3 l1Center = gprt::load<float3>(record.l1centers, l1ID);
     l2Center += l1Center * ppl1;
     total += ppl1;
