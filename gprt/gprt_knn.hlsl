@@ -103,6 +103,54 @@ bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points,
   return true; 
 }
 
+int getNumNodesInLevel(int level, int numPrimitives) {
+  // For level -1, the number of "nodes" is just the number of primitives
+  int numNodes = numPrimitives;
+  // When level is 0 or higher, we repeatedly divide the number of primitives per
+  // node, rounding up. 
+  for (int i = 0; i < (level + 1); ++i) {
+    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+  }
+  return numNodes;
+}
+
+/**
+ * @brief Returns the number of primitives in a given node in our "complete" tree 
+ * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
+ * @param index What node are we asking about relative to the given level?
+ * @param numPrimitives How many primitives in total are there in the tree?
+ */
+int getPrimsInNode(
+  int level,   
+  int index,    
+  int numPrimitives
+) {
+  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
+  // Theoretical maximum primitives in the level
+  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
+  // Account for when primitive counts don't exactly match a multiple of the branching factor
+  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
+}
+
+/**
+ * @brief Returns the parent node ID for the given primitive and level 
+ * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
+ * @param index What primitive are we asking about?
+ */
+int getParentNode(
+  int level,   
+  int index
+) {
+  // if the index is -1, then the parent index is just ourselves
+  int parentIndex = index;
+  // When level is 0 or higher, we repeatedly divide the number of primitives per
+  // node to determine our parent index.
+  for (int i = 0; i < (level + 1); ++i) {
+    parentIndex = parentIndex / BRANCHING_FACTOR;
+  }
+  return parentIndex;
+}
+
 typedef gprt::NNAccel NNAccel;
 
 GPRT_COMPUTE_PROGRAM(ComputePointBounds, (NNAccel, record), (1,1,1)) {
@@ -160,275 +208,6 @@ float4 makeMinimumBoundingSphere(in float3 p1, in float3 p2, in float3 p3) {
       ((dot2(cross(alpha, beta))) * 2.f) + c;
   }
   return s;
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (1,1,1)) {
-  int primID = DispatchThreadID.x;
-  if (primID >= record.numPrims) return;
-
-  uint3 tri = gprt::load<uint3>(record.triangles, primID);
-  float3 a, b, c;
-  a = gprt::load<float3>(record.points, tri.x);
-  if (isnan(a.x)) return;
-  b = gprt::load<float3>(record.points, tri.y);
-  c = gprt::load<float3>(record.points, tri.z);
-
-  float4 sphere = makeMinimumBoundingSphere(a,b,c);
-  float4 aabbMin = float4(min(min(a, b), c), sphere.w);
-  float4 aabbMax = float4(max(max(a, b), c), sphere.w);
-
-  // Compute world bounding box
-  gprt::atomicMin32f(record.aabb, 0, aabbMin);
-  gprt::atomicMax32f(record.aabb, 1, aabbMax);
-}
-
-// Run per leaf
-GPRT_COMPUTE_PROGRAM(ComputeTriangleLists, (NNAccel, record), (1,1,1)) {
-  int l0ID = DispatchThreadID.x;
-  if (l0ID >= record.numL0Clusters) return;
-  int numPrims = record.numPrims;
-
-  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t primID = l0ID * BRANCHING_FACTOR + i;
-    if (primID >= numPrims) break;
-    uint32_t primAddr = uint32_t(gprt::load<uint64_t>(record.ids, primID));
-    // load unsorted address
-    int3 tri = gprt::load<int3>(record.triangles, primAddr);
-    float3 a = gprt::load<float3>(record.points, tri.x);
-    float3 b = gprt::load<float3>(record.points, tri.y);
-    float3 c = gprt::load<float3>(record.points, tri.z);
-    gprt::store<float3>(record.triangleLists, primID * 3 + 0, a);
-    gprt::store<float3>(record.triangleLists, primID * 3 + 1, b);
-    gprt::store<float3>(record.triangleLists, primID * 3 + 2, c);
-  }
-
-}
-
-int getNumNodesInLevel(int level, int numPrimitives) {
-  // For level -1, the number of "nodes" is just the number of primitives
-  int numNodes = numPrimitives;
-  // When level is 0 or higher, we repeatedly divide the number of primitives per
-  // node, rounding up. 
-  for (int i = 0; i < (level + 1); ++i) {
-    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-  }
-  return numNodes;
-}
-
-/**
- * @brief Returns the number of primitives in a given node in our "complete" tree 
- * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
- * @param index What node are we asking about relative to the given level?
- * @param numPrimitives How many primitives in total are there in the tree?
- */
-int getPrimsInNode(
-  int level,   
-  int index,    
-  int numPrimitives
-) {
-  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
-  // Theoretical maximum primitives in the level
-  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
-  // Account for when primitive counts don't exactly match a multiple of the branching factor
-  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCenters, (NNAccel, record), (1,1,1)) {
-  int lpID = DispatchThreadID.x;
-  if (lpID >= record.numPrims) return;
-
-  // Get address from sorted codes
-  uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.ids, lpID)); 
-  uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
-  float3 a, b, c;
-  a = gprt::load<float3>(record.points, tri.x);
-  if (isnan(a.x)) return;
-  b = gprt::load<float3>(record.points, tri.y);
-  c = gprt::load<float3>(record.points, tri.z);
-
-  // while here, store approximate bounding ball
-  float4 s = makeMinimumBoundingSphere(a,b,c);
-  gprt::store<float4>(record.bballs, lpID, s);
-
-  // Accumulate vertices for centroids
-  uint32_t l0ID = lpID / BRANCHING_FACTOR;
-  uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
-  gprt::atomicAdd32f(record.l0centers, l0ID, (a + b + c) / (3 * ppl0));
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeOBBCenters, (NNAccel, record), (1,1,1)) {
-  int NID = DispatchThreadID.x;
-  int numClusters = getNumNodesInLevel(pc.iteration, pc.numPrims);
-  if (NID >= numClusters) return;
-  int total = 0;
-  float3 nCenter = float3(0.f, 0.f, 0.f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t MID = NID * BRANCHING_FACTOR + i;
-    uint32_t pplM = getPrimsInNode(pc.iteration - 1, MID, pc.numPrims);
-    float3 mCenter = gprt::load<float3>(pc.mcenters, MID);
-    nCenter += mCenter * pplM;
-    total += pplM;
-  }
-  gprt::store<float3>(pc.ncenters, NID, nCenter / total);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) {
-  int lpID = DispatchThreadID.x;
-  if (lpID >= record.numPrims) return;
-
-  // Get address from sorted codes
-  uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.ids, lpID)); 
-  uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
-  float3 a, b, c;
-  a = gprt::load<float3>(record.points, tri.x);
-  if (isnan(a.x)) return;
-  b = gprt::load<float3>(record.points, tri.y);
-  c = gprt::load<float3>(record.points, tri.z);
-
-  // Compute outer products for covariances
-  uint32_t l0ID = lpID / BRANCHING_FACTOR;
-  float3 l0center = gprt::load<float3>(record.l0centers, l0ID);
-  float3x3 l0partialcovar = outer2(a - l0center) + outer2(b - l0center) + outer2(c - l0center);
-  uint32_t ppl0 = getPrimsInNode(0, l0ID, record.numPrims);
-  gprt::atomicAdd32f(record.l0obbs, l0ID, l0partialcovar / (3 * ppl0));
-}
-
-// Using law of total covariance: https://en.wikipedia.org/wiki/Law_of_total_covariance
-GPRT_COMPUTE_PROGRAM(ComputeOBBCovariances, (NNAccel, record), (1,1,1)) {
-  int NID = DispatchThreadID.x;
-  int numNClusters = getNumNodesInLevel(pc.iteration, pc.numPrims);
-  int numMClusters = getNumNodesInLevel(pc.iteration-1, pc.numPrims);
-  if (NID >= numNClusters) return;
-  // Compute expected value of combined partial covariances
-  // Also load average points and compute average of those
-  int totalPrims = 0;
-  int totalM = 0;
-  float3 mAvgCenter = float3(0,0,0);
-  float3 mCenters[BRANCHING_FACTOR];
-  float3x3 nCovarianceLH = float3x3(0,0,0,0,0,0,0,0,0);
-  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
-    int MID = NID * BRANCHING_FACTOR + i;
-    if (MID >= numMClusters) break;
-    int ppM = getPrimsInNode(pc.iteration-1, MID, pc.numPrims);
-    float3x3 mCovariance = gprt::load<float3x3>(pc.mobbs, MID);
-    mCenters[i] = gprt::load<float3>(pc.mcenters, MID);
-    mAvgCenter += mCenters[i];
-    nCovarianceLH += mCovariance * ppM;
-    totalPrims += ppM;
-    totalM += 1;
-  }
-  nCovarianceLH /= totalPrims;
-  mAvgCenter /= totalM;
-  // Compute covariance over partial averages
-  float3x3 nCovarianceRH = float3x3(0,0,0,0,0,0,0,0,0);
-  for (int i = 0; i < totalM; ++i)
-    nCovarianceRH += outer2(mCenters[i] - mAvgCenter);
-  nCovarianceRH /= totalM;
-  // Law of total covariance
-  float3x3 nCovariance = nCovarianceLH + nCovarianceRH;
-  gprt::store<float3x3>(pc.nobbs, NID, nCovariance);
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeOBBAngles, (NNAccel, record), (1,1,1)) {
-  int NID = DispatchThreadID.x;
-  int numNClusters = getNumNodesInLevel(pc.iteration, pc.numPrims);
-  if (NID >= numNClusters) return;
-  float3x3 covariance = gprt::load<float3x3>(pc.nobbs, NID);
-  float3 obbEul = mat3_to_eul(symmetric_eigenanalysis(covariance));
-  gprt::store<float3>(pc.nobbs, NID * 3 + 0,  float3(1e38f, 1e38f, 1e38f));
-  gprt::store<float3>(pc.nobbs, NID * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
-  gprt::store<float3>(pc.nobbs, NID * 3 + 2, obbEul);
-}
-
-// Launch this BRANCHING_FACTOR times. Helps reduce atomic pressure.
-GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
-  int l0ID = DispatchThreadID.x;
-  int lpID = l0ID * BRANCHING_FACTOR + pc.iteration; 
-  if (lpID >= record.numPrims) return;
-
-  // Get address from sorted codes
-  uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.ids, lpID)); 
-  uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
-  float3 a, b, c;
-  a = gprt::load<float3>(record.points, tri.x);
-  if (isnan(a.x)) return;
-  b = gprt::load<float3>(record.points, tri.y);
-  c = gprt::load<float3>(record.points, tri.z);
-
-  // uint32_t l0ID = lpID / BRANCHING_FACTOR;
-  uint32_t l1ID = l0ID / BRANCHING_FACTOR;
-  uint32_t l2ID = l1ID / BRANCHING_FACTOR;
-  uint32_t l3ID = l2ID / BRANCHING_FACTOR;
-  uint32_t l4ID = l3ID / BRANCHING_FACTOR;
-  uint32_t l5ID = l4ID / BRANCHING_FACTOR;
-  uint32_t l6ID = l5ID / BRANCHING_FACTOR;
-
-  // load rotations  
-  float3 l0Eul = gprt::load<float3>(record.l0obbs, l0ID * 3 + 2);
-  float3x3 l0Rot = eul_to_mat3(l0Eul);
-
-  float3 l1Eul = gprt::load<float3>(record.l1obbs, l1ID * 3 + 2);
-  float3x3 l1Rot = eul_to_mat3(l1Eul);
-  
-  float3 l2Eul = gprt::load<float3>(record.l2obbs, l2ID * 3 + 2);
-  float3x3 l2Rot = eul_to_mat3(l2Eul);
-  
-  float3 l3Eul = gprt::load<float3>(record.l3obbs, l3ID * 3 + 2);
-  float3x3 l3Rot = eul_to_mat3(l3Eul);
-
-  float3 l4Eul = gprt::load<float3>(record.l4obbs, l4ID * 3 + 2);
-  float3x3 l4Rot = eul_to_mat3(l4Eul);
-
-  float3 l5Eul = gprt::load<float3>(record.l5obbs, l5ID * 3 + 2);
-  float3x3 l5Rot = eul_to_mat3(l5Eul);
-
-  float3 l6Eul = gprt::load<float3>(record.l6obbs, l6ID * 3 + 2);
-  float3x3 l6Rot = eul_to_mat3(l6Eul);
-
-  // Rotate vertices
-  float3 l0A = mul(l0Rot, a); float3 l0B = mul(l0Rot, b); float3 l0C = mul(l0Rot, c);
-  float3 l0PMin = min(min(l0A, l0B), l0C); float3 l0PMax = max(max(l0A, l0B), l0C);
-
-  float3 l1A = mul(l1Rot, a); float3 l1B = mul(l1Rot, b); float3 l1C = mul(l1Rot, c);
-  float3 l1PMin = min(min(l1A, l1B), l1C); float3 l1PMax = max(max(l1A, l1B), l1C);
-
-  float3 l2A = mul(l2Rot, a); float3 l2B = mul(l2Rot, b); float3 l2C = mul(l2Rot, c);
-  float3 l2PMin = min(min(l2A, l2B), l2C); float3 l2PMax = max(max(l2A, l2B), l2C);
-
-  float3 l3A = mul(l3Rot, a); float3 l3B = mul(l3Rot, b); float3 l3C = mul(l3Rot, c);
-  float3 l3PMin = min(min(l3A, l3B), l3C); float3 l3PMax = max(max(l3A, l3B), l3C);
-
-  float3 l4A = mul(l4Rot, a); float3 l4B = mul(l4Rot, b); float3 l4C = mul(l4Rot, c);
-  float3 l4PMin = min(min(l4A, l4B), l4C); float3 l4PMax = max(max(l4A, l4B), l4C);
-
-  float3 l5A = mul(l5Rot, a); float3 l5B = mul(l5Rot, b); float3 l5C = mul(l5Rot, c);
-  float3 l5PMin = min(min(l5A, l5B), l5C); float3 l5PMax = max(max(l5A, l5B), l5C);
-
-  float3 l6A = mul(l6Rot, a); float3 l6B = mul(l6Rot, b); float3 l6C = mul(l6Rot, c);
-  float3 l6PMin = min(min(l6A, l6B), l6C); float3 l6PMax = max(max(l6A, l6B), l6C);
-
-  // Atomically expand OBB bounds. Note, interlocked compare and exchange only 
-  // occurs when given value would change the previously known result. 
-  gprt::atomicMin32f(record.l0obbs, l0ID * 3 + 0, l0PMin);
-  gprt::atomicMax32f(record.l0obbs, l0ID * 3 + 1, l0PMax);
-  
-  gprt::atomicMin32f(record.l1obbs, l1ID * 3 + 0, l1PMin);
-  gprt::atomicMax32f(record.l1obbs, l1ID * 3 + 1, l1PMax);
-  
-  gprt::atomicMin32f(record.l2obbs, l2ID * 3 + 0, l2PMin);
-  gprt::atomicMax32f(record.l2obbs, l2ID * 3 + 1, l2PMax);
-  
-  gprt::atomicMin32f(record.l3obbs, l3ID * 3 + 0, l3PMin);
-  gprt::atomicMax32f(record.l3obbs, l3ID * 3 + 1, l3PMax);
-  
-  gprt::atomicMin32f(record.l4obbs, l4ID * 3 + 0, l4PMin);
-  gprt::atomicMax32f(record.l4obbs, l4ID * 3 + 1, l4PMax);
-
-  gprt::atomicMin32f(record.l5obbs, l5ID * 3 + 0, l5PMin);
-  gprt::atomicMax32f(record.l5obbs, l5ID * 3 + 1, l5PMax);
-
-  gprt::atomicMin32f(record.l6obbs, l6ID * 3 + 0, l6PMin);
-  gprt::atomicMax32f(record.l6obbs, l6ID * 3 + 1, l6PMax);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputePointHilbertCodes, (NNAccel, record), (1, 1, 1)) {
@@ -503,41 +282,24 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeMortonCodes, (NNAccel, record), (1, 1, 1)) {
   // gprt::store<uint64_t>(record.ids, primID, primID);
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleHilbertCodes, (NNAccel, record), (1, 1, 1)) {
-  // int primID = DispatchThreadID.x;
-  // if (primID >= record.numPrims) return;
+GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (1,1,1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numPrims) return;
 
-  // uint3 tri = gprt::load<uint3>(record.triangles, primID);
-  // float3 p1 = gprt::load<float3>(record.points, tri.x);
-  // if (isnan(p1.x)) {
-  //   gprt::store<uint>(record.codes, primID, -1);
-  //   return;
-  // }
-  // float3 p2 = gprt::load<float3>(record.points, tri.y);
-  // float3 p3 = gprt::load<float3>(record.points, tri.z);
-  // float3 c = (p1 + p2 + p3) / 3.f;
-  // float3 d = float3(
-  //   distance(c, p1),
-  //   distance(c, p2),
-  //   distance(c, p3)
-  // );
-  // float radius = min(min(d.x, d.y), d.z);
+  uint3 tri = gprt::load<uint3>(record.triangles, primID);
+  float3 p1, p2, p3;
+  p1 = gprt::load<float3>(record.points, tri.x);
+  if (isnan(p1.x)) return;
+  p2 = gprt::load<float3>(record.points, tri.y);
+  p3 = gprt::load<float3>(record.points, tri.z);
+  float3 c = (p1 + p2 + p3) / 3.f;
 
-  // float3 aabbMin = gprt::load<float3>(record.aabb, 0);
-  // float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+  float3 aabbMin = min(p1, min(p2, p3));
+  float3 aabbMax = max(p1, max(p2, p3));
 
-  // c = (c - aabbMin) / (aabbMax - aabbMin);
-
-  // uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
-  // uint64_t primitive = uint64_t(primID) | (uint64_t(asuint(radius)) << 32ull);
-
-  // if (primID == 0) {
-  //   float3 test = hilbert64_decode3D(code);
-  //   printf("Original: %f %f %f, quantized %f %f %f\n", c.x, c.y, c.z, test.x, test.y, test.z);
-  // }
-  
-  // gprt::store<uint64_t>(record.codes, primID, code);
-  // gprt::store<uint64_t>(record.ids, primID, primitive);
+  // Compute world bounding box
+  gprt::atomicMin32f(record.aabb, 0, aabbMin);
+  gprt::atomicMax32f(record.aabb, 1, aabbMax);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleCodes, (NNAccel, record), (1, 1, 1)) {
@@ -553,91 +315,192 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleCodes, (NNAccel, record), (1, 1, 1)) {
   float3 p2 = gprt::load<float3>(record.points, tri.y);
   float3 p3 = gprt::load<float3>(record.points, tri.z);
   float3 c = (p1 + p2 + p3) / 3.f;
-
-  float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
-  covariance += outer2(p1-c);
-  covariance += outer2(p2-c);
-  covariance += outer2(p3-c);
-  covariance /= 3.f;
-  float3 eul = mat3_to_eul(symmetric_eigenanalysis(covariance));
   
-  float4 aabbMin = gprt::load<float4>(record.aabb, 0);
-  float4 aabbMax = gprt::load<float4>(record.aabb, 1);
-  eul = ((eul + radians(180)) / radians(360));
-  c = (c - aabbMin.xyz) / (aabbMax.xyz - aabbMin.xyz);
+  // Transform triangle center into 0-1 range
+  float3 aabbMin = gprt::load<float3>(record.aabb, 0);
+  float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+  c = (c - aabbMin) / (aabbMax - aabbMin);
 
-  // uint32_t posCode = hilbert_encode3D(c.x, c.y, c.z);
-  // uint32_t eulCode = posCode; //hilbert_encode3D(eul.x, eul.y, eul.z);
-
-  // uint64_t code = 0;
-  // for (int i = 0; i < 64; ++i) {
-  //   uint64_t bit = 0;
-  //   if ((i%2) == 0) bit = ((posCode >> (i/2)) & 1);
-  //   else            bit = ((eulCode >> (i/2)) & 1);
-  //   code |= (bit << uint64_t(i));
-  // }
   uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
-
   gprt::store<uint64_t>(record.codes, primID, code);
   gprt::store<uint64_t>(record.ids, primID, primID);
-
-
-  // uint64_t bball = morton64_encode3D(qs.x, qs.y, qs.z); 
-  // gprt::store<uint64_t>(record.bballs, primID, bball);
-  //(asuint(s.w) | (morton_encode3D(qs.x, qs.y, qs.z) << 32ull));
-
-  // float4 qs = (s - aabbMin) / (aabbMax - aabbMin);
-  // uint64_t bball = morton64_encode4D(qs.x, qs.y, qs.z, qs.w);
-
-
-  // if (primID == 0) {
-  //   float4 ball = morton64_decode4D(bball);
-  //   ball = (ball * (aabbMax - aabbMin)) + aabbMin;
-  //   printf("min and max sphere scales: %f %f\n", aabbMin.w, aabbMax.w);
-
-  //   printf("triangle (%f %f %f)\n", p1.x, p1.y, p1.z);
-  //   printf("triangle (%f %f %f)\n", p2.x, p2.y, p2.z);
-  //   printf("triangle (%f %f %f)\n", p3.x, p3.y, p3.z);
-  //   printf("sphere (%f %f %f : %f)\n", s.x, s.y, s.z, s.w);
-  //   printf("decoded sphere (%f %f %f : %f)\n", ball.x, ball.y, ball.z, ball.w);
-  // }
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeTriangleMortonCodes, (NNAccel, record), (1, 1, 1)) {
-  // int primID = DispatchThreadID.x;
-  // if (primID >= record.numPrims) return;
+GPRT_COMPUTE_PROGRAM(ExpandTriangles, (NNAccel, record), (1,1,1)) {
+  int l0ID = DispatchThreadID.x;
+  if (l0ID >= record.numL0Clusters) return;
+  int numPrims = record.numPrims;
 
-  // uint3 tri = gprt::load<uint3>(record.triangles, primID);
-  // float3 p1 = gprt::load<float3>(record.points, tri.x);
-  // if (isnan(p1.x)) {
-  //   gprt::store<uint>(record.codes, primID, -1);
-  //   return;
-  // }
-  // float3 p2 = gprt::load<float3>(record.points, tri.y);
-  // float3 p3 = gprt::load<float3>(record.points, tri.z);
-  // float3 c = (p1 + p2 + p3) / 3.f;
-  // float3 d = float3(
-  //   distance(c, p1),
-  //   distance(c, p2),
-  //   distance(c, p3)
-  // );
-  // float radius = min(min(d.x, d.y), d.z);
+  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t primID = l0ID * BRANCHING_FACTOR + i;
+    if (primID >= numPrims) break;
+    uint32_t primAddr = uint32_t(gprt::load<uint64_t>(record.ids, primID));
+    // load unsorted address
+    int3 tri = gprt::load<int3>(record.triangles, primAddr);
+    float3 a = gprt::load<float3>(record.points, tri.x);
+    float3 b = gprt::load<float3>(record.points, tri.y);
+    float3 c = gprt::load<float3>(record.points, tri.z);
+    gprt::store<float3>(record.triangleLists, primID * 3 + 0, a);
+    gprt::store<float3>(record.triangleLists, primID * 3 + 1, b);
+    gprt::store<float3>(record.triangleLists, primID * 3 + 2, c);
+  }
+}
 
-  // float3 aabbMin = gprt::load<float3>(record.aabb, 0);
-  // float3 aabbMax = gprt::load<float3>(record.aabb, 1);
+GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.level, pc.numPrims);
+  if (NID >= numNClusters) return;
 
-  // c = (c - aabbMin) / (aabbMax - aabbMin);
+  float3 aabbMin =  float3(1e38f, 1e38f, 1e38f);
+  float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
+  float3 center = float3(0, 0, 0);
+  int total = 0;  
+  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    uint32_t primID = NID * BRANCHING_FACTOR + pid;
+    float3 a, b, c;
+    a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
+    if (isnan(a.x)) continue;
+    b = gprt::load<float3>(pc.triangles, primID * 3 + 1);
+    c = gprt::load<float3>(pc.triangles, primID * 3 + 2);
+    aabbMin = min(aabbMin, min(min(a, b), c));
+    aabbMax = max(aabbMax, max(max(a, b), c));
+    center += (a + b + c);
+    total += 3;
+  }
+  center /= total;
 
-  // uint64_t code = morton64_encode3D(c.x, c.y, c.z);
-  // uint64_t primitive = uint64_t(primID) | (uint64_t(asuint(radius)) << 32ull);
+  // Store AABB
+  gprt::store<float3>(pc.naabbs, NID * 2 + 0, aabbMin);
+  gprt::store<float3>(pc.naabbs, NID * 2 + 1, aabbMax);
 
-  // if (primID == 0) {
-  //   float3 test = morton64_decode3D(code);
-  //   printf("Original: %f %f %f, quantized %f %f %f\n", c.x, c.y, c.z, test.x, test.y, test.z);
-  // }
-  
-  // gprt::store<uint64_t>(record.codes, primID, code);
-  // gprt::store<uint64_t>(record.ids, primID, primitive);
+  // Store center of vertices
+  gprt::store<float3>(pc.ncenters, NID, center);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeAABBsAndCenters, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.level, pc.numPrims);
+  int numMClusters = getNumNodesInLevel(pc.level-1, pc.numPrims);
+  if (NID >= numNClusters) return;  
+  float3 nAabbMin = float3(1e38f, 1e38f, 1e38f); 
+  float3 nAabbMax = -float3(1e38f, 1e38f, 1e38f);
+  float3 nCenter = float3(0, 0, 0);
+  int total = 0;
+  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
+    uint32_t MID = BRANCHING_FACTOR * NID + i;
+    if (MID >= numMClusters) continue;
+    float3 mAabbMin = gprt::load<float3>(pc.maabbs, MID * 2 + 0);
+    float3 mAabbMax = gprt::load<float3>(pc.maabbs, MID * 2 + 1);
+    if (any(mAabbMax < mAabbMin)) continue; // invalid cluster
+    nAabbMin = min(mAabbMin, nAabbMin);
+    nAabbMax = max(mAabbMax, nAabbMax);
+    uint32_t pplM = getPrimsInNode(pc.level - 1, MID, pc.numPrims);
+    float3 mCenter = gprt::load<float3>(pc.mcenters, MID);
+    nCenter += mCenter * pplM;
+    total += pplM;
+  }
+  nCenter /= total;
+
+  // Store AABB
+  gprt::store<float3>(pc.naabbs, NID * 2 + 0, float3(nAabbMin));
+  gprt::store<float3>(pc.naabbs, NID * 2 + 1, float3(nAabbMax));
+
+  // Store center of vertices
+  gprt::store<float3>(pc.ncenters, NID, nCenter);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.level, pc.numPrims);
+  if (NID >= numNClusters) return;
+  float3 center = gprt::load<float3>(pc.ncenters, NID);
+  int total = 0;  
+  float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
+  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    uint32_t primID = NID * BRANCHING_FACTOR + pid;
+    float3 a, b, c;
+    a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
+    if (isnan(a.x)) continue;
+    b = gprt::load<float3>(pc.triangles, primID * 3 + 1);
+    c = gprt::load<float3>(pc.triangles, primID * 3 + 2);
+    covariance += outer2(a - center) + outer2(b - center) + outer2(c - center);
+    total = total + 3;
+  }
+  covariance /= total;
+
+  // Temporarily store covariance in OBB memory
+  gprt::store<float3x3>(pc.nobbs, NID, covariance); 
+}
+
+// Using law of total covariance: https://en.wikipedia.org/wiki/Law_of_total_covariance
+GPRT_COMPUTE_PROGRAM(ComputeOBBCovariances, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.level, pc.numPrims);
+  int numMClusters = getNumNodesInLevel(pc.level-1, pc.numPrims);
+  if (NID >= numNClusters) return;
+  // Compute expected value of combined partial covariances
+  // Also load average points and compute average of those
+  int totalPrims = 0;
+  int totalM = 0;
+  float3 mAvgCenter = float3(0,0,0);
+  float3 mCenters[BRANCHING_FACTOR];
+  float3x3 nCovarianceLH = float3x3(0,0,0,0,0,0,0,0,0);
+  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
+    int MID = NID * BRANCHING_FACTOR + i;
+    if (MID >= numMClusters) break;
+    int ppM = getPrimsInNode(pc.level-1, MID, pc.numPrims);
+    mCenters[i] = gprt::load<float3>(pc.mcenters, MID);
+    float3x3 mCovariance = gprt::load<float3x3>(pc.mobbs, MID);
+    mAvgCenter += mCenters[i];
+    nCovarianceLH += mCovariance * ppM;
+    totalPrims += ppM;
+    totalM += 1;
+  }
+  nCovarianceLH /= totalPrims;
+  mAvgCenter /= totalM;
+  // Compute covariance over partial averages
+  float3x3 nCovarianceRH = float3x3(0,0,0,0,0,0,0,0,0);
+  for (int i = 0; i < totalM; ++i)
+    nCovarianceRH += outer2(mCenters[i] - mAvgCenter);
+  nCovarianceRH /= totalM;
+  // Law of total covariance
+  float3x3 nCovariance = nCovarianceLH + nCovarianceRH;
+  gprt::store<float3x3>(pc.nobbs, NID, nCovariance);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeOBBAngles, (NNAccel, record), (1,1,1)) {
+  int NID = DispatchThreadID.x;
+  int numNClusters = getNumNodesInLevel(pc.level, pc.numPrims);
+  if (NID >= numNClusters) return;
+  float3x3 covariance = gprt::load<float3x3>(pc.nobbs, NID);
+  float3 obbEul = mat3_to_eul(symmetric_eigenanalysis(covariance));
+  gprt::store<float3>(pc.nobbs, NID * 3 + 0,  float3(1e38f, 1e38f, 1e38f));
+  gprt::store<float3>(pc.nobbs, NID * 3 + 1, -float3(1e38f, 1e38f, 1e38f));
+  gprt::store<float3>(pc.nobbs, NID * 3 + 2, obbEul);
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (1,1,1)) {
+  int primID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
+  if (primID >= pc.numPrims) return;
+
+  float3 a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
+  float3 b = gprt::load<float3>(pc.triangles, primID * 3 + 1);
+  float3 c = gprt::load<float3>(pc.triangles, primID * 3 + 2);
+  if (isnan(a.x)) return;
+
+  int parentID = getParentNode(pc.level, primID);
+  float3 eul = gprt::load<float3>(pc.nobbs, parentID * 3 + 2);
+  float3x3 rot = eul_to_mat3(eul);
+
+  // Rotate vertices into the OBB
+  float3 A = mul(rot, a); float3 B = mul(rot, b); float3 C = mul(rot, c);
+
+  // Get min and max corner of primitive in OBB's space
+  float3 primMin = min(min(A, B), C); float3 primMax = max(max(A, B), C);
+
+  // Atomically merge into our parent. 
+  gprt::atomicMin32f(pc.nobbs, parentID * 3 + 0, primMin);
+  gprt::atomicMax32f(pc.nobbs, parentID * 3 + 1, primMax);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputePointClusters, (NNAccel, record), (1,1,1)) {
@@ -704,51 +567,6 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeClusters, (NNAccel, record), (1,1,1)) {
 //   gprt::store<float3>(record.l0clusters, 2 * clusterID + 0, float3(clusterAabbMin));
 //   gprt::store<float3>(record.l0clusters, 2 * clusterID + 1, float3(clusterAabbMax));
 // }
-
-GPRT_COMPUTE_PROGRAM(ComputeTriangleLeaves, (NNAccel, record), (1,1,1)) {
-  int l0ClusterID = DispatchThreadID.x;
-  if (l0ClusterID >= record.numL0Clusters) return;
-
-  float3 aabbMin =  float3(1e38f, 1e38f, 1e38f);
-  float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
-  
-  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-    uint32_t primID = l0ClusterID * BRANCHING_FACTOR + pid;
-    uint32_t primitiveAddress = uint32_t(gprt::load<uint64_t>(record.ids, primID)); 
-    uint3 tri = gprt::load<uint3>(record.triangles, primitiveAddress);
-    float3 a, b, c;
-    a = gprt::load<float3>(record.points, tri.x);
-    if (isnan(a.x)) continue;
-    b = gprt::load<float3>(record.points, tri.y);
-    c = gprt::load<float3>(record.points, tri.z);
-    aabbMin = min(aabbMin, min(min(a, b), c));
-    aabbMax = max(aabbMax, max(max(a, b), c));
-  }
-
-  gprt::store<float3>(record.l0aabbs, l0ClusterID * 2 + 0, aabbMin);
-  gprt::store<float3>(record.l0aabbs, l0ClusterID * 2 + 1, aabbMax);
-}
-
-#define N_POINTS_PER_CLUSTER BRANCHING_FACTOR * 8
-GPRT_COMPUTE_PROGRAM(ComputeAABBs, (NNAccel, record), (1,1,1)) {
-  int NID = DispatchThreadID.x;
-  int numNClusters = getNumNodesInLevel(pc.iteration, pc.numPrims);
-  int numMClusters = getNumNodesInLevel(pc.iteration-1, pc.numPrims);
-  if (NID >= numNClusters) return;  
-  float3 nAabbMin = float3(1e38f, 1e38f, 1e38f); 
-  float3 nAabbMax = -float3(1e38f, 1e38f, 1e38f);
-  for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
-    uint32_t MID = BRANCHING_FACTOR * NID + i;
-    if (MID >= numMClusters) continue;
-    float3 mAabbMin = gprt::load<float3>(pc.maabbs, MID * 2 + 0);
-    float3 mAabbMax = gprt::load<float3>(pc.maabbs, MID * 2 + 1);
-    if (any(mAabbMax < mAabbMin)) continue; // invalid cluster
-    nAabbMin = min(mAabbMin, nAabbMin);
-    nAabbMax = max(mAabbMax, nAabbMax);
-  }
-  gprt::store<float3>(pc.naabbs, 2 * NID + 0, float3(nAabbMin));
-  gprt::store<float3>(pc.naabbs, 2 * NID + 1, float3(nAabbMax));
-}
 
 uint clz(uint x) {
   if (firstbithigh(x) == -1) return 32;

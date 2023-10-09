@@ -967,10 +967,7 @@ float3x3 mat3_from_quat(float4 q) {
   return m;
 }
 
-void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
-  float4 rootAabbMin = gprt::load<float4>(record.aabb, 0);
-  float4 rootAabbMax = gprt::load<float4>(record.aabb, 1);
-  
+void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {  
   payload.closestDistance = tmax;
 
   int numL6Clusters = record.numL6Clusters;

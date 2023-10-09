@@ -138,14 +138,14 @@ namespace gprt{
         alignas(16) gprt::Buffer l5aabbs;
         alignas(16) gprt::Buffer l6aabbs;
 
-        // For OBBs, buffers of center points.
-        alignas(16) gprt::Buffer l0centers;
-        alignas(16) gprt::Buffer l1centers;
-        alignas(16) gprt::Buffer l2centers;
-        alignas(16) gprt::Buffer l3centers;
-        alignas(16) gprt::Buffer l4centers;
-        alignas(16) gprt::Buffer l5centers;
-        alignas(16) gprt::Buffer l6centers;
+        // // For OBBs, buffers of center points.
+        // alignas(16) gprt::Buffer l0centers;
+        // alignas(16) gprt::Buffer l1centers;
+        // alignas(16) gprt::Buffer l2centers;
+        // alignas(16) gprt::Buffer l3centers;
+        // alignas(16) gprt::Buffer l4centers;
+        // alignas(16) gprt::Buffer l5centers;
+        // alignas(16) gprt::Buffer l6centers;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
@@ -193,7 +193,9 @@ namespace gprt{
     struct NNConstants {
         // An internal iteration parameter for construction
         alignas(4) uint32_t iteration;
+        alignas(4) uint32_t level;
         alignas(4) uint32_t numPrims;
+        alignas(16) gprt::Buffer triangles;
         alignas(16) gprt::Buffer ncenters; // level n
         alignas(16) gprt::Buffer mcenters; // level n-1
         alignas(16) gprt::Buffer nobbs; // level n
