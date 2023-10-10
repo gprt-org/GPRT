@@ -196,11 +196,12 @@ namespace gprt{
         alignas(4) uint32_t level;
         alignas(4) uint32_t numPrims;
         alignas(16) gprt::Buffer triangles;
-        alignas(16) gprt::Buffer ncenters; // level n
-        alignas(16) gprt::Buffer mcenters; // level n-1
-        alignas(16) gprt::Buffer nobbs; // level n
-        alignas(16) gprt::Buffer mobbs; // level n-1
-        alignas(16) gprt::Buffer naabbs; // level n
-        alignas(16) gprt::Buffer maabbs; // level n-1
+        alignas(16) gprt::Buffer points;
+        alignas(16) gprt::Buffer indices;
+
+        alignas(16) gprt::Buffer buffer1;
+        alignas(16) gprt::Buffer buffer2;
+        alignas(16) gprt::Buffer buffer3;
+        alignas(16) gprt::Buffer buffer4;
     };
 };
