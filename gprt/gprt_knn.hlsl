@@ -344,6 +344,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)
   int total = 0;  
   for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
     uint32_t primID = NID * BRANCHING_FACTOR + pid;
+    if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
     if (isnan(a.x)) continue;
@@ -405,6 +406,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (32,1,1))
   float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
   for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
     uint32_t primID = NID * BRANCHING_FACTOR + pid;
+    if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
     if (isnan(a.x)) continue;
@@ -471,6 +473,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   int N0ID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
   if (N0ID >= record.numL0Clusters) return;
 
+  int numVerts = 0;
   float3 v[BRANCHING_FACTOR * 3];
   for (int i = 0; i < BRANCHING_FACTOR; ++i) {
     int primID = N0ID * BRANCHING_FACTOR + i;
@@ -479,6 +482,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     v[i * 3 + 0] = gprt::load<float3>(pc.triangles, primID * 3 + 0);
     v[i * 3 + 1] = gprt::load<float3>(pc.triangles, primID * 3 + 1);
     v[i * 3 + 2] = gprt::load<float3>(pc.triangles, primID * 3 + 2);
+    numVerts += 3;
   }
 
   for (int level = 0; level < 7; ++level) {  
@@ -497,7 +501,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     float3 obbMin =  float3(1e38f, 1e38f, 1e38f);
     float3 obbMax = -float3(1e38f, 1e38f, 1e38f);
     for (int i = 0; i < BRANCHING_FACTOR * 3; ++i) {
-      if (i >= pc.numPrims * 3) continue;
+      if (i >= numVerts) break;
       // Rotate leaf vertices into the leaf OBB
       float3 V = mul(obbRot, v[i]);
       obbMin = min(obbMin, V);
