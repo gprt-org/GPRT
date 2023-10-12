@@ -10,6 +10,11 @@
 // relative to the number of primitives. 
 #define BRANCHING_FACTOR 8
 
+// 1 prim per leaf achieves really good culling, but it takes a lot of memory. 
+// It shifts the bottleneck into the nodes, but overall performance is best when 
+// the branching factor and prims per leaf match.
+#define PRIMS_PER_LEAF 8
+
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
 // Edit edit: Downward pruning seems to fall apart when nodes are quantized. The reason 
@@ -36,7 +41,7 @@
 //   For untruncated queries, the ultimate bottleneck is when tree traversal fails and many prims 
 //   are all approximately the same distance. There, its better to have an accurate queue for culling. 
 //   However, I suspect the issue with culling has more to do with using AABBs over something tigher fitting
-#define ENABLE_QUEUE_QUANTIZATION
+// #define ENABLE_QUEUE_QUANTIZATION
 
 
 // Enables oriented bounding boxes in an attempt to improve culling performance. 
@@ -45,9 +50,11 @@
 // issue seems to become more and more extreme as primitives are clustered together.
 // This mode uses a singular value decomposition to compute the orientation of a bounding box 
 // that best fits the underlying primitive distribution
-#define ENABLE_OBBS
+// #define ENABLE_OBBS
 
-#define ENABLE_AABBS
+// #define ENABLE_AABBS
+
+// #define ENABLE_6DOPS
 
 // Honestly I don't see much improvement by avoiding square roots. I don't think this is what the bottleneck is
 // at least on my problems... Just going to take square roots for simplicity...
@@ -138,14 +145,23 @@ namespace gprt{
         alignas(16) gprt::Buffer l5aabbs;
         alignas(16) gprt::Buffer l6aabbs;
 
-        // // For OBBs, buffers of center points.
-        // alignas(16) gprt::Buffer l0centers;
-        // alignas(16) gprt::Buffer l1centers;
-        // alignas(16) gprt::Buffer l2centers;
-        // alignas(16) gprt::Buffer l3centers;
-        // alignas(16) gprt::Buffer l4centers;
-        // alignas(16) gprt::Buffer l5centers;
-        // alignas(16) gprt::Buffer l6centers;
+        // min/max distances from centers of aabbs
+        alignas(16) gprt::Buffer l0shells;
+        alignas(16) gprt::Buffer l1shells;
+        alignas(16) gprt::Buffer l2shells;
+        alignas(16) gprt::Buffer l3shells;
+        alignas(16) gprt::Buffer l4shells;
+        alignas(16) gprt::Buffer l5shells;
+        alignas(16) gprt::Buffer l6shells;
+
+        // min/max distances from centers of aabbs
+        alignas(16) gprt::Buffer l0centers;
+        alignas(16) gprt::Buffer l1centers;
+        alignas(16) gprt::Buffer l2centers;
+        alignas(16) gprt::Buffer l3centers;
+        alignas(16) gprt::Buffer l4centers;
+        alignas(16) gprt::Buffer l5centers;
+        alignas(16) gprt::Buffer l6centers;
          
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
@@ -196,12 +212,12 @@ namespace gprt{
         alignas(4) uint32_t level;
         alignas(4) uint32_t numPrims;
         alignas(16) gprt::Buffer triangles;
-        alignas(16) gprt::Buffer points;
-        alignas(16) gprt::Buffer indices;
 
         alignas(16) gprt::Buffer buffer1;
         alignas(16) gprt::Buffer buffer2;
         alignas(16) gprt::Buffer buffer3;
         alignas(16) gprt::Buffer buffer4;
+        alignas(16) gprt::Buffer buffer5;
+        alignas(16) gprt::Buffer buffer6;
     };
 };

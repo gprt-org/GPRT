@@ -81,6 +81,9 @@
 #define _LDBL_RADIX      _DBL_RADIX              // exponent radix
 #define LDBL_TRUE_MIN    DBL_TRUE_MIN            // min positive value
 
+#define HLF_EPSILON      9.77e-04h               // smallest such that 1.0h+HLF_EPSILON != 1.0h
+#define HLF_MAX          65504.h                 // max value
+
 #define DECIMAL_DIG      DBL_DECIMAL_DIG
 
 #include "gprt_shared.h"

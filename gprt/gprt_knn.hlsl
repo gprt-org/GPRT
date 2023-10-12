@@ -105,10 +105,10 @@ bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points,
 
 int getNumNodesInLevel(int level, int numPrimitives) {
   // For level -1, the number of "nodes" is just the number of primitives
-  int numNodes = numPrimitives;
-  // When level is 0 or higher, we repeatedly divide the number of primitives per
+  int numNodes = (numPrimitives + (PRIMS_PER_LEAF - 1)) / PRIMS_PER_LEAF;
+  // When level is 1 or higher, we repeatedly divide the number of primitives per
   // node, rounding up. 
-  for (int i = 0; i < (level + 1); ++i) {
+  for (int i = 0; i < level; ++i) {
     numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
   }
   return numNodes;
@@ -116,7 +116,7 @@ int getNumNodesInLevel(int level, int numPrimitives) {
 
 /**
  * @brief Returns the number of primitives in a given node in our "complete" tree 
- * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
+ * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
  * @param index What node are we asking about relative to the given level?
  * @param numPrimitives How many primitives in total are there in the tree?
  */
@@ -126,26 +126,25 @@ int getPrimsInNode(
   int numPrimitives
 ) {
   int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
-  // Theoretical maximum primitives in the level
-  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
+  // Theoretical maximum primitives in a node at this level
+  int maxPrimsInLevel = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, level);
   // Account for when primitive counts don't exactly match a multiple of the branching factor
   return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
 }
 
 /**
  * @brief Returns the parent node ID for the given primitive and level 
- * @param level What level is the node in the tree? -1 refers to primitives per leaf, 0 is the first level, 1 is the second, etc
+ * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
  * @param index What primitive are we asking about?
  */
 int getParentNode(
   int level,   
-  int index
+  int primIndex
 ) {
-  // if the index is -1, then the parent index is just ourselves
-  int parentIndex = index;
-  // When level is 0 or higher, we repeatedly divide the number of primitives per
+  int parentIndex = primIndex / PRIMS_PER_LEAF;
+  // When level is 1 or higher, we repeatedly divide the number of primitives per
   // node to determine our parent index.
-  for (int i = 0; i < (level + 1); ++i) {
+  for (int i = 0; i < level; ++i) {
     parentIndex = parentIndex / BRANCHING_FACTOR;
   }
   return parentIndex;
@@ -286,12 +285,12 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleRootBounds, (NNAccel, record), (32,1,1)) {
   int primID = DispatchThreadID.x;
   if (primID >= pc.numPrims) return;
 
-  uint3 tri = gprt::load<uint3>(pc.indices, primID);
+  uint3 tri = gprt::load<uint3>(pc.buffer3, primID);
   float3 p1, p2, p3;
-  p1 = gprt::load<float3>(pc.points, tri.x);
+  p1 = gprt::load<float3>(pc.buffer4, tri.x);
   if (isnan(p1.x)) return;
-  p2 = gprt::load<float3>(pc.points, tri.y);
-  p3 = gprt::load<float3>(pc.points, tri.z);
+  p2 = gprt::load<float3>(pc.buffer4, tri.y);
+  p3 = gprt::load<float3>(pc.buffer4, tri.z);
   float3 c = (p1 + p2 + p3) / 3.f;
 
   // temporarily cache the center point here for computing codes later
@@ -324,13 +323,16 @@ GPRT_COMPUTE_PROGRAM(ExpandTriangles, (NNAccel, record), (32,1,1)) {
   if (primID >= pc.numPrims) return;
   uint32_t primAddr = uint32_t(gprt::load<uint64_t>(pc.buffer1, primID));
   // load unsorted address
-  int3 tri = gprt::load<int3>(pc.indices, primAddr);
-  float3 a = gprt::load<float3>(pc.points, tri.x);
-  float3 b = gprt::load<float3>(pc.points, tri.y);
-  float3 c = gprt::load<float3>(pc.points, tri.z);
+  int3 tri = gprt::load<int3>(pc.buffer3, primAddr);
+  float3 a = gprt::load<float3>(pc.buffer4, tri.x);
+  float3 b = gprt::load<float3>(pc.buffer4, tri.y);
+  float3 c = gprt::load<float3>(pc.buffer4, tri.z);
   gprt::store<float3>(pc.triangles, primID * 3 + 0, a);
   gprt::store<float3>(pc.triangles, primID * 3 + 1, b);
   gprt::store<float3>(pc.triangles, primID * 3 + 2, c);
+  
+  // also store a minimum bounding sphere for underestimates
+  gprt::store<float4>(pc.buffer2, primID, makeMinimumBoundingSphere(a, b, c));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)) {
@@ -342,8 +344,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)
   float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
   float3 center = float3(0, 0, 0);
   int total = 0;  
-  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-    uint32_t primID = NID * BRANCHING_FACTOR + pid;
+  for (uint32_t pid = 0; pid < PRIMS_PER_LEAF; ++pid) {
+    uint32_t primID = NID * PRIMS_PER_LEAF + pid;
     if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -363,6 +365,9 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)
 
   // Store center of vertices
   gprt::store<float3>(pc.buffer3, NID, center);
+
+  // Clear shell
+  gprt::store<float2>(pc.buffer4, NID, float2(1e38f, -1e38f));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeAABBsAndCenters, (NNAccel, record), (32,1,1)) {
@@ -395,6 +400,58 @@ GPRT_COMPUTE_PROGRAM(ComputeAABBsAndCenters, (NNAccel, record), (32,1,1)) {
 
   // Store center of vertices
   gprt::store<float3>(pc.buffer3, NID, nCenter);
+
+  // clear shell
+  gprt::store<float2>(pc.buffer5, NID, float2(1e38f, -1e38f));
+}
+
+GPRT_COMPUTE_PROGRAM(ComputeTriangleShells, (NNAccel, record), (32,1,1)) {
+  int N0ID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
+  if (N0ID >= record.numL0Clusters) return;
+
+  int numVerts = 0;
+  float3 v[PRIMS_PER_LEAF * 3];
+  for (int i = 0; i < PRIMS_PER_LEAF; ++i) {
+    int primID = N0ID * PRIMS_PER_LEAF + i;
+    if (primID >= pc.numPrims) continue;
+    // load triangles into registers
+    v[i * 3 + 0] = gprt::load<float3>(pc.triangles, primID * 3 + 0);
+    v[i * 3 + 1] = gprt::load<float3>(pc.triangles, primID * 3 + 1);
+    v[i * 3 + 2] = gprt::load<float3>(pc.triangles, primID * 3 + 2);
+    numVerts += 3;
+  }
+
+  for (int level = 0; level < 7; ++level) {
+    int parentID = getParentNode(level, N0ID * PRIMS_PER_LEAF);
+    gprt::Buffer aabbs; gprt::Buffer shells; 
+         if (level == 0) {aabbs = record.l0aabbs; shells = record.l0shells;}
+    else if (level == 1) {aabbs = record.l1aabbs; shells = record.l1shells;}
+    else if (level == 2) {aabbs = record.l2aabbs; shells = record.l2shells;}
+    else if (level == 3) {aabbs = record.l3aabbs; shells = record.l3shells;}
+    else if (level == 4) {aabbs = record.l4aabbs; shells = record.l4shells;}
+    else if (level == 5) {aabbs = record.l5aabbs; shells = record.l5shells;}
+    else if (level == 6) {aabbs = record.l6aabbs; shells = record.l6shells;}
+
+    float3 aabbMin = gprt::load<float3>(aabbs, parentID * 2 + 0);
+    float3 aabbMax = gprt::load<float3>(aabbs, parentID * 2 + 1);
+    float3 center = (aabbMin + aabbMax) * .5f;
+    float2 shellMinMax = float2(1e38f, -1e38f);
+    for (int i = 0; i < numVerts; ++i) {
+      // Compute distance from leaf vertices to aabb centers
+      float d = distance(center, v[i]);
+      shellMinMax.x = min(shellMinMax.x, d);
+      shellMinMax.y = max(shellMinMax.y, d);
+    }
+    if (level == 0) {
+      // Store shell bounds for current leaf node
+      gprt::store<float2>(shells, N0ID, shellMinMax);
+    }
+    else {
+      // Atomically merge into our parent. 
+      gprt::atomicMin32f(shells, parentID * 2 + 0, shellMinMax.x);
+      gprt::atomicMax32f(shells, parentID * 2 + 1, shellMinMax.y);
+    }
+  }
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (32,1,1)) {
@@ -404,8 +461,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (32,1,1))
   float3 center = gprt::load<float3>(pc.buffer3, NID);
   int total = 0;  
   float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
-  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-    uint32_t primID = NID * BRANCHING_FACTOR + pid;
+  for (uint32_t pid = 0; pid < PRIMS_PER_LEAF; ++pid) {
+    uint32_t primID = NID * PRIMS_PER_LEAF + pid;
     if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -474,9 +531,9 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   if (N0ID >= record.numL0Clusters) return;
 
   int numVerts = 0;
-  float3 v[BRANCHING_FACTOR * 3];
-  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
-    int primID = N0ID * BRANCHING_FACTOR + i;
+  float3 v[PRIMS_PER_LEAF * 3];
+  for (int i = 0; i < PRIMS_PER_LEAF; ++i) {
+    int primID = N0ID * PRIMS_PER_LEAF + i;
     if (primID >= pc.numPrims) continue;
     // load triangles into registers
     v[i * 3 + 0] = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -485,29 +542,27 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     numVerts += 3;
   }
 
-  for (int level = 0; level < 7; ++level) {  
-    int parentID = getParentNode(level, N0ID * BRANCHING_FACTOR);
+  for (int level = 0; level < 7; ++level) {
+    int parentID = getParentNode(level, N0ID * PRIMS_PER_LEAF);
     gprt::Buffer obbs;
-         if (level == 0) obbs = record.l0obbs;
-    else if (level == 1) obbs = record.l1obbs;
-    else if (level == 2) obbs = record.l2obbs;
-    else if (level == 3) obbs = record.l3obbs;
-    else if (level == 4) obbs = record.l4obbs;
-    else if (level == 5) obbs = record.l5obbs;
-    else if (level == 6) obbs = record.l6obbs;
+         if (level == 0) {obbs = record.l0obbs;}
+    else if (level == 1) {obbs = record.l1obbs;}
+    else if (level == 2) {obbs = record.l2obbs;}
+    else if (level == 3) {obbs = record.l3obbs;}
+    else if (level == 4) {obbs = record.l4obbs;}
+    else if (level == 5) {obbs = record.l5obbs;}
+    else if (level == 6) {obbs = record.l6obbs;}
 
     float3 obbEul = gprt::load<float3>(obbs, parentID * 3 + 2);
     float3x3 obbRot = eul_to_mat3(obbEul);
     float3 obbMin =  float3(1e38f, 1e38f, 1e38f);
     float3 obbMax = -float3(1e38f, 1e38f, 1e38f);
-    for (int i = 0; i < BRANCHING_FACTOR * 3; ++i) {
-      if (i >= numVerts) break;
+    for (int i = 0; i < numVerts; ++i) {
       // Rotate leaf vertices into the leaf OBB
       float3 V = mul(obbRot, v[i]);
       obbMin = min(obbMin, V);
       obbMax = max(obbMax, V);
     }
-
     if (level == 0) {
       // Store OBB bounds for current leaf node
       gprt::store<float3>(obbs, N0ID * 3 + 0, obbMin);
