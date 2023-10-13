@@ -330,9 +330,6 @@ GPRT_COMPUTE_PROGRAM(ExpandTriangles, (NNAccel, record), (32,1,1)) {
   gprt::store<float3>(pc.triangles, primID * 3 + 0, a);
   gprt::store<float3>(pc.triangles, primID * 3 + 1, b);
   gprt::store<float3>(pc.triangles, primID * 3 + 2, c);
-  
-  // also store a minimum bounding sphere for underestimates
-  gprt::store<float4>(pc.buffer2, primID, makeMinimumBoundingSphere(a, b, c));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)) {
@@ -365,9 +362,6 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)
 
   // Store center of vertices
   gprt::store<float3>(pc.buffer3, NID, center);
-
-  // Clear shell
-  gprt::store<float2>(pc.buffer4, NID, float2(1e38f, -1e38f));
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeAABBsAndCenters, (NNAccel, record), (32,1,1)) {
@@ -400,58 +394,6 @@ GPRT_COMPUTE_PROGRAM(ComputeAABBsAndCenters, (NNAccel, record), (32,1,1)) {
 
   // Store center of vertices
   gprt::store<float3>(pc.buffer3, NID, nCenter);
-
-  // clear shell
-  gprt::store<float2>(pc.buffer5, NID, float2(1e38f, -1e38f));
-}
-
-GPRT_COMPUTE_PROGRAM(ComputeTriangleShells, (NNAccel, record), (32,1,1)) {
-  int N0ID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
-  if (N0ID >= record.numL0Clusters) return;
-
-  int numVerts = 0;
-  float3 v[PRIMS_PER_LEAF * 3];
-  for (int i = 0; i < PRIMS_PER_LEAF; ++i) {
-    int primID = N0ID * PRIMS_PER_LEAF + i;
-    if (primID >= pc.numPrims) continue;
-    // load triangles into registers
-    v[i * 3 + 0] = gprt::load<float3>(pc.triangles, primID * 3 + 0);
-    v[i * 3 + 1] = gprt::load<float3>(pc.triangles, primID * 3 + 1);
-    v[i * 3 + 2] = gprt::load<float3>(pc.triangles, primID * 3 + 2);
-    numVerts += 3;
-  }
-
-  for (int level = 0; level < 7; ++level) {
-    int parentID = getParentNode(level, N0ID * PRIMS_PER_LEAF);
-    gprt::Buffer aabbs; gprt::Buffer shells; 
-         if (level == 0) {aabbs = record.l0aabbs; shells = record.l0shells;}
-    else if (level == 1) {aabbs = record.l1aabbs; shells = record.l1shells;}
-    else if (level == 2) {aabbs = record.l2aabbs; shells = record.l2shells;}
-    else if (level == 3) {aabbs = record.l3aabbs; shells = record.l3shells;}
-    else if (level == 4) {aabbs = record.l4aabbs; shells = record.l4shells;}
-    else if (level == 5) {aabbs = record.l5aabbs; shells = record.l5shells;}
-    else if (level == 6) {aabbs = record.l6aabbs; shells = record.l6shells;}
-
-    float3 aabbMin = gprt::load<float3>(aabbs, parentID * 2 + 0);
-    float3 aabbMax = gprt::load<float3>(aabbs, parentID * 2 + 1);
-    float3 center = (aabbMin + aabbMax) * .5f;
-    float2 shellMinMax = float2(1e38f, -1e38f);
-    for (int i = 0; i < numVerts; ++i) {
-      // Compute distance from leaf vertices to aabb centers
-      float d = distance(center, v[i]);
-      shellMinMax.x = min(shellMinMax.x, d);
-      shellMinMax.y = max(shellMinMax.y, d);
-    }
-    if (level == 0) {
-      // Store shell bounds for current leaf node
-      gprt::store<float2>(shells, N0ID, shellMinMax);
-    }
-    else {
-      // Atomically merge into our parent. 
-      gprt::atomicMin32f(shells, parentID * 2 + 0, shellMinMax.x);
-      gprt::atomicMax32f(shells, parentID * 2 + 1, shellMinMax.y);
-    }
-  }
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (32,1,1)) {

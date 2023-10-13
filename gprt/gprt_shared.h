@@ -118,9 +118,6 @@ namespace gprt{
         alignas(16) gprt::Buffer codes;
         alignas(16) gprt::Buffer ids;
 
-        // bounding balls for leaf-level primitive sorting / culling. 
-        alignas(16) gprt::Buffer bballs;
-
         // Buffer containing the global AABB. Pair of two floats
         alignas(16) gprt::Buffer aabb;        
 
@@ -144,25 +141,7 @@ namespace gprt{
         alignas(16) gprt::Buffer l4aabbs;
         alignas(16) gprt::Buffer l5aabbs;
         alignas(16) gprt::Buffer l6aabbs;
-
-        // min/max distances from centers of aabbs
-        alignas(16) gprt::Buffer l0shells;
-        alignas(16) gprt::Buffer l1shells;
-        alignas(16) gprt::Buffer l2shells;
-        alignas(16) gprt::Buffer l3shells;
-        alignas(16) gprt::Buffer l4shells;
-        alignas(16) gprt::Buffer l5shells;
-        alignas(16) gprt::Buffer l6shells;
-
-        // min/max distances from centers of aabbs
-        alignas(16) gprt::Buffer l0centers;
-        alignas(16) gprt::Buffer l1centers;
-        alignas(16) gprt::Buffer l2centers;
-        alignas(16) gprt::Buffer l3centers;
-        alignas(16) gprt::Buffer l4centers;
-        alignas(16) gprt::Buffer l5centers;
-        alignas(16) gprt::Buffer l6centers;
-         
+ 
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
         // byte   15   14    13    12    11 10 9 8   7  6  5  4  3  2  1  0

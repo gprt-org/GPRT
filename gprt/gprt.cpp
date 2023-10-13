@@ -4582,7 +4582,6 @@ struct Context {
     internalComputePrograms.insert({"ComputeOBBCovariances", new Compute(logicalDevice, module, "ComputeOBBCovariances", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeOBBAngles", new Compute(logicalDevice, module, "ComputeOBBAngles", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ComputeTriangleOBBBounds", new Compute(logicalDevice, module, "ComputeTriangleOBBBounds", sizeof(gprt::NNAccel))});    
-    internalComputePrograms.insert({"ComputeTriangleShells", new Compute(logicalDevice, module, "ComputeTriangleShells", sizeof(gprt::NNAccel))});    
     internalComputePrograms.insert({"ExpandTriangles", new Compute(logicalDevice, module, "ExpandTriangles", sizeof(gprt::NNAccel))});    
     
     // internalComputePrograms.insert({"ComputeAABBCodes", new Compute(logicalDevice, module, "ComputeAABBCodes", sizeof(gprt::NNAccel))});    
@@ -7491,8 +7490,6 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<uint64_t> ids;
   GPRTBufferOf<float3> aabb;
 
-  GPRTBufferOf<float4> bballs;
-
   GPRTBufferOf<float3> l0aabbs;
   GPRTBufferOf<float3> l1aabbs;
   GPRTBufferOf<float3> l2aabbs;
@@ -7508,15 +7505,6 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<float3> l4centers;
   GPRTBufferOf<float3> l5centers;
   GPRTBufferOf<float3> l6centers;
-
-  // Contain the minimum and maximum distances to vertices from the aabb centers.
-  GPRTBufferOf<float2> l0shells;
-  GPRTBufferOf<float2> l1shells;
-  GPRTBufferOf<float2> l2shells;
-  GPRTBufferOf<float2> l3shells;
-  GPRTBufferOf<float2> l4shells;
-  GPRTBufferOf<float2> l5shells;
-  GPRTBufferOf<float2> l6shells;
 
   GPRTBufferOf<float3> l0obbs;
   GPRTBufferOf<float3> l1obbs;
@@ -7563,7 +7551,6 @@ struct NNTriangleAccel : public Accel {
     // create these
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     ids = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    bballs = gprtDeviceBufferCreate<float4>((GPRTContext)context, nnAccelHandle.numPrims);
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
 
     // #ifdef ENABLE_OBBS
@@ -7575,6 +7562,7 @@ struct NNTriangleAccel : public Accel {
     l5obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL5Clusters);
     l6obbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numL6Clusters);
 
+    // can technically serve as bounding balls in the future if that's ever a helpful approximation
     l0centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL0Clusters);
     l1centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL1Clusters);
     l2centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL2Clusters);
@@ -7582,14 +7570,6 @@ struct NNTriangleAccel : public Accel {
     l4centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     l5centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL5Clusters);
     l6centers = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numL6Clusters);
-
-    l0shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL0Clusters);
-    l1shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL1Clusters);
-    l2shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL2Clusters);
-    l3shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL3Clusters);
-    l4shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL4Clusters);
-    l5shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL5Clusters);
-    l6shells = gprtDeviceBufferCreate<float2>((GPRTContext)context, nnAccelHandle.numL6Clusters);
 
     // #else
     l0aabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL0Clusters);
@@ -7619,7 +7599,6 @@ struct NNTriangleAccel : public Accel {
     
     nnAccelHandle.codes = gprtBufferGetHandle(codes);
     nnAccelHandle.ids = gprtBufferGetHandle(ids);
-    nnAccelHandle.bballs = gprtBufferGetHandle(bballs);
     nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
     nnAccelHandle.l0obbs = gprtBufferGetHandle(l0obbs);
     nnAccelHandle.l1obbs = gprtBufferGetHandle(l1obbs);
@@ -7636,22 +7615,6 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.l4aabbs = gprtBufferGetHandle(l4aabbs);
     nnAccelHandle.l5aabbs = gprtBufferGetHandle(l5aabbs);
     nnAccelHandle.l6aabbs = gprtBufferGetHandle(l6aabbs);
-
-    nnAccelHandle.l0shells = gprtBufferGetHandle(l0shells);
-    nnAccelHandle.l1shells = gprtBufferGetHandle(l1shells);
-    nnAccelHandle.l2shells = gprtBufferGetHandle(l2shells);
-    nnAccelHandle.l3shells = gprtBufferGetHandle(l3shells);
-    nnAccelHandle.l4shells = gprtBufferGetHandle(l4shells);
-    nnAccelHandle.l5shells = gprtBufferGetHandle(l5shells);
-    nnAccelHandle.l6shells = gprtBufferGetHandle(l6shells);
-
-    nnAccelHandle.l0centers = gprtBufferGetHandle(l0centers);
-    nnAccelHandle.l1centers = gprtBufferGetHandle(l1centers);
-    nnAccelHandle.l2centers = gprtBufferGetHandle(l2centers);
-    nnAccelHandle.l3centers = gprtBufferGetHandle(l3centers);
-    nnAccelHandle.l4centers = gprtBufferGetHandle(l4centers);
-    nnAccelHandle.l5centers = gprtBufferGetHandle(l5centers);
-    nnAccelHandle.l6centers = gprtBufferGetHandle(l6centers);
 
     // nnAccelHandle.lbvhMortonCodes = gprtBufferGetHandle(lbvhMortonCodes);
     // nnAccelHandle.lbvhIds = gprtBufferGetHandle(lbvhIds);
@@ -7761,14 +7724,12 @@ struct NNTriangleAccel : public Accel {
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], &nnAccelHandle);
-    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleShells"], &nnAccelHandle);    
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ExpandTriangles"], &nnAccelHandle);
 
     gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_COMPUTE);
 
     std::vector<uint32_t> nClusters = {nnAccelHandle.numL0Clusters, nnAccelHandle.numL1Clusters, nnAccelHandle.numL2Clusters, nnAccelHandle.numL3Clusters, nnAccelHandle.numL4Clusters, nnAccelHandle.numL5Clusters, nnAccelHandle.numL6Clusters};
     std::vector<GPRTBufferOf<linalg::aliases::float3>> centers = {l0centers, l1centers, l2centers, l3centers, l4centers, l5centers, l6centers};
-    std::vector<GPRTBufferOf<linalg::aliases::float2>> shells = {l0shells, l1shells, l2shells, l3shells, l4shells, l5shells, l6shells};
     std::vector<GPRTBufferOf<linalg::aliases::float3>> obbs = {l0obbs, l1obbs, l2obbs, l3obbs, l4obbs, l5obbs, l6obbs};
     std::vector<GPRTBufferOf<linalg::aliases::float3>> aabbs = {l0aabbs, l1aabbs, l2aabbs, l3aabbs, l4aabbs, l5aabbs, l6aabbs};
 
@@ -7836,7 +7797,6 @@ struct NNTriangleAccel : public Accel {
     float timeToExpandTriangles = 0.f;
     for (int i = 0; i < 100; ++i) {
       pc.buffer1 = gprtBufferGetHandle(ids);
-      pc.buffer2 = gprtBufferGetHandle(bballs);
       pc.buffer3 = nnAccelHandle.triangles;
       pc.buffer4 = nnAccelHandle.points;
       gprtBeginProfile((GPRTContext)context);
@@ -7852,7 +7812,6 @@ struct NNTriangleAccel : public Accel {
       pc.level = 0;
       pc.buffer1 = gprtBufferGetHandle(aabbs[0]);
       pc.buffer3 = gprtBufferGetHandle(centers[0]);
-      pc.buffer4 = gprtBufferGetHandle(shells[0]);
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"], (nClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
       computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
@@ -7862,7 +7821,6 @@ struct NNTriangleAccel : public Accel {
         pc.buffer1 = gprtBufferGetHandle(aabbs[lid]);
         pc.buffer4 = gprtBufferGetHandle(centers[lid-1]);
         pc.buffer3 = gprtBufferGetHandle(centers[lid]);
-        pc.buffer5 = gprtBufferGetHandle(shells[lid]);
         gprtBeginProfile((GPRTContext)context);
         gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBsAndCenters"], (nClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
@@ -7870,18 +7828,6 @@ struct NNTriangleAccel : public Accel {
     }
     computeAABBsAndCentersTime /= 100.f;
     std::cout<<"Time to build AABBs and Centers in ms: " << computeAABBsAndCentersTime << std::endl;
-
-    float computeShellsTime = 0.f;
-    for (int i = 0; i < 100; ++i) {
-      for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-        pc.iteration = pid;
-        gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleShells"], (nClusters[1] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-        computeShellsTime += gprtEndProfile((GPRTContext)context);
-      }
-    }
-    computeShellsTime /= 100.f;
-    std::cout<<"Time to build shells in ms: " << computeShellsTime << std::endl;
 
     // #ifdef ENABLE_OBBS
     uint32_t totalClusters = nnAccelHandle.numL0Clusters + 
@@ -7953,7 +7899,6 @@ struct NNTriangleAccel : public Accel {
       timeToSortCodeIDPairs +
       timeToExpandTriangles +
       computeAABBsAndCentersTime +
-      computeShellsTime +
       totalTime;
 
     std::cout<<"total build time " << totalOverallTime << std::endl;
@@ -8003,6 +7948,13 @@ struct NNTriangleAccel : public Accel {
     gprtBufferDestroy(codes);
     gprtBufferDestroy(ids);
     gprtBufferDestroy(aabb);
+    gprtBufferDestroy(l0centers);
+    gprtBufferDestroy(l1centers);
+    gprtBufferDestroy(l2centers);
+    gprtBufferDestroy(l3centers);
+    gprtBufferDestroy(l4centers);
+    gprtBufferDestroy(l5centers);
+    gprtBufferDestroy(l6centers);
     gprtBufferDestroy(l0obbs);
     gprtBufferDestroy(l1obbs);
     gprtBufferDestroy(l2obbs);
