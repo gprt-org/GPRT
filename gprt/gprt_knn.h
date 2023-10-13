@@ -971,6 +971,67 @@ float3x3 mat3_from_quat(float4 q) {
   return m;
 }
 
+
+struct Pair {
+  uint32_t _key : 16;
+  uint32_t _val : 16;
+  int key() {return _key;}
+  float value() {return float(asfloat16(uint16_t(_val)));}
+
+  static Pair Create(uint key, float value) {
+    Pair pair;
+    pair._key = uint16_t(key);
+    pair._val = asuint16(half(value));
+    return pair;
+  }
+};
+
+struct List {
+  Pair items[BRANCHING_FACTOR];
+  void clear() {
+    for (int i = 0; i < BRANCHING_FACTOR; ++i) {
+      items[i]._key = 65535;
+      items[i]._val = asuint16(65504.h);
+    }
+  };
+
+  void insert(Pair newItem) {
+    if (items[0].value() > newItem.value()) {
+      items[0] = newItem;
+      // [unroll]
+      for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+        if (items[i-1].value() >= items[i].value()) break;
+        Pair tmp = items[i-1]; items[i-1] = items[i]; items[i] = tmp;
+      }
+    }
+  }
+
+  static List Create(){
+    List list;
+    list.clear();
+    return list;
+  };
+
+  int key(int index) {
+    return items[BRANCHING_FACTOR - 1 - index].key();
+  };
+
+  float value(int index) {
+    return items[BRANCHING_FACTOR - 1 - index].value();
+  };
+};
+
+// void insertionSort(inout Pair list[BRANCHING_FACTOR]) {
+//   Pair item;
+//   int i, j;
+//   for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+//     item = list[i];
+//     for (j = i - 1; j >= 0 && list[j].key > item.key; j--)
+//       list[j + 1] = list[j];
+//     list[j + 1] = item;  
+//   }
+// };
+
 void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {  
   payload.closestDistance = tmax;
 
@@ -991,11 +1052,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
   int numPrims = record.numPrims;
 
   // Initialize active l6 list
-  uint32_t activeL6Clusters[BRANCHING_FACTOR];
-  // [unroll]
-  for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
-    activeL6Clusters[l6] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-  }
+  List activeL6Clusters = List::Create();
 
   // Insert into active l6 list by distance far to near
   for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
@@ -1023,20 +1080,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       if (l6MinDist > payload.closestDistance) continue;
     }
 
-    // Insertion sort
-    activeL6Clusters[0] = uint32_t(l6 << 16) | uint32_t(asuint16(half(l6MinDist)));
-    // [unroll]
-    for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-      if (asfloat16(uint16_t(activeL6Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL6Clusters[i] & 65535))) break;
-      uint32_t tmp = activeL6Clusters[i-1]; activeL6Clusters[i-1] = activeL6Clusters[i]; activeL6Clusters[i] = tmp;
-    }
+    activeL6Clusters.insert(Pair::Create(l6, l6MinDist));
   }
 
   // Traverse clusters near to far
   for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
-    uint32_t l6Pair = activeL6Clusters[BRANCHING_FACTOR - 1 - l6];
-    float l6MinDist = float(asfloat16(uint16_t(l6Pair & 65535)));
-    int l6Index = l6Pair >> 16;
+    int l6Index = activeL6Clusters.key(l6);
+    float l6MinDist = activeL6Clusters.value(l6);
     
     // break out when all superclusters from here on are too far
     if (l6Index >= BRANCHING_FACTOR) break;
@@ -1056,11 +1106,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
     int l6ClusterID = l6Index;
 
     // Initialize active l5 list
-    uint32_t activeL5Clusters[BRANCHING_FACTOR];
-    // [unroll]
-    for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
-      activeL5Clusters[l5] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-    }
+    List activeL5Clusters = List::Create();
 
     // Insert into active l5 list by distance far to near
     for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
@@ -1088,20 +1134,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         if (l5MinDist > payload.closestDistance) continue;
       }
 
-      // Insertion sort
-      activeL5Clusters[0] = uint32_t(l5 << 16) | uint32_t(asuint16(half(l5MinDist)));
-      // [unroll]
-      for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-        if (asfloat16(uint16_t(activeL5Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL5Clusters[i] & 65535))) break;
-        uint32_t tmp = activeL5Clusters[i-1]; activeL5Clusters[i-1] = activeL5Clusters[i]; activeL5Clusters[i] = tmp;
-      }
+      activeL5Clusters.insert(Pair::Create(l5, l5MinDist));
     }
 
     // Traverse clusters near to far
     for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
-      uint32_t l5Pair = activeL5Clusters[BRANCHING_FACTOR - 1 - l5];
-      float l5MinDist = float(asfloat16(uint16_t(l5Pair & 65535)));
-      int l5Index = l5Pair >> 16;
+      int l5Index = activeL5Clusters.key(l5);
+      float l5MinDist = activeL5Clusters.value(l5);
       
       // break out when all superclusters from here on are too far
       if (l5Index >= BRANCHING_FACTOR) break;
@@ -1121,11 +1160,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + l5Index;
 
       // Initialize active l4 list
-      uint32_t activeL4Clusters[BRANCHING_FACTOR];
-      // [unroll]
-      for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
-        activeL4Clusters[l4] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-      }
+      List activeL4Clusters = List::Create();
 
       // Insert into active l4 list by distance far to near
       for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
@@ -1153,20 +1188,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           if (l4MinDist > payload.closestDistance) continue;
         }
 
-        // Insertion sort
-        activeL4Clusters[0] = uint32_t(l4 << 16) | uint32_t(asuint16(half(l4MinDist)));
-        // [unroll]
-        for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-          if (asfloat16(uint16_t(activeL4Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL4Clusters[i] & 65535))) break;
-          uint32_t tmp = activeL4Clusters[i-1]; activeL4Clusters[i-1] = activeL4Clusters[i]; activeL4Clusters[i] = tmp;
-        }
+        activeL4Clusters.insert(Pair::Create(l4, l4MinDist));
       }
 
       // Traverse clusters near to far
       for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
-        uint32_t l4Pair = activeL4Clusters[BRANCHING_FACTOR - 1 - l4];
-        float l4MinDist = float(asfloat16(uint16_t(l4Pair & 65535)));
-        int l4Index = l4Pair >> 16;
+        int l4Index = activeL4Clusters.key(l4);
+        float l4MinDist = activeL4Clusters.value(l4);
         
         // break out when all superclusters from here on are too far
         if (l4Index >= BRANCHING_FACTOR) break;
@@ -1186,11 +1214,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + l4Index;
 
         // Initialize active l3 list
-        uint32_t activeL3Clusters[BRANCHING_FACTOR];
-        // [unroll]
-        for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
-          activeL3Clusters[l3] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-        }
+        List activeL3Clusters = List::Create();
         
         // Insert into active l3 list by distance far to near
         for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
@@ -1218,20 +1242,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             if (l3MinDist > payload.closestDistance) continue;
           }
 
-          // Insertion sort
-          activeL3Clusters[0] = uint32_t(l3 << 16) | uint32_t(asuint16(half(l3MinDist)));
-          // [unroll]
-          for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-            if (asfloat16(uint16_t(activeL3Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL3Clusters[i] & 65535))) break;
-            uint32_t tmp = activeL3Clusters[i-1]; activeL3Clusters[i-1] = activeL3Clusters[i]; activeL3Clusters[i] = tmp;
-          }
+          activeL3Clusters.insert(Pair::Create(l3, l3MinDist));
         }
 
         // Traverse clusters near to far
         for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
-          uint32_t l3Pair = activeL3Clusters[BRANCHING_FACTOR - 1 - l3];
-          float l3MinDist = float(asfloat16(uint16_t(l3Pair & 65535)));
-          int l3Index = l3Pair >> 16;
+          int l3Index = activeL3Clusters.key(l3);
+          float l3MinDist = activeL3Clusters.value(l3);
           
           // break out when all superclusters from here on are too far
           if (l3Index >= BRANCHING_FACTOR) break;
@@ -1251,11 +1268,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
 
           // Initialize active l2 list
-          uint32_t activeL2Clusters[BRANCHING_FACTOR];
-          // [unroll]
-          for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-            activeL2Clusters[l2] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-          }
+          List activeL2Clusters = List::Create();
                   
           // Insert into active l2 list by distance far to near
           for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
@@ -1283,20 +1296,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               if (l2MinDist > payload.closestDistance) continue;
             }
 
-            // Insertion sort
-            activeL2Clusters[0] = uint32_t(l2 << 16) | uint32_t(asuint16(half(l2MinDist)));
-            // [unroll]
-            for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-              if (asfloat16(uint16_t(activeL2Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL2Clusters[i] & 65535))) break;
-              uint32_t tmp = activeL2Clusters[i-1]; activeL2Clusters[i-1] = activeL2Clusters[i]; activeL2Clusters[i] = tmp;
-            }
+            activeL2Clusters.insert(Pair::Create(l2, l2MinDist));
           }
 
           // Traverse clusters near to far
           for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-            uint32_t l2Pair = activeL2Clusters[BRANCHING_FACTOR - 1 - l2];
-            float l2MinDist = float(asfloat16(uint16_t(l2Pair & 65535)));
-            int l2Index = l2Pair >> 16;
+            int l2Index = activeL2Clusters.key(l2);
+            float l2MinDist = activeL2Clusters.value(l2);
             
             // break out when all superclusters from here on are too far
             if (l2Index >= BRANCHING_FACTOR) break;
@@ -1316,11 +1322,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
 
             // Initialize active l1 cluster list
-            uint32_t activeL1Clusters[BRANCHING_FACTOR];
-            // [unroll]
-            for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-              activeL1Clusters[l1] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-            }
+            List activeL1Clusters = List::Create();
 
             // Insert into active cluster list by distance far to near
             for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
@@ -1348,21 +1350,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 if (l1MinDist > payload.closestDistance) continue;
               }
 
-
-              // Insertion sort
-              activeL1Clusters[0] = uint32_t(l1 << 16) | uint32_t(asuint16(half(l1MinDist)));
-              // [unroll]
-              for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-                if (asfloat16(uint16_t(activeL1Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL1Clusters[i] & 65535))) break;
-                uint32_t tmp = activeL1Clusters[i-1]; activeL1Clusters[i-1] = activeL1Clusters[i]; activeL1Clusters[i] = tmp;
-              }
+              activeL1Clusters.insert(Pair::Create(l1, l1MinDist));
             }
 
             // Traverse clusters near to far
             for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-              uint32_t l1Pair = activeL1Clusters[BRANCHING_FACTOR - 1 - l1];
-              float l1MinDist = float(asfloat16(uint16_t(l1Pair & 65535)));
-              int l1Index = l1Pair >> 16;
+              int l1Index = activeL1Clusters.key(l1);
+              float l1MinDist = activeL1Clusters.value(l1);
               
               // break out when all clusters from here on are invalid
               if (l1Index >= BRANCHING_FACTOR) break;
@@ -1382,11 +1376,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
               
               // Initialize active l0 list
-              uint32_t activeL0Clusters[BRANCHING_FACTOR];
-              // [unroll]
-              for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-                activeL0Clusters[l0] = uint32_t(65535 << 16) | uint32_t(asuint16(65504.h));
-              }
+              List activeL0Clusters = List::Create();
               
               // Insert into active leaf list by distance far to near
               for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
@@ -1414,29 +1404,22 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                   if (l0MinDist > payload.closestDistance) continue;
                 }
 
-                // Insertion sort
-                activeL0Clusters[0] = uint32_t(l0 << 16) | uint32_t(asuint16(half(l0MinDist)));
-                // [unroll]
-                for (int i = 1; i < BRANCHING_FACTOR; ++i) {
-                  if (asfloat16(uint16_t(activeL0Clusters[i-1] & 65535)) >= asfloat16(uint16_t(activeL0Clusters[i] & 65535))) break;
-                  uint32_t tmp = activeL0Clusters[i-1]; activeL0Clusters[i-1] = activeL0Clusters[i]; activeL0Clusters[i] = tmp;
-                }
+                activeL0Clusters.insert(Pair::Create(l0, l0MinDist));
               }
 
               // Traverse all l0 clusters from near to far
               // [unroll]
               for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-                uint32_t l0Pair = activeL0Clusters[BRANCHING_FACTOR - 1 - l0];
-                float l0MinDist = float(asfloat16(uint16_t(l0Pair & 65535)));
-                int idx = l0Pair >> 16;
+                int l0Index = activeL0Clusters.key(l0);
+                float l0MinDist = activeL0Clusters.value(l0);
                 
                 // break out when all primitives from here on are too far
-                if (idx >= BRANCHING_FACTOR) break;
+                if (l0Index >= BRANCHING_FACTOR) break;
                 
                 // Upward culling
                 if (l0MinDist > payload.closestDistance) continue;
 
-                uint32_t l0ClusterID = l1ClusterID * BRANCHING_FACTOR + idx;
+                uint32_t l0ClusterID = l1ClusterID * BRANCHING_FACTOR + l0Index;
                 if (l0ClusterID >= numL0Clusters) break;
 
                 #ifdef COLLECT_STATS
