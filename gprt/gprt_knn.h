@@ -1032,6 +1032,28 @@ struct List {
 //   }
 // };
 
+// x is overoptimistic, y is pessimistic
+float2 getAABBDists(float3 p, in gprt::Buffer aabbs, uint32_t index) {
+  float2 dists;
+  float3 aabbMin = gprt::load<float3>(aabbs, index * 2 + 0);
+  float3 aabbMax = gprt::load<float3>(aabbs, index * 2 + 1);
+  dists.x = getMinDist(p, aabbMin, aabbMax);
+  dists.y = getMinMaxDist(p, aabbMin, aabbMax);
+  return dists;
+}
+
+float2 getOBBDists(float3 p, in gprt::Buffer obbs, uint32_t index) {
+  float2 dists;
+  float3 obbMin = gprt::load<float3>(obbs, index * 3 + 0);
+  float3 obbMax = gprt::load<float3>(obbs, index * 3 + 1);
+  float3 obbEul = gprt::load<float3>(obbs, index * 3 + 2);
+  float3x3 obbRot = eul_to_mat3(obbEul);
+  float3 pRot = mul(obbRot, p);
+  dists.x = getMinDist(pRot, obbMin, obbMax);
+  dists.y = getMinMaxDist(pRot, obbMin, obbMax);
+  return dists;
+}
+
 void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {  
   payload.closestDistance = tmax;
 
@@ -1051,8 +1073,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
   int numL0Clusters = record.numL0Clusters;
   int numPrims = record.numPrims;
 
+  List activeL6Clusters;
+  List activeL5Clusters;
+  List activeL4Clusters;
+  List activeL3Clusters;
+  List activeL2Clusters;
+  List activeL1Clusters;
+  List activeL0Clusters;
+  
   // Initialize active l6 list
-  List activeL6Clusters = List::Create();
+  activeL6Clusters.clear();
 
   // Insert into active l6 list by distance far to near
   for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
@@ -1061,22 +1091,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
     float l6MinDist = 0.f;
     
+    // Upward Culling: skip superclusters father than current closest primitive
     if (useAABBs) {
-      float3 aabbMin = gprt::load<float3>(record.l6aabbs, l6ClusterID * 2 + 0);
-      float3 aabbMax = gprt::load<float3>(record.l6aabbs, l6ClusterID * 2 + 1);
-      l6MinDist = max(l6MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-      // Upward Culling: skip superclusters father than current closest primitive
+      float2 dists = getAABBDists(queryOrigin, record.l6aabbs, l6ClusterID);
+      l6MinDist = max(l6MinDist, dists.x);
       if (l6MinDist > payload.closestDistance) continue;
     }
     
     if (useOBBs) {
-      float3 obbMin = gprt::load<float3>(record.l6obbs, l6ClusterID * 3 + 0);
-      float3 obbMax = gprt::load<float3>(record.l6obbs, l6ClusterID * 3 + 1);
-      float3 obbEul = gprt::load<float3>(record.l6obbs, l6ClusterID * 3 + 2);
-      float3x3 obbRot = eul_to_mat3(obbEul);
-      float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-      l6MinDist = max(l6MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-      // Upward Culling: skip superclusters father than current closest primitive
+      float2 dists = getOBBDists(queryOrigin, record.l6obbs, l6ClusterID);
+      l6MinDist = max(l6MinDist, dists.x);
       if (l6MinDist > payload.closestDistance) continue;
     }
 
@@ -1106,7 +1130,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
     int l6ClusterID = l6Index;
 
     // Initialize active l5 list
-    List activeL5Clusters = List::Create();
+    activeL5Clusters.clear();
 
     // Insert into active l5 list by distance far to near
     for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
@@ -1114,23 +1138,17 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       if (l5ClusterID >= numL5Clusters) break;
 
       float l5MinDist = l6MinDist;
-      
+
+      // Upward Culling: skip superclusters father than current closest primitive
       if (useAABBs) {
-        float3 aabbMin = gprt::load<float3>(record.l5aabbs, l5ClusterID * 2 + 0);
-        float3 aabbMax = gprt::load<float3>(record.l5aabbs, l5ClusterID * 2 + 1);
-        l5MinDist = max(l5MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-        // Upward Culling: skip superclusters father than current closest primitive
+        float2 dists = getAABBDists(queryOrigin, record.l5aabbs, l5ClusterID);
+        l5MinDist = max(l5MinDist, dists.x);
         if (l5MinDist > payload.closestDistance) continue;
       }
-
-      if (useOBBs) { 
-        float3 obbMin = gprt::load<float3>(record.l5obbs, l5ClusterID * 3 + 0);
-        float3 obbMax = gprt::load<float3>(record.l5obbs, l5ClusterID * 3 + 1);
-        float3 obbEul = gprt::load<float3>(record.l5obbs, l5ClusterID * 3 + 2);
-        float3x3 obbRot = eul_to_mat3(obbEul);
-        float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-        l5MinDist = max(l5MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-        // Upward Culling: skip superclusters father than current closest primitive
+      
+      if (useOBBs) {
+        float2 dists = getOBBDists(queryOrigin, record.l5obbs, l5ClusterID);
+        l5MinDist = max(l5MinDist, dists.x);
         if (l5MinDist > payload.closestDistance) continue;
       }
 
@@ -1160,7 +1178,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + l5Index;
 
       // Initialize active l4 list
-      List activeL4Clusters = List::Create();
+      activeL4Clusters.clear();
 
       // Insert into active l4 list by distance far to near
       for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
@@ -1169,22 +1187,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
         float l4MinDist = l5MinDist;
         
+        // Upward Culling: skip superclusters father than current closest primitive
         if (useAABBs) {
-          float3 aabbMin = gprt::load<float3>(record.l4aabbs, l4ClusterID * 2 + 0);
-          float3 aabbMax = gprt::load<float3>(record.l4aabbs, l4ClusterID * 2 + 1);
-          l4MinDist = max(l4MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-          // Upward Culling: skip superclusters father than current closest primitive
+          float2 dists = getAABBDists(queryOrigin, record.l4aabbs, l4ClusterID);
+          l4MinDist = max(l4MinDist, dists.x);
           if (l4MinDist > payload.closestDistance) continue;
         }
-
-        if (useOBBs) { 
-          float3 obbMin = gprt::load<float3>(record.l4obbs, l4ClusterID * 3 + 0);
-          float3 obbMax = gprt::load<float3>(record.l4obbs, l4ClusterID * 3 + 1);
-          float3 obbEul = gprt::load<float3>(record.l4obbs, l4ClusterID * 3 + 2);
-          float3x3 obbRot = eul_to_mat3(obbEul);
-          float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-          l4MinDist = max(l4MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-          // Upward Culling: skip superclusters father than current closest primitive
+        
+        if (useOBBs) {
+          float2 dists = getOBBDists(queryOrigin, record.l4obbs, l4ClusterID);
+          l4MinDist = max(l4MinDist, dists.x);
           if (l4MinDist > payload.closestDistance) continue;
         }
 
@@ -1214,7 +1226,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + l4Index;
 
         // Initialize active l3 list
-        List activeL3Clusters = List::Create();
+        activeL3Clusters.clear();
         
         // Insert into active l3 list by distance far to near
         for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
@@ -1223,22 +1235,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
           float l3MinDist = l4MinDist;
           
+          // Upward Culling: skip superclusters father than current closest primitive
           if (useAABBs) {
-            float3 aabbMin = gprt::load<float3>(record.l3aabbs, l3ClusterID * 2 + 0);
-            float3 aabbMax = gprt::load<float3>(record.l3aabbs, l3ClusterID * 2 + 1);
-            l3MinDist = max(l3MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-            // Upward Culling: skip superclusters father than current closest primitive
+            float2 dists = getAABBDists(queryOrigin, record.l3aabbs, l3ClusterID);
+            l3MinDist = max(l3MinDist, dists.x);
             if (l3MinDist > payload.closestDistance) continue;
           }
-
-          if (useOBBs) { 
-            float3 obbMin = gprt::load<float3>(record.l3obbs, l3ClusterID * 3 + 0);
-            float3 obbMax = gprt::load<float3>(record.l3obbs, l3ClusterID * 3 + 1);
-            float3 obbEul = gprt::load<float3>(record.l3obbs, l3ClusterID * 3 + 2);
-            float3x3 obbRot = eul_to_mat3(obbEul);
-            float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-            l3MinDist = max(l3MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-            // Upward Culling: skip superclusters father than current closest primitive
+          
+          if (useOBBs) {
+            float2 dists = getOBBDists(queryOrigin, record.l3obbs, l3ClusterID);
+            l3MinDist = max(l3MinDist, dists.x);
             if (l3MinDist > payload.closestDistance) continue;
           }
 
@@ -1268,7 +1274,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
 
           // Initialize active l2 list
-          List activeL2Clusters = List::Create();
+          activeL2Clusters.clear();
                   
           // Insert into active l2 list by distance far to near
           for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
@@ -1277,22 +1283,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
             float l2MinDist = l3MinDist;
             
+            // Upward Culling: skip superclusters father than current closest primitive
             if (useAABBs) {
-              float3 aabbMin = gprt::load<float3>(record.l2aabbs, l2ClusterID * 2 + 0);
-              float3 aabbMax = gprt::load<float3>(record.l2aabbs, l2ClusterID * 2 + 1);
-              l2MinDist = max(l2MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-              // Upward Culling: Skip superclusters father than current closest primitive
+              float2 dists = getAABBDists(queryOrigin, record.l2aabbs, l2ClusterID);
+              l2MinDist = max(l2MinDist, dists.x);
               if (l2MinDist > payload.closestDistance) continue;
             }
-
-            if (useOBBs) { 
-              float3 obbMin = gprt::load<float3>(record.l2obbs, l2ClusterID * 3 + 0);
-              float3 obbMax = gprt::load<float3>(record.l2obbs, l2ClusterID * 3 + 1);
-              float3 obbEul = gprt::load<float3>(record.l2obbs, l2ClusterID * 3 + 2);
-              float3x3 obbRot = eul_to_mat3(obbEul);
-              float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-              l2MinDist = max(l2MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-              // Upward Culling: Skip superclusters father than current closest primitive
+            
+            if (useOBBs) {
+              float2 dists = getOBBDists(queryOrigin, record.l2obbs, l2ClusterID);
+              l2MinDist = max(l2MinDist, dists.x);
               if (l2MinDist > payload.closestDistance) continue;
             }
 
@@ -1322,7 +1322,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
 
             // Initialize active l1 cluster list
-            List activeL1Clusters = List::Create();
+            activeL1Clusters.clear();
 
             // Insert into active cluster list by distance far to near
             for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
@@ -1331,22 +1331,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
               float l1MinDist = l2MinDist;
 
+              // Upward Culling: skip superclusters father than current closest primitive
               if (useAABBs) {
-                float3 aabbMin = gprt::load<float3>(record.l1aabbs, l1ClusterID * 2 + 0);
-                float3 aabbMax = gprt::load<float3>(record.l1aabbs, l1ClusterID * 2 + 1);
-                l1MinDist = max(l1MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-                // Upward Culling, Skip clusters father than current closest primitive
+                float2 dists = getAABBDists(queryOrigin, record.l1aabbs, l1ClusterID);
+                l1MinDist = max(l1MinDist, dists.x);
                 if (l1MinDist > payload.closestDistance) continue;
               }
               
-              if (useOBBs) { 
-                float3 obbMin = gprt::load<float3>(record.l1obbs, l1ClusterID * 3 + 0);
-                float3 obbMax = gprt::load<float3>(record.l1obbs, l1ClusterID * 3 + 1);
-                float3 obbEul = gprt::load<float3>(record.l1obbs, l1ClusterID * 3 + 2);
-                float3x3 obbRot = eul_to_mat3(obbEul);
-                float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-                l1MinDist = max(l1MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-                // Upward Culling, Skip clusters father than current closest primitive
+              if (useOBBs) {
+                float2 dists = getOBBDists(queryOrigin, record.l1obbs, l1ClusterID);
+                l1MinDist = max(l1MinDist, dists.x);
                 if (l1MinDist > payload.closestDistance) continue;
               }
 
@@ -1376,7 +1370,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
               
               // Initialize active l0 list
-              List activeL0Clusters = List::Create();
+              activeL0Clusters.clear();
               
               // Insert into active leaf list by distance far to near
               for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
@@ -1385,22 +1379,16 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
                 float l0MinDist = 0.f;
 
+                // Upward Culling: skip superclusters father than current closest primitive
                 if (useAABBs) {
-                  float3 aabbMin = gprt::load<float3>(record.l0aabbs, l0ClusterID * 2 + 0);
-                  float3 aabbMax = gprt::load<float3>(record.l0aabbs, l0ClusterID * 2 + 1);
-                  l0MinDist = max(l0MinDist, getMinDist(queryOrigin, aabbMin, aabbMax));
-                  // Upward Culling: Skip clusters father than current closest primitive
+                  float2 dists = getAABBDists(queryOrigin, record.l0aabbs, l0ClusterID);
+                  l0MinDist = max(l0MinDist, dists.x);
                   if (l0MinDist > payload.closestDistance) continue;
                 }
-
-                if (useOBBs) { 
-                  float3 obbMin = gprt::load<float3>(record.l0obbs, l0ClusterID * 3 + 0);
-                  float3 obbMax = gprt::load<float3>(record.l0obbs, l0ClusterID * 3 + 1);
-                  float3 obbEul = gprt::load<float3>(record.l0obbs, l0ClusterID * 3 + 2);
-                  float3x3 obbRot = eul_to_mat3(obbEul);
-                  float3 obbQueryOrigin = mul(obbRot, queryOrigin);
-                  l0MinDist = max(l0MinDist, getMinDist(obbQueryOrigin, obbMin, obbMax));
-                  // Upward Culling: Skip clusters father than current closest primitive
+                
+                if (useOBBs) {
+                  float2 dists = getOBBDists(queryOrigin, record.l0obbs, l0ClusterID);
+                  l0MinDist = max(l0MinDist, dists.x);
                   if (l0MinDist > payload.closestDistance) continue;
                 }
 
