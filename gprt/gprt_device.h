@@ -29,8 +29,6 @@
  */
 #pragma once 
 
-#define alignas(alignment)
-
 // struct PushConstants {
 //   uint64_t r[16];
 // };

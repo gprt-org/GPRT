@@ -28,7 +28,6 @@
  * SOFTWARE.
  */
 
-#include <cstdalign>
 #include <vulkan/vulkan.h>
 
 #include "linalg.h"

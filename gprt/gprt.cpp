@@ -5301,6 +5301,11 @@ struct Context {
       return requiredExtensions.empty();
     };
 
+    // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
+    // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
+    // components, without additional requirements.
+    enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
+
     // Ray tracing related extensions required
 
     enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
@@ -5537,6 +5542,10 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlocklayoutFeatures = {};
+    physicalDeviceScalarBlocklayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
+    physicalDeviceScalarBlocklayoutFeatures.scalarBlockLayout = true;
+
     VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
     memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
 

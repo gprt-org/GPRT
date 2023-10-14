@@ -26,27 +26,27 @@
 
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
-  alignas(8) int tmp;   // unused for now
+  int tmp;   // unused for now
 };
 
 struct RayGenData {
-  alignas(16) gprt::Buffer frameBuffer;
-  alignas(16) gprt::Accel world;
+  gprt::Buffer frameBuffer;
+  gprt::Accel world;
 };
 
 /* variables for the miss program */
 struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  float3 color0;
+  float3 color1;
 };
 
 /* A small structure of constants that can change every frame without rebuilding the 
   shader binding table. (must be 128 bytes or less) */
 struct PushConstants {
   struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
   } camera;
 };
