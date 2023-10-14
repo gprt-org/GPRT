@@ -27,30 +27,30 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index;   // vec3i*
+  gprt::Buffer index;   // vec3i*
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex;   // vec3f *
+  gprt::Buffer vertex;   // vec3f *
   /*! base color we use for the entire mesh */
-  alignas(16) float3 color;
+  float3 color;
 };
 
 struct RayGenData {
-  alignas(16) gprt::Buffer frameBuffer;
-  alignas(16) gprt::Accel world;
+  gprt::Buffer frameBuffer;
+  gprt::Accel world;
 };
 
 /* variables for the miss program */
 struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  float3 color0;
+  float3 color1;
 };
 
 /* Constants that change each frame */
 struct PushConstants {
   struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
   } camera;
 };

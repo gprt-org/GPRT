@@ -24,33 +24,33 @@
 
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  alignas(16) gprt::Buffer index;
+  gprt::Buffer index;
   /*! array/buffer of vertex positions */
-  alignas(16) gprt::Buffer vertex;
+  gprt::Buffer vertex;
   /*! the number of triangles along a row */
-  alignas(4) unsigned int gridSize;
+  unsigned int gridSize;
 };
 
 struct RayGenData {
-  alignas(16) gprt::Buffer frameBuffer;
-  alignas(16) gprt::Accel world;
+  gprt::Buffer frameBuffer;
+  gprt::Accel world;
 };
 
 /* variables for the miss program */
 struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  float3 color0;
+  float3 color1;
 };
 
 /* Constants that change each frame */
 struct PushConstants {
   struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
   } camera;
 
   /*! the current time */
-  alignas(4) float now;
+  float now;
 };
