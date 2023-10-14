@@ -7781,7 +7781,7 @@ struct NNTriangleAccel : public Accel {
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
       computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
-      for (int lid = 1; lid < 7; ++lid) {
+      for (int lid = 1; lid < MAX_LEVELS; ++lid) {
         pc.level = lid;
         pc.buffer2 = gprtBufferGetHandle(aabbs[lid-1]);
         pc.buffer1 = gprtBufferGetHandle(aabbs[lid]);
@@ -7814,7 +7814,7 @@ struct NNTriangleAccel : public Accel {
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
       computeCovarianceTime += gprtEndProfile((GPRTContext)context);
-      for (int lid = 1; lid < 7; ++lid) {
+      for (int lid = 1; lid < MAX_LEVELS; ++lid) {
         pc.level = lid;
         pc.buffer4 = gprtBufferGetHandle(centers[lid-1]);
         pc.buffer3 = gprtBufferGetHandle(centers[lid]);
@@ -7824,7 +7824,7 @@ struct NNTriangleAccel : public Accel {
         gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeCovarianceTime += gprtEndProfile((GPRTContext)context);
       }
-      for (int lid = 0; lid < 7; ++lid) {
+      for (int lid = 0; lid < MAX_LEVELS; ++lid) {
         pc.level = lid;
         pc.buffer1 = gprtBufferGetHandle(oobbs[lid]);
         gprtBeginProfile((GPRTContext)context);

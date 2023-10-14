@@ -42,17 +42,24 @@ enum NN_FLAG : uint32_t
 
 struct NNStats {
   float primsHit;
-  float l0Hit;
-  float l1Hit;
-  float l2Hit;
-  float l3Hit;
-  float l4Hit;
-  float l5Hit;
-  float l6Hit;
-
+  float lHit[MAX_LEVELS];
+  
   float getTotalTouched() {
-    return primsHit + l0Hit + l1Hit + l2Hit + l3Hit + l4Hit + l5Hit + l6Hit;
+    float totalTouched = primsHit;
+    for (int i = 0; i < MAX_LEVELS; ++i) {
+      totalTouched += lHit[i];
+    }
+    return totalTouched;
   }
+
+  static NNStats Create() {
+    NNStats stats;
+    stats.primsHit = 0;
+    for (int i = 0; i < MAX_LEVELS; ++i) {
+      stats.lHit[i] = 0;
+    }
+    return stats;
+  };
 };
 
 inline float rm(float p, float rp, float rq) {
@@ -228,14 +235,7 @@ struct [raypayload] NNPayload {
   int closestPrimitive : read(anyhit, caller) : write(anyhit, caller);
   #ifdef COLLECT_STATS
   int primsHit : read(anyhit, caller) : write(anyhit, caller);
-  int leavesHit : read(anyhit, caller) : write(anyhit, caller);
-  int l0Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l1Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l2Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l3Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l4Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l5Hit : read(anyhit, caller) : write(anyhit, caller);
-  int l6Hit : read(anyhit, caller) : write(anyhit, caller);
+  int lHit[MAX_LEVELS] : read(anyhit, caller) : write(anyhit, caller);
   #endif
 };
 
@@ -1071,16 +1071,10 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
   uint32_t numClusters[MAX_LEVELS] = record.numClusters;
   int numPrims = record.numPrims;
 
-  List activeL6Clusters;
-  List activeL5Clusters;
-  List activeL4Clusters;
-  List activeL3Clusters;
-  List activeL2Clusters;
-  List activeL1Clusters;
-  List activeL0Clusters;
+  List activeClusters[MAX_LEVELS];
   
   // Initialize active l6 list
-  activeL6Clusters.clear();
+  activeClusters[6].clear();
 
   // Insert into active l6 list by distance far to near
   for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
@@ -1102,24 +1096,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       if (l6MinDist > payload.closestDistance) continue;
     }
 
-    activeL6Clusters.insert(Pair::Create(l6, l6MinDist));
+    activeClusters[6].insert(Pair::Create(l6, l6MinDist));
   }
-
-  // if (debug) {
-  //   printf("listDists %f %f %f %f %f %f %f %f\n", 
-  //     activeL6Clusters.value(0),
-  //     activeL6Clusters.value(1),
-  //     activeL6Clusters.value(2),
-  //     activeL6Clusters.value(3),
-  //     activeL6Clusters.value(4),
-  //     activeL6Clusters.value(5),
-  //     activeL6Clusters.value(6));
-  // }
 
   // Traverse clusters near to far
   for (int l6 = 0; l6 < BRANCHING_FACTOR; ++l6) {
-    int l6Index = activeL6Clusters.key(l6);
-    float l6MinDist = activeL6Clusters.value(l6);
+    int l6Index = activeClusters[6].key(l6);
+    float l6MinDist = activeClusters[6].value(l6);
     
     // break out when all superclusters from here on are too far
     if (l6Index >= BRANCHING_FACTOR) break;
@@ -1133,13 +1116,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
     }
     
     #ifdef COLLECT_STATS
-    payload.l6Hit++; // Count this as traversing a l6
+    payload.lHit[6]++; // Count this as traversing a l6
     #endif
 
     int l6ClusterID = l6Index;
 
     // Initialize active l5 list
-    activeL5Clusters.clear();
+    activeClusters[5].clear();
 
     // Insert into active l5 list by distance far to near
     for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
@@ -1161,13 +1144,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         if (l5MinDist > payload.closestDistance) continue;
       }
 
-      activeL5Clusters.insert(Pair::Create(l5, l5MinDist));
+      activeClusters[5].insert(Pair::Create(l5, l5MinDist));
     }
 
     // Traverse clusters near to far
     for (int l5 = 0; l5 < BRANCHING_FACTOR; ++l5) {
-      int l5Index = activeL5Clusters.key(l5);
-      float l5MinDist = activeL5Clusters.value(l5);
+      int l5Index = activeClusters[5].key(l5);
+      float l5MinDist = activeClusters[5].value(l5);
       
       // break out when all superclusters from here on are too far
       if (l5Index >= BRANCHING_FACTOR) break;
@@ -1181,13 +1164,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       }
 
       #ifdef COLLECT_STATS
-      payload.l5Hit++; // Count this as traversing a l5
+      payload.lHit[5]++; // Count this as traversing a l5
       #endif
 
       int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + l5Index;
 
       // Initialize active l4 list
-      activeL4Clusters.clear();
+      activeClusters[4].clear();
 
       // Insert into active l4 list by distance far to near
       for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
@@ -1209,13 +1192,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           if (l4MinDist > payload.closestDistance) continue;
         }
 
-        activeL4Clusters.insert(Pair::Create(l4, l4MinDist));
+        activeClusters[4].insert(Pair::Create(l4, l4MinDist));
       }
 
       // Traverse clusters near to far
       for (int l4 = 0; l4 < BRANCHING_FACTOR; ++l4) {
-        int l4Index = activeL4Clusters.key(l4);
-        float l4MinDist = activeL4Clusters.value(l4);
+        int l4Index = activeClusters[4].key(l4);
+        float l4MinDist = activeClusters[4].value(l4);
         
         // break out when all superclusters from here on are too far
         if (l4Index >= BRANCHING_FACTOR) break;
@@ -1229,13 +1212,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         }
       
         #ifdef COLLECT_STATS
-        payload.l4Hit++; // Count this as traversing a leaf
+        payload.lHit[4]++; // Count this as traversing a leaf
         #endif
 
         int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + l4Index;
 
         // Initialize active l3 list
-        activeL3Clusters.clear();
+        activeClusters[3].clear();
         
         // Insert into active l3 list by distance far to near
         for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
@@ -1257,13 +1240,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             if (l3MinDist > payload.closestDistance) continue;
           }
 
-          activeL3Clusters.insert(Pair::Create(l3, l3MinDist));
+          activeClusters[3].insert(Pair::Create(l3, l3MinDist));
         }
 
         // Traverse clusters near to far
         for (int l3 = 0; l3 < BRANCHING_FACTOR; ++l3) {
-          int l3Index = activeL3Clusters.key(l3);
-          float l3MinDist = activeL3Clusters.value(l3);
+          int l3Index = activeClusters[3].key(l3);
+          float l3MinDist = activeClusters[3].value(l3);
           
           // break out when all superclusters from here on are too far
           if (l3Index >= BRANCHING_FACTOR) break;
@@ -1277,13 +1260,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           }
           
           #ifdef COLLECT_STATS
-          payload.l3Hit++; // Count this as traversing a l3
+          payload.lHit[3]++; // Count this as traversing a l3
           #endif
           
           int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
 
           // Initialize active l2 list
-          activeL2Clusters.clear();
+          activeClusters[2].clear();
                   
           // Insert into active l2 list by distance far to near
           for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
@@ -1305,13 +1288,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               if (l2MinDist > payload.closestDistance) continue;
             }
 
-            activeL2Clusters.insert(Pair::Create(l2, l2MinDist));
+            activeClusters[2].insert(Pair::Create(l2, l2MinDist));
           }
 
           // Traverse clusters near to far
           for (int l2 = 0; l2 < BRANCHING_FACTOR; ++l2) {
-            int l2Index = activeL2Clusters.key(l2);
-            float l2MinDist = activeL2Clusters.value(l2);
+            int l2Index = activeClusters[2].key(l2);
+            float l2MinDist = activeClusters[2].value(l2);
             
             // break out when all superclusters from here on are too far
             if (l2Index >= BRANCHING_FACTOR) break;
@@ -1325,13 +1308,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             }
             
             #ifdef COLLECT_STATS
-            payload.l2Hit++; // Count this as traversing a supercluster
+            payload.lHit[2]++; // Count this as traversing a supercluster
             #endif
 
             int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
 
             // Initialize active l1 cluster list
-            activeL1Clusters.clear();
+            activeClusters[1].clear();
 
             // Insert into active cluster list by distance far to near
             for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
@@ -1353,13 +1336,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 if (l1MinDist > payload.closestDistance) continue;
               }
 
-              activeL1Clusters.insert(Pair::Create(l1, l1MinDist));
+              activeClusters[1].insert(Pair::Create(l1, l1MinDist));
             }
 
             // Traverse clusters near to far
             for (int l1 = 0; l1 < BRANCHING_FACTOR; ++l1) {
-              int l1Index = activeL1Clusters.key(l1);
-              float l1MinDist = activeL1Clusters.value(l1);
+              int l1Index = activeClusters[1].key(l1);
+              float l1MinDist = activeClusters[1].value(l1);
               
               // break out when all clusters from here on are invalid
               if (l1Index >= BRANCHING_FACTOR) break;
@@ -1373,13 +1356,13 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               }
               
               #ifdef COLLECT_STATS
-              payload.l1Hit++; // Count this as traversing a cluster
+              payload.lHit[1]++; // Count this as traversing a cluster
               #endif
 
               int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + l1Index;
               
               // Initialize active l0 list
-              activeL0Clusters.clear();
+              activeClusters[0].clear();
               
               // Insert into active leaf list by distance far to near
               for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
@@ -1401,14 +1384,14 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                   if (l0MinDist > payload.closestDistance) continue;
                 }
 
-                activeL0Clusters.insert(Pair::Create(l0, l0MinDist));
+                activeClusters[0].insert(Pair::Create(l0, l0MinDist));
               }
 
               // Traverse all l0 clusters from near to far
               // [unroll]
               for (int l0 = 0; l0 < BRANCHING_FACTOR; ++l0) {
-                int l0Index = activeL0Clusters.key(l0);
-                float l0MinDist = activeL0Clusters.value(l0);
+                int l0Index = activeClusters[0].key(l0);
+                float l0MinDist = activeClusters[0].value(l0);
                 
                 // break out when all primitives from here on are too far
                 if (l0Index >= BRANCHING_FACTOR) break;
@@ -1420,7 +1403,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 if (l0ClusterID >= numClusters[0]) break;
 
                 #ifdef COLLECT_STATS
-                payload.l0Hit++; // Count this as traversing an l0
+                payload.lHit[0]++; // Count this as traversing an l0
                 #endif
                 
                 // At this point, it appears that the fastest thing to do is just 
@@ -1599,13 +1582,9 @@ void TraceNN(
   payload.closestDistance = tMax;
   #ifdef COLLECT_STATS
   payload.primsHit = stats.primsHit;
-  payload.l0Hit = stats.l0Hit;
-  payload.l1Hit = stats.l1Hit;
-  payload.l2Hit = stats.l2Hit;
-  payload.l3Hit = stats.l3Hit;
-  payload.l4Hit = stats.l4Hit;
-  payload.l5Hit = stats.l5Hit;
-  payload.l6Hit = stats.l6Hit;
+  for (int i = 0; i < MAX_LEVELS; ++i) {
+    payload.lHit[i] = stats.lHit[i];
+  }
   #endif
 
   if (tMax > 0.f) {
@@ -1659,13 +1638,9 @@ void TraceNN(
   closestDistance = payload.closestDistance;
   #ifdef COLLECT_STATS
   stats.primsHit = payload.primsHit;
-  stats.l0Hit = payload.l0Hit;
-  stats.l1Hit = payload.l1Hit;
-  stats.l2Hit = payload.l2Hit;
-  stats.l3Hit = payload.l3Hit;
-  stats.l4Hit = payload.l4Hit;
-  stats.l5Hit = payload.l5Hit;
-  stats.l6Hit = payload.l6Hit;
+  for (int i = 0; i < MAX_LEVELS; ++i) {
+    stats.lHit[i] = payload.lHit[i];
+  }
   #endif
 }
 #endif

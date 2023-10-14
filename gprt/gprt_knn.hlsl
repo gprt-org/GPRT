@@ -157,12 +157,8 @@ GPRT_COMPUTE_PROGRAM(ComputePointBounds, (NNAccel, record), (1,1,1)) {
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
   if (!getPointBounds(record.points, primID, aabbMin, aabbMax)) return;
-  gprt::atomicMin32f(record.aabb, 0, aabbMin.x);
-  gprt::atomicMin32f(record.aabb, 1, aabbMin.y);
-  gprt::atomicMin32f(record.aabb, 2, aabbMin.z);
-  gprt::atomicMax32f(record.aabb, 3, aabbMax.x);
-  gprt::atomicMax32f(record.aabb, 4, aabbMax.y);
-  gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
+  gprt::atomicMin32f(record.aabb, 0, aabbMin);
+  gprt::atomicMax32f(record.aabb, 1, aabbMax);
 }
 
 GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (NNAccel, record), (1,1,1)) {
@@ -170,12 +166,8 @@ GPRT_COMPUTE_PROGRAM(ComputeEdgeBounds, (NNAccel, record), (1,1,1)) {
   if (primID >= record.numPrims) return;
   float3 aabbMin, aabbMax;
   if (!getEdgeBounds(record.edges, record.points, primID, aabbMin, aabbMax)) return;
-  gprt::atomicMin32f(record.aabb, 0, aabbMin.x);
-  gprt::atomicMin32f(record.aabb, 1, aabbMin.y);
-  gprt::atomicMin32f(record.aabb, 2, aabbMin.z);
-  gprt::atomicMax32f(record.aabb, 3, aabbMax.x);
-  gprt::atomicMax32f(record.aabb, 4, aabbMax.y);
-  gprt::atomicMax32f(record.aabb, 5, aabbMax.z);
+  gprt::atomicMin32f(record.aabb, 0, aabbMin);
+  gprt::atomicMax32f(record.aabb, 1, aabbMax);
 }
 
 float dot2(float3 v) {return dot(v, v);}
