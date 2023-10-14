@@ -470,7 +470,7 @@ GPRT_COMPUTE_PROGRAM(ComputeOBBAngles, (NNAccel, record), (32,1,1)) {
 // Run this "BRANCHING_FACTOR" times, sweeping pc.iteration from 0 to BRANCHING_FACTOR-1
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   int N0ID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
-  if (N0ID >= record.numL0Clusters) return;
+  if (N0ID >= record.numClusters[0]) return;
 
   int numVerts = 0;
   float3 v[PRIMS_PER_LEAF * 3];
@@ -484,18 +484,11 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     numVerts += 3;
   }
 
-  for (int level = 0; level < 7; ++level) {
+  for (int level = 0; level < MAX_LEVELS; ++level) {
     int parentID = getParentNode(level, N0ID * PRIMS_PER_LEAF);
-    gprt::Buffer obbs;
-         if (level == 0) {obbs = record.l0obbs;}
-    else if (level == 1) {obbs = record.l1obbs;}
-    else if (level == 2) {obbs = record.l2obbs;}
-    else if (level == 3) {obbs = record.l3obbs;}
-    else if (level == 4) {obbs = record.l4obbs;}
-    else if (level == 5) {obbs = record.l5obbs;}
-    else if (level == 6) {obbs = record.l6obbs;}
+    gprt::Buffer oobbs = record.oobbs[level];
 
-    float3 obbEul = gprt::load<float3>(obbs, parentID * 3 + 2);
+    float3 obbEul = gprt::load<float3>(oobbs, parentID * 3 + 2);
     float3x3 obbRot = eul_to_mat3(obbEul);
     float3 obbMin =  float3(1e38f, 1e38f, 1e38f);
     float3 obbMax = -float3(1e38f, 1e38f, 1e38f);
@@ -507,13 +500,13 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     }
     if (level == 0) {
       // Store OBB bounds for current leaf node
-      gprt::store<float3>(obbs, N0ID * 3 + 0, obbMin);
-      gprt::store<float3>(obbs, N0ID * 3 + 1, obbMax);
+      gprt::store<float3>(oobbs, N0ID * 3 + 0, obbMin);
+      gprt::store<float3>(oobbs, N0ID * 3 + 1, obbMax);
     }
     else {
       // Atomically merge into our parent. 
-      gprt::atomicMin32f(obbs, parentID * 3 + 0, obbMin);
-      gprt::atomicMax32f(obbs, parentID * 3 + 1, obbMax);
+      gprt::atomicMin32f(oobbs, parentID * 3 + 0, obbMin);
+      gprt::atomicMax32f(oobbs, parentID * 3 + 1, obbMax);
     }
   }
 }
@@ -852,17 +845,17 @@ struct ClosestPointAttributes {
 }; 
 
 GPRT_INTERSECTION_PROGRAM(ClosestNeighborIntersection, (NNAccel, record)) {
-  uint leafID = PrimitiveIndex();
-  float3 aabbMin = gprt::load<float3>(record.numL4Clusters, 2 * leafID + 0) + record.maxSearchRange;
-  float3 aabbMax = gprt::load<float3>(record.numL4Clusters, 2 * leafID + 1) - record.maxSearchRange;
-  float3 origin = WorldRayOrigin();
+  // uint leafID = PrimitiveIndex();
+  // float3 aabbMin = gprt::load<float3>(record.numL4Clusters, 2 * leafID + 0) + record.maxSearchRange;
+  // float3 aabbMax = gprt::load<float3>(record.numL4Clusters, 2 * leafID + 1) - record.maxSearchRange;
+  // float3 origin = WorldRayOrigin();
 
-  float minDist = getMinDist(origin, aabbMin, aabbMax);
-  if (minDist > pow(record.maxSearchRange, 2)) return;
+  // float minDist = getMinDist(origin, aabbMin, aabbMax);
+  // if (minDist > pow(record.maxSearchRange, 2)) return;
   
-  ClosestPointAttributes attr;
-  attr.minDist = minDist;
-  ReportHit(0.0f, 0, attr);
+  // ClosestPointAttributes attr;
+  // attr.minDist = minDist;
+  // ReportHit(0.0f, 0, attr);
 }
 
 // void ClosestPrimitiveQuery(

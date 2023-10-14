@@ -84,6 +84,7 @@ function(embed_devicecode)
       -fspv-extension=SPV_KHR_physical_storage_buffer
       -fspv-extension=SPV_KHR_vulkan_memory_model
       -fspv-extension=SPV_EXT_descriptor_indexing
+      -fvk-use-scalar-layout
       -fcgl
       ${EMBED_DEVICECODE_SOURCES}
       -Fo ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}_${ENTRY_POINT_TYPE}.spv

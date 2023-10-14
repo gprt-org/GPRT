@@ -2,9 +2,8 @@
 
 #define COLLECT_STATS
 
-// The overall results I'm leaning from the below is that, the more culling you enable
-// by turning these features on, the more performance becomes dependent on how efficient
-// the culling primitives are...
+// The higher this number is, the more primitives we can store in our tree
+#define MAX_LEVELS 7
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
@@ -92,61 +91,43 @@ namespace gprt{
 
     struct NNAccel {
         // input
-        alignas(4) uint32_t numPrims;
-        alignas(4) uint32_t numL0Clusters;
-        alignas(4) uint32_t numL1Clusters;
-        alignas(4) uint32_t numL2Clusters;
-        alignas(4) uint32_t numL3Clusters;
-        alignas(4) uint32_t numL4Clusters;
-        alignas(4) uint32_t numL5Clusters;
-        alignas(4) uint32_t numL6Clusters;
-        alignas(4) float maxSearchRange;
+        uint32_t numPrims;
+        uint32_t numClusters[MAX_LEVELS];
+        float maxSearchRange;
 
-        alignas(16) gprt::Buffer points; 
+        gprt::Buffer points; 
 
         // Why are we separating these again?... 
         // They could just be "primitives"...
-        alignas(16) gprt::Buffer edges; 
-        alignas(16) gprt::Buffer triangles;
+        gprt::Buffer edges; 
+        gprt::Buffer triangles;
 
         // A sorted list of triangle indices, meant to be traversed
         // linearly from the leaves
-        alignas(16) gprt::Buffer triangleLists;
+        gprt::Buffer triangleLists;
 
         // Hilbert codes of quantized primitive centroids
         // One uint64_t per primitive
-        alignas(16) gprt::Buffer codes;
-        alignas(16) gprt::Buffer ids;
+        gprt::Buffer codes;
+        gprt::Buffer ids;
 
         // Buffer containing the global AABB. Pair of two floats
-        alignas(16) gprt::Buffer aabb;        
+        gprt::Buffer aabb;        
 
         // Buffers of bounding primitives. 
         // If axis aligned bounding boxes, each is a pair of float3.
         // If bounding balls, each is a single float4 (xyzr).
         // If oriented bounding boxes, each is a triplet of float3s.
         //   - note, also reused for temporarily storing covariance matrices
-        alignas(16) gprt::Buffer l0obbs;
-        alignas(16) gprt::Buffer l1obbs;
-        alignas(16) gprt::Buffer l2obbs;
-        alignas(16) gprt::Buffer l3obbs;
-        alignas(16) gprt::Buffer l4obbs;
-        alignas(16) gprt::Buffer l5obbs;
-        alignas(16) gprt::Buffer l6obbs;
-
-        alignas(16) gprt::Buffer l0aabbs;
-        alignas(16) gprt::Buffer l1aabbs;
-        alignas(16) gprt::Buffer l2aabbs;
-        alignas(16) gprt::Buffer l3aabbs;
-        alignas(16) gprt::Buffer l4aabbs;
-        alignas(16) gprt::Buffer l5aabbs;
-        alignas(16) gprt::Buffer l6aabbs;
+        gprt::Buffer aabbs[MAX_LEVELS];
+        gprt::Buffer oobbs[MAX_LEVELS];
+        gprt::Buffer centers[MAX_LEVELS];
  
         // 3 floats for treelet aabb min, 
         // 3 bytes for scale exponent, one unused 
         // byte   15   14    13    12    11 10 9 8   7  6  5  4  3  2  1  0
         //       [??]  [sz]  [sy]  [sx]  [  zmin  ]  [  ymin  ]  [  xmin  ]
-        // alignas(16) gprt::Buffer treelets;
+        // gprt::Buffer treelets;
 
         // If an "axis aligned bounding box", 64-bit integers, 6 bytes for bounding box, 2 unused.
         // byte   8    7   6     5     4     3     2     1           
@@ -161,27 +142,27 @@ namespace gprt{
         // Then 20 bits for Euler rotations in X, Y, then Z. 4 bits unused.
         //        15 14 13 12 11 10 9 8   7   6   5     4     3    2    1    0
         //       [ zr ]  [ yr ]  [ xr ]   [?] [?] [zh]  [yh]  [xh]  [zl]  [yl]  [xl]
-        // alignas(16) gprt::Buffer children; 
+        // gprt::Buffer children; 
 
         // An RT core tree
-        alignas(16) gprt::Accel accel;
+        gprt::Accel accel;
 
         // An LBVH tree
-        // alignas(16) gprt::Buffer lbvhMortonCodes;
+        // gprt::Buffer lbvhMortonCodes;
 
         // Primitive IDs that correspond to sorted morton codes. 
         // One uint32_t per primitive
-        // alignas(16) gprt::Buffer lbvhIds;
+        // gprt::Buffer lbvhIds;
 
         // numPrims-1 + numPrims long. 
         // The "numPrims-1" section contains inner nodes
         // The "numPrims" section contains leaves
         // Each node is an int4. 
         // "X" is left, "Y" is right, "Z" is parent, and "W" is leaf or -1 if internal node.
-        // alignas(16) gprt::Buffer lbvhNodes;
+        // gprt::Buffer lbvhNodes;
 
         // numPrims-1 + numPrims long. Each aabb is a pair of float3.
-        // alignas(16) gprt::Buffer lbvhAabbs;
+        // gprt::Buffer lbvhAabbs;
 
     };
 

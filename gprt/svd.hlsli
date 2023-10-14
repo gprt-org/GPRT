@@ -232,7 +232,6 @@ float3x3 cholesky_decomp(float3x3 A)
 
 // Constants
 #define M_SQRT3    1.73205081f   // sqrt(3)
-#define FLT_EPSILON     1.192092896e-07f
 
 // Macros
 #define SQR(x)      ((x)*(x))                        // x^2 
