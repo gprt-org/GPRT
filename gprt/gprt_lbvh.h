@@ -25,31 +25,31 @@
 
 struct LBVHData {
   // input
-  alignas(4) uint32_t numPrims;
-  alignas(4) uint32_t numNodes;
-  alignas(4) uint32_t numInner;
-  alignas(4) uint32_t tmp;
-  alignas(16) gprt::Buffer positions;
-  alignas(16) gprt::Buffer edges;
-  alignas(16) gprt::Buffer triangles;
+  uint32_t numPrims;
+  uint32_t numNodes;
+  uint32_t numInner;
+  uint32_t tmp;
+  gprt::Buffer positions;
+  gprt::Buffer edges;
+  gprt::Buffer triangles;
 
   // Morton codes of quantized primitive centroids
   // One uint32_t per primitive
-  alignas(16) gprt::Buffer mortonCodes;
+  gprt::Buffer mortonCodes;
 
   // Primitive IDs that correspond to sorted morton codes. 
   // One uint32_t per primitive
-  alignas(16) gprt::Buffer ids;
+  gprt::Buffer ids;
   
   // numPrims-1 + numPrims long. 
   // The "numPrims-1" section contains inner nodes
   // The "numPrims" section contains leaves
   // Each node is an int4. 
   // "X" is left, "Y" is right, "Z" is parent, and "W" is leaf or -1 if internal node.
-  alignas(16) gprt::Buffer nodes;
+  gprt::Buffer nodes;
 
   // numPrims-1 + numPrims long. Each aabb is a pair of float3.
-  alignas(16) gprt::Buffer aabbs;
+  gprt::Buffer aabbs;
 };
 
 #ifndef GPRT_DEVICE

@@ -115,33 +115,10 @@ and our ray tracing device, which we'll declare in our *sharedCode.h* file.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/sharedCode.h
    :language: c++
-   :lines: 23-46
+   :lines: 23-29
 
-.. One thing that might stand out right away is the use of ``alignas(16)``. In HLSL, 
-.. types align themselves to avoid crossing 16 byte boundaries; however, this isn't
-.. necessarily the case in C++. Therefore, we use this alignas macro to guarantee
-.. that the struct follows HLSL alignment rules for both C++ and HLSL so that the
-.. struct can be shared between the two devices. 
-.. Although it might seem intimidating at first, the rules aren't that bad to follow. 
-.. If a type is a float3 or int3, use ``alignas(16)`` rather than ``alignas(12)``. 
-.. Otherwise, alignas should take as input the number of bytes referenced by the 
-.. following object's type.
-
-.. The use of alignas is necessary to ensure that HLSL and C++ structs are aligned 
-.. correctly and can be shared between devices. This is because C++ uses 4/8 byte 
-.. alignment for 32/64bit applications, while HLSL uses 16 byte alignment. HLSL
-.. also prevents variables from crossing 16-byte boundaries, and inserts padding
-.. to structs to make sure this never happens. It may be intimidating, but the rules
-.. for alignas are simple: use alignas(16) for float3, int3, gprt::Buffer and gprt::Accel 
-.. types, and otherwise alignas should take the number of bytes of the corresponding type.
-
-The use of alignas is necessary to ensure that HLSL and C++ structs can be shared 
-between devices. HLSL requires 16 byte alignment, and prevents variables from 
-crossing 16-byte boundaries by inserting padding to structs. To ensure a matching 
-struct alignment, alignas(16) should be used for float3, int3, gprt::Buffer and 
-gprt::Accel types. For smaller types, alignas should take the number of bytes of 
-the corresponding type, and for types larger than 16 bytes, a value of 16 should 
-be used.
+In this struct, we'll store the two colors to use for our checkerboard pattern, 
+as well as a frame buffer of pixels to store the results into.
 
 Device Code
 ^^^^^^^^^^^
@@ -164,10 +141,8 @@ document.
 .. This macro takes as input the *name* of our program, followed
 .. by the type and name of this kernel's "shader record".
 This macro takes in the name of the kernel and the type and name of its *shader 
-record*. In GPRT, every kernel receives a shader record, which serve as the 
-parameters to that kernel. We will talk more about shader records and the 
-shader binding table in a future example, but for now, just know that these 
-things exist! 
+record*. In GPRT, every kernel receives a shader record, which acts as a block 
+of parameters that are made available to the kernel when it's executed on the device.
 
 This raygen kernel runs the same code in parallel over many different threads. In
 our case, we will run one thread per pixel. We read the thread ID using 
@@ -178,17 +153,11 @@ framebuffer at the given location.
 
 Also, just like on the CPU, we can use printf to print out helpful debug messages! 
 
-.. warning::
-   For Vulkan GPRT backends, printf requires that validation layers be enabled, 
-   which can be done using the Vulkan Configurator tool by using the "Debug 
-   Printf Preset".
-
 Host Code
 ^^^^^^^^^
 
-As our Final step, all that's left is to write our host side code. 
-We begin by requesting a window 
-and creating a ``GPRTContext``: 
+As our final step, all that's left is to write our host side code. 
+We begin by requesting a window and creating a ``GPRTContext``: 
 
 .. that we will use to show our checkerboard pattern. 
 .. Then, we create our ``GPRTContext``, which under the hood initializes our underlying
@@ -199,25 +168,35 @@ and creating a ``GPRTContext``:
    :lines: 58-66
 
 After that, we create a ``GPRTModule``, which acts as a container that will hold 
-our compiled GPU program. 
+our compiled device kernels.
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
    :lines: 68-72
 
+Because we're using two different devices to run our code (normally a CPU and a GPU), we have 
+two separate compilation steps. The device code is compiled first, then the binary from that 
+compilation step is embedded into our host side code. This way, GPRT executables are "standalone",
+and don't need to carry around compiled shader files. 
+
 Creating our Raytracing Pipeline
 """"""""""""""""""""""""""""""""
-Next, we'll setup our ray tracing pipeline. A ray tracing pipeline is essentially 
-a collection of GPU programs that all operate together. In this example, our ray 
-tracing pipeline is actually pretty simple: just a single ray generation program. 
-Note that to create a handle to our ray generation program, we need to pass the 
-name of the program--here it's "simpleRayGen"--as well as the shader record 
-type--which is our `struct RayGenData` that we previously declared in our 
-"sharedCode.h" file.
+Next, we'll setup our ray tracing pipeline. We'll talk more about the ray tracing 
+pipeline in the next example, but essentially, it's a collection of GPU programs 
+that all operate together. 
+
+In this example, our ray tracing pipeline is super simple: just a single ray generation 
+program. 
 
 .. literalinclude:: ../../../samples/s00-rayGenOnly/hostCode.cpp
    :language: c++
    :lines: 73-78
+
+.. note::
+   To create a handle to our ray generation program, we need to pass the 
+   name of the program--here it's "simpleRayGen"--as well as the shader record 
+   type--which is our `struct RayGenData` that we previously declared in our 
+   "sharedCode.h" file.
 
 .. note::
    Many GPRT handles can be made in one of two ways: ``GPRTHandle`` and 

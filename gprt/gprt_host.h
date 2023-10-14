@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include <cstdalign>
 #include <vulkan/vulkan.h>
 
 #include "linalg.h"
@@ -43,6 +42,7 @@ using namespace linalg::ostream_overloads;
 #include <sys/types.h>
 
 #include <assert.h>
+#include <limits>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -1318,23 +1318,23 @@ gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTe
 
 /**
  * @brief Rasterize a list of GPRT geometry. (Currently assuming all geometry are GPRT_TRIANGLES)
- * 
+ *
  * @param context The GPRT context used to rasterize the triangles
  * @param geomType The geometry type to fetch raster programs from
  * @param numGeometry The number of GPRTGeoms to rasterize
  * @param geometry A pointer to a list of GPRT geometry, to be rasterized in the order given
- * @param rasterType Controls which rasterization programs to use. Analogous to "Ray Type", in 
+ * @param rasterType Controls which rasterization programs to use. Analogous to "Ray Type", in
  * that it indexes into the shader binding table.
- * @param instanceCounts How many instances of each geometry in the "geometry" list to rasterize. 
+ * @param instanceCounts How many instances of each geometry in the "geometry" list to rasterize.
  * Useful for rasterizing the same geometry in many different locations. If null pointer, this parameter is ignored.
  * Otherwise, we expect a list of length "numGeometry"
- * @param pushConstantsSize The size of the push constants structure to upload to the device. 
+ * @param pushConstantsSize The size of the push constants structure to upload to the device.
  * If 0, no push constants are updated. Currently limited to 128 bytes or less.
  * @param pushConstants A pointer to a structure of push constants to upload to the device.
 */
 void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
                            uint32_t rasterType, uint32_t *instanceCounts,
-                           size_t pushConstantsSize GPRT_IF_CPP(= 0), 
+                           size_t pushConstantsSize GPRT_IF_CPP(= 0),
                             void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
@@ -1897,8 +1897,8 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
-GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups, 
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), 
+GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
+                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
                                   void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
@@ -1916,7 +1916,7 @@ gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint
 
 GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
                                   uint32_t y_workgroups,
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), 
+                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
                                   void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
@@ -1933,8 +1933,8 @@ gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint
 }
 
 GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
-                                  uint32_t y_workgroups, uint32_t z_workgroups, 
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), 
+                                  uint32_t y_workgroups, uint32_t z_workgroups,
+                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
                                   void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
