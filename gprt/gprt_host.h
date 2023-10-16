@@ -130,15 +130,8 @@ struct Accel {
   uint64_t y;
 };
 
-struct Texture {
-  uint64_t x;
-  uint64_t y;
-};
-
-struct Sampler {
-  uint64_t x;
-  uint64_t y;
-};
+typedef uint32_t Texture;
+typedef uint32_t Sampler;
 }   // namespace gprt
 
 /*! launch params (or "globals") are variables that can be put into

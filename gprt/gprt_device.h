@@ -79,8 +79,12 @@ make_bgra(const float4 color) {
 
 // ideally this buffer type would be a struct...
 // but I'm running into a compiler bug reading one struct inside another one.
+
 // x stores pointer, y stores size.
 typedef uint64_t2 Buffer;
+typedef uint64_t2 Accel;
+typedef uint32_t Texture;
+typedef uint32_t Sampler;
 
 template <typename T>
 T
@@ -140,8 +144,6 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
-// x stores pointer, y stores type
-typedef uint64_t2 Accel;
 
 [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 
@@ -155,28 +157,26 @@ getBufferHandle(Buffer buffer) {
   return buffers[buffer.y];
 }
 
-typedef uint64_t2 Texture;
 
 Texture1D
 getTexture1DHandle(gprt::Texture texture) {
-  return texture1Ds[texture.x];
+  return texture1Ds[texture];
 }
 
 Texture2D
 getTexture2DHandle(gprt::Texture texture) {
-  return texture2Ds[texture.x];
+  return texture2Ds[texture];
 }
 
 Texture3D
 getTexture3DHandle(gprt::Texture texture) {
-  return texture3Ds[texture.x];
+  return texture3Ds[texture];
 }
 
-typedef uint64_t2 Sampler;
 
 SamplerState
 getSamplerHandle(gprt::Sampler sampler) {
-  return samplers[sampler.x];
+  return samplers[sampler];
 }
 
 SamplerState
