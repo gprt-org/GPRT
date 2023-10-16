@@ -1054,6 +1054,61 @@ float2 getOOBBDists(float3 p, in gprt::Buffer oobbs, uint32_t index) {
   return dists;
 }
 
+void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {
+  int numPrims = record.numPrims;
+
+  // At this point, it appears that the fastest thing to do is just 
+  // let traversal proceed linearly at the leaves to drive upward culling.
+  for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
+    uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
+    if (itemID >= numPrims) continue;
+
+    // minDist = min(minDist, l0MinDist);
+
+    #ifdef COLLECT_STATS
+    payload.primsHit++; // Count this as traversing a primitive
+    #endif
+    float3 p = queryOrigin;
+
+    float3 a = gprt::load<float3>(record.triangleLists, itemID * 3 + 0);
+    float3 b = gprt::load<float3>(record.triangleLists, itemID * 3 + 1);
+
+    float3 ba = b - a; float3 pa = p - a;
+    float distToEdgeA = sqrt(_dot2(ba*clamp(dot(ba,pa)/_dot2(ba),0.0f,1.0f)-pa));
+    // if (distToEdgeA > payload.closestDistance) continue;
+
+    float3 c = gprt::load<float3>(record.triangleLists, itemID * 3 + 2);
+    float3 cb = c - b; float3 pb = p - b;
+
+    float distToEdgeB = sqrt(_dot2(cb*clamp(dot(cb,pb)/_dot2(cb),0.0f,1.0f)-pb));
+    // if (distToEdgeB > payload.closestDistance) continue;
+
+    float3 ac = a - c; float3 pc = p - c;
+    float distToEdgeC = sqrt(_dot2(ac*clamp(dot(ac,pc)/_dot2(ac),0.0f,1.0f)-pc));
+    // if (distToEdgeC > payload.closestDistance) continue;
+
+    float3 nor = cross( ba, ac );
+    float distToPlane = sqrt(dot(nor,pa)*dot(nor,pa)/_dot2(nor));
+    // if (distToPlane > payload.closestDistance) continue;
+
+    float distToEdges = min(min(distToEdgeA, distToEdgeB), distToEdgeC);
+
+    // inside/outside test 
+    bool inside = (sign(dot(cross(ba,nor),pa)) +
+                  sign(dot(cross(cb,nor),pb)) +
+                  sign(dot(cross(ac,nor),pc))<2.0f);
+
+    float dist = inside ? distToEdges : distToPlane;
+    
+    // Primitive farther than furthest
+    if (dist > payload.closestDistance) continue;
+
+    // Newly found closest primitive
+    payload.closestDistance = dist;
+    payload.closestPrimitive = itemID;
+  }
+}
+
 void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
   payload.closestDistance = tmax;
 
@@ -1069,7 +1124,6 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
 
   uint32_t numClusters[MAX_LEVELS] = record.numClusters;
-  int numPrims = record.numPrims;
 
   List activeClusters[MAX_LEVELS];
   
@@ -1406,82 +1460,12 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 payload.lHit[0]++; // Count this as traversing an l0
                 #endif
                 
-                // At this point, it appears that the fastest thing to do is just 
-                // let traversal proceed linearly at the leaves to drive upward culling.
-                for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
-                  uint32_t itemID = l0ClusterID * PRIMS_PER_LEAF + primID;
-                  if (itemID >= numPrims) continue;
-
-                  if (distanceLevel == 1) {
-                    payload.closestDistance = l0MinDist;
-                    continue;
-                  }
-
-                  // minDist = min(minDist, l0MinDist);
-
-                  #ifdef COLLECT_STATS
-                  payload.primsHit++; // Count this as traversing a primitive
-                  #endif
-                  float3 p = queryOrigin;
-
-                  float3 a = gprt::load<float3>(record.triangleLists, itemID * 3 + 0);
-                  float3 b = gprt::load<float3>(record.triangleLists, itemID * 3 + 1);
-
-                  float3 ba = b - a; float3 pa = p - a;
-                  float distToEdgeA = sqrt(_dot2(ba*clamp(dot(ba,pa)/_dot2(ba),0.0f,1.0f)-pa));
-                  // if (distToEdgeA > payload.closestDistance) continue;
-
-                  float3 c = gprt::load<float3>(record.triangleLists, itemID * 3 + 2);
-                  float3 cb = c - b; float3 pb = p - b;
-
-                  float distToEdgeB = sqrt(_dot2(cb*clamp(dot(cb,pb)/_dot2(cb),0.0f,1.0f)-pb));
-                  // if (distToEdgeB > payload.closestDistance) continue;
-
-                  float3 ac = a - c; float3 pc = p - c;
-                  float distToEdgeC = sqrt(_dot2(ac*clamp(dot(ac,pc)/_dot2(ac),0.0f,1.0f)-pc));
-                  // if (distToEdgeC > payload.closestDistance) continue;
-
-                  float3 nor = cross( ba, ac );
-                  float distToPlane = sqrt(dot(nor,pa)*dot(nor,pa)/_dot2(nor));
-                  // if (distToPlane > payload.closestDistance) continue;
- 
-                  float distToEdges = min(min(distToEdgeA, distToEdgeB), distToEdgeC);
-
-                  // inside/outside test 
-                  bool inside = (sign(dot(cross(ba,nor),pa)) +
-                                sign(dot(cross(cb,nor),pb)) +
-                                sign(dot(cross(ac,nor),pc))<2.0f);
-
-                  float dist = inside ? distToEdges : distToPlane;
-
-                  // collect statistics
-                  totalHits++;
-                  closestDistAvg = lerp(closestDistAvg, dist, 1.f / totalHits);
-                  closestDistM2 += pow(dist - closestDistAvg, 2);
-                  if (totalHits < 2) closestDistVar = 0.f;
-                  else {
-                    closestDistVar = closestDistM2 / totalHits;
-                  }
-                  
-                  // Primitive farther than furthest
-                  if (dist > payload.closestDistance) continue;
-
-                  // Newly found closest primitive
-                  payload.closestDistance = dist;
-                  payload.closestPrimitive = itemID;
-
-                  // If we're accepting the first hit, stop traversal now.
-                  // if ((NNFlags & NN_FLAG_ACCEPT_FIRST_NEIGHBOR_AND_END_SEARCH) != 0) {
-                  //   if (debug) {
-                  //     printf("Accepting first hit! Total Hits %d True Dist: %f Closest Prim %d Average Dist %f Variance %f Std Dev %f\n", 
-                  //       totalHits, payload.closestDistance, payload.closestPrimitive, closestDistAvg, closestDistVar, sqrt(closestDistVar)
-                  //     );
-                  //   }
-
-                  //   payload.closestPrimitive = uint32_t(gprt::load<uint64_t>(record.ids, payload.closestPrimitive)); 
-                  //   return;
-                  // }
+                if (distanceLevel == 1) {
+                  payload.closestDistance = l0MinDist;
+                  continue;
                 }
+                
+                TraverseLeaf(record, l0ClusterID, queryOrigin, tmax, payload, debug);
               }
             }
           }
