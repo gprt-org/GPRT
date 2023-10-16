@@ -271,7 +271,7 @@ namespace gprt {
 
   void
   acceptHitAndEndSearch() {
-    _ignoreHit = true;
+    _acceptHitAndEndSearch = true;
   }
 };   // namespace gprt
 
