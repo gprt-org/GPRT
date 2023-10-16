@@ -62,28 +62,23 @@
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
 
+    typedef uint32_t Texture;
+    typedef uint32_t Sampler;
+
     #ifdef GPRT_DEVICE
     // ideally this buffer type would be a struct on the GPU...
     // but I'm running into a compiler bug reading one struct inside another one.
     // x stores pointer, y stores size.
     typedef uint64_t2 Buffer;
     typedef uint64_t2 Accel;
-    typedef uint64_t2 Texture;
-    typedef uint64_t2 Sampler;
+    
+
     #else
     struct Buffer {
         uint64_t x;
         uint64_t y;
     };
     struct Accel {
-        uint64_t x;
-        uint64_t y;
-    };
-    struct Texture {
-        uint64_t x;
-        uint64_t y;
-    };
-    struct Sampler {
         uint64_t x;
         uint64_t y;
     };

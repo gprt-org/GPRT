@@ -284,23 +284,23 @@ getBufferHandle(Buffer buffer) {
 
 Texture1D
 getTexture1DHandle(gprt::Texture texture) {
-  return texture1Ds[texture.x];
+  return texture1Ds[texture];
 }
 
 Texture2D
 getTexture2DHandle(gprt::Texture texture) {
-  return texture2Ds[texture.x];
+  return texture2Ds[texture];
 }
 
 Texture3D
 getTexture3DHandle(gprt::Texture texture) {
-  return texture3Ds[texture.x];
+  return texture3Ds[texture];
 }
 
 
 SamplerState
 getSamplerHandle(gprt::Sampler sampler) {
-  return samplers[sampler.x];
+  return samplers[sampler];
 }
 
 SamplerState
@@ -386,22 +386,17 @@ where ARG is "(type_, name)". */
 
 static bool _ignoreHit = false;
 static bool _acceptHitAndEndSearch = false;
-
 namespace gprt {
-// There's a bug with a couple vendors where calling these functions
-// inside another function can cause bugs when writing to the ray payload.
-// They must be called in the main body of the anyhit entrypoint.
-// These act as a temporary workaround until driver bugs are fixed...
+// See DXC issue #5158
+  void
+  ignoreHit() {
+    _ignoreHit = true;
+  }
 
-void
-ignoreHit() {
-  _ignoreHit = true;
-}
-
-void
-acceptHitAndEndSearch() {
-  _ignoreHit = true;
-}
+  void
+  acceptHitAndEndSearch() {
+    _acceptHitAndEndSearch = true;
+  }
 };   // namespace gprt
 
 #ifndef GPRT_ANY_HIT_PROGRAM

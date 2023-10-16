@@ -3836,7 +3836,7 @@ struct Context {
 
       defaultSampler =
           new Sampler(physicalDevice, logicalDevice, VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR,
-                      1, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
+                      1, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
       defaultTexture1D =
           new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
                       memoryUsageFlags, VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
@@ -10112,9 +10112,7 @@ GPRT_API gprt::Sampler
 gprtSamplerGetHandle(GPRTSampler _sampler) {
   LOG_API_CALL();
   Sampler *sampler = (Sampler *) _sampler;
-  gprt::Sampler samplerHandle;
-  samplerHandle.x = sampler->address;
-  samplerHandle.y = 0;   // for future use
+  gprt::Sampler samplerHandle = sampler->address;
   return samplerHandle;
 }
 
@@ -10232,8 +10230,7 @@ gprtTextureGetHandle(GPRTTexture _texture, int deviceID) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
   gprt::Texture texHandle;
-  texHandle.x = texture->address;
-  texHandle.y = 0;   // for future use
+  texHandle = texture->address;
   return texHandle;
 }
 
