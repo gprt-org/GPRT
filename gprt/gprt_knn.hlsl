@@ -414,8 +414,9 @@ GPRT_COMPUTE_PROGRAM(ComputeOBBAngles, (NNAccel, record), (32,1,1)) {
 
 // Run this "BRANCHING_FACTOR" times, sweeping pc.iteration from 0 to BRANCHING_FACTOR-1
 GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
-  int N0ID = DispatchThreadID.x * BRANCHING_FACTOR + pc.iteration;
-  if (N0ID >= record.numClusters[0]) return;
+  int N0ID = DispatchThreadID.x * pc.stride + pc.iteration;
+  int numNClusters = getNumNodesInLevel(0, pc.numPrims);
+  if (N0ID >= numNClusters) return;
 
   int numVerts = 0;
   float3 v[PRIMS_PER_LEAF * 3];
@@ -429,6 +430,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
     numVerts += 3;
   }
 
+  [unroll] // oddly, if I don't unroll, I crash when max levels is 1... 
   for (int level = 0; level < MAX_LEVELS; ++level) {
     int parentID = getPrimParentNode(level, N0ID * PRIMS_PER_LEAF);
     gprt::Buffer oobbs = record.oobbs[level];

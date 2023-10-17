@@ -1160,14 +1160,16 @@ List intersectAndSortChildren(
   float3 queryOrigin, float closestDistance, 
   int start, int maxClusters,
   bool useAABBs, in gprt::Buffer aabbs, 
-  bool useOOBBs, in gprt::Buffer oobbs) 
+  bool useOOBBs, in gprt::Buffer oobbs, bool debug = false) 
 {
   List H;
   H.clear();
 
   for (int child = 0; child < BRANCHING_FACTOR; ++child) {
     uint32_t index = start + child;
-    if (index >= maxClusters) break;
+    if (index >= maxClusters) {
+      break;
+    }
 
     float minDist = 0.f;
 
@@ -1199,8 +1201,95 @@ List intersectAndSortChildren(
 //   }
 //   return sortedList;
 // }
+void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
+  payload.closestDistance = tmax;
 
-void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
+  gprt::Buffer aabbs[MAX_LEVELS] = record.aabbs;
+  gprt::Buffer oobbs[MAX_LEVELS] = record.oobbs;
+
+  float minDist = 0.f;
+
+  float closestDistAvg = 0.f;
+  float closestDistM2 = 0.f; // m2 aggregates the squared distance from the mean
+  float closestDistVar = 0.f;
+  int totalHits = 0;
+
+  uint32_t numClusters[MAX_LEVELS] = record.numClusters;
+
+  List stack[MAX_LEVELS];
+
+  int starts[MAX_LEVELS];
+  for (int i = 0; i < MAX_LEVELS; ++i) starts[i] = 0;
+
+  int trail[MAX_LEVELS];
+  for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;  
+
+  // Traverse over all levels, starting from the top and going down
+  int level = MAX_LEVELS - 1;
+  while (level < MAX_LEVELS) {
+    // Figure out our parent cluster index
+    int index = (level == (MAX_LEVELS-1)) ? 0 : starts[level + 1] + stack[level + 1].key(trail[level + 1]);
+
+    // If we're traversing down the tree...
+    if (trail[level] == 0) {
+
+      // The start of our level is our parent times the branching factor
+      starts[level] = index * BRANCHING_FACTOR;
+
+      // Intersect and sort the children at this level
+      stack[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, starts[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level], debug);
+    }
+
+    // Traverse all children from near to far
+    [unroll]
+    for (int i = 0; i < BRANCHING_FACTOR; ++i) {      
+      // If recursing up, skip forward to the child we were last on 
+      if (i < trail[level]) continue; 
+      
+      // Fetch child index and distance from the sorted stack
+      int child = stack[level].key(trail[level]);
+      float minDist = stack[level].value(trail[level]);
+      
+      // Pop when all children from here on are too far
+      if (child >= BRANCHING_FACTOR || minDist > payload.closestDistance) {
+        trail[level] = BRANCHING_FACTOR;
+        break;
+      }
+      
+      #ifdef COLLECT_STATS
+      payload.lHit[level]++; // Count this as a hit
+      #endif
+
+      // if at this point we're at the bottom of the tree, traverse the leaf
+      if (level == 0) {
+        uint32_t leafID = starts[level] + child;
+        TraverseLeaf(record, leafID, queryOrigin, tmax, payload, debug);
+        // Advance the trail now that we've processed this child.
+        trail[level]++;
+      } else {
+        // recurse down the tree
+        break;
+      }
+    }
+    if (trail[level] == BRANCHING_FACTOR) {
+      // Reset the trail when we're done with this level.
+      trail[level] = 0;
+      // Then, go back up to the parent level.
+      level++;
+      // advance to the next node
+      trail[level]++;
+    } else {
+      // recurse down
+      level--;
+    }
+  }
+
+  if (payload.closestPrimitive != -1) {
+    payload.closestPrimitive = uint32_t(gprt::load<uint64_t>(record.ids, payload.closestPrimitive)); 
+  }
+}
+
+void TraverseTree7LevelsUnrolled(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
   payload.closestDistance = tmax;
 
   gprt::Buffer aabbs[MAX_LEVELS] = record.aabbs;
@@ -1480,7 +1569,7 @@ void TraceNN(
     //         payload                  // the payload IO
     // );
     // #else
-    TraverseTree(knnAccel, distanceLevel, useAABBs, useOOBBs, queryOrigin, tMax, payload, debug);
+    TraverseTree7LevelsUnrolled(knnAccel, distanceLevel, useAABBs, useOOBBs, queryOrigin, tMax, payload, debug);
     // #endif
   }
 
