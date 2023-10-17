@@ -1021,6 +1021,70 @@ struct List {
   };
 };
 
+int getNumNodesInLevel(int level, int numPrimitives) {
+  // For level -1, the number of "nodes" is just the number of primitives
+  int numNodes = (numPrimitives + (PRIMS_PER_LEAF - 1)) / PRIMS_PER_LEAF;
+  // When level is 1 or higher, we repeatedly divide the number of primitives per
+  // node, rounding up. 
+  for (int i = 0; i < level; ++i) {
+    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+  }
+  return numNodes;
+}
+
+/**
+ * @brief Returns the number of primitives in a given node in our "complete" tree 
+ * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
+ * @param index What node are we asking about relative to the given level?
+ * @param numPrimitives How many primitives in total are there in the tree?
+ */
+int getPrimsInNode(
+  int level,   
+  int index,    
+  int numPrimitives
+) {
+  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
+  // Theoretical maximum primitives in a node at this level
+  int maxPrimsInLevel = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, level);
+  // Account for when primitive counts don't exactly match a multiple of the branching factor
+  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
+}
+
+/**
+ * @brief Returns the parent node ID for the given primitive and parent level 
+ * @param level What level is the parent node in the tree? 0 is the first level, 1 is the second, etc
+ * @param index What primitive are we asking about?
+ */
+int getPrimParentNode(
+  int level,   
+  int primIndex
+) {
+  int parentIndex = primIndex / PRIMS_PER_LEAF;
+  // When level is 1 or higher, we repeatedly divide the number of primitives per
+  // node to determine our parent index.
+  for (int i = 0; i < level; ++i) {
+    parentIndex = parentIndex / BRANCHING_FACTOR;
+  }
+  return parentIndex;
+}
+
+/**
+ * @brief Returns the node address for the node at the given trail level
+ * @param level What level in the tree? 0 is the level containing leaves, 1 is the second level up, etc
+ * @param trail A trail of child offsets from 0 to branching factor, one per level
+ */
+int getNodeAddress(
+  int level,   
+  in int trail[MAX_LEVELS],
+  in List stack[MAX_LEVELS]
+) {
+  int index = 0;
+  for (int i = MAX_LEVELS - 1; i >= level; --i) {
+    index = index * BRANCHING_FACTOR + stack[i].key(trail[i]);
+  }
+  return index;
+}
+
 // void insertionSort(inout Pair list[BRANCHING_FACTOR]) {
 //   Pair item;
 //   int i, j;
@@ -1173,6 +1237,10 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
   List activeClusters[MAX_LEVELS];
 
+  int fullTrail[MAX_LEVELS];
+  for (int i = 0; i < MAX_LEVELS; ++i) fullTrail[i] = 0;
+
+
   int trail[MAX_LEVELS];
   for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;
 
@@ -1199,9 +1267,9 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
     payload.lHit[6]++; // Count this as traversing a l6
     #endif
 
-    int l6ClusterID = l6Index;
+    fullTrail[6] = l6Index;
 
-    List H = intersectChildren(queryOrigin, payload.closestDistance, l6ClusterID, 6, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+    List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[6], 6, numClusters, useAABBs, aabbs, useOBBs, oobbs);
     activeClusters[5] = sortList(H);
 
     // Traverse clusters near to far
@@ -1224,9 +1292,9 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
       payload.lHit[5]++; // Count this as traversing a l5
       #endif
 
-      int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + l5Index;
+      fullTrail[5] = fullTrail[6] * BRANCHING_FACTOR + l5Index;
 
-      List H = intersectChildren(queryOrigin, payload.closestDistance, l5ClusterID, 5, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+      List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[5], 5, numClusters, useAABBs, aabbs, useOBBs, oobbs);
       activeClusters[4] = sortList(H);
 
       // Traverse clusters near to far
@@ -1249,9 +1317,9 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
         payload.lHit[4]++; // Count this as traversing a leaf
         #endif
 
-        int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + l4Index;
+        fullTrail[4] = fullTrail[5] * BRANCHING_FACTOR + l4Index;
 
-        List H = intersectChildren(queryOrigin, payload.closestDistance, l4ClusterID, 4, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+        List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[4], 4, numClusters, useAABBs, aabbs, useOBBs, oobbs);
         activeClusters[3] = sortList(H);
 
         // Traverse clusters near to far
@@ -1274,9 +1342,9 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           payload.lHit[3]++; // Count this as traversing a l3
           #endif
           
-          int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
+          fullTrail[3] = fullTrail[4] * BRANCHING_FACTOR + l3Index;
 
-          List H = intersectChildren(queryOrigin, payload.closestDistance, l3ClusterID, 3, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+          List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[3], 3, numClusters, useAABBs, aabbs, useOBBs, oobbs);
           activeClusters[2] = sortList(H);
 
           // Traverse clusters near to far
@@ -1299,8 +1367,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             payload.lHit[2]++; // Count this as traversing a supercluster
             #endif
 
-            int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
-            List H = intersectChildren(queryOrigin, payload.closestDistance, l2ClusterID, 2, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+            fullTrail[2] = fullTrail[3] * BRANCHING_FACTOR + l2Index;
+            List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[2], 2, numClusters, useAABBs, aabbs, useOBBs, oobbs);
             activeClusters[1] = sortList(H);
 
             // Traverse clusters near to far
@@ -1323,10 +1391,10 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               payload.lHit[1]++; // Count this as traversing a cluster
               #endif
 
-              int parentIndex = l2ClusterID * BRANCHING_FACTOR + l1Index;
+              fullTrail[1] = fullTrail[2] * BRANCHING_FACTOR + l1Index;
               int level = 0;
               
-              List H = intersectChildren(queryOrigin, payload.closestDistance, parentIndex, 1, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+              List H = intersectChildren(queryOrigin, payload.closestDistance, fullTrail[1], 1, numClusters, useAABBs, aabbs, useOBBs, oobbs);
               activeClusters[level] = sortList(H);
 
               // Traverse all children from near to far
@@ -1340,14 +1408,14 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 // Break when nodes here on are too far
                 if (minDist > payload.closestDistance) break;
 
-                uint32_t index = parentIndex * BRANCHING_FACTOR + child;
-                if (index >= numClusters[level]) break;
+                fullTrail[0] = fullTrail[1] * BRANCHING_FACTOR + child;
+                if (fullTrail[0] >= numClusters[level]) break;
 
                 #ifdef COLLECT_STATS
                 payload.lHit[level]++; // Count this as a hit
                 #endif
 
-                TraverseLeaf(record, index, queryOrigin, tmax, payload, debug);
+                TraverseLeaf(record, fullTrail[0], queryOrigin, tmax, payload, debug);
               }
             }
           }

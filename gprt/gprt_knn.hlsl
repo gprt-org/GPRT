@@ -103,53 +103,6 @@ bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points,
   return true; 
 }
 
-int getNumNodesInLevel(int level, int numPrimitives) {
-  // For level -1, the number of "nodes" is just the number of primitives
-  int numNodes = (numPrimitives + (PRIMS_PER_LEAF - 1)) / PRIMS_PER_LEAF;
-  // When level is 1 or higher, we repeatedly divide the number of primitives per
-  // node, rounding up. 
-  for (int i = 0; i < level; ++i) {
-    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-  }
-  return numNodes;
-}
-
-/**
- * @brief Returns the number of primitives in a given node in our "complete" tree 
- * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
- * @param index What node are we asking about relative to the given level?
- * @param numPrimitives How many primitives in total are there in the tree?
- */
-int getPrimsInNode(
-  int level,   
-  int index,    
-  int numPrimitives
-) {
-  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
-  // Theoretical maximum primitives in a node at this level
-  int maxPrimsInLevel = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, level);
-  // Account for when primitive counts don't exactly match a multiple of the branching factor
-  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
-}
-
-/**
- * @brief Returns the parent node ID for the given primitive and level 
- * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
- * @param index What primitive are we asking about?
- */
-int getParentNode(
-  int level,   
-  int primIndex
-) {
-  int parentIndex = primIndex / PRIMS_PER_LEAF;
-  // When level is 1 or higher, we repeatedly divide the number of primitives per
-  // node to determine our parent index.
-  for (int i = 0; i < level; ++i) {
-    parentIndex = parentIndex / BRANCHING_FACTOR;
-  }
-  return parentIndex;
-}
-
 typedef gprt::NNAccel NNAccel;
 
 GPRT_COMPUTE_PROGRAM(ComputePointBounds, (NNAccel, record), (1,1,1)) {
@@ -477,7 +430,7 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   }
 
   for (int level = 0; level < MAX_LEVELS; ++level) {
-    int parentID = getParentNode(level, N0ID * PRIMS_PER_LEAF);
+    int parentID = getPrimParentNode(level, N0ID * PRIMS_PER_LEAF);
     gprt::Buffer oobbs = record.oobbs[level];
 
     float3 obbEul = gprt::load<float3>(oobbs, parentID * 3 + 2);
