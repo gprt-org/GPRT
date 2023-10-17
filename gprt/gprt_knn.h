@@ -1424,8 +1424,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                 activeClusters[level].clear();
                 
                 // Insert into active leaf list by distance far to near
-                for (int cid = 0; cid < BRANCHING_FACTOR; ++cid) {
-                  uint32_t index = parentIndex * BRANCHING_FACTOR + cid;
+                for (int child = 0; child < BRANCHING_FACTOR; ++child) {
+                  uint32_t index = parentIndex * BRANCHING_FACTOR + child;
                   if (index >= numClusters[level]) break;
 
                   float minDist = 0.f;
@@ -1443,7 +1443,7 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
                     if (minDist > payload.closestDistance) continue;
                   }
 
-                  activeClusters[level].insert(Pair::Create(cid, minDist));
+                  activeClusters[level].insert(Pair::Create(child, minDist));
                 }
 
                 // Traverse all children from near to far
