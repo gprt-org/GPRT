@@ -1224,128 +1224,147 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
   int trail[MAX_LEVELS];
   for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;
+  int level = 7;
 
-  activeClusters[6] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[6], numClusters[6], useAABBs, aabbs[6], useOOBBs, oobbs[6]);
+  level--;
+  fullTrail[level] = 0;
+  activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
   // Traverse clusters near to far
-  for (trail[6] = 0; trail[6] < BRANCHING_FACTOR; ++trail[6]) {
-    int l6Index = activeClusters[6].key(trail[6]);
-    float l6MinDist = activeClusters[6].value(trail[6]);
+  for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+    int index = activeClusters[level].key(trail[level]);
+    float mindist = activeClusters[level].value(trail[level]);
     
-    // Break when nodes here on are too far
-    if (l6Index >= BRANCHING_FACTOR || l6MinDist > payload.closestDistance) break;
+    // Pop when nodes here on are too far
+    if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
 
     #ifdef COLLECT_STATS
-    payload.lHit[6]++; // Count this as traversing a l6
+    payload.lHit[level]++; // Count this as traversing a l6
     #endif
 
-    fullTrail[5] = l6Index * BRANCHING_FACTOR;
+    level--;
 
-    activeClusters[5] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[5], numClusters[5], useAABBs, aabbs[5], useOOBBs, oobbs[5]);
+    fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+    activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
     // Traverse clusters near to far
-    for (trail[5] = 0; trail[5] < BRANCHING_FACTOR; ++trail[5]) {
-      int l5Index = activeClusters[5].key(trail[5]);
-      float l5MinDist = activeClusters[5].value(trail[5]);
+    for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+      int index = activeClusters[level].key(trail[level]);
+      float mindist = activeClusters[level].value(trail[level]);
       
-      // Break when nodes here on are too far
-      if (l5Index >= BRANCHING_FACTOR || l5MinDist > payload.closestDistance) break;
+      // Pop when nodes here on are too far
+      if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
 
       #ifdef COLLECT_STATS
-      payload.lHit[5]++; // Count this as traversing a l5
+      payload.lHit[level]++; // Count this as traversing a l5
       #endif
 
-      fullTrail[4] = (fullTrail[5] + l5Index) * BRANCHING_FACTOR;
+      level--;
 
-      activeClusters[4] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[4], numClusters[4], useAABBs, aabbs[4], useOOBBs, oobbs[4]);
+      fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+      activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
       // Traverse clusters near to far
-      for (trail[4] = 0; trail[4] < BRANCHING_FACTOR; ++trail[4]) {
-        int l4Index = activeClusters[4].key(trail[4]);
-        float l4MinDist = activeClusters[4].value(trail[4]);
+      for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+        int index = activeClusters[level].key(trail[level]);
+        float mindist = activeClusters[level].value(trail[level]);
         
-        // Break when nodes here on are too far
-        if (l4Index >= BRANCHING_FACTOR || l4MinDist > payload.closestDistance) break;
+        // Pop when nodes here on are too far
+        if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
 
         #ifdef COLLECT_STATS
-        payload.lHit[4]++; // Count this as traversing a leaf
+        payload.lHit[level]++; // Count this as traversing a leaf
         #endif
 
-        fullTrail[3] = (fullTrail[4] + l4Index) * BRANCHING_FACTOR;
+        level--;
 
-        activeClusters[3] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[3], numClusters[3], useAABBs, aabbs[3], useOOBBs, oobbs[3]);
+        fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+        activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
         // Traverse clusters near to far
-        for (trail[3] = 0; trail[3] < BRANCHING_FACTOR; ++trail[3]) {
-          int l3Index = activeClusters[3].key(trail[3]);
-          float l3MinDist = activeClusters[3].value(trail[3]);
+        for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+          int index = activeClusters[level].key(trail[level]);
+          float mindist = activeClusters[level].value(trail[level]);
           
-          // Break when nodes here on are too far
-          if (l3Index >= BRANCHING_FACTOR || l3MinDist > payload.closestDistance) break;
+          // Pop when nodes here on are too far
+          if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
 
           #ifdef COLLECT_STATS
-          payload.lHit[3]++; // Count this as traversing a l3
+          payload.lHit[level]++; // Count this as traversing a l3
           #endif
-          
-          fullTrail[2] = (fullTrail[3] + l3Index) * BRANCHING_FACTOR;
 
-          activeClusters[2] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[2], numClusters[2], useAABBs, aabbs[2], useOOBBs, oobbs[2]);
+          level--;
+          
+          fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+          activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
           // Traverse clusters near to far
-          for (trail[2] = 0; trail[2] < BRANCHING_FACTOR; ++trail[2]) {
-            int l2Index = activeClusters[2].key(trail[2]);
-            float l2MinDist = activeClusters[2].value(trail[2]);
+          for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+            int index = activeClusters[level].key(trail[level]);
+            float mindist = activeClusters[level].value(trail[level]);
             
-            // Break when nodes here on are too far
-            if (l2Index >= BRANCHING_FACTOR || l2MinDist > payload.closestDistance) break;
+            // Pop when nodes here on are too far
+            if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
             
             #ifdef COLLECT_STATS
-            payload.lHit[2]++; // Count this as traversing a supercluster
+            payload.lHit[level]++; // Count this as traversing a supercluster
             #endif
 
-            fullTrail[1] = (fullTrail[2] + l2Index) * BRANCHING_FACTOR;
-            activeClusters[1] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[1], numClusters[1], useAABBs, aabbs[1], useOOBBs, oobbs[1]);
+            level--;
+
+            fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+            activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
             // Traverse clusters near to far
-            for (trail[1] = 0; trail[1] < BRANCHING_FACTOR; ++trail[1]) {
-              int l1Index = activeClusters[1].key(trail[1]);
-              float l1MinDist = activeClusters[1].value(trail[1]);
+            for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+              int index = activeClusters[level].key(trail[level]);
+              float mindist = activeClusters[level].value(trail[level]);
               
-              // Break when nodes here on are too far
-              if (l1Index >= BRANCHING_FACTOR || l1MinDist > payload.closestDistance) break;
+              // Pop when nodes here on are too far
+              if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
               
               #ifdef COLLECT_STATS
-              payload.lHit[1]++; // Count this as traversing a cluster
+              payload.lHit[level]++; // Count this as traversing a cluster
               #endif
 
-              fullTrail[0] = (fullTrail[1] + l1Index) * BRANCHING_FACTOR;
-              int level = 0;
+              level--;
               
-              activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[0], numClusters[0], useAABBs, aabbs[0], useOOBBs, oobbs[0]);
+              fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
+              activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
 
               // Traverse all children from near to far
               for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
                 int child = activeClusters[level].key(trail[level]);
                 float minDist = activeClusters[level].value(trail[level]);
                 
-                // Break when nodes here on are too far
+                // Pop when nodes here on are too far
                 if (child >= BRANCHING_FACTOR || minDist > payload.closestDistance) break;
 
-                uint32_t leafID = fullTrail[0] + child;
+                uint32_t leafID = fullTrail[level] + child;
 
                 #ifdef COLLECT_STATS
                 payload.lHit[level]++; // Count this as a hit
                 #endif
 
+                level--;
                 TraverseLeaf(record, leafID, queryOrigin, tmax, payload, debug);
+                level++;
               }
+              level++;
             }
+            level++;
           }
+          level++;
         }
+        level++;
       }
+      level++;
     }
+    level++;
   }
   
+  level++;
+
   if (payload.closestPrimitive != -1) {
     payload.closestPrimitive = uint32_t(gprt::load<uint64_t>(record.ids, payload.closestPrimitive)); 
   }
