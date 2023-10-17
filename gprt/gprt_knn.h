@@ -1109,6 +1109,52 @@ void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, float3 queryOrigin, 
   }
 }
 
+List intersectChildren(
+  float3 queryOrigin, float closestDistance, 
+  int currentIndex, int currentLevel, 
+  in uint32_t numClusters[MAX_LEVELS], 
+  bool useAABBs, in gprt::Buffer aabbs[MAX_LEVELS], 
+  bool useOOBBs, in gprt::Buffer oobbs[MAX_LEVELS]) 
+{
+  List H;
+  H.clear();
+
+  int childLevel = currentLevel - 1;
+  for (int child = 0; child < BRANCHING_FACTOR; ++child) {
+    uint32_t index = currentIndex * BRANCHING_FACTOR + child;
+    if (index >= numClusters[childLevel]) break;
+
+    float minDist = 0.f;
+
+    // Upward Culling: skip superclusters father than current closest primitive
+    if (useAABBs) {
+      float2 dists = getAABBDists(queryOrigin, aabbs[childLevel], index);
+      minDist = max(minDist, dists.x);
+      if (minDist > closestDistance) continue;
+    }
+    
+    if (useOOBBs) {
+      float2 dists = getOOBBDists(queryOrigin, oobbs[childLevel], index);
+      minDist = max(minDist, dists.x);
+      if (minDist > closestDistance) continue;
+    }
+
+    H.items[child] = Pair::Create(child, minDist);
+  }
+
+  return H;
+}
+
+// sorts by value
+List sortList(in List unsortedList) {
+  List sortedList;
+  sortedList.clear();
+  for (int child = 0; child < BRANCHING_FACTOR; ++child) {
+    sortedList.insert(unsortedList.items[child]);
+  }
+  return sortedList;
+}
+
 void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
   payload.closestDistance = tmax;
 
@@ -1129,32 +1175,9 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
   int trail[MAX_LEVELS];
   for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;
-  
-  // Initialize active l6 list
-  activeClusters[6].clear();
 
-  // Insert into active l6 list by distance far to near
-  for (trail[6] = 0; trail[6] < BRANCHING_FACTOR; ++trail[6]) {
-    int l6ClusterID = trail[6];
-    if (l6ClusterID >= numClusters[6]) break;
-
-    float l6MinDist = 0.f;
-    
-    // Upward Culling: skip superclusters father than current closest primitive
-    if (useAABBs) {
-      float2 dists = getAABBDists(queryOrigin, aabbs[6], l6ClusterID);
-      l6MinDist = max(l6MinDist, dists.x);
-      if (l6MinDist > payload.closestDistance) continue;
-    }
-    
-    if (useOBBs) {
-      float2 dists = getOOBBDists(queryOrigin, oobbs[6], l6ClusterID);
-      l6MinDist = max(l6MinDist, dists.x);
-      if (l6MinDist > payload.closestDistance) continue;
-    }
-
-    activeClusters[6].insert(Pair::Create(trail[6], l6MinDist));
-  }
+  List H = intersectChildren(queryOrigin, payload.closestDistance, 0, 7, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+  activeClusters[6] = sortList(H);
 
   // Traverse clusters near to far
   for (trail[6] = 0; trail[6] < BRANCHING_FACTOR; ++trail[6]) {
@@ -1178,31 +1201,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
     int l6ClusterID = l6Index;
 
-    // Initialize active l5 list
-    activeClusters[5].clear();
-
-    // Insert into active l5 list by distance far to near
-    for (trail[5] = 0; trail[5] < BRANCHING_FACTOR; ++trail[5]) {
-      int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + trail[5];
-      if (l5ClusterID >= numClusters[5]) break;
-
-      float l5MinDist = l6MinDist;
-
-      // Upward Culling: skip superclusters father than current closest primitive
-      if (useAABBs) {
-        float2 dists = getAABBDists(queryOrigin, aabbs[5], l5ClusterID);
-        l5MinDist = max(l5MinDist, dists.x);
-        if (l5MinDist > payload.closestDistance) continue;
-      }
-      
-      if (useOBBs) {
-        float2 dists = getOOBBDists(queryOrigin, oobbs[5], l5ClusterID);
-        l5MinDist = max(l5MinDist, dists.x);
-        if (l5MinDist > payload.closestDistance) continue;
-      }
-
-      activeClusters[5].insert(Pair::Create(trail[5], l5MinDist));
-    }
+    List H = intersectChildren(queryOrigin, payload.closestDistance, l6ClusterID, 6, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+    activeClusters[5] = sortList(H);
 
     // Traverse clusters near to far
     for (trail[5] = 0; trail[5] < BRANCHING_FACTOR; ++trail[5]) {
@@ -1226,31 +1226,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
       int l5ClusterID = l6ClusterID * BRANCHING_FACTOR + l5Index;
 
-      // Initialize active l4 list
-      activeClusters[4].clear();
-
-      // Insert into active l4 list by distance far to near
-      for (trail[4] = 0; trail[4] < BRANCHING_FACTOR; ++trail[4]) {
-        int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + trail[4];
-        if (l4ClusterID >= numClusters[4]) break;
-
-        float l4MinDist = l5MinDist;
-        
-        // Upward Culling: skip superclusters father than current closest primitive
-        if (useAABBs) {
-          float2 dists = getAABBDists(queryOrigin, aabbs[4], l4ClusterID);
-          l4MinDist = max(l4MinDist, dists.x);
-          if (l4MinDist > payload.closestDistance) continue;
-        }
-        
-        if (useOBBs) {
-          float2 dists = getOOBBDists(queryOrigin, oobbs[4], l4ClusterID);
-          l4MinDist = max(l4MinDist, dists.x);
-          if (l4MinDist > payload.closestDistance) continue;
-        }
-
-        activeClusters[4].insert(Pair::Create(trail[4], l4MinDist));
-      }
+      List H = intersectChildren(queryOrigin, payload.closestDistance, l5ClusterID, 5, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+      activeClusters[4] = sortList(H);
 
       // Traverse clusters near to far
       for (trail[4] = 0; trail[4] < BRANCHING_FACTOR; ++trail[4]) {
@@ -1274,31 +1251,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
 
         int l4ClusterID = l5ClusterID * BRANCHING_FACTOR + l4Index;
 
-        // Initialize active l3 list
-        activeClusters[3].clear();
-        
-        // Insert into active l3 list by distance far to near
-        for (trail[3] = 0; trail[3] < BRANCHING_FACTOR; ++trail[3]) {
-          int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + trail[3];
-          if (l3ClusterID >= numClusters[3]) break;
-
-          float l3MinDist = l4MinDist;
-          
-          // Upward Culling: skip superclusters father than current closest primitive
-          if (useAABBs) {
-            float2 dists = getAABBDists(queryOrigin, aabbs[3], l3ClusterID);
-            l3MinDist = max(l3MinDist, dists.x);
-            if (l3MinDist > payload.closestDistance) continue;
-          }
-          
-          if (useOBBs) {
-            float2 dists = getOOBBDists(queryOrigin, oobbs[3], l3ClusterID);
-            l3MinDist = max(l3MinDist, dists.x);
-            if (l3MinDist > payload.closestDistance) continue;
-          }
-
-          activeClusters[3].insert(Pair::Create(trail[3], l3MinDist));
-        }
+        List H = intersectChildren(queryOrigin, payload.closestDistance, l4ClusterID, 4, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+        activeClusters[3] = sortList(H);
 
         // Traverse clusters near to far
         for (trail[3] = 0; trail[3] < BRANCHING_FACTOR; ++trail[3]) {
@@ -1322,31 +1276,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
           
           int l3ClusterID = l4ClusterID * BRANCHING_FACTOR + l3Index;
 
-          // Initialize active l2 list
-          activeClusters[2].clear();
-                  
-          // Insert into active l2 list by distance far to near
-          for (trail[2] = 0; trail[2] < BRANCHING_FACTOR; ++trail[2]) {
-            int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + trail[2];
-            if (l2ClusterID >= numClusters[2]) break;
-
-            float l2MinDist = l3MinDist;
-            
-            // Upward Culling: skip superclusters father than current closest primitive
-            if (useAABBs) {
-              float2 dists = getAABBDists(queryOrigin, aabbs[2], l2ClusterID);
-              l2MinDist = max(l2MinDist, dists.x);
-              if (l2MinDist > payload.closestDistance) continue;
-            }
-            
-            if (useOBBs) {
-              float2 dists = getOOBBDists(queryOrigin, oobbs[2], l2ClusterID);
-              l2MinDist = max(l2MinDist, dists.x);
-              if (l2MinDist > payload.closestDistance) continue;
-            }
-
-            activeClusters[2].insert(Pair::Create(trail[2], l2MinDist));
-          }
+          List H = intersectChildren(queryOrigin, payload.closestDistance, l3ClusterID, 3, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+          activeClusters[2] = sortList(H);
 
           // Traverse clusters near to far
           for (trail[2] = 0; trail[2] < BRANCHING_FACTOR; ++trail[2]) {
@@ -1369,32 +1300,8 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
             #endif
 
             int l2ClusterID = l3ClusterID * BRANCHING_FACTOR + l2Index;
-
-            // Initialize active l1 cluster list
-            activeClusters[1].clear();
-
-            // Insert into active cluster list by distance far to near
-            for (trail[1] = 0; trail[1] < BRANCHING_FACTOR; ++trail[1]) {
-              int l1ClusterID = l2ClusterID * BRANCHING_FACTOR + trail[1];
-              if (l1ClusterID >= numClusters[1]) break;
-
-              float l1MinDist = l2MinDist;
-
-              // Upward Culling: skip superclusters father than current closest primitive
-              if (useAABBs) {
-                float2 dists = getAABBDists(queryOrigin, aabbs[1], l1ClusterID);
-                l1MinDist = max(l1MinDist, dists.x);
-                if (l1MinDist > payload.closestDistance) continue;
-              }
-              
-              if (useOBBs) {
-                float2 dists = getOOBBDists(queryOrigin, oobbs[1], l1ClusterID);
-                l1MinDist = max(l1MinDist, dists.x);
-                if (l1MinDist > payload.closestDistance) continue;
-              }
-
-              activeClusters[1].insert(Pair::Create(trail[1], l1MinDist));
-            }
+            List H = intersectChildren(queryOrigin, payload.closestDistance, l2ClusterID, 2, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+            activeClusters[1] = sortList(H);
 
             // Traverse clusters near to far
             for (trail[1] = 0; trail[1] < BRANCHING_FACTOR; ++trail[1]) {
@@ -1417,65 +1324,31 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
               #endif
 
               int parentIndex = l2ClusterID * BRANCHING_FACTOR + l1Index;
-
               int level = 0;
-              while (level < 1) {
-                // Initialize active l0 list
-                activeClusters[level].clear();
+              
+              List H = intersectChildren(queryOrigin, payload.closestDistance, parentIndex, 1, numClusters, useAABBs, aabbs, useOBBs, oobbs);
+              activeClusters[level] = sortList(H);
+
+              // Traverse all children from near to far
+              for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
+                int child = activeClusters[level].key(trail[level]);
+                float minDist = activeClusters[level].value(trail[level]);
                 
-                // Insert into active leaf list by distance far to near
-                for (int child = 0; child < BRANCHING_FACTOR; ++child) {
-                  uint32_t index = parentIndex * BRANCHING_FACTOR + child;
-                  if (index >= numClusters[level]) break;
+                // Pop when nodes here on are culled
+                if (child >= BRANCHING_FACTOR) break;
+                
+                // Break when nodes here on are too far
+                if (minDist > payload.closestDistance) break;
 
-                  float minDist = 0.f;
+                uint32_t index = parentIndex * BRANCHING_FACTOR + child;
+                if (index >= numClusters[level]) break;
 
-                  // Upward Culling: skip superclusters father than current closest primitive
-                  if (useAABBs) {
-                    float2 dists = getAABBDists(queryOrigin, aabbs[level], index);
-                    minDist = max(minDist, dists.x);
-                    if (minDist > payload.closestDistance) continue;
-                  }
-                  
-                  if (useOBBs) {
-                    float2 dists = getOOBBDists(queryOrigin, oobbs[level], index);
-                    minDist = max(minDist, dists.x);
-                    if (minDist > payload.closestDistance) continue;
-                  }
+                #ifdef COLLECT_STATS
+                payload.lHit[level]++; // Count this as a hit
+                #endif
 
-                  activeClusters[level].insert(Pair::Create(child, minDist));
-                }
-
-                // Traverse all children from near to far
-                for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-                  int child = activeClusters[level].key(trail[level]);
-                  float minDist = activeClusters[level].value(trail[level]);
-                  
-                  // Pop when nodes here on are culled
-                  if (child >= BRANCHING_FACTOR) break;
-                  
-                  // Break when nodes here on are too far
-                  if (minDist > payload.closestDistance) break;
-
-                  uint32_t index = parentIndex * BRANCHING_FACTOR + child;
-                  if (index >= numClusters[level]) break;
-
-                  #ifdef COLLECT_STATS
-                  payload.lHit[index]++; // Count this as a hit
-                  #endif
-                  
-                  if (distanceLevel == (level + 1)) {
-                    payload.closestDistance = minDist;
-                    continue;
-                  }
-                  else {
-                    TraverseLeaf(record, index, queryOrigin, tmax, payload, debug);
-                  }
-                }
-
-                // go back up a level
-                level++;
-              };
+                TraverseLeaf(record, index, queryOrigin, tmax, payload, debug);
+              }
             }
           }
         }
@@ -1487,11 +1360,11 @@ void TraverseTree(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bo
     payload.closestPrimitive = uint32_t(gprt::load<uint64_t>(record.ids, payload.closestPrimitive)); 
   }
 
-  if (debug) {
-    printf("Total Hits %d True Dist: %f Closest Prim %d Average Dist %f Variance %f Std Dev %f\n", 
-      totalHits, payload.closestDistance, payload.closestPrimitive, closestDistAvg, closestDistVar, sqrt(closestDistVar)
-    );
-  }
+  // if (debug) {
+  //   printf("Total Hits %d True Dist: %f Closest Prim %d Average Dist %f Variance %f Std Dev %f\n", 
+  //     totalHits, payload.closestDistance, payload.closestPrimitive, closestDistAvg, closestDistVar, sqrt(closestDistVar)
+  //   );
+  // }
 }
 
 // void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
