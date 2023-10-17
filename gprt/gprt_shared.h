@@ -5,6 +5,7 @@
 // The higher this number is, the more primitives we can store in our tree
 #define MAX_LEVELS 7
 
+
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
 #define BRANCHING_FACTOR 8
