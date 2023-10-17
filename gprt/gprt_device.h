@@ -29,8 +29,6 @@
  */
 #pragma once
 
-#define alignas(alignment)
-
 // #ifndef FLT_MAX 
 // #define FLT_MAX 3.402823466e+38
 // #endif

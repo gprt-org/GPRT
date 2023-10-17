@@ -144,10 +144,10 @@ void __compute__Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV
 
 		// Pre-load the key values in order to hide some of the read latency
 		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (uint32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{
@@ -387,10 +387,10 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 		
 		// Pre-load the key values in order to hide some of the read latency
 		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (int32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{
@@ -525,17 +525,17 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 		
 		// Pre-load the key values in order to hide some of the read latency
 		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		// Also preload payload
 		uint64_t srcValues[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcValues[0] = SrcPayload[DataIndex];
-		srcValues[1] = SrcPayload[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcValues[2] = SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcValues[3] = SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		srcValues[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcValues[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcValues[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcValues[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (int32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{

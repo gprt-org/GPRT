@@ -7831,13 +7831,18 @@ struct NNTriangleAccel : public Accel {
         gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeAnglesTime += gprtEndProfile((GPRTContext)context);
       }
+      
+      gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
+      pc.stride = BRANCHING_FACTOR;
+      pc.numPrims = nnAccelHandle.numPrims;
+      pc.triangles = gprtBufferGetHandle(triangleLists);
       for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
         pc.iteration = pid;
         gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], (nnAccelHandle.numClusters[1] + 31) / 32, sizeof(gprt::NNConstants), &pc);
+        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], (((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR) + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeBoundsTime += gprtEndProfile((GPRTContext)context);
-      }
+      }      
     }
     computeCovarianceTime /= 100.f;
     computeAnglesTime /= 100.f;

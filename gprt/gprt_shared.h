@@ -3,12 +3,11 @@
 #define COLLECT_STATS
 
 // The higher this number is, the more primitives we can store in our tree
-#define MAX_LEVELS 7
-
+#define MAX_LEVELS 1
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 8
+#define BRANCHING_FACTOR 32
 
 // 1 prim per leaf achieves really good culling, but it takes a lot of memory. 
 // It shifts the bottleneck into the nodes, but overall performance is best when 
@@ -164,16 +163,17 @@ namespace gprt{
 
     struct NNConstants {
         // An internal iteration parameter for construction
-        alignas(4) uint32_t iteration;
-        alignas(4) uint32_t level;
-        alignas(4) uint32_t numPrims;
-        alignas(16) gprt::Buffer triangles;
+        uint32_t iteration;
+        uint32_t stride;
+        uint32_t level;
+        uint32_t numPrims;
+        gprt::Buffer triangles;
 
-        alignas(16) gprt::Buffer buffer1;
-        alignas(16) gprt::Buffer buffer2;
-        alignas(16) gprt::Buffer buffer3;
-        alignas(16) gprt::Buffer buffer4;
-        alignas(16) gprt::Buffer buffer5;
-        alignas(16) gprt::Buffer buffer6;
+        gprt::Buffer buffer1;
+        gprt::Buffer buffer2;
+        gprt::Buffer buffer3;
+        gprt::Buffer buffer4;
+        gprt::Buffer buffer5;
+        gprt::Buffer buffer6;
     };
 };
