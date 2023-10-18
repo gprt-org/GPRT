@@ -319,14 +319,14 @@ getDefaultSampler() {
   backend.
 */
 
-/* RAW here makes sure macro expansion doesn't get ignored when generated as
+/* GPRT_RAW here makes sure macro expansion doesn't get ignored when generated as
 part of the parent macro expansion. */
-#define RAW(...) __VA_ARGS__
+#define GPRT_RAW(...) __VA_ARGS__
 
-/* CAT here is similar to RAW, making sure concatenation is preserved as
+/* GPRT_CAT here is similar to GPRT_RAW, making sure concatenation is preserved as
 part of the parent macro expansion */
-#define CAT_(A, B) A##B
-#define CAT(A, B)  CAT_(A, B)
+#define GPRT_CAT_(A, B) A##B
+#define GPRT_CAT(A, B)  GPRT_CAT_(A, B)
 
 /* TYPE_NAME_EXPAND transforms "(A,B)"" into "A B". We usually include the
 parenthesis as part of the argument in the macro, like "TYPE_NAME_EXPAND ARG,
@@ -339,19 +339,19 @@ where ARG is "(type_, name)". */
 #ifdef RAYGEN
 #define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                                                                      \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                  \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                  \
                                                                                                                        \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
+  [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
+                                                                            GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("raygeneration")] void __raygen__##progName() { progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl))); } \
+  [shader("raygeneration")] void __raygen__##progName() { progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl))); } \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_RAYGEN_PROGRAM(progName, RecordDecl)                                                                      \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -359,26 +359,26 @@ where ARG is "(type_, name)". */
 #ifdef CLOSESTHIT
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                     \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                               \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+                in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                               \
                                                                                                                        \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
+  [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
+                                                                            GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("closesthit")] void __closesthit__##progName(inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                        \
-                                                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                       \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
-             RAW(NAME_EXPAND AttributeDecl));                                                                          \
+  [shader("closesthit")] void __closesthit__##progName(inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                        \
+                                                       in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) {                       \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)), GPRT_RAW(NAME_EXPAND PayloadDecl),                            \
+             GPRT_RAW(NAME_EXPAND AttributeDecl));                                                                          \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+                in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_CLOSEST_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                     \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
-                in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                          \
+                in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -401,16 +401,16 @@ namespace gprt {
 #ifdef ANYHIT
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* fwd decl for the kernel func to call */                                                                           \
-  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                       in RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                        \
+  inline void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl);                                                        \
                                                                                                                        \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
+  [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
+                                                                            GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("anyhit")] void __anyhit__##progName(inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                                \
-                                               in RAW(TYPE_NAME_EXPAND) AttributeDecl) {                               \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl),                            \
-             RAW(NAME_EXPAND AttributeDecl));                                                                          \
+  [shader("anyhit")] void __anyhit__##progName(inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                                \
+                                               in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) {                               \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)), GPRT_RAW(NAME_EXPAND PayloadDecl),                            \
+             GPRT_RAW(NAME_EXPAND AttributeDecl));                                                                          \
     if (_ignoreHit)                                                                                                    \
       IgnoreHit();                                                                                                     \
     if (_acceptHitAndEndSearch)                                                                                        \
@@ -418,13 +418,13 @@ namespace gprt {
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  inline void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_ANY_HIT_PROGRAM(progName, RecordDecl, PayloadDecl, AttributeDecl)                                         \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  inline void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
-                       in RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
+  inline void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl,                   \
+                       in GPRT_RAW(TYPE_NAME_EXPAND) AttributeDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -432,21 +432,21 @@ namespace gprt {
 #ifdef INTERSECTION
 #define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                                                                \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                  \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                  \
                                                                                                                        \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
+  [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
+                                                                            GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
   [shader("intersection")] void __intersection__##progName() {                                                         \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                                         \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)));                                                         \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_INTERSECTION_PROGRAM(progName, RecordDecl)                                                                \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
@@ -454,33 +454,33 @@ namespace gprt {
 #ifdef MISS
 #define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                                                           \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, inout RAW(TYPE_NAME_EXPAND) PayloadDecl);                         \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl);                         \
                                                                                                                        \
-  [[vk::shader_record_ext]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName),                             \
-                                                                            RAW(TYPE_EXPAND RecordDecl));              \
+  [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
+                                                                            GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("miss")] void __miss__##progName(inout RAW(TYPE_NAME_EXPAND) PayloadDecl) {                                  \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), RAW(NAME_EXPAND PayloadDecl));                           \
+  [shader("miss")] void __miss__##progName(inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl) {                                  \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)), GPRT_RAW(NAME_EXPAND PayloadDecl));                           \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl,                                                                   \
-                inout RAW(TYPE_NAME_EXPAND) PayloadDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl,                                                                   \
+                inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_MISS_PROGRAM(progName, RecordDecl, PayloadDecl)                                                           \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl,                                                                   \
-                inout RAW(TYPE_NAME_EXPAND) PayloadDecl) /* program args and body supplied by user ... */
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl,                                                                   \
+                inout GPRT_RAW(TYPE_NAME_EXPAND) PayloadDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
                 uint GroupIndex);                                                                                      \
                                                                                                                        \
   [numthreads NumThreads][shader("compute")] void __compute__##progName(uint3 groupThreadID                            \
@@ -488,16 +488,16 @@ namespace gprt {
                                                                         : SV_GroupID, uint3 dispatchThreadID           \
                                                                         : SV_DispatchThreadID, uint groupIndex         \
                                                                         : SV_GroupIndex) {                             \
-    progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)), groupThreadID, groupID, dispatchThreadID, groupIndex);   \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)), groupThreadID, groupID, dispatchThreadID, groupIndex);   \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
                 uint GroupIndex) /* program args and body supplied by user ... */
 #else
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
+  void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
                 uint GroupIndex) /* program args and body supplied by user ... */
 #endif
 #endif
@@ -535,16 +535,16 @@ Position() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
                                                                                                                        \
   [shader("vertex")] progName##VSOutput __vertex__##progName(uint SVVID : SV_VertexID) {                               \
     _VertexIndex = SVVID;                                                                                              \
     _PrimitiveIndex = _VertexIndex % 3;                                                                                \
     progName##VSOutput output;                                                                                         \
-    output.position = progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                       \
+    output.position = progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)));                                       \
     output.barycentrics = (((SVVID % 3) == 0)   ? float2(0.f, 0.f)                                                     \
                            : ((SVVID % 3) == 1) ? float2(1.f, 0.f)                                                     \
                                                 : float2(0.f, 1.f));                                                   \
@@ -552,21 +552,21 @@ Position() {
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_VERTEX_PROGRAM(progName, RecordDecl)                                                                      \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif
 
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
                                                                                                                        \
   [shader("pixel")] float4 __pixel__##progName(float2 baryWeights                                                      \
                                                : TEXCOORD0, float4 position                                            \
@@ -576,14 +576,14 @@ Position() {
     _Position = position;                                                                                              \
     _Barycentrics = baryWeights;                                                                                       \
     _PrimitiveIndex = PrimitiveID;                                                                                     \
-    return progName(CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl)));                                                  \
+    return progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)));                                                  \
   }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #else
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
-  float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
+  float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
 #endif

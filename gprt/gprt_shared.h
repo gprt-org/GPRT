@@ -1,18 +1,16 @@
 #pragma once
 
-#define COLLECT_STATS
+// #define COLLECT_STATS
 
-// The higher this number is, the more primitives we can store in our tree
-#define MAX_LEVELS 7
+// The higher this number is, the more primitives we can store in our tree.
+#define MAX_LEVELS 10
 
 // The higher this number is, the more clusters we're going to touch
 // relative to the number of primitives. 
-#define BRANCHING_FACTOR 8
+#define BRANCHING_FACTOR 4
 
-// 1 prim per leaf achieves really good culling, but it takes a lot of memory. 
-// It shifts the bottleneck into the nodes, but overall performance is best when 
-// the branching factor and prims per leaf match.
-#define PRIMS_PER_LEAF 8
+// With a branching factor of 4 and 12 levels (10 excluding the leaves),
+// we can support up to 8 million primitives per nearest neighbor tree.
 
 // Edit: nevermind... I had a bug with my previous minMaxDist function which was giving me some 
 // incorrect intuition. I'm finding now that this is very helpful for the utah teapot.
@@ -87,6 +85,7 @@ namespace gprt{
     struct NNAccel {
         // input
         uint32_t numPrims;
+        uint32_t numLevels;
         uint32_t numClusters[MAX_LEVELS];
         float maxSearchRange;
 
@@ -165,6 +164,7 @@ namespace gprt{
         // An internal iteration parameter for construction
         uint32_t iteration;
         uint32_t stride;
+        uint32_t numLevels;
         uint32_t level;
         uint32_t numPrims;
         gprt::Buffer triangles;
@@ -174,6 +174,5 @@ namespace gprt{
         gprt::Buffer buffer3;
         gprt::Buffer buffer4;
         gprt::Buffer buffer5;
-        gprt::Buffer buffer6;
     };
 };

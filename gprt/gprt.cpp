@@ -7528,14 +7528,21 @@ struct NNTriangleAccel : public Accel {
     
     // some logic here for rounding up
     nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    nnAccelHandle.numClusters[0] = (nnAccelHandle.numPrims      + (PRIMS_PER_LEAF - 1)) / PRIMS_PER_LEAF;
-
+    nnAccelHandle.numClusters[0] = (nnAccelHandle.numPrims      + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    
     for (int i = 1; i < MAX_LEVELS; ++i) {
       nnAccelHandle.numClusters[i] = (nnAccelHandle.numClusters[i-1] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
     }
 
-    if (nnAccelHandle.numClusters[MAX_LEVELS - 1] > BRANCHING_FACTOR)
-      throw std::runtime_error("Too many prims in tree!");
+    for (int i = 1; i < MAX_LEVELS; ++i) {
+      if (nnAccelHandle.numClusters[i] == 1) {
+        nnAccelHandle.numLevels = i;
+        break;
+      }
+    }
+
+    if (nnAccelHandle.numClusters[MAX_LEVELS - 1] > 1)
+      throw std::runtime_error("Too many prims in tree! Max is 2^29 primitives");
 
     // create these
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
@@ -7543,7 +7550,7 @@ struct NNTriangleAccel : public Accel {
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
 
     // #ifdef ENABLE_OBBS
-    for (int i = 0; i < MAX_LEVELS; ++i) {
+    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
       oobbs[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
       centers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
       aabbs[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
@@ -7569,7 +7576,7 @@ struct NNTriangleAccel : public Accel {
     nnAccelHandle.ids = gprtBufferGetHandle(ids);
     nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
     
-    for (int i = 0; i < MAX_LEVELS; ++i) {
+    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
       nnAccelHandle.oobbs[i] = gprtBufferGetHandle(oobbs[i]);
       nnAccelHandle.aabbs[i] = gprtBufferGetHandle(aabbs[i]);
       nnAccelHandle.centers[i] = gprtBufferGetHandle(centers[i]);
@@ -7694,6 +7701,7 @@ struct NNTriangleAccel : public Accel {
     gprt::NNConstants pc;
     pc.numPrims = nnAccelHandle.numPrims;
     pc.triangles = gprtBufferGetHandle(triangleLists);
+    pc.numLevels = nnAccelHandle.numLevels;
     
     // initialize root AABB
     gprtBufferMap(aabb);
@@ -7781,7 +7789,7 @@ struct NNTriangleAccel : public Accel {
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
       computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
-      for (int lid = 1; lid < MAX_LEVELS; ++lid) {
+      for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
         pc.level = lid;
         pc.buffer2 = gprtBufferGetHandle(aabbs[lid-1]);
         pc.buffer1 = gprtBufferGetHandle(aabbs[lid]);
@@ -7797,7 +7805,7 @@ struct NNTriangleAccel : public Accel {
 
     // #ifdef ENABLE_OBBS
     uint32_t totalClusters = 0;
-    for (int i = 0; i < MAX_LEVELS; ++i) {
+    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
       totalClusters += nnAccelHandle.numClusters[i];
     }
 
@@ -7814,7 +7822,7 @@ struct NNTriangleAccel : public Accel {
       gprtBeginProfile((GPRTContext)context);
       gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
       computeCovarianceTime += gprtEndProfile((GPRTContext)context);
-      for (int lid = 1; lid < MAX_LEVELS; ++lid) {
+      for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
         pc.level = lid;
         pc.buffer4 = gprtBufferGetHandle(centers[lid-1]);
         pc.buffer3 = gprtBufferGetHandle(centers[lid]);
@@ -7824,7 +7832,7 @@ struct NNTriangleAccel : public Accel {
         gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeCovarianceTime += gprtEndProfile((GPRTContext)context);
       }
-      for (int lid = 0; lid < MAX_LEVELS; ++lid) {
+      for (int lid = 0; lid < nnAccelHandle.numLevels; ++lid) {
         pc.level = lid;
         pc.buffer1 = gprtBufferGetHandle(oobbs[lid]);
         gprtBeginProfile((GPRTContext)context);
@@ -7834,6 +7842,7 @@ struct NNTriangleAccel : public Accel {
       
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
+      pc.numLevels = nnAccelHandle.numLevels;
       pc.stride = BRANCHING_FACTOR;
       pc.numPrims = nnAccelHandle.numPrims;
       pc.triangles = gprtBufferGetHandle(triangleLists);
@@ -7916,7 +7925,7 @@ struct NNTriangleAccel : public Accel {
     gprtBufferDestroy(codes);
     gprtBufferDestroy(ids);
     gprtBufferDestroy(aabb);
-    for (int i = 0; i < MAX_LEVELS; ++i) {
+    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
       gprtBufferDestroy(centers[i]);
       gprtBufferDestroy(oobbs[i]);
       gprtBufferDestroy(aabbs[i]);

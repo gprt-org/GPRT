@@ -971,43 +971,48 @@ float3x3 mat3_from_quat(float4 q) {
   return m;
 }
 
-
-struct Pair {
-  uint32_t _key : 16;
-  uint32_t _val : 16;
+struct StackItem {
+  uint32_t _key;
+  float _val;
   int key() {return _key;}
-  float value() {return float(asfloat16(uint16_t(_val)));}
+  float value() {return _val;}
 
-  static Pair Create(uint key, float value) {
-    Pair pair;
-    pair._key = uint16_t(key);
-    pair._val = asuint16(half(value));
+  static StackItem Create(uint key, float value) {
+    StackItem pair;
+    pair._key = key;
+    pair._val = value;
+    return pair;
+  }
+
+  static StackItem Create() {
+    StackItem pair;
+    pair._key = -1;
+    pair._val = FLT_MAX;
     return pair;
   }
 };
 
-struct List {
-  Pair items[BRANCHING_FACTOR];
+struct Stack {
+  StackItem items[BRANCHING_FACTOR];
   void clear() {
     for (int i = 0; i < BRANCHING_FACTOR; ++i) {
-      items[i]._key = 65535;
-      items[i]._val = asuint16(65504.h);
+      items[i] = StackItem::Create();
     }
   };
 
-  void insert(Pair newItem) {
+  void insert(StackItem newItem) {
     if (items[0].value() > newItem.value()) {
       items[0] = newItem;
       // [unroll]
       for (int i = 1; i < BRANCHING_FACTOR; ++i) {
         if (items[i-1].value() >= items[i].value()) break;
-        Pair tmp = items[i-1]; items[i-1] = items[i]; items[i] = tmp;
+        StackItem tmp = items[i-1]; items[i-1] = items[i]; items[i] = tmp;
       }
     }
   }
 
-  static List Create(){
-    List list;
+  static Stack Create(){
+    Stack list;
     list.clear();
     return list;
   };
@@ -1022,11 +1027,8 @@ struct List {
 };
 
 int getNumNodesInLevel(int level, int numPrimitives) {
-  // For level -1, the number of "nodes" is just the number of primitives
-  int numNodes = (numPrimitives + (PRIMS_PER_LEAF - 1)) / PRIMS_PER_LEAF;
-  // When level is 1 or higher, we repeatedly divide the number of primitives per
-  // node, rounding up. 
-  for (int i = 0; i < level; ++i) {
+  int numNodes = numPrimitives;
+  for (int i = 0; i <= level; ++i) {
     numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
   }
   return numNodes;
@@ -1045,7 +1047,7 @@ int getPrimsInNode(
 ) {
   int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
   // Theoretical maximum primitives in a node at this level
-  int maxPrimsInLevel = PRIMS_PER_LEAF * pow(BRANCHING_FACTOR, level);
+  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
   // Account for when primitive counts don't exactly match a multiple of the branching factor
   return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
 }
@@ -1059,17 +1061,15 @@ int getPrimParentNode(
   int level,   
   int primIndex
 ) {
-  int parentIndex = primIndex / PRIMS_PER_LEAF;
-  // When level is 1 or higher, we repeatedly divide the number of primitives per
-  // node to determine our parent index.
-  for (int i = 0; i < level; ++i) {
+  int parentIndex = primIndex;
+  for (int i = 0; i <= level; ++i) {
     parentIndex = parentIndex / BRANCHING_FACTOR;
   }
   return parentIndex;
 }
 
-// void insertionSort(inout Pair list[BRANCHING_FACTOR]) {
-//   Pair item;
+// void insertionSort(inout StackItem list[BRANCHING_FACTOR]) {
+//   StackItem item;
 //   int i, j;
 //   for (int i = 1; i < BRANCHING_FACTOR; ++i) {
 //     item = list[i];
@@ -1080,34 +1080,29 @@ int getPrimParentNode(
 // };
 
 // x is overoptimistic, y is pessimistic
-float2 getAABBDists(float3 p, in gprt::Buffer aabbs, uint32_t index) {
-  float2 dists;
+float getAABBDist(float3 p, gprt::Buffer aabbs, uint32_t index) {
   float3 aabbMin = gprt::load<float3>(aabbs, index * 2 + 0);
   float3 aabbMax = gprt::load<float3>(aabbs, index * 2 + 1);
-  dists.x = getMinDist(p, aabbMin, aabbMax);
-  dists.y = getMinMaxDist(p, aabbMin, aabbMax);
-  return dists;
+  return getMinDist(p, aabbMin, aabbMax);
 }
 
-float2 getOOBBDists(float3 p, in gprt::Buffer oobbs, uint32_t index) {
+float getOOBBDist(float3 p, gprt::Buffer oobbs, uint32_t index) {
   float2 dists;
   float3 obbMin = gprt::load<float3>(oobbs, index * 3 + 0);
   float3 obbMax = gprt::load<float3>(oobbs, index * 3 + 1);
   float3 obbEul = gprt::load<float3>(oobbs, index * 3 + 2);
   float3x3 obbRot = eul_to_mat3(obbEul);
   float3 pRot = mul(obbRot, p);
-  dists.x = getMinDist(pRot, obbMin, obbMax);
-  dists.y = getMinMaxDist(pRot, obbMin, obbMax);
-  return dists;
+  return getMinDist(pRot, obbMin, obbMax);
 }
 
-void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {
+void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, bool useAABBs, bool useOOBBs, float3 queryOrigin, inout NNPayload payload, bool debug) {
   int numPrims = record.numPrims;
 
   // At this point, it appears that the fastest thing to do is just 
   // let traversal proceed linearly at the leaves to drive upward culling.
-  for (uint32_t primID = 0; primID < PRIMS_PER_LEAF; ++primID) {
-    uint32_t itemID = leafID * PRIMS_PER_LEAF + primID;
+  for (uint32_t primID = 0; primID < BRANCHING_FACTOR; ++primID) {
+    uint32_t itemID = leafID * BRANCHING_FACTOR + primID;
     if (itemID >= numPrims) continue;
 
     // minDist = min(minDist, l0MinDist);
@@ -1156,13 +1151,13 @@ void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, float3 queryOrigin, 
   }
 }
 
-List intersectAndSortChildren(
-  float3 queryOrigin, float closestDistance, 
+Stack intersectAndSortChildren(
+  float3 queryOrigin, inout float closestDistance, 
   int start, int maxClusters,
   bool useAABBs, in gprt::Buffer aabbs, 
   bool useOOBBs, in gprt::Buffer oobbs, bool debug = false) 
 {
-  List H;
+  Stack H;
   H.clear();
 
   for (int child = 0; child < BRANCHING_FACTOR; ++child) {
@@ -1175,32 +1170,21 @@ List intersectAndSortChildren(
 
     // Upward Culling: skip superclusters father than current closest primitive
     if (useAABBs) {
-      float2 dists = getAABBDists(queryOrigin, aabbs, index);
-      minDist = max(minDist, dists.x);
+      minDist = max(minDist, getAABBDist(queryOrigin, aabbs, index));
       if (minDist > closestDistance) continue;
     }
     
     if (useOOBBs) {
-      float2 dists = getOOBBDists(queryOrigin, oobbs, index);
-      minDist = max(minDist, dists.x);
+      minDist = max(minDist, getOOBBDist(queryOrigin, oobbs, index));
       if (minDist > closestDistance) continue;
     }
 
-    H.insert(Pair::Create(child, minDist));
+    H.insert(StackItem::Create(index, minDist));
   }
 
   return H;
 }
 
-// // sorts by value
-// List sortList(in List unsortedList) {
-//   List sortedList;
-//   sortedList.clear();
-//   for (int child = 0; child < BRANCHING_FACTOR; ++child) {
-//     sortedList.insert(unsortedList.items[child]);
-//   }
-//   return sortedList;
-// }
 void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
   payload.closestDistance = tmax;
 
@@ -1216,70 +1200,59 @@ void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool use
 
   uint32_t numClusters[MAX_LEVELS] = record.numClusters;
 
-  List stack[MAX_LEVELS];
-
-  int starts[MAX_LEVELS];
-  for (int i = 0; i < MAX_LEVELS; ++i) starts[i] = 0;
+  Stack stack[MAX_LEVELS];
 
   int trail[MAX_LEVELS];
   for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;  
 
   // Traverse over all levels, starting from the top and going down
   int level = MAX_LEVELS - 1;
+  int parentIndex = 0;
   while (level < MAX_LEVELS) {
-    // Figure out our parent cluster index
-    int index = (level == (MAX_LEVELS-1)) ? 0 : starts[level + 1] + stack[level + 1].key(trail[level + 1]);
-
     // If we're traversing down the tree...
     if (trail[level] == 0) {
-
-      // The start of our level is our parent times the branching factor
-      starts[level] = index * BRANCHING_FACTOR;
-
       // Intersect and sort the children at this level
-      stack[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, starts[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level], debug);
+      stack[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, parentIndex * BRANCHING_FACTOR, numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level], debug);
     }
 
     // Traverse all children from near to far
     [unroll]
-    for (int i = 0; i < BRANCHING_FACTOR; ++i) {      
+    for (int i = 0; i < BRANCHING_FACTOR; ++i) {
       // If recursing up, skip forward to the child we were last on 
       if (i < trail[level]) continue; 
       
       // Fetch child index and distance from the sorted stack
-      int child = stack[level].key(trail[level]);
+      int childIndex = stack[level].key(trail[level]);
       float minDist = stack[level].value(trail[level]);
       
       // Pop when all children from here on are too far
-      if (child >= BRANCHING_FACTOR || minDist > payload.closestDistance) {
+      if (childIndex == -1 || minDist > payload.closestDistance) {
         trail[level] = BRANCHING_FACTOR;
         break;
       }
-      
-      #ifdef COLLECT_STATS
-      payload.lHit[level]++; // Count this as a hit
-      #endif
 
       // if at this point we're at the bottom of the tree, traverse the leaf
       if (level == 0) {
-        uint32_t leafID = starts[level] + child;
-        TraverseLeaf(record, leafID, queryOrigin, tmax, payload, debug);
+        TraverseLeaf(record, childIndex, useAABBs, useOOBBs, queryOrigin, payload, debug);
         // Advance the trail now that we've processed this child.
         trail[level]++;
       } else {
         // recurse down the tree
+        parentIndex = childIndex;
         break;
       }
     }
+
     if (trail[level] == BRANCHING_FACTOR) {
       // Reset the trail when we're done with this level.
       trail[level] = 0;
       // Then, go back up to the parent level.
+      parentIndex /= BRANCHING_FACTOR;
       level++;
       // advance to the next node
       trail[level]++;
     } else {
-      // recurse down
+      // recurse down      
       level--;
     }
   }
@@ -1289,180 +1262,78 @@ void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool use
   }
 }
 
-void TraverseTree7LevelsUnrolled(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
-  payload.closestDistance = tmax;
+#define TRAVERSE_TREE_N_LEVELS(N, RECURSION)                                                                         \
+void TraverseTree ## N(                                                                                              \
+  in gprt::NNAccel record,                                                                                           \
+  int parentIndex,                                                                                                   \
+  bool useAABBs, bool useOOBBs,                                                                                      \
+  float3 queryOrigin, inout NNPayload payload, bool debug) {                                                         \
+  int start = parentIndex * BRANCHING_FACTOR;                                                                        \
+  Stack stack = intersectAndSortChildren(queryOrigin, payload.closestDistance,                                        \
+                                        start, record.numClusters[N-1],                                              \
+                                        useAABBs, record.aabbs[N-1],                                                 \
+                                        useOOBBs, record.oobbs[N-1]);                                                \
+  for (int i = 0; i < BRANCHING_FACTOR; ++i) {                                                                       \
+    int currentIndex = stack.key(i);                                                                                 \
+    float mindist = stack.value(i);                                                                                  \
+    if (currentIndex == -1 || mindist > payload.closestDistance) return;                               \
+    RECURSION(record, currentIndex, useAABBs, useOOBBs, queryOrigin, payload, debug);                        \
+  }                                                                                                                  \
+}                                                                                        
 
-  gprt::Buffer aabbs[MAX_LEVELS] = record.aabbs;
-  gprt::Buffer oobbs[MAX_LEVELS] = record.oobbs;
+#define CAT(a, ...) a ## __VA_ARGS__
+#define TRAVERSE_TREE(N) CAT(TraverseTree, N)
 
-  float minDist = 0.f;
+#if (MAX_LEVELS >= 1) 
+TRAVERSE_TREE_N_LEVELS(1, TraverseLeaf)
+#endif
+#if (MAX_LEVELS >= 2) 
+TRAVERSE_TREE_N_LEVELS(2, TraverseTree1)
+#endif
+#if (MAX_LEVELS >= 3) 
+TRAVERSE_TREE_N_LEVELS(3, TraverseTree2)
+#endif
+#if (MAX_LEVELS >= 4) 
+TRAVERSE_TREE_N_LEVELS(4, TraverseTree3)
+#endif
+#if (MAX_LEVELS >= 5) 
+TRAVERSE_TREE_N_LEVELS(5, TraverseTree4)
+#endif
+#if (MAX_LEVELS >= 6) 
+TRAVERSE_TREE_N_LEVELS(6, TraverseTree5)
+#endif
+#if (MAX_LEVELS >= 7) 
+TRAVERSE_TREE_N_LEVELS(7, TraverseTree6)
+#endif
+#if (MAX_LEVELS >= 8) 
+TRAVERSE_TREE_N_LEVELS(8, TraverseTree7)
+#endif
+#if (MAX_LEVELS >= 9) 
+TRAVERSE_TREE_N_LEVELS(9, TraverseTree8)
+#endif
+#if (MAX_LEVELS >= 10) 
+TRAVERSE_TREE_N_LEVELS(10, TraverseTree9)
+#endif
 
-  float closestDistAvg = 0.f;
-  float closestDistM2 = 0.f; // m2 aggregates the squared distance from the mean
-  float closestDistVar = 0.f;
-  int totalHits = 0;
-
-
-  uint32_t numClusters[MAX_LEVELS] = record.numClusters;
-
-  List activeClusters[MAX_LEVELS];
-
-  int fullTrail[MAX_LEVELS];
-  for (int i = 0; i < MAX_LEVELS; ++i) fullTrail[i] = 0;
-
-
-  int trail[MAX_LEVELS];
-  for (int i = 0; i < MAX_LEVELS; ++i) trail[i] = 0;
-  int level = 7;
-
-  level--;
-  fullTrail[level] = 0;
-  activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-  // Traverse clusters near to far
-  for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-    int index = activeClusters[level].key(trail[level]);
-    float mindist = activeClusters[level].value(trail[level]);
-    
-    // Pop when nodes here on are too far
-    if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-
-    #ifdef COLLECT_STATS
-    payload.lHit[level]++; // Count this as traversing a l6
-    #endif
-
-    level--;
-
-    fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-    activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-    // Traverse clusters near to far
-    for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-      int index = activeClusters[level].key(trail[level]);
-      float mindist = activeClusters[level].value(trail[level]);
-      
-      // Pop when nodes here on are too far
-      if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-
-      #ifdef COLLECT_STATS
-      payload.lHit[level]++; // Count this as traversing a l5
-      #endif
-
-      level--;
-
-      fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-      activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-      // Traverse clusters near to far
-      for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-        int index = activeClusters[level].key(trail[level]);
-        float mindist = activeClusters[level].value(trail[level]);
-        
-        // Pop when nodes here on are too far
-        if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-
-        #ifdef COLLECT_STATS
-        payload.lHit[level]++; // Count this as traversing a leaf
-        #endif
-
-        level--;
-
-        fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-        activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-        // Traverse clusters near to far
-        for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-          int index = activeClusters[level].key(trail[level]);
-          float mindist = activeClusters[level].value(trail[level]);
-          
-          // Pop when nodes here on are too far
-          if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-
-          #ifdef COLLECT_STATS
-          payload.lHit[level]++; // Count this as traversing a l3
-          #endif
-
-          level--;
-          
-          fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-          activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-          // Traverse clusters near to far
-          for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-            int index = activeClusters[level].key(trail[level]);
-            float mindist = activeClusters[level].value(trail[level]);
-            
-            // Pop when nodes here on are too far
-            if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-            
-            #ifdef COLLECT_STATS
-            payload.lHit[level]++; // Count this as traversing a supercluster
-            #endif
-
-            level--;
-
-            fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-            activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-            // Traverse clusters near to far
-            for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-              int index = activeClusters[level].key(trail[level]);
-              float mindist = activeClusters[level].value(trail[level]);
-              
-              // Pop when nodes here on are too far
-              if (index >= BRANCHING_FACTOR || mindist > payload.closestDistance) break;
-              
-              #ifdef COLLECT_STATS
-              payload.lHit[level]++; // Count this as traversing a cluster
-              #endif
-
-              level--;
-              
-              fullTrail[level] = (fullTrail[level + 1] + index) * BRANCHING_FACTOR;
-              activeClusters[level] = intersectAndSortChildren(queryOrigin, payload.closestDistance, fullTrail[level], numClusters[level], useAABBs, aabbs[level], useOOBBs, oobbs[level]);
-
-              // Traverse all children from near to far
-              for (trail[level] = 0; trail[level] < BRANCHING_FACTOR; ++trail[level]) {
-                int child = activeClusters[level].key(trail[level]);
-                float minDist = activeClusters[level].value(trail[level]);
-                
-                // Pop when nodes here on are too far
-                if (child >= BRANCHING_FACTOR || minDist > payload.closestDistance) break;
-
-                uint32_t leafID = fullTrail[level] + child;
-
-                #ifdef COLLECT_STATS
-                payload.lHit[level]++; // Count this as a hit
-                #endif
-
-                level--;
-                TraverseLeaf(record, leafID, queryOrigin, tmax, payload, debug);
-                level++;
-              }
-              level++;
-            }
-            level++;
-          }
-          level++;
-        }
-        level++;
-      }
-      level++;
-    }
-    level++;
-  }
-  
-  level++;
-
+void TraverseTreeRecursive(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {
+  payload.closestDistance = tmax;  
+  switch (record.numLevels)
+  {
+    case  1 :  TraverseTree1(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  2 :  TraverseTree2(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  3 :  TraverseTree3(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  4 :  TraverseTree4(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  5 :  TraverseTree5(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  6 :  TraverseTree6(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  7 :  TraverseTree7(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  8 :  TraverseTree8(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  9 :  TraverseTree9(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case 10 : TraverseTree10(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    default: break;
+  }  
   if (payload.closestPrimitive != -1) {
     payload.closestPrimitive = uint32_t(gprt::load<uint64_t>(record.ids, payload.closestPrimitive)); 
   }
-
-  // if (debug) {
-  //   printf("Total Hits %d True Dist: %f Closest Prim %d Average Dist %f Variance %f Std Dev %f\n", 
-  //     totalHits, payload.closestDistance, payload.closestPrimitive, closestDistAvg, closestDistVar, sqrt(closestDistVar)
-  //   );
-  // }
 }
 
 // void TraverseTree(in gprt::NNAccel record, uint NNFlags, float3 queryOrigin, float tmin, float tmax, inout NNPayload payload, bool debug) {
@@ -1569,7 +1440,10 @@ void TraceNN(
     //         payload                  // the payload IO
     // );
     // #else
-    TraverseTree7LevelsUnrolled(knnAccel, distanceLevel, useAABBs, useOOBBs, queryOrigin, tMax, payload, debug);
+
+    TraverseTreeRecursive(knnAccel, distanceLevel, useAABBs, useOOBBs, queryOrigin, tMax, payload, debug);
+    // TraverseTreeFullStack(knnAccel, distanceLevel, useAABBs, useOOBBs, queryOrigin, tMax, payload, debug);
+    
     // #endif
   }
 
@@ -1602,7 +1476,7 @@ void TraceNN(
   closestDistance = payload.closestDistance;
   #ifdef COLLECT_STATS
   stats.primsHit = payload.primsHit;
-  for (int i = 0; i < MAX_LEVELS; ++i) {
+  for (int i = 0; i < knnAccel.numLevels; ++i) {
     stats.lHit[i] = payload.lHit[i];
   }
   #endif

@@ -286,8 +286,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleAABBsAndCenters, (NNAccel, record), (32,1,1)
   float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
   float3 center = float3(0, 0, 0);
   int total = 0;  
-  for (uint32_t pid = 0; pid < PRIMS_PER_LEAF; ++pid) {
-    uint32_t primID = NID * PRIMS_PER_LEAF + pid;
+  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    uint32_t primID = NID * BRANCHING_FACTOR + pid;
     if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -348,8 +348,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBCovariances, (NNAccel, record), (32,1,1))
   float3 center = gprt::load<float3>(pc.buffer3, NID);
   int total = 0;  
   float3x3 covariance = float3x3(0,0,0,0,0,0,0,0,0);
-  for (uint32_t pid = 0; pid < PRIMS_PER_LEAF; ++pid) {
-    uint32_t primID = NID * PRIMS_PER_LEAF + pid;
+  for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    uint32_t primID = NID * BRANCHING_FACTOR + pid;
     if (primID >= pc.numPrims) continue;
     float3 a, b, c;
     a = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -419,9 +419,9 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   if (N0ID >= numNClusters) return;
 
   int numVerts = 0;
-  float3 v[PRIMS_PER_LEAF * 3];
-  for (int i = 0; i < PRIMS_PER_LEAF; ++i) {
-    int primID = N0ID * PRIMS_PER_LEAF + i;
+  float3 v[BRANCHING_FACTOR * 3];
+  for (int i = 0; i < BRANCHING_FACTOR; ++i) {
+    int primID = N0ID * BRANCHING_FACTOR + i;
     if (primID >= pc.numPrims) continue;
     // load triangles into registers
     v[i * 3 + 0] = gprt::load<float3>(pc.triangles, primID * 3 + 0);
@@ -431,8 +431,8 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleOBBBounds, (NNAccel, record), (32,1,1)) {
   }
 
   [unroll] // oddly, if I don't unroll, I crash when max levels is 1... 
-  for (int level = 0; level < MAX_LEVELS; ++level) {
-    int parentID = getPrimParentNode(level, N0ID * PRIMS_PER_LEAF);
+  for (int level = 0; level < pc.numLevels; ++level) {
+    int parentID = getPrimParentNode(level, N0ID * BRANCHING_FACTOR);
     gprt::Buffer oobbs = record.oobbs[level];
 
     float3 obbEul = gprt::load<float3>(oobbs, parentID * 3 + 2);
