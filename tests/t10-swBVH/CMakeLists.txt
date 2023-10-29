@@ -20,8 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(t00-bufferCopy)
-add_subdirectory(t01-bufferResize)
-add_subdirectory(t02-bufferSort)
-add_subdirectory(t03-bufferExclusiveSum)
-add_subdirectory(t10-swBVH)
+add_executable(t10_swBVH hostCode.cpp)
+target_link_libraries(t10_swBVH
+  PRIVATE gprt::gprt
+)

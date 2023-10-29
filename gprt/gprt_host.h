@@ -1621,6 +1621,37 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
 }
 
 /**
+ * @brief Computes a device-wide exclusive prefix sum.
+ * Exclusive sum requires a temporary "scratch" space
+ *
+ * @param context The GPRT context
+ * @param buffer A buffer of 32-bit unsigned integers
+ * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer buffer, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Computes a device-wide exclusive prefix sum.
+ * Exclusive sum requires a temporary "scratch" space
+ *
+ * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
+ *
+ * @param context The GPRT context
+ * @param buffer A buffer of 32-bit unsigned integers
+ * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2>
+void
+gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferExclusiveSum(context, (GPRTBuffer) buffer, (GPRTBuffer) scratch);
+}
+
+/**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
  *
