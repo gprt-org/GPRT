@@ -971,6 +971,28 @@ float3x3 mat3_from_quat(float4 q) {
   return m;
 }
 
+// Uses a Cayley transform to generate an orthogonal basis.
+// The given vector "v" contains rotations in x, y, and z, where 0 to 1 map to 0 to 90 degrees.
+float3x3 genOrthoBasis(float3 v) {
+  float w = -1.f;
+
+  float3x3 mat;
+  mat._11 = w*w + v.x*v.x - v.y*v.y - v.z*v.z;
+  mat._21 = 2*(v.x*v.y + w*v.z);
+  mat._31 = 2*(v.x*v.z - w*v.y);
+
+  mat._12 = 2*(v.x*v.y - w*v.z);
+  mat._22 = w*w - v.x*v.x + v.y*v.y - v.z*v.z;
+  mat._32 =  2*(w*v.x + v.y*v.z);
+
+  mat._13 = 2*(w*v.y + v.x*v.z);
+  mat._23 = 2*(v.y*v.z - w*v.x);
+  mat._33 = w*w - v.x*v.x - v.y*v.y + v.z*v.z;
+
+  mat /= (v.x*v.x + v.y*v.y + v.z*v.z + w*w);
+  return mat;
+};
+
 struct StackItem {
   uint32_t _key;
   float _val;
@@ -1185,6 +1207,8 @@ Stack intersectAndSortChildren(
   return H;
 }
 
+// This method unfortunately seems pretty slow. 
+// Our hypothesis is that the "trail" here causes an indirect register read from the stack, which is slow.
 void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool useAABBs, bool useOOBBs, float3 queryOrigin, float tmax, inout NNPayload payload, bool debug) {    
   payload.closestDistance = tmax;
 
