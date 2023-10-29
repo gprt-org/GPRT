@@ -178,7 +178,7 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch1D(context, transformProgram, (uint32_t)samplers.size(), pc);
 
-  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, 1, &plane);
+  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
 
   std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, (uint32_t)instances.size(), instances.data());

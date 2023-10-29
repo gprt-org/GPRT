@@ -40,7 +40,7 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
   rayDesc.Direction =
       normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
-  rayDesc.TMax = 1e20f;
+  rayDesc.TMax = 1e38f;
 
   // Trace ray against surface
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);

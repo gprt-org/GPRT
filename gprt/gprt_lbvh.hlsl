@@ -22,9 +22,6 @@
 
 #include "gprt_lbvh.h"
 
-#define FLT_MAX 3.402823466e+38
-#define FLT_MIN 1.175494351e-38
-
 uint separate_bits(uint n)
 {
     n &= 0x000003FF;
@@ -283,8 +280,8 @@ GPRT_COMPUTE_PROGRAM(MakeNodes, (LBVHData, record), (1, 1, 1)) {
   int nodeID = DispatchThreadID.x;
   if (nodeID >= record.numNodes) return;
   storeNode(record.nodes, nodeID, int4(-1,-1,-1,-1));
-  gprt::store<float3>(record.aabbs, nodeID * 2 + 0,  float3(1e20f, 1e20f, 1e20f));
-  gprt::store<float3>(record.aabbs, nodeID * 2 + 1, -float3(1e20f, 1e20f, 1e20f));
+  gprt::store<float3>(record.aabbs, nodeID * 2 + 0,  float3(1e38f, 1e38f, 1e38f));
+  gprt::store<float3>(record.aabbs, nodeID * 2 + 1, -float3(1e38f, 1e38f, 1e38f));
 }
 
 GPRT_COMPUTE_PROGRAM(SplitNodes, (LBVHData, record), (1, 1, 1)) {

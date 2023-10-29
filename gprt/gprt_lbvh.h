@@ -175,9 +175,13 @@ inline void gprtLBVHBuild(GPRTContext context, GPRTLBVH &lbvh) {
     aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
     gprtBufferUnmap(lbvh.aabbs);
 
+    // Now compute bounding boxes over the primitives
     if (lbvh.type == GPRT_LBVH_POINTS) {
         gprtComputeLaunch1D(context, lbvh.computePointBounds, lbvh.handle.numPrims);
         gprtComputeLaunch1D(context, lbvh.computePointMortonCodes, lbvh.handle.numPrims);
+    } else if (lbvh.type == GPRT_LBVH_EDGES) {
+        gprtComputeLaunch1D(context, lbvh.computeEdgeBounds, lbvh.handle.numPrims);
+        gprtComputeLaunch1D(context, lbvh.computeEdgeMortonCodes, lbvh.handle.numPrims);
     } else if (lbvh.type == GPRT_LBVH_TRIANGLES) {
         gprtComputeLaunch1D(context, lbvh.computeTriangleBounds, lbvh.handle.numPrims);
         gprtComputeLaunch1D(context, lbvh.computeTriangleMortonCodes, lbvh.handle.numPrims);

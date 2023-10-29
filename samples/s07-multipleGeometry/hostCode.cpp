@@ -147,7 +147,7 @@ main(int ac, char **av) {
                                      translation_matrix(float3(0.0f, 0.0f, -4.0f)));
   std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry,
                                                       floorMesh.geometry};
-  GPRTAccel trianglesBLAS = gprtTrianglesAccelCreate(context, geoms.size(), geoms.data());
+  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, geoms.size(), geoms.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, &trianglesBLAS);
   gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);

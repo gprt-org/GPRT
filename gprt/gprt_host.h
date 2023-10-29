@@ -28,11 +28,13 @@
  * SOFTWARE.
  */
 
+#pragma once
+
 #include <vulkan/vulkan.h>
 
 #include "linalg.h"
 using namespace linalg;
-using namespace linalg::detail;
+// using namespace linalg::detail; // causes conflicts
 using namespace linalg::aliases;
 using namespace linalg::ostream_overloads;
 
@@ -119,20 +121,8 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
 using GPRTProgram = std::map<std::string, std::vector<uint8_t>>;
 
-namespace gprt {
-struct Buffer {
-  uint64_t x;
-  uint64_t y;
-};
-
-struct Accel {
-  uint64_t x;
-  uint64_t y;
-};
-
-typedef uint32_t Texture;
-typedef uint32_t Sampler;
-}   // namespace gprt
+// Shared internal data structures between GPU and CPU
+#include "gprt_shared.h"
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -168,7 +158,10 @@ typedef enum {
   GPRT_UNKNOWN,
   GPRT_AABBS,
   GPRT_TRIANGLES,
-  //  GPRT_CURVES
+  GPRT_CURVES,
+  GPRT_NN_POINTS,
+  GPRT_NN_EDGES,
+  GPRT_NN_TRIANGLES,
 } GPRTGeomKind;
 
 typedef enum {
@@ -336,6 +329,56 @@ void
 gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
                       uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
+}
+
+GPRT_API void gprtNNPointsSetVertices(GPRTGeom points, GPRTBuffer vertices, uint32_t count,
+                                       uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtNNPointsSetVertices(GPRTGeomOf<T1> points, GPRTBufferOf<T2> vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtNNPointsSetVertices((GPRTGeom) points, (GPRTBuffer) vertices, count, stride, offset);
+}
+
+GPRT_API void gprtNNEdgesSetVertices(GPRTGeom edges, GPRTBuffer vertices, uint32_t count,
+                                       uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtNNEdgesSetVertices(GPRTGeomOf<T1> edges, GPRTBufferOf<T2> vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtNNEdgesSetVertices((GPRTGeom) edges, (GPRTBuffer) vertices, count, stride, offset);
+}
+
+GPRT_API void gprtNNEdgesSetIndices(GPRTGeom edges, GPRTBuffer indices, uint32_t count,
+                                      uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtNNEdgesSetIndices(GPRTGeomOf<T1> edges, GPRTBufferOf<T2> indices, uint32_t count,
+                        uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtNNEdgesSetIndices((GPRTGeom) edges, (GPRTBuffer) indices, count, stride, offset);
+}
+
+GPRT_API void gprtNNTrianglesSetVertices(GPRTGeom triangles, GPRTBuffer vertices, uint32_t count,
+                                       uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtNNTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtNNTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
+}
+
+GPRT_API void gprtNNTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
+                                      uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtNNTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
+                        uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtNNTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags flags GPRT_IF_CPP(= GPRT_SBT_ALL));
@@ -906,19 +949,19 @@ gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *ar
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
   geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_GEOM_TRIANGLES
+  created with gprtGeomCreate, and must be of a GPRT_TRIANGLES
   type.
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
                                             unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
                          unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtTrianglesAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+  return gprtTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
 // // ------------------------------------------------------------------
@@ -943,6 +986,77 @@ gprtTrianglesAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T
 //                          size_t     numCurveGeometries,
 //                          GPRTGeom   *curveGeometries,
 //                          unsigned int flags GPRT_IF_CPP(=0));
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for triangle geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_NN_POINTS
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+                                            unsigned int flags GPRT_IF_CPP(= 0));
+
+template <typename T>
+GPRTAccel
+gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+                         unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtNNPointAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+}
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for triangle geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_NN_EDGES
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+                                            unsigned int flags GPRT_IF_CPP(= 0));
+
+template <typename T>
+GPRTAccel
+gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+                         unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtNNEdgeAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+}
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for triangle geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms A array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_NN_TRIANGLES
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtNNTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+                                            unsigned int flags GPRT_IF_CPP(= 0));
+
+template <typename T>
+GPRTAccel
+gprtNNTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+                         unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtNNTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+}
+
+GPRT_API void gprtNNAccelSetSearchRange(GPRTAccel nnAccel, float searchRange);
 
 // ------------------------------------------------------------------
 /*! create a new instance acceleration structure with given number of
@@ -1109,6 +1223,8 @@ GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0)
 
 GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
+GPRT_API gprt::NNAccel gprtNNAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
+
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during
  * intersection and/or rasterization, and the parameters to pass into these device programs.
@@ -1146,6 +1262,14 @@ template <typename T>
 void
 gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
   gprtGeomTypeSetClosestHitProg((GPRTGeomType) type, rayType, module, entrypoint);
+}
+
+GPRT_API void gprtGeomTypeSetClosestNeighborProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
+
+template <typename T>
+void
+gprtGeomTypeSetClosestNeighborProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
+  gprtGeomTypeSetClosestNeighborProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
 GPRT_API void gprtGeomTypeSetAnyHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
@@ -1657,7 +1781,7 @@ gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferO
  *
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param buffer A buffer of 64-bit unsigned integers
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
@@ -1672,7 +1796,7 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param buffer A buffer of 64-bit unsigned integers
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
@@ -1688,8 +1812,8 @@ gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> sc
  * Radix sort requires a temporary "scratch" space
  *
  * @param context The GPRT context
- * @param keys A buffer of 32-bit unsigned integer keys
- * @param values A buffer of 32-bit values
+ * @param keys A buffer of 64-bit unsigned integer keys
+ * @param values A buffer of 64-bit values
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.

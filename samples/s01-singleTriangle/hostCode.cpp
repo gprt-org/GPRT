@@ -130,7 +130,7 @@ main(int ac, char **av) {
   // determine which triangle the ray hits in a sub-linear amount of time.
   // This first acceleration structure level is called a bottom level
   // acceleration structure, or a BLAS.
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // We can then make multiple "instances", or copies, of that BLAS in

@@ -225,8 +225,8 @@ main(int ac, char **av) {
   // // initialize root AABB
   // gprtBufferMap(aabbs);
   // float3* aabbPtr = gprtBufferGetPointer(aabbs);
-  // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = 1e20f;
-  // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -1e20f;
+  // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = 1e38f;
+  // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -1e38f;
   // gprtBufferUnmap(aabbs);
 
   // gprtComputeSetParameters(computeBounds,  &lbvhParams);

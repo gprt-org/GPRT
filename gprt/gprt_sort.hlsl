@@ -20,28 +20,28 @@
 // ParallelSort Shaders/Includes
 //--------------------------------------------------------------------------------------
 #define HLSL
-#include "sort.h"
+#include "gprt_sort.h"
 
 // [[vk::binding(/*binding*/, /*set*/)]] 
 
 [[vk::push_constant]] ParallelSortCB rootConstData;								// Store the shift bit directly in the root signature
 
-[[vk::binding(0, 0)]] RWStructuredBuffer<uint>	SrcBuffer		;					// The unsorted keys or scan data
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint>	SrcPayload		;					// The payload data
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint64_t>	SrcBuffer		;					// The unsorted keys or scan data
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint64_t>	SrcPayload		;					// The payload data
 				 
-[[vk::binding(0, 2)]] RWStructuredBuffer<uint>	SumTable		;					// The sum table we will write sums to
-[[vk::binding(1, 2)]] RWStructuredBuffer<uint>	ReduceTable		;					// The reduced sum table we will write sums to
+[[vk::binding(0, 2)]] RWStructuredBuffer<uint32_t>	SumTable		;					// The sum table we will write sums to
+[[vk::binding(1, 2)]] RWStructuredBuffer<uint32_t>	ReduceTable		;					// The reduced sum table we will write sums to
 				 
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint>	DstBuffer		;					// The sorted keys or prefixed data
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint>	DstPayload		;					// the sorted payload data
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint64_t>	DstBuffer		;					// The sorted keys or prefixed data
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint64_t>	DstPayload		;					// the sorted payload data
 				 
-[[vk::binding(0, 1)]] RWStructuredBuffer<uint>	ScanSrc			;					// Source for Scan Data
-[[vk::binding(1, 1)]] RWStructuredBuffer<uint>	ScanDst			;					// Destination for Scan Data
-[[vk::binding(2, 1)]] RWStructuredBuffer<uint>	ScanScratch		;					// Scratch data for Scan
+[[vk::binding(0, 1)]] RWStructuredBuffer<uint32_t>	ScanSrc			;					// Source for Scan Data
+[[vk::binding(1, 1)]] RWStructuredBuffer<uint32_t>	ScanDst			;					// Destination for Scan Data
+[[vk::binding(2, 1)]] RWStructuredBuffer<uint32_t>	ScanScratch		;					// Scratch data for Scan
 				 
 
-groupshared uint32_t gs_PARALLELSORT_LDSKeys[PARALLELSORT_THREADGROUP_SIZE];
-groupshared uint32_t gs_PARALLELSORT_LDSVals[PARALLELSORT_THREADGROUP_SIZE];
+groupshared uint64_t gs_PARALLELSORT_LDSKeys[PARALLELSORT_THREADGROUP_SIZE];
+groupshared uint64_t gs_PARALLELSORT_LDSVals[PARALLELSORT_THREADGROUP_SIZE];
 
 groupshared uint32_t gs_PARALLELSORT_LDSSums[PARALLELSORT_THREADGROUP_SIZE];
 groupshared uint32_t gs_PARALLELSORT_Histogram[PARALLELSORT_THREADGROUP_SIZE * PARALLELSORT_SORT_BIN_COUNT];
@@ -143,17 +143,17 @@ void __compute__Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV
 		uint32_t DataIndex = BlockIndex;
 
 		// Pre-load the key values in order to hide some of the read latency
-		uint32_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (uint32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{
 			if (DataIndex < rootConstData.NumKeys)
 			{
-				uint32_t localKey = (srcKeys[i] >> ShiftBit) & 0xf;
+				uint32_t localKey = uint32_t((srcKeys[i] >> ShiftBit) & 0xf);
 				InterlockedAdd(gs_PARALLELSORT_Histogram[(localKey * PARALLELSORT_THREADGROUP_SIZE) + localID], 1);
 				DataIndex += PARALLELSORT_THREADGROUP_SIZE;
 			}
@@ -386,11 +386,11 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 		uint32_t DataIndex = BlockIndex;
 		
 		// Pre-load the key values in order to hide some of the read latency
-		uint32_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (int32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{
@@ -398,14 +398,14 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 			if (localID < PARALLELSORT_SORT_BIN_COUNT)
 				gs_PARALLELSORT_LocalHistogram[localID] = 0;
 
-			uint32_t localKey = (DataIndex < rootConstData.NumKeys ? srcKeys[i] : 0xffffffff);
+			uint64_t localKey = (DataIndex < rootConstData.NumKeys ? srcKeys[i] : 0xffffffffffffffff);
 
 			// Sort the keys locally in LDS
 			for (uint32_t bitShift = 0; bitShift < PARALLELSORT_SORT_BITS_PER_PASS; bitShift += 2)
 			{
 				// Figure out the keyIndex
-				uint32_t keyIndex = (localKey >> ShiftBit) & 0xf;
-				uint32_t bitKey = (keyIndex >> bitShift) & 0x3;
+				uint32_t keyIndex = uint32_t((localKey >> ShiftBit) & 0xf);
+				uint32_t bitKey = uint32_t((keyIndex >> bitShift) & 0x3);
 
 				// Create a packed histogram 
 				uint32_t packedHistogram = 1U << (bitKey * 8);
@@ -444,7 +444,7 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 			}
 
 			// Need to recalculate the keyIndex on this thread now that values have been copied around the thread group
-			uint32_t keyIndex = (localKey >> ShiftBit) & 0xf;
+			uint32_t keyIndex = uint32_t((localKey >> ShiftBit) & 0xf);
 
 			// Reconstruct histogram
 			InterlockedAdd(gs_PARALLELSORT_LocalHistogram[keyIndex], 1);
@@ -524,18 +524,18 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 		uint32_t DataIndex = BlockIndex;
 		
 		// Pre-load the key values in order to hide some of the read latency
-		uint32_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcKeys[0] = SrcBuffer[DataIndex];
-		srcKeys[1] = SrcBuffer[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcKeys[2] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcKeys[3] = SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		uint64_t srcKeys[PARALLELSORT_ELEMENTS_PER_THREAD];
+		srcKeys[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcKeys[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcKeys[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcKeys[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcBuffer[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		// Also preload payload
-		uint32_t srcValues[PARALLELSORT_ELEMENTS_PER_THREAD];
-		srcValues[0] = SrcPayload[DataIndex];
-		srcValues[1] = SrcPayload[DataIndex + PARALLELSORT_THREADGROUP_SIZE];
-		srcValues[2] = SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)];
-		srcValues[3] = SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)];
+		uint64_t srcValues[PARALLELSORT_ELEMENTS_PER_THREAD];
+		srcValues[0] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 0)] : 0xffffffffffffffff;
+		srcValues[1] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 1)] : 0xffffffffffffffff;
+		srcValues[2] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 2)] : 0xffffffffffffffff;
+		srcValues[3] = (DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3) < rootConstData.NumKeys) ? SrcPayload[DataIndex + (PARALLELSORT_THREADGROUP_SIZE * 3)] : 0xffffffffffffffff;
 
 		for (int32_t i = 0; i < PARALLELSORT_ELEMENTS_PER_THREAD; i++)
 		{
@@ -543,15 +543,15 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 			if (localID < PARALLELSORT_SORT_BIN_COUNT)
 				gs_PARALLELSORT_LocalHistogram[localID] = 0;
 
-			uint32_t localKey = (DataIndex < rootConstData.NumKeys ? srcKeys[i] : 0xffffffff);
-			uint32_t localValue = (DataIndex < rootConstData.NumKeys ? srcValues[i] : 0xffffffff);
+			uint64_t localKey = (DataIndex < rootConstData.NumKeys ? srcKeys[i] : 0xffffffffffffffff);
+			uint64_t localValue = (DataIndex < rootConstData.NumKeys ? srcValues[i] : 0xffffffffffffffff);
 
 			// Sort the keys locally in LDS
 			for (uint32_t bitShift = 0; bitShift < PARALLELSORT_SORT_BITS_PER_PASS; bitShift += 2)
 			{
 				// Figure out the keyIndex
-				uint32_t keyIndex = (localKey >> ShiftBit) & 0xf;
-				uint32_t bitKey = (keyIndex >> bitShift) & 0x3;
+				uint32_t keyIndex = uint32_t((localKey >> ShiftBit) & 0xf);
+				uint32_t bitKey = uint32_t((keyIndex >> bitShift) & 0x3);
 
 				// Create a packed histogram 
 				uint32_t packedHistogram = 1U << (bitKey * 8);
@@ -591,7 +591,7 @@ void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t gro
 			}
 
 			// Need to recalculate the keyIndex on this thread now that values have been copied around the thread group
-			uint32_t keyIndex = (localKey >> ShiftBit) & 0xf;
+			uint32_t keyIndex = uint32_t((localKey >> ShiftBit) & 0xf);
 
 			// Reconstruct histogram
 			InterlockedAdd(gs_PARALLELSORT_LocalHistogram[keyIndex], 1);
