@@ -23,58 +23,79 @@
 #include <gprt.h>
 #include <iostream>
 #include <stdexcept>
+#include <chrono>
 
 int
 main(int ac, char **av) {
+  // 32 million int32 items
+  int numItems = 32000000;
+
   // Arrange
+  std::vector<uint32_t> dataHost(numItems, 1); 
+  
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTBufferOf<uint32_t> data = gprtDeviceBufferCreate<uint32_t>(context, 1000);
+  GPRTBufferOf<uint32_t> data = gprtDeviceBufferCreate<uint32_t>(context, numItems, dataHost.data());
+  GPRTBufferOf<uint32_t> exclusiveSum = gprtDeviceBufferCreate<uint32_t>(context, numItems);
   GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);
   
-  std::vector<uint32_t> dataHost(1000); 
+  std::vector<uint32_t> hostExclusiveSum(numItems); 
 
-  // Seed with a real random value, if available
-  // std::random_device r;
-  // std::default_random_engine e1(r());
-  // std::uniform_int_distribution<uint32_t> uniform_dist(0, 4'294'967'295);
-
-  // for now, just testng to see if a series of 1's work.
-  gprtBufferMap(data);
-  uint32_t *ptr = gprtBufferGetPointer(data);
-  for (uint32_t i = 0; i < 1000; ++i) {
-      ptr[i] = 1;//uniform_dist(e1);
-      dataHost[i] = ptr[i];
+  // Act
+  std::cout<<"Computing exclusive sum on device" << std::endl;
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < 100; ++i) {
+    gprtBufferExclusiveSum(context, data, exclusiveSum, scratch);
   }
-  gprtBufferUnmap(data);
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() / 100.f;
 
-  std::vector<uint32_t> dataHostExclusiveSum(1000); 
+  float itemsToBillions = float(1000000000) / float(numItems);  
+  float millisecondsToSeconds = float(1000) / float(1);
 
+  duration = (duration * itemsToBillions) / millisecondsToSeconds;
+
+  std::cout<<"Done! Billions of input items / sec: " << 1.f / duration << std::endl;
+
+  std::cout<<"Computing exclusive sum on host" << std::endl;
   int sum = 0;
-  for (uint32_t i = 0; i < 1000; ++i) {
+  for (uint32_t i = 0; i < numItems; ++i) {
     int value = dataHost[i];
-    dataHostExclusiveSum[i] = sum;
+    hostExclusiveSum[i] = sum;
     sum += value;
   }
-  
-  // Act
-  gprtBufferExclusiveSum(context, data, scratch);
+  std::cout<<"Done!" << std::endl;
 
   // Assert
-  gprtBufferMap(data);
-  ptr = gprtBufferGetPointer(data);
-  for (uint32_t i = 0; i < 1000; ++i) {
-    // emperical proof of correctness
-    int sum = 0;
-    for (int j = 0; j < i; ++j) {
-      sum += dataHost[j];
+  std::cout<<"Verifying correctness..." << std::endl;
+  bool correct = true;
+  gprtBufferMap(exclusiveSum);
+  uint32_t* ptr = gprtBufferGetPointer(exclusiveSum);
+  for (uint32_t i = 0; i < numItems; ++i) {
+    // // emperical proof of correctness
+    // int sum = 0;
+    // for (int j = 0; j < i; ++j) {
+    //   sum += dataHost[j];
+    // }
+    // if (sum != hostExclusiveSum[i]) {
+    //   throw std::runtime_error("Error, exclusive sum is incorrect!");
+    // }
+    if (ptr[i] != hostExclusiveSum[i]) {
+      std::cout<<"Error. Item " << i << " is " << ptr[i] << " but should be " << hostExclusiveSum[i] << std::endl;
+      correct = false;
+      break;
     }
-    if (sum != dataHostExclusiveSum[i]) throw std::runtime_error("Error, exclusive sum is incorrect!");
-    // if (ptr[i] != dataHostExclusiveSum[i]) throw std::runtime_error("Error, device and host output disagree!");
   }
-  gprtBufferUnmap(data);
+  gprtBufferUnmap(exclusiveSum);
+
+  if (!correct) {
+    throw std::runtime_error("Error, device and host output disagree!");
+  } else {
+    std::cout<<"Results appear correct!" <<std::endl;
+  }
 
   // Cleanup  
   gprtBufferDestroy(data);
+  gprtBufferDestroy(exclusiveSum);
   gprtBufferDestroy(scratch);
   gprtContextDestroy(context);
 }

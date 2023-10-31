@@ -1749,12 +1749,14 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
  * Exclusive sum requires a temporary "scratch" space
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param input An input buffer of 32-bit unsigned integers to be summed
+ * @param output An output buffer of 32-bit unsigned integers that will store the exclusive sum.
  * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ * Generally, requires 2*log_1024(N) ints of scratch memory.
  */
-GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer buffer, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Computes a device-wide exclusive prefix sum.
@@ -1764,15 +1766,16 @@ GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer buffer, GPR
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
- * @param buffer A buffer of 32-bit unsigned integers
+ * @param input An input buffer of 32-bit unsigned integers to be summed
+ * @param output An output buffer of 32-bit unsigned integers that will store the exclusive sum.
  * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
 template <typename T1, typename T2>
 void
-gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
-  gprtBufferExclusiveSum(context, (GPRTBuffer) buffer, (GPRTBuffer) scratch);
+gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  gprtBufferExclusiveSum(context, (GPRTBuffer) input, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**

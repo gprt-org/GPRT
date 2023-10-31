@@ -1,5 +1,7 @@
 #pragma once
 
+#define WAVE_SIZE 32
+
 // #define COLLECT_STATS
 
 // The higher this number is, the more primitives we can store in our tree.
@@ -57,6 +59,11 @@
 // at least on my problems... Just going to take square roots for simplicity...
 // #define USE_SQUARED_DISTS
 
+// We just assume 4 levels for scans, which allows for a maximum of 2^40 items assuming 
+// a wave size of 32.
+#define NUM_SCAN_LEVELS 3
+#define NUM_SCAN_THREADS (WAVE_SIZE * WAVE_SIZE)
+
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt{
 
@@ -81,6 +88,25 @@ namespace gprt{
         uint64_t y;
     };
     #endif
+
+    struct ScanRecord {
+        int tmp;
+    };
+
+    struct ScanConstants {
+        uint32_t numItems;
+        uint32_t numGroups;
+        uint32_t num0Groups;
+        uint32_t num1Groups;
+        uint32_t num2Groups;
+        
+        gprt::Buffer input;
+        gprt::Buffer output;
+        gprt::Buffer scratch;
+        uint32_t scratchOffset;
+        uint32_t inputOffset;
+        uint32_t outputOffset;
+    };
 
     struct NNAccel {
         // input
