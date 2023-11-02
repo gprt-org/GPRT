@@ -50,7 +50,7 @@ else() # linux
   )
   FetchContent_Populate(HLSLCompiler)
   message("Extracting...")
-  execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64")
+  execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64" RESULT_VARIABLE EXTRACT_RESULT)
   if(NOT EXTRACT_RESULT EQUAL 0)
       message(FATAL_ERROR "mkdir failed with error code: ${EXTRACT_RESULT}")
   endif()
