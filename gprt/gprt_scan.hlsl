@@ -27,12 +27,104 @@
 // for 32 threads in a wave, this is 1024
 #define TG_SIZE (WAVE_SIZE * WAVE_SIZE) 
 
-groupshared int32_t gs_WaveSums[WAVE_SIZE];
+groupshared int32_t gs_WaveExclusiveSums[WAVE_SIZE];
+
+groupshared int32_t gs_GroupExclusiveSum;
 
 typedef gprt::ScanRecord ScanRecord;
 
 // Note, this requires running using a multiple of WAVE_SIZE threads.
 // However, input does *not* need to be a multiple of WAVE_SIZE.
+
+enum StatusFlag : uint32_t
+{
+  INVALID = 0,
+  AGGREGATE_AVAILABLE = 1,
+  PREFIX_AVAILABLE = 2,
+};
+
+GPRT_COMPUTE_PROGRAM(InitializePartitionDescriptor, (ScanRecord, record), (1,1,1)) {
+  uint DTid = DispatchThreadID.x;
+  if (DTid >= pc.numGroups) return; 
+  gprt::store<int64_t>(pc.scratch, DTid, (int64_t(INVALID) << 32ull) | 0ull);
+}
+
+GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,1,1)) {
+  uint DTid = DispatchThreadID.x;
+  uint waveIndex = GroupIndex / WAVE_SIZE;
+  uint group = GroupID.x;
+  bool firstWave = waveIndex == 0;
+  bool lastLane = WaveGetLaneIndex() == (WAVE_SIZE - 1);
+  bool lastItem = (GroupIndex == 1023 || GroupIndex == (pc.numItems - 1));
+
+  int32_t val = 0;
+  if (DTid < pc.numItems) val = gprt::load<int32_t>(pc.input, DTid);
+  int32_t exclusiveLaneSum = WavePrefixSum(val);
+
+  // Store wave's aggregate into shared memory
+  if (lastLane) {
+    uint32_t waveAggreagate = exclusiveLaneSum + val;
+    gs_WaveExclusiveSums[waveIndex] = waveAggreagate;
+  }
+
+  GroupMemoryBarrierWithGroupSync();
+
+  // Compute exclusive sum over individual wave aggregates
+  if (firstWave) {
+    int32_t waveAggregate = gs_WaveExclusiveSums[GroupIndex];
+    int32_t exclusiveWaveSum = WavePrefixSum(waveAggregate);
+    gs_WaveExclusiveSums[GroupIndex] = exclusiveWaveSum;
+  }
+
+  GroupMemoryBarrierWithGroupSync();
+
+  // Incorporate predecessor waves' sum into our lane's exclusive sum
+  exclusiveLaneSum += gs_WaveExclusiveSums[waveIndex]; 
+
+  if (lastItem) {
+    // Store group aggregate (or inclusive prefix if group 0)
+    int groupAggregate = exclusiveLaneSum + val;
+    if (group == 0) {
+      gprt::store<int64_t>(pc.scratch, group, (int64_t(PREFIX_AVAILABLE) << 32ull) | int64_t(groupAggregate));
+      gs_GroupExclusiveSum = 0;
+
+    } else {
+      gprt::store<int64_t>(pc.scratch, group, (int64_t(AGGREGATE_AVAILABLE) << 32ull) | int64_t(groupAggregate));
+    
+      // Compute group exclusive prefix using a decoupled look-back
+      gs_GroupExclusiveSum = 0;
+      for (int i = group - 1; i >= 0; --i) {
+        int64_t descriptor; 
+        int status, value;
+        for (int j = 0; j < 10000000; ++j) {
+          descriptor = gprt::load<int64_t>(pc.scratch, i);
+          status = int32_t(descriptor >> 32ull);
+          value = int32_t(descriptor);
+          if (status != INVALID) break; 
+        }
+        if (group < 32 && status == INVALID) {
+          printf("ERROR! group %d gave up waiting for preceding group %d!\n", group, i);
+          break;
+        }
+        
+        gs_GroupExclusiveSum += value;
+
+        // If value was the predecessors inclusive sum, we're done.
+        if (status == PREFIX_AVAILABLE) break;
+      }
+      
+      // Update our inclusive prefix
+      gprt::store<int64_t>(pc.scratch, group, (int64_t(PREFIX_AVAILABLE) << 32ull) | int64_t(gs_GroupExclusiveSum + groupAggregate));
+    }
+  }
+
+  GroupMemoryBarrier();
+  
+  if (DTid < pc.numItems) {
+    gprt::store<int32_t>(pc.output, DTid, exclusiveLaneSum + gs_GroupExclusiveSum);
+  }
+}
+
 GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   uint DTid = DispatchThreadID.x;
   uint waveIndex = GroupIndex / WAVE_SIZE;
@@ -47,7 +139,7 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   if (WaveGetLaneIndex() == (WAVE_SIZE - 1)) {
     // cache this wave's total into shared memory
     uint32_t waveSum = prefixSum + val;
-    gs_WaveSums[waveIndex] = waveSum;
+    gs_WaveExclusiveSums[waveIndex] = waveSum;
   }
 
   GroupMemoryBarrierWithGroupSync();
@@ -55,15 +147,15 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   // If we're the first wave...
   if (waveIndex == 0) {
     // Compute the prefix sum of the individual wave totals
-    int32_t waveSum = gs_WaveSums[GroupIndex];
+    int32_t waveSum = gs_WaveExclusiveSums[GroupIndex];
     int32_t prefixWaveSum = WavePrefixSum(waveSum);
-    gs_WaveSums[GroupIndex] = prefixWaveSum;
+    gs_WaveExclusiveSums[GroupIndex] = prefixWaveSum;
   }
 
   GroupMemoryBarrierWithGroupSync();
 
   // Make current wave's prefix sum relative to prior waves
-  prefixSum += gs_WaveSums[waveIndex]; 
+  prefixSum += gs_WaveExclusiveSums[waveIndex]; 
   if (DTid < pc.numItems) {
     gprt::store<int32_t>(pc.output, DTid + pc.outputOffset, prefixSum);
   }

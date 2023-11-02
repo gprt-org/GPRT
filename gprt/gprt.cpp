@@ -2869,6 +2869,10 @@ struct Context {
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
 
+  /* Some algorithms like "scan" benefit from guaranteed "forward progress", but not all 
+     devices support this. */
+  bool forwardProgressGuaranteed;
+
   // For handling vulkan memory allocation
   VmaAllocator allocator;
 
@@ -3362,6 +3366,15 @@ struct Context {
     // the physical device Device properties also contain limits and sparse
     // properties
     vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+
+    // NVIDIA (guaranteed with cards supporting RT)
+    if (deviceProperties.vendorID == 0X10DE)      forwardProgressGuaranteed = true;
+    // AMD (guaranteed with cards supporting RT)
+    else if (deviceProperties.vendorID == 0x1002) forwardProgressGuaranteed = true;
+    // Intel (guaranteed with cards supporting RT)
+    else if (deviceProperties.vendorID == 0x8086) forwardProgressGuaranteed = true;
+    // Apple and ARM unsupported
+    else forwardProgressGuaranteed = false;
 
     // VkPhysicalDeviceRayTracingPipelinePropertiesKHR
     // rayTracingPipelineProperties{};
@@ -4543,6 +4556,8 @@ struct Context {
   
     // Scanning stages
     {
+      internalComputePrograms.insert({"InitializePartitionDescriptor", new Compute(logicalDevice, scanModule, "InitializePartitionDescriptor", sizeof(gprt::ScanRecord))});
+      internalComputePrograms.insert({"ExclusiveSumDecoupledLookback", new Compute(logicalDevice, scanModule, "ExclusiveSumDecoupledLookback", sizeof(gprt::ScanRecord))});
       internalComputePrograms.insert({"ExclusiveSumGroups", new Compute(logicalDevice, scanModule, "ExclusiveSumGroups", sizeof(gprt::ScanRecord))});
       internalComputePrograms.insert({"AddGroupPartialSums", new Compute(logicalDevice, scanModule, "AddGroupPartialSums", sizeof(gprt::ScanRecord))});
       computePipelinesOutOfDate = true;
@@ -10525,89 +10540,111 @@ void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _out
   Buffer *scratch = (Buffer *) _scratch;
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  auto ExclusiveSumGroups = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["ExclusiveSumGroups"];
-  auto AddGroupPartialSums = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["AddGroupPartialSums"];
+  if (context->forwardProgressGuaranteed) {
+    auto InitializePartitionDescriptor = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitializePartitionDescriptor"];
+    auto ExclusiveSumDecoupledLookback = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["ExclusiveSumDecoupledLookback"];
+    uint32_t numGroups = (numItems + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
 
-  // exclusive scan occurs over groups of 1024, so we need to use multiple 
-  // iterations to combine intermediate results.
+    // Each group gets an aggregate/inclusive prefix and a status flag.
+    if (scratch->getSize() < numGroups * sizeof(uint64_t))
+      scratch->resize(numGroups * sizeof(uint64_t), false);
 
-  // at each successive iteration, we have a reduction of items to scan by a factor of 1024.
-  std::vector<uint32_t> numGroups(NUM_SCAN_LEVELS);
-  numGroups[0] = (numItems + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
-  for (int i = 1; i < NUM_SCAN_LEVELS; ++i)
-    numGroups[i] = (numGroups[i-1] + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
-  
-  if (numGroups[2] > 1024) 
-    LOG_ERROR("Scan limited to 2^40 items or less!");
-
-  // Reserve scratch for partial values exclusive sums.
-  // Partial results at successive iterations share the same scratch buffer,
-  //   but include an offset to account for previous iterations
-  std::vector<uint32_t> scratchOffsets(NUM_SCAN_LEVELS); 
-  uint32_t requiredScratchSize = 0;
-  for (int i = 0; i < NUM_SCAN_LEVELS; ++i) {
-    scratchOffsets[i] = requiredScratchSize;
-    requiredScratchSize += 2 * numGroups[i];
+    gprt::ScanConstants scanConstants;
+    scanConstants.numItems = numItems;
+    scanConstants.numGroups = numGroups;
+    scanConstants.input = gprtBufferGetHandle(_input);
+    scanConstants.output = gprtBufferGetHandle(_output);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);    
+    gprtComputeLaunch1D(_context, InitializePartitionDescriptor, numGroups, scanConstants);
+    gprtComputeLaunch1D(_context, ExclusiveSumDecoupledLookback, numGroups, scanConstants);
   }
 
-  if (scratch->getSize() < requiredScratchSize * sizeof(uint32_t)) {
-    scratch->resize(requiredScratchSize * sizeof(uint32_t), false);
+
+  else {
+    auto ExclusiveSumGroups = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["ExclusiveSumGroups"];
+    auto AddGroupPartialSums = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["AddGroupPartialSums"];
+
+    // exclusive scan occurs over groups of 1024, so we need to use multiple 
+    // iterations to combine intermediate results.
+
+    // at each successive iteration, we have a reduction of items to scan by a factor of 1024.
+    std::vector<uint32_t> numGroups(NUM_SCAN_LEVELS);
+    numGroups[0] = (numItems + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
+    for (int i = 1; i < NUM_SCAN_LEVELS; ++i)
+      numGroups[i] = (numGroups[i-1] + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
+    
+    if (numGroups[2] > 1024) 
+      LOG_ERROR("Scan limited to 2^40 items or less!");
+
+    // Reserve scratch for partial values exclusive sums.
+    // Partial results at successive iterations share the same scratch buffer,
+    //   but include an offset to account for previous iterations
+    std::vector<uint32_t> scratchOffsets(NUM_SCAN_LEVELS); 
+    uint32_t requiredScratchSize = 0;
+    for (int i = 0; i < NUM_SCAN_LEVELS; ++i) {
+      scratchOffsets[i] = requiredScratchSize;
+      requiredScratchSize += 2 * numGroups[i];
+    }
+
+    if (scratch->getSize() < requiredScratchSize * sizeof(uint32_t)) {
+      scratch->resize(requiredScratchSize * sizeof(uint32_t), false);
+    }
+
+    gprt::ScanConstants scanConstants;
+
+    // Level 0
+    scanConstants.numItems = numItems;
+    scanConstants.numGroups = numGroups[0];
+    scanConstants.input = gprtBufferGetHandle(_input);
+    scanConstants.output = gprtBufferGetHandle(_output);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);
+    scanConstants.inputOffset = 0;
+    scanConstants.outputOffset = 0;
+    scanConstants.scratchOffset = 0;
+    gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[0], scanConstants);
+
+    // Level 1
+    scanConstants.numItems = numGroups[0];
+    scanConstants.numGroups = numGroups[1];
+    scanConstants.input = gprtBufferGetHandle(_scratch);
+    scanConstants.output = gprtBufferGetHandle(_scratch);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);
+    scanConstants.inputOffset = 0;
+    scanConstants.outputOffset = numGroups[0];
+    scanConstants.scratchOffset = numGroups[0] * 2;
+    gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[1], scanConstants);
+
+    // Level 2
+    scanConstants.numItems = numGroups[1];
+    scanConstants.numGroups = numGroups[2];
+    scanConstants.input = gprtBufferGetHandle(_scratch);
+    scanConstants.output = gprtBufferGetHandle(_scratch);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);
+    scanConstants.inputOffset = numGroups[0] * 2;
+    scanConstants.outputOffset = numGroups[0] * 2 + numGroups[1];
+    scanConstants.scratchOffset = numGroups[0] * 2 + numGroups[1] * 2; 
+    gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[2], scanConstants);
+
+    // Level 3
+    scanConstants.numItems = numGroups[2];
+    scanConstants.numGroups = 1;
+    scanConstants.input = gprtBufferGetHandle(_scratch);
+    scanConstants.output = gprtBufferGetHandle(_scratch);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);
+    scanConstants.inputOffset = numGroups[0] * 2 + numGroups[1] * 2;
+    scanConstants.outputOffset = numGroups[0] * 2 + numGroups[1] * 2 + numGroups[2];
+    scanConstants.scratchOffset = numGroups[0] * 2 + numGroups[1] * 2 + numGroups[2] * 2; 
+    gprtComputeLaunch1D(_context, ExclusiveSumGroups, 1, scanConstants);
+
+    // Combine results
+    scanConstants.numItems = numItems;
+    scanConstants.num0Groups = numGroups[0];
+    scanConstants.num1Groups = numGroups[1];
+    scanConstants.num2Groups = numGroups[2];
+    scanConstants.output = gprtBufferGetHandle(_output);
+    scanConstants.scratch = gprtBufferGetHandle(_scratch);
+    gprtComputeLaunch1D(_context, AddGroupPartialSums, numGroups[0], scanConstants);
   }
-
-  gprt::ScanConstants scanConstants;
-
-  // Level 0
-  scanConstants.numItems = numItems;
-  scanConstants.numGroups = numGroups[0];
-  scanConstants.input = gprtBufferGetHandle(_input);
-  scanConstants.output = gprtBufferGetHandle(_output);
-  scanConstants.scratch = gprtBufferGetHandle(_scratch);
-  scanConstants.inputOffset = 0;
-  scanConstants.outputOffset = 0;
-  scanConstants.scratchOffset = 0;
-  gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[0], scanConstants);
-
-  // Level 1
-  scanConstants.numItems = numGroups[0];
-  scanConstants.numGroups = numGroups[1];
-  scanConstants.input = gprtBufferGetHandle(_scratch);
-  scanConstants.output = gprtBufferGetHandle(_scratch);
-  scanConstants.scratch = gprtBufferGetHandle(_scratch);
-  scanConstants.inputOffset = 0;
-  scanConstants.outputOffset = numGroups[0];
-  scanConstants.scratchOffset = numGroups[0] * 2;
-  gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[1], scanConstants);
-
-  // Level 2
-  scanConstants.numItems = numGroups[1];
-  scanConstants.numGroups = numGroups[2];
-  scanConstants.input = gprtBufferGetHandle(_scratch);
-  scanConstants.output = gprtBufferGetHandle(_scratch);
-  scanConstants.scratch = gprtBufferGetHandle(_scratch);
-  scanConstants.inputOffset = numGroups[0] * 2;
-  scanConstants.outputOffset = numGroups[0] * 2 + numGroups[1];
-  scanConstants.scratchOffset = numGroups[0] * 2 + numGroups[1] * 2; 
-  gprtComputeLaunch1D(_context, ExclusiveSumGroups, numGroups[2], scanConstants);
-
-  // Level 3
-  scanConstants.numItems = numGroups[2];
-  scanConstants.numGroups = 1;
-  scanConstants.input = gprtBufferGetHandle(_scratch);
-  scanConstants.output = gprtBufferGetHandle(_scratch);
-  scanConstants.scratch = gprtBufferGetHandle(_scratch);
-  scanConstants.inputOffset = numGroups[0] * 2 + numGroups[1] * 2;
-  scanConstants.outputOffset = numGroups[0] * 2 + numGroups[1] * 2 + numGroups[2];
-  scanConstants.scratchOffset = numGroups[0] * 2 + numGroups[1] * 2 + numGroups[2] * 2; 
-  gprtComputeLaunch1D(_context, ExclusiveSumGroups, 1, scanConstants);
-
-  // Combine results
-  scanConstants.numItems = numItems;
-  scanConstants.num0Groups = numGroups[0];
-  scanConstants.num1Groups = numGroups[1];
-  scanConstants.num2Groups = numGroups[2];
-  scanConstants.output = gprtBufferGetHandle(_output);
-  scanConstants.scratch = gprtBufferGetHandle(_scratch);
-  gprtComputeLaunch1D(_context, AddGroupPartialSums, numGroups[0], scanConstants);
 }
 
 void gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
