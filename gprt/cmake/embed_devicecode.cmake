@@ -50,11 +50,13 @@ else() # linux
   )
   FetchContent_Populate(HLSLCompiler)
   message("Extracting...")
-  execute_process(
-    COMMAND mkdir "-p ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64"
-    COMMAND tar "xzf ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64.tar.gz -C ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+  execute_process(COMMAND mkdir "-p ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64")
   if(NOT EXTRACT_RESULT EQUAL 0)
-      message(FATAL_ERROR "Extraction failed with error code: ${EXTRACT_RESULT}")
+      message(FATAL_ERROR "mkdir failed with error code: ${EXTRACT_RESULT}")
+  endif()
+  execute_process(COMMAND tar "xzf ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64.tar.gz -C ${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+  if(NOT EXTRACT_RESULT EQUAL 0)
+      message(FATAL_ERROR "tar failed with error code: ${EXTRACT_RESULT}")
   else()
       message("Done.")
   endif()
