@@ -60,6 +60,7 @@ else() # linux
   else()
       message("Done.")
   endif()
+  execute_process(COMMAND chmod +x "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64/bin/dxc")
   set(CMAKE_DXC_COMPILER "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64/bin/dxc" CACHE INTERNAL "CMAKE_DXC_COMPILER")
 endif()
 
