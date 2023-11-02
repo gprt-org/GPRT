@@ -344,7 +344,9 @@ where ARG is "(type_, name)". */
   [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
                                                                             GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("raygeneration")] void __raygen__##progName() { progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl))); } \
+  [shader("raygeneration")] void __raygen__##progName() {                                                              \
+    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)));                                                         \
+  }                                                                                                                    \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
   void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */

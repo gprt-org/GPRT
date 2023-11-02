@@ -22,17 +22,52 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-find_program(CMAKE_DXC_COMPILER dxc
-  DOC "Path to the dxc executable."
-  HINTS ${Vulkan_INCLUDE_DIR}/../bin/ ${Vulkan_INCLUDE_DIR}/../Bin/ ${DXC_BIN_DIR}
-)
+include(FetchContent)
 
-# set(CMAKE_SPIRV_OPTIMIZER ${Vulkan_BIN_DIR}/spirv-opt)
-# set(CMAKE_SPIRV_ASSEMBLER ${Vulkan_BIN_DIR}/spirv-as)
-# set(CMAKE_SPIRV_DISASSEMBLER ${Vulkan_BIN_DIR}/spirv-dis)
+message("Downloading HLSL Compiler...")
+if (WIN32)
+  FetchContent_Declare(HLSLCompiler
+    URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/dxc_2023_08_14.zip
+    URL_HASH SHA256=01d4c4dfa37dee21afe70cac510d63001b6b611a128e3760f168765eead1e625
+    DOWNLOAD_NO_EXTRACT true
+    DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
+  )
+  FetchContent_Populate(HLSLCompiler)
+  message("Extracting...")
+  execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/dxc_2023_08_14.zip" -DestinationPath "${CMAKE_BINARY_DIR}/dxc_2023_08_14" RESULT_VARIABLE EXTRACT_RESULT)
+  if(NOT EXTRACT_RESULT EQUAL 0)
+      message(FATAL_ERROR "Extraction failed with error code: ${EXTRACT_RESULT}")
+  else()
+      message("Done.")
+  endif()
+  set(CMAKE_DXC_COMPILER "${CMAKE_BINARY_DIR}/dxc_2023_08_14/bin/x64/dxc.exe" CACHE INTERNAL "CMAKE_DXC_COMPILER")
+else() # linux
+  FetchContent_Declare(HLSLCompiler
+    URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/linux_dxc_2023_08_14.x86_64.tar.gz
+    URL_HASH SHA256=4fad86d15a5a68c9063a272af069dc40b7a24c325f665f474ed2dbd8623f7448
+    DOWNLOAD_NO_EXTRACT true
+    DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
+  )
+  FetchContent_Populate(HLSLCompiler)
+  message("Extracting...")
+  execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+  if(NOT EXTRACT_RESULT EQUAL 0)
+      message(FATAL_ERROR "mkdir failed with error code: ${EXTRACT_RESULT}")
+  endif()
+  execute_process(COMMAND tar xzf "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64.tar.gz" -C "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+  if(NOT EXTRACT_RESULT EQUAL 0)
+      message(FATAL_ERROR "tar failed with error code: ${EXTRACT_RESULT}")
+  else()
+      message("Done.")
+  endif()
+  execute_process(COMMAND chmod +x "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64/bin/dxc")
+  set(CMAKE_DXC_COMPILER "${CMAKE_BINARY_DIR}/linux_dxc_2023_08_14.x86_64/bin/dxc" CACHE INTERNAL "CMAKE_DXC_COMPILER")
+endif()
 
-if(NOT CMAKE_DXC_COMPILER)
-  message(FATAL_ERROR "dxc not found.")
+# Test to see if compiler is working
+execute_process(COMMAND ${CMAKE_DXC_COMPILER} "--version" RESULT_VARIABLE EXTRACT_RESULT)
+if(NOT EXTRACT_RESULT EQUAL 0)
+message("Envoking HLSL compiler failed with error code: ${EXTRACT_RESULT}")
 endif()
 
 set(EMBED_DEVICECODE_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
