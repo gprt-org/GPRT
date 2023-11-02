@@ -44,7 +44,7 @@ if (WIN32)
 else() # linux
   FetchContent_Declare(HLSLCompiler
     URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/linux_dxc_2023_08_14.x86_64.tar.gz
-    URL_HASH c5363a699d69b516ba3e7e4980d469d90485aedf
+    URL_HASH SHA256=c5363a699d69b516ba3e7e4980d469d90485aedf
     DOWNLOAD_NO_EXTRACT true
     DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
   )
