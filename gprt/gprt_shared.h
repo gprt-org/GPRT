@@ -59,13 +59,10 @@
 // at least on my problems... Just going to take square roots for simplicity...
 // #define USE_SQUARED_DISTS
 
-// We just assume 4 levels for scans, which allows for a maximum of 2^40 items assuming 
-// a wave size of 32.
-#define NUM_SCAN_LEVELS 3
-#define NUM_SCAN_THREADS (WAVE_SIZE * WAVE_SIZE)
+#define SCAN_PARTITON_SIZE 8192
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
-namespace gprt{
+namespace gprt {
 
     typedef uint32_t Texture;
     typedef uint32_t Sampler;
@@ -93,19 +90,11 @@ namespace gprt{
         int tmp;
     };
 
-    struct ScanConstants {
-        uint32_t numItems;
-        uint32_t numGroups;
-        uint32_t num0Groups;
-        uint32_t num1Groups;
-        uint32_t num2Groups;
-        
+    struct ScanConstants {        
+        uint32_t size;
         gprt::Buffer input;
         gprt::Buffer output;
-        gprt::Buffer scratch;
-        uint32_t scratchOffset;
-        uint32_t inputOffset;
-        uint32_t outputOffset;
+        gprt::Buffer state;
     };
 
     struct NNAccel {

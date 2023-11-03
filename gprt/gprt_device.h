@@ -279,11 +279,24 @@ atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
   return old;
 }
 
+uint32_t
+atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.y].InterlockedOr(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
 // workaround for a bug with raw buffer load / store...
 template <typename T>
 T 
 atomicLoad(in Buffer buffer, uint32_t index) {
   return buffers[buffer.y].Load<T>(index * sizeof(T));
+}
+
+template <typename T>
+void 
+atomicStore(in Buffer buffer, uint32_t index, in T value) {
+  buffers[buffer.y].Store<T>(index * sizeof(T), value);
 }
 
 [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);

@@ -1,225 +1,277 @@
-// MIT License
-
-// Copyright (c) 2023 Nathan V. Morrical
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/******************************************************************************
+ * Exclusive Vectorized Chained Scan With Decoupled Lookback
+ *
+ * Variant: Raking warp-sized radix reduce scan using partitions of size equal to 
+ *          maximum shared memory.
+ *                    
+ * Notes:   **Preprocessor macros must be manually changed for AMD**
+ * 
+ * Author:  Thomas Smith 8/7/2023
+ *
+ * Based off of Research by:
+ *          Duane Merrill, Nvidia Corporation
+ *          Michael Garland, Nvidia Corporation
+ *          https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
+ *
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011-2022, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the NVIDIA CORPORATION nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ ******************************************************************************/
 
 #include "gprt.h"
 
 [[vk::push_constant]] gprt::ScanConstants pc;
 
-// for 32 threads in a wave, this is 1024
-#define TG_SIZE (WAVE_SIZE * WAVE_SIZE) 
-
-groupshared uint32_t gs_WaveExclusiveSums[WAVE_SIZE];
-
-groupshared uint32_t gs_GroupExclusiveSum;
-
 typedef gprt::ScanRecord ScanRecord;
 
-// Note, this requires running using a multiple of WAVE_SIZE threads.
-// However, input does *not* need to be a multiple of WAVE_SIZE.
+#define PARTITION_SIZE      8192
+#define PART_VEC_SIZE       2048
+#define PART_VEC_MASK       2047
+#define GROUP_SIZE          512
+#define THREAD_BLOCKS       256
+#define PART_LOG            13
+#define PART_VEC_LOG        11
 
-enum StatusFlag : uint32_t
-{
-  INVALID = 0,
-  AGGREGATE_AVAILABLE = 1,
-  PREFIX_AVAILABLE = 2,
-  FLAG_MASK = 3,
-};
+#define VECTOR_MASK         3
+#define VECTOR_LOG          2
 
-GPRT_COMPUTE_PROGRAM(InitializePartitionDescriptor, (ScanRecord, record), (1,1,1)) {
-  uint DTid = DispatchThreadID.x;
-  if (DTid >= pc.numGroups) return; 
-  gprt::store<uint32_t>(pc.scratch, DTid, INVALID);
-}
+#define LANE_COUNT          32  // <---------------------------   For Nvidia; change depending on hardware
+#define LANE_MASK           31
+#define LANE_LOG            5
+#define WAVES_PER_GROUP     16
+#define WAVE_PARTITION_SIZE 128
+#define WAVE_PART_LOG       7
 
-// GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,1,1)) {
-//   uint DTid = DispatchThreadID.x;
-//   uint waveIndex = GroupIndex / WAVE_SIZE;
-//   uint group = GroupID.x;
-//   bool firstItem = (GroupIndex == 0);
+//#define LANE_COUNT            64 <-------------------------   AMD 
+//#define LANE_MASK             63
+//#define LANE_LOG              6    
+//#define WAVES_PER_GROUP       8
+//#define WAVE_PARTITION_SIZE   256
+//#define WAVE_PART_LOG         8
 
-//   if (firstItem) {
-//     if (group == 0) {
-//       gprt::atomicAdd(pc.scratch, group, PREFIX_AVAILABLE);
-//     } else {
-//       gprt::atomicAdd(pc.scratch, group, AGGREGATE_AVAILABLE);
-      
-//       // Compute group exclusive prefix using a decoupled look-back
-//       for (int i = group - 1; i >= 0; --i) {
-//         uint32_t status; 
-//         while(true) {
-//           status = gprt::atomicLoad<uint32_t>(pc.scratch, i);
-//           if (status != INVALID) break; 
-//         }
-        
-//         // If value was the predecessors inclusive sum, we're done.
-//         if ((status & PREFIX_AVAILABLE) > 0) break;
-//       }
-      
-//       // Update our inclusive prefix (note, atomically adds 1 to flag going from aggregate to prefix available, 
-//       //   then adds onto our previously stored aggregate)
-//       gprt::atomicAdd(pc.scratch, group, 1);
-//     }
-//   }
-// }
+#define FLAG_NOT_READY  0
+#define FLAG_AGGREGATE  1
+#define FLAG_INCLUSIVE  2
+#define FLAG_MASK       3
 
-GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,1,1)) {
-  uint DTid = DispatchThreadID.x;
-  uint waveIndex = GroupIndex / WAVE_SIZE;
-  uint group = GroupID.x;
-  bool firstWave = waveIndex == 0;
-  bool lastLane = WaveGetLaneIndex() == (WAVE_SIZE - 1);
-  bool lastItem = (GroupIndex == 1023 || GroupIndex == (pc.numItems - 1));
+#define LANE            gtid.x
+#define WAVE_INDEX      gtid.y
+#define SPINE_INDEX     (((gtid.x + 1) << WAVE_PART_LOG) - 1)
+#define PARTITIONS      (pc.size >> PART_LOG)
+#define WAVE_PART_START (WAVE_INDEX << WAVE_PART_LOG)
+#define WAVE_PART_END   (WAVE_INDEX + 1 << WAVE_PART_LOG)
+#define PARTITION_START (partitionIndex << PART_VEC_LOG)
 
-  uint32_t val = 0;
-  if (DTid < pc.numItems) val = gprt::load<uint32_t>(pc.input, DTid);
-  uint32_t exclusiveLaneSum = WavePrefixSum(val);
+// using 0th value to hold the partition index
+#define STATE_START     1
 
-  // Store wave's aggregate into shared memory
-  if (lastLane) {
-    uint32_t waveAggreagate = exclusiveLaneSum + val;
-    gs_WaveExclusiveSums[waveIndex] = waveAggreagate;
-  }
+groupshared uint4 g_sharedMem[PART_VEC_SIZE];
 
-  GroupMemoryBarrierWithGroupSync();
-
-  // Compute exclusive sum over individual wave aggregates
-  if (firstWave) {
-    uint32_t waveAggregate = gs_WaveExclusiveSums[GroupIndex];
-    uint32_t exclusiveWaveSum = WavePrefixSum(waveAggregate);
-    gs_WaveExclusiveSums[GroupIndex] = exclusiveWaveSum;
-  }
-
-  GroupMemoryBarrierWithGroupSync();
-
-  // Incorporate predecessor waves' sum into our lane's exclusive sum
-  exclusiveLaneSum += gs_WaveExclusiveSums[waveIndex]; 
-
-  if (lastItem) {
-    // Store group aggregate (or inclusive prefix if group 0)
-    uint32_t groupAggregate = exclusiveLaneSum + val;
-    if (group == 0) {
-      gprt::atomicAdd(pc.scratch, group, PREFIX_AVAILABLE | groupAggregate << 2);
-      gs_GroupExclusiveSum = 0;
-    } else {
-      gprt::atomicAdd(pc.scratch, group, AGGREGATE_AVAILABLE | groupAggregate << 2);
-      
-      // Compute group exclusive prefix using a decoupled look-back
-      gs_GroupExclusiveSum = 0;
-      for (int i = group - 1; i >= 0; --i) {
-        uint32_t descriptor; 
-        int status, value;
-        while(true) {
-          descriptor = gprt::atomicLoad<uint32_t>(pc.scratch, i);
-          status =  descriptor & FLAG_MASK;
-          value = descriptor >> 2;
-          if (status != INVALID) break; 
-        }
-        // if (group < 32 && status == INVALID) {
-        //   printf("ERROR! group %d gave up waiting for preceding group %d!\n", group, i);
-        //   break;
-        // }
-
-        // if (status == INVALID) break;
-        
-        gs_GroupExclusiveSum += value;
-
-        // If value was the predecessors inclusive sum, we're done.
-        if ((status & PREFIX_AVAILABLE) > 0) break;
-      }
-      
-      // Update our inclusive prefix (note, atomically adds 1 to flag going from aggregate to prefix available, 
-      //   then adds onto our previously stored aggregate)
-      gprt::atomicAdd(pc.scratch, group, 1 | gs_GroupExclusiveSum << 2);
-    }
-  }
-
-  GroupMemoryBarrierWithGroupSync();
-
-  // if (DTid == 1028) {
-  //   printf("Group %d groupExclusiveSum is %d\n", group, gs_GroupExclusiveSum);
-  // }
+GPRT_COMPUTE_PROGRAM(InitChainedDecoupledExclusive, (ScanRecord, record), (512,1,1)) {
+  uint3 id = DispatchThreadID;
   
-  if (DTid < pc.numItems) {
-    gprt::store<uint32_t>(pc.output, DTid, exclusiveLaneSum + gs_GroupExclusiveSum);
-  }
+  if (id.x == 0)
+    gprt::store<uint32_t>(pc.state, id.x, 0);
+
+  gprt::store<uint32_t>(STATE_START + pc.state, id.x, FLAG_NOT_READY);
 }
 
-GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
-  uint DTid = DispatchThreadID.x;
-  uint waveIndex = GroupIndex / WAVE_SIZE;
+GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUNT, WAVES_PER_GROUP,1)) {
+  uint3 gtid = GroupThreadID;
+  uint3 gid = GroupID;
 
-  uint32_t val = 0;
-  if (DTid < pc.numItems) {
-    val = gprt::load<uint32_t>(pc.input, DTid + pc.inputOffset);
-  }
-  uint32_t prefixSum = WavePrefixSum(val);
-
-  // If we're the last lane...
-  if (WaveGetLaneIndex() == (WAVE_SIZE - 1)) {
-    // cache this wave's total into shared memory
-    uint32_t waveSum = prefixSum + val;
-    gs_WaveExclusiveSums[waveIndex] = waveSum;
-  }
-
+  //Acquire the partition index
+  int partitionIndex;
+  if (WAVE_INDEX == 0 && LANE == 0)
+    g_sharedMem[0].x = gprt::atomicAdd(pc.state, 0, 1);
+  GroupMemoryBarrierWithGroupSync();
+  partitionIndex = WaveReadLaneAt(g_sharedMem[0].x, 0);
   GroupMemoryBarrierWithGroupSync();
 
-  // If we're the first wave...
-  if (waveIndex == 0) {
-    // Compute the prefix sum of the individual wave totals
-    uint32_t waveSum = gs_WaveExclusiveSums[GroupIndex];
-    uint32_t prefixWaveSum = WavePrefixSum(waveSum);
-    gs_WaveExclusiveSums[GroupIndex] = prefixWaveSum;
+  // Note, the code below is using a warp-sized-radix ranking reduce scan, which mostly avoids bank conflicts.
+  const int partSize = partitionIndex == PARTITIONS ? (pc.size >> VECTOR_LOG) + (pc.size & VECTOR_MASK ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
+  int i = LANE + WAVE_PART_START;
+  if (i < partSize)
+  {
+    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    
+    uint t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].y;
+    g_sharedMem[i].y = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].z;
+    g_sharedMem[i].z = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].w;
+    g_sharedMem[i].w = t;
+    g_sharedMem[i] += WavePrefixSum(g_sharedMem[i].x);
   }
-
+          
+  i += LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    
+    uint t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].y;
+    g_sharedMem[i].y = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].z;
+    g_sharedMem[i].z = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].w;
+    g_sharedMem[i].w = t;
+    g_sharedMem[i] += WavePrefixSum(g_sharedMem[i].x) + WaveReadLaneAt(g_sharedMem[i - 1].x, 0);
+  }
+          
+  i += LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    
+    uint t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].y;
+    g_sharedMem[i].y = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].z;
+    g_sharedMem[i].z = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].w;
+    g_sharedMem[i].w = t;
+    g_sharedMem[i] += WavePrefixSum(g_sharedMem[i].x) + WaveReadLaneAt(g_sharedMem[i - 1].x, 0);
+  }
+          
+  i += LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    
+    uint t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].y;
+    g_sharedMem[i].y = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].z;
+    g_sharedMem[i].z = t;
+    
+    t = g_sharedMem[i].x;
+    g_sharedMem[i].x += g_sharedMem[i].w;
+    g_sharedMem[i].w = t;
+    g_sharedMem[i] += WavePrefixSum(g_sharedMem[i].x) + WaveReadLaneAt(g_sharedMem[i - 1].x, 0);
+  }
   GroupMemoryBarrierWithGroupSync();
 
-  // Make current wave's prefix sum relative to prior waves
-  prefixSum += gs_WaveExclusiveSums[waveIndex]; 
-  if (DTid < pc.numItems) {
-    gprt::store<uint32_t>(pc.output, DTid + pc.outputOffset, prefixSum);
+  if (WAVE_INDEX == 0 && LANE < WAVES_PER_GROUP)
+    g_sharedMem[SPINE_INDEX] += WavePrefixSum(g_sharedMem[SPINE_INDEX].x);
+  GroupMemoryBarrierWithGroupSync();
+
+  //Set flag payload
+  if (WAVE_INDEX == 0 && LANE == 0)
+  {
+    if (partitionIndex == 0)
+      gprt::atomicOr(pc.state, STATE_START + partitionIndex, FLAG_INCLUSIVE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
+    else
+      gprt::atomicOr(pc.state, STATE_START + partitionIndex, FLAG_AGGREGATE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
   }
 
-  // If we're the last group... 
-  if (GroupIndex == 1023 || GroupIndex == (pc.numItems - 1)) {
-    // cache this group's total into global memory
-    uint32_t groupSum = prefixSum + val;
-    gprt::store<uint32_t>(pc.scratch, GroupID.x + pc.scratchOffset, groupSum);
+  //Lookback
+  uint aggregate = 0;
+  if (partitionIndex)
+  {
+    if (WAVE_INDEX == 0)
+    {
+      for (int k = partitionIndex - LANE - 1; 0 <= k;)
+      {
+        uint flagPayload = gprt::atomicLoad<uint>(pc.state, STATE_START + k);
+        const int inclusiveIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE ? LANE_COUNT : 0));
+        const int gapIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_NOT_READY ? LANE_COUNT : 0));
+        if (inclusiveIndex < gapIndex)
+        {
+            aggregate += WaveActiveSum(LANE <= inclusiveIndex ? (flagPayload >> 2) : 0);
+            if (LANE == 0)
+            {
+              gprt::atomicAdd(pc.state, STATE_START + partitionIndex, 1 | aggregate << 2);
+              g_sharedMem[PART_VEC_MASK].x = aggregate;
+            }
+            break;
+        }
+        else
+        {
+          if (gapIndex < LANE_COUNT)
+          {
+            aggregate += WaveActiveSum(LANE < gapIndex ? (flagPayload >> 2) : 0);
+            k -= gapIndex;
+          }
+          else
+          {
+            aggregate += WaveActiveSum(flagPayload >> 2);
+            k -= LANE_COUNT;
+          }
+        }
+      }
+    }
+    GroupMemoryBarrierWithGroupSync();
+        
+    //propogate aggregate values
+    if (WAVE_INDEX || LANE)
+      aggregate = WaveReadLaneAt(g_sharedMem[PART_VEC_MASK].x, 1);
   }
-}
 
-// Combines groups of exclusive/inclusive sums using the exclusive/inclusive
-// sums of their group totals.
-GPRT_COMPUTE_PROGRAM(AddGroupPartialSums, (ScanRecord, record), (1024,1,1)) {
-  uint DTid = DispatchThreadID.x;
-  if (DTid >= pc.numItems) return;
-  uint32_t num0Groups = pc.num0Groups;
-  uint32_t num1Groups = pc.num1Groups;
-  uint32_t num2Groups = pc.num2Groups;
-  uint32_t group0ID = DTid / 1024;
-  uint32_t group1ID = group0ID / 1024;
-  uint32_t group2ID = group1ID / 1024;
-  uint32_t group0Total = gprt::load<uint32_t>(pc.scratch, num0Groups + group0ID);
-  uint32_t group1Total = gprt::load<uint32_t>(pc.scratch, num0Groups * 2 + num1Groups + group1ID);
-  uint32_t group2Total = gprt::load<uint32_t>(pc.scratch, num0Groups * 2 + num1Groups * 2 + num2Groups + group2ID);
-  uint32_t localSum = gprt::load<uint32_t>(pc.output, DTid) + group0Total + group1Total + group2Total;  
-  gprt::store<uint32_t>(pc.output, DTid, localSum);
+  const uint prev = (WAVE_INDEX ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
+  GroupMemoryBarrierWithGroupSync();
+          
+  if (i < partSize)
+  {
+    g_sharedMem[i].x = g_sharedMem[i - 1].x + (LANE != LANE_MASK ? 0 : prev - aggregate);
+    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + (LANE != LANE_MASK ? prev : aggregate));
+  }
+  
+  i -= LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i].x = g_sharedMem[i - 1].x;
+    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+  }
+          
+  i -= LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i].x = g_sharedMem[i - 1].x;
+    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+  }
+          
+  i -= LANE_COUNT;
+  if (i < partSize)
+  {
+    g_sharedMem[i].x = LANE ? g_sharedMem[i - 1].x : 0;
+    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+  }
 }

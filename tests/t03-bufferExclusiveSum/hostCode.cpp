@@ -27,10 +27,8 @@
 
 int
 main(int ac, char **av) {
-  // 32 million int32 items
-  int numItems = 320000000;
-  // int numItems = 2048;
-
+  int numItems = 2 << 28;
+  
   // Arrange
   std::vector<uint32_t> dataHost(numItems, 1); 
   
@@ -43,19 +41,8 @@ main(int ac, char **av) {
 
   // Act
   std::cout<<"Computing exclusive sum on device" << std::endl;
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < 100; ++i) {
-    gprtBufferExclusiveSum(context, data, exclusiveSum, scratch);
-  }
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() / 100.f;
-
-  float itemsToBillions = float(1000000000) / float(numItems);  
-  float millisecondsToSeconds = float(1000) / float(1);
-
-  duration = (duration * itemsToBillions) / millisecondsToSeconds;
-
-  std::cout<<"Done! Billions of input items / sec: " << 1.f / duration << std::endl;
+  gprtBufferExclusiveSum(context, data, exclusiveSum, scratch);
+  std::cout<<"Done!"<<std::endl;
 
   std::cout<<"Computing exclusive sum on host" << std::endl;
   int sum = 0;
