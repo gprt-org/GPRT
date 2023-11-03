@@ -27,9 +27,9 @@
 // for 32 threads in a wave, this is 1024
 #define TG_SIZE (WAVE_SIZE * WAVE_SIZE) 
 
-groupshared int32_t gs_WaveExclusiveSums[WAVE_SIZE];
+groupshared uint32_t gs_WaveExclusiveSums[WAVE_SIZE];
 
-groupshared int32_t gs_GroupExclusiveSum;
+groupshared uint32_t gs_GroupExclusiveSum;
 
 typedef gprt::ScanRecord ScanRecord;
 
@@ -41,13 +41,45 @@ enum StatusFlag : uint32_t
   INVALID = 0,
   AGGREGATE_AVAILABLE = 1,
   PREFIX_AVAILABLE = 2,
+  FLAG_MASK = 3,
 };
 
 GPRT_COMPUTE_PROGRAM(InitializePartitionDescriptor, (ScanRecord, record), (1,1,1)) {
   uint DTid = DispatchThreadID.x;
   if (DTid >= pc.numGroups) return; 
-  gprt::store<int64_t>(pc.scratch, DTid, (int64_t(INVALID) << 32ull) | 0ull);
+  gprt::store<uint32_t>(pc.scratch, DTid, INVALID);
 }
+
+// GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,1,1)) {
+//   uint DTid = DispatchThreadID.x;
+//   uint waveIndex = GroupIndex / WAVE_SIZE;
+//   uint group = GroupID.x;
+//   bool firstItem = (GroupIndex == 0);
+
+//   if (firstItem) {
+//     if (group == 0) {
+//       gprt::atomicAdd(pc.scratch, group, PREFIX_AVAILABLE);
+//     } else {
+//       gprt::atomicAdd(pc.scratch, group, AGGREGATE_AVAILABLE);
+      
+//       // Compute group exclusive prefix using a decoupled look-back
+//       for (int i = group - 1; i >= 0; --i) {
+//         uint32_t status; 
+//         while(true) {
+//           status = gprt::atomicLoad<uint32_t>(pc.scratch, i);
+//           if (status != INVALID) break; 
+//         }
+        
+//         // If value was the predecessors inclusive sum, we're done.
+//         if ((status & PREFIX_AVAILABLE) > 0) break;
+//       }
+      
+//       // Update our inclusive prefix (note, atomically adds 1 to flag going from aggregate to prefix available, 
+//       //   then adds onto our previously stored aggregate)
+//       gprt::atomicAdd(pc.scratch, group, 1);
+//     }
+//   }
+// }
 
 GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,1,1)) {
   uint DTid = DispatchThreadID.x;
@@ -57,9 +89,9 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,
   bool lastLane = WaveGetLaneIndex() == (WAVE_SIZE - 1);
   bool lastItem = (GroupIndex == 1023 || GroupIndex == (pc.numItems - 1));
 
-  int32_t val = 0;
-  if (DTid < pc.numItems) val = gprt::load<int32_t>(pc.input, DTid);
-  int32_t exclusiveLaneSum = WavePrefixSum(val);
+  uint32_t val = 0;
+  if (DTid < pc.numItems) val = gprt::load<uint32_t>(pc.input, DTid);
+  uint32_t exclusiveLaneSum = WavePrefixSum(val);
 
   // Store wave's aggregate into shared memory
   if (lastLane) {
@@ -71,8 +103,8 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,
 
   // Compute exclusive sum over individual wave aggregates
   if (firstWave) {
-    int32_t waveAggregate = gs_WaveExclusiveSums[GroupIndex];
-    int32_t exclusiveWaveSum = WavePrefixSum(waveAggregate);
+    uint32_t waveAggregate = gs_WaveExclusiveSums[GroupIndex];
+    uint32_t exclusiveWaveSum = WavePrefixSum(waveAggregate);
     gs_WaveExclusiveSums[GroupIndex] = exclusiveWaveSum;
   }
 
@@ -83,45 +115,51 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumDecoupledLookback, (ScanRecord, record), (1024,
 
   if (lastItem) {
     // Store group aggregate (or inclusive prefix if group 0)
-    int groupAggregate = exclusiveLaneSum + val;
+    uint32_t groupAggregate = exclusiveLaneSum + val;
     if (group == 0) {
-      gprt::store<int64_t>(pc.scratch, group, (int64_t(PREFIX_AVAILABLE) << 32ull) | int64_t(groupAggregate));
+      gprt::atomicAdd(pc.scratch, group, PREFIX_AVAILABLE | groupAggregate << 2);
       gs_GroupExclusiveSum = 0;
-
     } else {
-      gprt::store<int64_t>(pc.scratch, group, (int64_t(AGGREGATE_AVAILABLE) << 32ull) | int64_t(groupAggregate));
-    
+      gprt::atomicAdd(pc.scratch, group, AGGREGATE_AVAILABLE | groupAggregate << 2);
+      
       // Compute group exclusive prefix using a decoupled look-back
       gs_GroupExclusiveSum = 0;
       for (int i = group - 1; i >= 0; --i) {
-        int64_t descriptor; 
+        uint32_t descriptor; 
         int status, value;
-        for (int j = 0; j < 10000000; ++j) {
-          descriptor = gprt::load<int64_t>(pc.scratch, i);
-          status = int32_t(descriptor >> 32ull);
-          value = int32_t(descriptor);
+        while(true) {
+          descriptor = gprt::atomicLoad<uint32_t>(pc.scratch, i);
+          status =  descriptor & FLAG_MASK;
+          value = descriptor >> 2;
           if (status != INVALID) break; 
         }
-        if (group < 32 && status == INVALID) {
-          printf("ERROR! group %d gave up waiting for preceding group %d!\n", group, i);
-          break;
-        }
+        // if (group < 32 && status == INVALID) {
+        //   printf("ERROR! group %d gave up waiting for preceding group %d!\n", group, i);
+        //   break;
+        // }
+
+        // if (status == INVALID) break;
         
         gs_GroupExclusiveSum += value;
 
         // If value was the predecessors inclusive sum, we're done.
-        if (status == PREFIX_AVAILABLE) break;
+        if ((status & PREFIX_AVAILABLE) > 0) break;
       }
       
-      // Update our inclusive prefix
-      gprt::store<int64_t>(pc.scratch, group, (int64_t(PREFIX_AVAILABLE) << 32ull) | int64_t(gs_GroupExclusiveSum + groupAggregate));
+      // Update our inclusive prefix (note, atomically adds 1 to flag going from aggregate to prefix available, 
+      //   then adds onto our previously stored aggregate)
+      gprt::atomicAdd(pc.scratch, group, 1 | gs_GroupExclusiveSum << 2);
     }
   }
 
-  GroupMemoryBarrier();
+  GroupMemoryBarrierWithGroupSync();
+
+  // if (DTid == 1028) {
+  //   printf("Group %d groupExclusiveSum is %d\n", group, gs_GroupExclusiveSum);
+  // }
   
   if (DTid < pc.numItems) {
-    gprt::store<int32_t>(pc.output, DTid, exclusiveLaneSum + gs_GroupExclusiveSum);
+    gprt::store<uint32_t>(pc.output, DTid, exclusiveLaneSum + gs_GroupExclusiveSum);
   }
 }
 
@@ -129,11 +167,11 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   uint DTid = DispatchThreadID.x;
   uint waveIndex = GroupIndex / WAVE_SIZE;
 
-  int32_t val = 0;
+  uint32_t val = 0;
   if (DTid < pc.numItems) {
-    val = gprt::load<int32_t>(pc.input, DTid + pc.inputOffset);
+    val = gprt::load<uint32_t>(pc.input, DTid + pc.inputOffset);
   }
-  int32_t prefixSum = WavePrefixSum(val);
+  uint32_t prefixSum = WavePrefixSum(val);
 
   // If we're the last lane...
   if (WaveGetLaneIndex() == (WAVE_SIZE - 1)) {
@@ -147,8 +185,8 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   // If we're the first wave...
   if (waveIndex == 0) {
     // Compute the prefix sum of the individual wave totals
-    int32_t waveSum = gs_WaveExclusiveSums[GroupIndex];
-    int32_t prefixWaveSum = WavePrefixSum(waveSum);
+    uint32_t waveSum = gs_WaveExclusiveSums[GroupIndex];
+    uint32_t prefixWaveSum = WavePrefixSum(waveSum);
     gs_WaveExclusiveSums[GroupIndex] = prefixWaveSum;
   }
 
@@ -157,14 +195,14 @@ GPRT_COMPUTE_PROGRAM(ExclusiveSumGroups, (ScanRecord, record), (1024,1,1)) {
   // Make current wave's prefix sum relative to prior waves
   prefixSum += gs_WaveExclusiveSums[waveIndex]; 
   if (DTid < pc.numItems) {
-    gprt::store<int32_t>(pc.output, DTid + pc.outputOffset, prefixSum);
+    gprt::store<uint32_t>(pc.output, DTid + pc.outputOffset, prefixSum);
   }
 
   // If we're the last group... 
   if (GroupIndex == 1023 || GroupIndex == (pc.numItems - 1)) {
     // cache this group's total into global memory
     uint32_t groupSum = prefixSum + val;
-    gprt::store<int32_t>(pc.scratch, GroupID.x + pc.scratchOffset, groupSum);
+    gprt::store<uint32_t>(pc.scratch, GroupID.x + pc.scratchOffset, groupSum);
   }
 }
 
@@ -179,9 +217,9 @@ GPRT_COMPUTE_PROGRAM(AddGroupPartialSums, (ScanRecord, record), (1024,1,1)) {
   uint32_t group0ID = DTid / 1024;
   uint32_t group1ID = group0ID / 1024;
   uint32_t group2ID = group1ID / 1024;
-  int32_t group0Total = gprt::load<int32_t>(pc.scratch, num0Groups + group0ID);
-  int32_t group1Total = gprt::load<int32_t>(pc.scratch, num0Groups * 2 + num1Groups + group1ID);
-  int32_t group2Total = gprt::load<int32_t>(pc.scratch, num0Groups * 2 + num1Groups * 2 + num2Groups + group2ID);
-  int32_t localSum = gprt::load<int32_t>(pc.output, DTid) + group0Total + group1Total + group2Total;  
-  gprt::store<int32_t>(pc.output, DTid, localSum);
+  uint32_t group0Total = gprt::load<uint32_t>(pc.scratch, num0Groups + group0ID);
+  uint32_t group1Total = gprt::load<uint32_t>(pc.scratch, num0Groups * 2 + num1Groups + group1ID);
+  uint32_t group2Total = gprt::load<uint32_t>(pc.scratch, num0Groups * 2 + num1Groups * 2 + num2Groups + group2ID);
+  uint32_t localSum = gprt::load<uint32_t>(pc.output, DTid) + group0Total + group1Total + group2Total;  
+  gprt::store<uint32_t>(pc.output, DTid, localSum);
 }

@@ -28,7 +28,8 @@
 int
 main(int ac, char **av) {
   // 32 million int32 items
-  int numItems = 32000000;
+  int numItems = 320000000;
+  // int numItems = 2048;
 
   // Arrange
   std::vector<uint32_t> dataHost(numItems, 1); 
@@ -82,7 +83,7 @@ main(int ac, char **av) {
     if (ptr[i] != hostExclusiveSum[i]) {
       std::cout<<"Error. Item " << i << " is " << ptr[i] << " but should be " << hostExclusiveSum[i] << std::endl;
       correct = false;
-      break;
+      // break;
     }
   }
   gprtBufferUnmap(exclusiveSum);

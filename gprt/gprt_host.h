@@ -1746,6 +1746,9 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
 
 /**
  * @brief Computes a device-wide exclusive prefix sum.
+ * Important note, currently the maximum aggregate sum supported is 2^30. 
+ * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
+ * 
  * Exclusive sum requires a temporary "scratch" space
  *
  * @param context The GPRT context
@@ -1760,6 +1763,9 @@ GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRT
 
 /**
  * @brief Computes a device-wide exclusive prefix sum.
+ * Important note, currently the maximum aggregate sum supported is 2^30. 
+ * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
+ * 
  * Exclusive sum requires a temporary "scratch" space
  *
  * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)

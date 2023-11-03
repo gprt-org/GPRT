@@ -96,7 +96,11 @@
 [[vk::binding(0, 1)]] Texture1D texture1Ds[];
 [[vk::binding(0, 2)]] Texture2D texture2Ds[];
 [[vk::binding(0, 3)]] Texture3D texture3Ds[];
-[[vk::binding(0, 4)]] RWByteAddressBuffer buffers[];
+
+// globally coherent here causes memory barriers and syncs to flush data across
+// the entire GPU such that other groups can see writes. Without this specifier,
+// a memory barrier or sync will only flush a UAV within the current group.
+[[vk::binding(0, 4)]] globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -268,6 +272,20 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float3x3 value) {
   return result;
 }
 
+uint32_t
+atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.y].InterlockedAdd(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
+// workaround for a bug with raw buffer load / store...
+template <typename T>
+T 
+atomicLoad(in Buffer buffer, uint32_t index) {
+  return buffers[buffer.y].Load<T>(index * sizeof(T));
+}
+
 [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 
 RaytracingAccelerationStructure
@@ -275,7 +293,7 @@ getAccelHandle(Accel accel) {
   return getAccelHandle(accel.x);
 }
 
-RWByteAddressBuffer
+globallycoherent RWByteAddressBuffer
 getBufferHandle(Buffer buffer) {
   return buffers[buffer.y];
 }

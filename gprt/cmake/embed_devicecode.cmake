@@ -107,12 +107,12 @@ function(embed_devicecode)
       -spirv
       -fspv-target-env=vulkan1.1spirv1.4
       -enable-payload-qualifiers
-      -HV 2021
       # -Werror
       -T lib_6_7
       -I ${GPRT_INCLUDE_DIR}
       -D GPRT_DEVICE
       -D ${ENTRY_POINT_TYPE}
+      -fspv-extension=SPV_KHR_ray_tracing
       -fspv-extension=SPV_KHR_ray_tracing
       -fspv-extension=SPV_KHR_ray_query
       -fspv-extension=SPV_KHR_non_semantic_info

@@ -253,7 +253,8 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
     if (message.find("[ UNASSIGNED-DEBUG-PRINTF ]") != std::string::npos) {
       // if so, remove all the junk at the front...
       // This is currently very kludgy... we should use a regex...
-      message = message.substr(143);
+      size_t beginning = message.find("  ") + 2;
+      message = message.substr(beginning);
       LOG_PRINTF(message.c_str());
     } else {
       LOG_INFO(pCallbackData->pMessage);
@@ -1825,7 +1826,7 @@ struct Compute : public SBTEntry {
   }
   ~Compute() {}
 
-  void buildPipeline(VkDescriptorSetLayout samplerDescriptorSetLayout,
+  void updatePipeline(VkDescriptorSetLayout samplerDescriptorSetLayout,
                      VkDescriptorSetLayout texture1DDescriptorSetLayout,
                      VkDescriptorSetLayout texture2DDescriptorSetLayout,
                      VkDescriptorSetLayout texture3DDescriptorSetLayout,
@@ -3991,7 +3992,7 @@ struct Context {
 
     // Finally, setup the internal shader stages and build an initial shader binding table
     setupInternalStages();
-    buildPipeline();
+    updatePipeline();
     buildSBT(GPRT_SBT_ALL);
   };
 
@@ -4191,7 +4192,7 @@ struct Context {
   //   // At the moment, we don't actually build our programs here.
   // }
 
-  void buildPipeline();
+  void updatePipeline();
 
   void setupInternalStages() {
 
@@ -8253,7 +8254,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
   }
 }
 
-void Context::buildPipeline() {
+void Context::updatePipeline() {
   // If the number of textures has changed, we need to make a new
   // descriptor pool
   if (samplerDescriptorPool && previousNumSamplers != Sampler::samplers.size()) {
@@ -9110,7 +9111,7 @@ void Context::buildPipeline() {
     for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
       if (!Compute::computes[i])
         continue;
-      Compute::computes[i]->buildPipeline(samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+      Compute::computes[i]->updatePipeline(samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
                                           texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                           bufferDescriptorSetLayout, computeRecordDescriptorSetLayout);
     }
@@ -10546,8 +10547,11 @@ void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _out
     uint32_t numGroups = (numItems + NUM_SCAN_THREADS - 1) / NUM_SCAN_THREADS;
 
     // Each group gets an aggregate/inclusive prefix and a status flag.
-    if (scratch->getSize() < numGroups * sizeof(uint64_t))
-      scratch->resize(numGroups * sizeof(uint64_t), false);
+    if (scratch->getSize() < numGroups * sizeof(uint32_t)) {
+      // updating SBT, since we're using atomics here...
+      scratch->resize(numGroups * sizeof(uint32_t), false);
+      gprtBuildShaderBindingTable(_context);
+    }
 
     gprt::ScanConstants scanConstants;
     scanConstants.numItems = numItems;
@@ -10558,7 +10562,6 @@ void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _out
     gprtComputeLaunch1D(_context, InitializePartitionDescriptor, numGroups, scanConstants);
     gprtComputeLaunch1D(_context, ExclusiveSumDecoupledLookback, numGroups, scanConstants);
   }
-
 
   else {
     auto ExclusiveSumGroups = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["ExclusiveSumGroups"];
@@ -11155,7 +11158,7 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->buildPipeline();
+  context->updatePipeline();
   context->buildSBT(flags);
 }
 
