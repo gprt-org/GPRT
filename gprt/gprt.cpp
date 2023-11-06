@@ -1792,6 +1792,8 @@ struct Compute : public SBTEntry {
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
 
+  VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroupSizeInfo{};
+
   Compute(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
     // Hunt for an existing free address for this compute kernel
     for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
@@ -1819,11 +1821,17 @@ struct Compute : public SBTEntry {
 
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
+    subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
+    subgroupSizeInfo.requiredSubgroupSize = 32;
+    subgroupSizeInfo.pNext = nullptr;
+
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    shaderStage.flags = 0;
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
+    shaderStage.pNext = &subgroupSizeInfo;
 
     this->recordSize = recordSize;
     this->SBTRecord = (uint8_t *) malloc(recordSize);
@@ -3257,6 +3265,11 @@ struct Context {
       return requiredExtensions.empty();
     };
 
+    // This allows us to require a certain subgroup size. (NVIDIA calls these "warps")
+    // For certain cooperative subgroup tasks like prefix sum, radix sorting, etc,
+    // it's helpful to have a guarantee about a subgroup size. 
+    enabledDeviceExtensions.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+
     // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
     // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
     // components, without additional requirements.
@@ -3499,9 +3512,15 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
+    VkPhysicalDeviceSubgroupSizeControlFeatures physicalDeviceSubgroupSizeControlFeatures = {};
+    physicalDeviceSubgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    physicalDeviceSubgroupSizeControlFeatures.subgroupSizeControl = VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT;
+    physicalDeviceSubgroupSizeControlFeatures.computeFullSubgroups = false;
+
     VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlocklayoutFeatures = {};
     physicalDeviceScalarBlocklayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
     physicalDeviceScalarBlocklayoutFeatures.scalarBlockLayout = true;
+    physicalDeviceScalarBlocklayoutFeatures.pNext = &physicalDeviceSubgroupSizeControlFeatures;
 
     VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
     memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
