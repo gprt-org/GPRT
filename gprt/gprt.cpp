@@ -397,9 +397,9 @@ struct Buffer {
 
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
-      region.srcOffset = 0;
+      region.srcOffset = offset;
       region.dstOffset = 0;
-      region.size = size;
+      region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
       vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
       err = vkEndCommandBuffer(commandBuffer);
@@ -430,7 +430,7 @@ struct Buffer {
     }
   }
 
-  void unmap() {
+  void unmap(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
     if (!mapped)
       return;
 
@@ -451,8 +451,8 @@ struct Buffer {
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = 0;
-      region.dstOffset = 0;
-      region.size = size;
+      region.dstOffset = offset;
+      region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
       vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
       err = vkEndCommandBuffer(commandBuffer);
@@ -1822,7 +1822,7 @@ struct Compute : public SBTEntry {
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
-    subgroupSizeInfo.requiredSubgroupSize = 32;
+    // subgroupSizeInfo.requiredSubgroupSize = 32;
     subgroupSizeInfo.pNext = nullptr;
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2874,6 +2874,7 @@ struct Context {
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
   VkPhysicalDeviceProperties deviceProperties;
+  VkPhysicalDeviceSubgroupProperties subgroupProperties;
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
   // Stores the features available on the selected physical device (for e.g.
@@ -3381,10 +3382,16 @@ struct Context {
     // properties
     vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
 
+    subgroupProperties = {};
+    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    subgroupProperties.pNext = NULL;
+
     // VkPhysicalDeviceRayTracingPipelinePropertiesKHR
     // rayTracingPipelineProperties{};
     rayTracingPipelineProperties = {};
     rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    rayTracingPipelineProperties.pNext = &subgroupProperties;
+
     VkPhysicalDeviceProperties2 deviceProperties2{};
     deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     deviceProperties2.pNext = &rayTracingPipelineProperties;
@@ -4046,86 +4053,147 @@ struct Context {
       computeRecordBuffer = nullptr;
     }
 
-    if (samplerDescriptorSet)
+    if (samplerDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
-    if (texture1DDescriptorSet)
+      samplerDescriptorSet = nullptr;
+    }
+    if (texture1DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
-    if (texture2DDescriptorSet)
+      texture1DDescriptorSet = nullptr;
+    }
+    if (texture2DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
-    if (texture3DDescriptorSet)
+      texture2DDescriptorSet = nullptr;
+    }
+    if (texture3DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
-    if (bufferDescriptorSet)
+      texture3DDescriptorSet = nullptr;
+    }
+    if (bufferDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
+      bufferDescriptorSet = nullptr;
+    }
 
-    if (samplerDescriptorSetLayout)
+    if (samplerDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
-    if (texture1DDescriptorSetLayout)
+      samplerDescriptorSetLayout = nullptr; 
+    }
+    if (texture1DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
-    if (texture2DDescriptorSetLayout)
+      texture1DDescriptorSetLayout = nullptr; 
+    }
+    if (texture2DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
-    if (texture3DDescriptorSetLayout)
+      texture2DDescriptorSetLayout = nullptr; 
+    }
+    if (texture3DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
-    if (rasterRecordDescriptorSetLayout)
+      texture3DDescriptorSetLayout = nullptr; 
+    }
+    if (rasterRecordDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
-    if (computeRecordDescriptorSetLayout)
+      rasterRecordDescriptorSetLayout = nullptr; 
+    }
+    if (computeRecordDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
-    if (bufferDescriptorSetLayout)
+      computeRecordDescriptorSetLayout = nullptr; 
+    }
+    if (bufferDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
+      bufferDescriptorSetLayout = nullptr; 
+    }
 
-    if (samplerDescriptorPool)
+    if (samplerDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
-    if (texture1DDescriptorPool)
+      samplerDescriptorPool = nullptr;
+    }
+    if (texture1DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
-    if (texture2DDescriptorPool)
+      texture1DDescriptorPool = nullptr;
+    }
+    if (texture2DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
-    if (texture3DDescriptorPool)
+      texture2DDescriptorPool = nullptr;
+    }
+    if (texture3DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
-    if (rasterRecordDescriptorPool)
+      texture3DDescriptorPool = nullptr;
+    }
+    if (rasterRecordDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
-    if (computeRecordDescriptorPool)
+      rasterRecordDescriptorPool = nullptr;
+    }
+    if (computeRecordDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
-    if (bufferDescriptorPool)
+      computeRecordDescriptorPool = nullptr;
+    }
+    if (bufferDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
+      bufferDescriptorPool = nullptr;
+    }
     if (imguiPool) {
       vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
+      imguiPool = nullptr;
     }
     if (imgui.renderPass) {
       ImGui_ImplVulkan_Shutdown();
       vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+      imgui.renderPass = nullptr;
     }
     if (imgui.frameBuffer) {
       vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+      imgui.frameBuffer = nullptr;
     }
 
-    if (imageAvailableSemaphore)
+    if (imageAvailableSemaphore) {
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    if (renderFinishedSemaphore)
+      imageAvailableSemaphore = nullptr;
+    }
+    if (renderFinishedSemaphore) {
       vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+      renderFinishedSemaphore = nullptr;
+    }
 
-    if (inFlightFence)
+    if (inFlightFence) {
       vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+      inFlightFence = nullptr;
+    }
 
     if (swapchain) {
       vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+      swapchain = nullptr;
     }
     if (window) {
       glfwDestroyWindow(window);
       glfwTerminate();
+      window = nullptr;
     }
-    if (surface)
+    if (surface) {
       vkDestroySurfaceKHR(instance, surface, nullptr);
+      surface = nullptr;
+    }
 
-    if (raytracingPipelineLayout)
+    if (raytracingPipelineLayout) {
       vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
-    if (raytracingPipeline)
+      raytracingPipelineLayout = nullptr;
+    }
+    if (raytracingPipeline) {
       vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+      raytracingPipeline = nullptr;
+    }
 
-    if (fillInstanceDataStage.layout)
+    if (fillInstanceDataStage.layout) {
       vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
-    if (fillInstanceDataStage.pipeline)
+      fillInstanceDataStage.layout = nullptr;
+    }
+    if (fillInstanceDataStage.pipeline) {
       vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
-    if (fillInstanceDataStage.module)
+      fillInstanceDataStage.pipeline = nullptr;
+    }
+    if (fillInstanceDataStage.module) {
       vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
+      fillInstanceDataStage.module = nullptr;
+    }
 
     destroyInternalPrograms();
 
@@ -4145,12 +4213,70 @@ struct Context {
       hitgroupTable = nullptr;
     }
 
+    previousNumSamplers = 0;
+    previousNumTexture1Ds = 0;
+    previousNumTexture2Ds = 0;
+    previousNumTexture3Ds = 0;
+    previousNumBuffers = 0;
+    previousNumRasterRecords = 0;
+    previousNumComputeRecords = 0;
+    
     vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+
+    // verify these are all cleared.
+    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
+      if (GeomType::geomTypes[i] != nullptr) {
+        GeomType::geomTypes[i]->destroy();
+      }
+    }
+    GeomType::geomTypes.resize(0);
+
+    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
+      if (Buffer::buffers[i] != nullptr) {
+        Buffer::buffers[i]->destroy();
+      }
+    }
+    Buffer::buffers.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
+      if (Texture::texture1Ds[i] != nullptr) {
+        Texture::texture1Ds[i]->destroy();
+      }
+    }
+    Texture::texture1Ds.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
+      if (Texture::texture2Ds[i] != nullptr) {
+        Texture::texture2Ds[i]->destroy();
+      }
+    }
+    Texture::texture2Ds.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
+      if (Texture::texture3Ds[i] != nullptr) {
+        Texture::texture3Ds[i]->destroy();
+      }
+    }
+    Texture::texture3Ds.resize(0);
+
+    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
+      if (Sampler::samplers[i] != nullptr) {
+        Sampler::samplers[i]->destroy();
+      }
+    }
+    Sampler::samplers.resize(0);
+
+    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+      if (Compute::computes[i] != nullptr) {
+        Compute::computes[i]->destroy();
+      }
+    }
+    Compute::computes.resize(0);
 
     vmaDestroyAllocator(allocator);
 
@@ -4160,37 +4286,6 @@ struct Context {
 
     freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
-
-    // verify these are all cleared.
-    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
-      if (GeomType::geomTypes[i] != nullptr) throw std::runtime_error("Not all geom types destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
-      if (Buffer::buffers[i] != nullptr) throw std::runtime_error("Not all buffers destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
-      if (Texture::texture1Ds[i] != nullptr) throw std::runtime_error("Not all texture1Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
-      if (Texture::texture2Ds[i] != nullptr) throw std::runtime_error("Not all texture2Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
-      if (Texture::texture3Ds[i] != nullptr) throw std::runtime_error("Not all texture3Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
-      if (Sampler::samplers[i] != nullptr) throw std::runtime_error("Not all samplers destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      if (Compute::computes[i] != nullptr) throw std::runtime_error("Not all compute programs destroyed!");
-    }
-   
-
   }
 
   ~Context(){};
@@ -4567,8 +4662,8 @@ struct Context {
   
     // Scanning stages
     {
-      internalComputePrograms.insert({"InitChainedDecoupledExclusive", new Compute(logicalDevice, scanModule, "InitChainedDecoupledExclusive", sizeof(gprt::ScanRecord))});
-      internalComputePrograms.insert({"ChainedDecoupledExclusive", new Compute(logicalDevice, scanModule, "ChainedDecoupledExclusive", sizeof(gprt::ScanRecord))});
+      internalComputePrograms.insert({"InitScan", new Compute(logicalDevice, scanModule, "InitScan", sizeof(gprt::ScanRecord))});
+      internalComputePrograms.insert({"Scan", new Compute(logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), sizeof(gprt::ScanRecord))});
       computePipelinesOutOfDate = true;
     }
 
@@ -10540,7 +10635,7 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
   buffer->resize(size * count, preserveContents);
 }
 
-void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
+uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition, bool select, bool selectPositive) {
   LOG_API_CALL();
 
   Context *context = (Context *) _context;
@@ -10551,15 +10646,16 @@ void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _out
   // note, input->getSize() here should always be a multiple of 16 bytes
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitChainedDecoupledExclusive"];
-  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["ChainedDecoupledExclusive"];
+  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitScan"];
+  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["Scan"];
   uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
 
   // Each group gets an aggregate/inclusive prefix and a status flag.
-  // We also reserve one int for group to partition scheduling
-  if (scratch->getSize() < (numThreadBlocks + 1) * sizeof(uint32_t)) {
+  // We also reserve one int for the total aggregate count, and one
+  // for group-to-partition scheduling
+  if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
     // updating SBT, since we're using atomics here...
-    scratch->resize((numThreadBlocks + 1) * sizeof(uint32_t), false);
+    scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
     gprtBuildShaderBindingTable(_context);
   }
 
@@ -10568,14 +10664,33 @@ void bufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _out
   scanConstants.output = gprtBufferGetHandle(_output);
   scanConstants.input = gprtBufferGetHandle(_input);
   scanConstants.state = gprtBufferGetHandle(_scratch);
-  gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, 256, scanConstants);
+  scanConstants.flags = 0;
+  if (partition) scanConstants.flags |= SCAN_PARTITION;
+  else if (select) scanConstants.flags |= SCAN_SELECT;
+  
+  if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
+
+  gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, numThreadBlocks, scanConstants);
   gprtComputeLaunch1D(_context, ChainedDecoupledExclusive, numThreadBlocks, scanConstants);
+  
+  scratch->map(sizeof(uint32_t), 0);
+  uint32_t total = *((uint32_t*)scratch->mapped);
+  scratch->unmap(sizeof(uint32_t), 0);
+  return total;
 }
 
-void gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
+uint32_t gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
   // Redirection here, since we might eventually change the below function to support inclusive and exclusive, 
   // also to include operators other than addition.
-  bufferExclusiveSum(_context, _input, _output, _scratch);
+  return bufferScan(_context, _input, _output, _scratch, false, false, false);
+}
+
+uint32_t gprtBufferPartition(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, true, false, selectPositive);
+}
+
+uint32_t gprtBufferSelect(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, false, true, selectPositive);
 }
 
 void

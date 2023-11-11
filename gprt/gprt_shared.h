@@ -60,6 +60,9 @@
 // #define USE_SQUARED_DISTS
 
 #define SCAN_PARTITON_SIZE 8192
+#define SCAN_PARTITION (1 << 0)
+#define SCAN_SELECT (1 << 1)
+#define SCAN_SELECT_POSITIVE (1 << 2)
 
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt {
@@ -92,6 +95,7 @@ namespace gprt {
 
     struct ScanConstants {        
         uint32_t size;
+        uint32_t flags;
         gprt::Buffer input;
         gprt::Buffer output;
         gprt::Buffer state;

@@ -57,26 +57,19 @@ typedef gprt::ScanRecord ScanRecord;
 #define VECTOR_MASK         3
 #define VECTOR_LOG          2
 
-#define LANE_COUNT          32  // <---------------------------   For Nvidia; change depending on hardware
-#define LANE_MASK           31
-#define LANE_LOG            5
-#define WAVES_PER_GROUP     16
-#define WAVE_PARTITION_SIZE 128
-#define WAVE_PART_LOG       7
-
-//#define LANE_COUNT            64 <-------------------------   AMD 
-//#define LANE_MASK             63
-//#define LANE_LOG              6    
-//#define WAVES_PER_GROUP       8
-//#define WAVE_PARTITION_SIZE   256
-//#define WAVE_PART_LOG         8
+#define SCAN_PARTITON_SIZE 8192
 
 #define FLAG_NOT_READY  0
 #define FLAG_AGGREGATE  1
 #define FLAG_INCLUSIVE  2
 #define FLAG_MASK       3
 
+#define WAVE_PARTITION_SIZE   (4 * LANE_COUNT)
+#define WAVE_PART_LOG         uint(log2(WAVE_PARTITION_SIZE))
+#define WAVES_PER_GROUP       (SCAN_PARTITON_SIZE / (16 * LANE_COUNT))
+#define LANE_LOG              uint(log2(LANE_COUNT))    
 #define LANE            gtid.x
+#define LANE_MASK       (LANE_COUNT - 1)
 #define WAVE_INDEX      gtid.y
 #define SPINE_INDEX     (((gtid.x + 1) << WAVE_PART_LOG) - 1)
 #define PARTITIONS      (pc.size >> PART_LOG)
@@ -84,38 +77,49 @@ typedef gprt::ScanRecord ScanRecord;
 #define WAVE_PART_END   (WAVE_INDEX + 1 << WAVE_PART_LOG)
 #define PARTITION_START (partitionIndex << PART_VEC_LOG)
 
-// using 0th value to hold the partition index
-#define STATE_START     1
+// using 0th value to hold the aggregate (or total selected) 
+// and the 1st to hold the partition index
+#define STATE_START     2
 
 groupshared uint4 g_sharedMem[PART_VEC_SIZE];
 
-GPRT_COMPUTE_PROGRAM(InitChainedDecoupledExclusive, (ScanRecord, record), (512,1,1)) {
-  uint3 id = DispatchThreadID;
-  
-  if (id.x == 0)
-    gprt::store<uint32_t>(pc.state, id.x, 0);
-
-  gprt::store<uint32_t>(STATE_START + pc.state, id.x, FLAG_NOT_READY);
+uint getForwardAddr(int i, int size, int exclusiveSum) {
+  return exclusiveSum;
 }
 
-GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUNT, WAVES_PER_GROUP,1)) {
+uint getReverseAddr(int i, int size, int exclusiveSum) {
+  return (size - 1) - (i - exclusiveSum);
+}
+
+template <unsigned int LANE_COUNT>
+void Scan(uint3 GroupThreadID, uint3 GroupID) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
 
   //Acquire the partition index
   int partitionIndex;
   if (WAVE_INDEX == 0 && LANE == 0)
-    g_sharedMem[0].x = gprt::atomicAdd(pc.state, 0, 1);
+    g_sharedMem[0].x = gprt::atomicAdd(pc.state, 1, 1);
   GroupMemoryBarrierWithGroupSync();
   partitionIndex = WaveReadLaneAt(g_sharedMem[0].x, 0);
   GroupMemoryBarrierWithGroupSync();
 
-  // Note, the code below is using a warp-sized-radix ranking reduce scan, which mostly avoids bank conflicts.
+  int select = (pc.flags & SCAN_SELECT_POSITIVE) ? 0 : 1;
+
+  bool partitioning = ((pc.flags & SCAN_PARTITION) > 0);
+  bool selecting = ((pc.flags & SCAN_SELECT) > 0);
+
+  int4 sg0Val = int4(0,0,0,0), sg1Val = int4(0,0,0,0), sg2Val = int4(0,0,0,0), sg3Val = int4(0,0,0,0);
+
+  // four warp-sized-radix ranking reduce scans
   const int partSize = partitionIndex == PARTITIONS ? (pc.size >> VECTOR_LOG) + (pc.size & VECTOR_MASK ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
+  // printf("PartSize %d\n", partSize);
   int i = LANE + WAVE_PART_START;
   if (i < partSize)
   {
-    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    sg0Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    if (partitioning || selecting) g_sharedMem[i] = (sg0Val >> 31) == select;
+    else g_sharedMem[i] = sg0Val;
     
     uint t = g_sharedMem[i].x;
     g_sharedMem[i].x += g_sharedMem[i].y;
@@ -134,7 +138,9 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
   i += LANE_COUNT;
   if (i < partSize)
   {
-    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    sg1Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    if (partitioning || selecting) g_sharedMem[i] = (sg1Val >> 31) == select;
+    else g_sharedMem[i] = sg1Val;
     
     uint t = g_sharedMem[i].x;
     g_sharedMem[i].x += g_sharedMem[i].y;
@@ -153,7 +159,9 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
   i += LANE_COUNT;
   if (i < partSize)
   {
-    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    sg2Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    if (partitioning || selecting) g_sharedMem[i] = (sg2Val >> 31) == select;
+    else g_sharedMem[i] = sg2Val;
     
     uint t = g_sharedMem[i].x;
     g_sharedMem[i].x += g_sharedMem[i].y;
@@ -172,7 +180,9 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
   i += LANE_COUNT;
   if (i < partSize)
   {
-    g_sharedMem[i] = gprt::atomicLoad<uint4>(pc.input, i + PARTITION_START);
+    sg3Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    if (partitioning || selecting) g_sharedMem[i] = (sg3Val >> 31) == select;
+    else g_sharedMem[i] = sg3Val;
     
     uint t = g_sharedMem[i].x;
     g_sharedMem[i].x += g_sharedMem[i].y;
@@ -193,7 +203,7 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
     g_sharedMem[SPINE_INDEX] += WavePrefixSum(g_sharedMem[SPINE_INDEX].x);
   GroupMemoryBarrierWithGroupSync();
 
-  //Set flag payload
+  // Set flag payload
   if (WAVE_INDEX == 0 && LANE == 0)
   {
     if (partitionIndex == 0)
@@ -202,7 +212,7 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
       gprt::atomicOr(pc.state, STATE_START + partitionIndex, FLAG_AGGREGATE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
   }
 
-  //Lookback
+  // Decoupled lookback
   uint aggregate = 0;
   if (partitionIndex)
   {
@@ -215,13 +225,13 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
         const int gapIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_NOT_READY ? LANE_COUNT : 0));
         if (inclusiveIndex < gapIndex)
         {
-            aggregate += WaveActiveSum(LANE <= inclusiveIndex ? (flagPayload >> 2) : 0);
-            if (LANE == 0)
-            {
-              gprt::atomicAdd(pc.state, STATE_START + partitionIndex, 1 | aggregate << 2);
-              g_sharedMem[PART_VEC_MASK].x = aggregate;
-            }
-            break;
+          aggregate += WaveActiveSum(LANE <= inclusiveIndex ? (flagPayload >> 2) : 0);
+          if (LANE == 0)
+          {
+            gprt::atomicAdd(pc.state, STATE_START + partitionIndex, 1 | aggregate << 2);
+            g_sharedMem[PART_VEC_MASK].x = aggregate;
+          }
+          break;
         }
         else
         {
@@ -240,38 +250,137 @@ GPRT_COMPUTE_PROGRAM(ChainedDecoupledExclusive, (ScanRecord, record), (LANE_COUN
     }
     GroupMemoryBarrierWithGroupSync();
         
-    //propogate aggregate values
+    // Propogate aggregate values
     if (WAVE_INDEX || LANE)
       aggregate = WaveReadLaneAt(g_sharedMem[PART_VEC_MASK].x, 1);
   }
 
   const uint prev = (WAVE_INDEX ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
   GroupMemoryBarrierWithGroupSync();
-          
+
+  uint lastOffset = (pc.size - 1) % 4;
+
   if (i < partSize)
   {
+    uint i4 = i + PARTITION_START;
     g_sharedMem[i].x = g_sharedMem[i - 1].x + (LANE != LANE_MASK ? 0 : prev - aggregate);
-    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + (LANE != LANE_MASK ? prev : aggregate));
+    uint4 exclusiveSums = g_sharedMem[i] + (LANE != LANE_MASK ? prev : aggregate);
+    // Scatter by exclusive sum
+    if (partitioning || selecting)
+      for (int j = 0; j < 4; ++j) {
+        if (4 * i4 + j >= pc.size) break;
+        if ((sg3Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg3Val[j]);
+        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg3Val[j]);
+      }
+    
+    // Store exclusive sum
+    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+
+    // Store final aggregate
+    if (i4 == ((pc.size + 3) / 4) - 1) {
+      uint lastValue;
+      if (partitioning || selecting) lastValue = ((sg3Val[lastOffset] >> 31) == select);
+      else                           lastValue = sg3Val[lastOffset];
+      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+    }
   }
   
   i -= LANE_COUNT;
   if (i < partSize)
   {
+    uint i4 = i + PARTITION_START;
     g_sharedMem[i].x = g_sharedMem[i - 1].x;
-    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+    uint4 exclusiveSums = g_sharedMem[i] + prev;
+    // Scatter by exclusive sum
+    if (partitioning || selecting)
+      for (int j = 0; j < 4; ++j) {
+        if (4 * i4 + j >= pc.size) break;
+        if ((sg2Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg2Val[j]);
+        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg2Val[j]);
+      }
+    
+    // Store exclusive sum
+    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+
+    // Store final aggregate
+    if (i4 == ((pc.size + 3) / 4) - 1) {
+      uint lastValue;
+      if (partitioning || selecting) lastValue = ((sg2Val[lastOffset] >> 31) == select);
+      else                           lastValue = sg2Val[lastOffset];
+      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+    }
   }
           
   i -= LANE_COUNT;
   if (i < partSize)
   {
+    uint i4 = i + PARTITION_START;
     g_sharedMem[i].x = g_sharedMem[i - 1].x;
-    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+    uint4 exclusiveSums = g_sharedMem[i] + prev;
+    // Scatter by exclusive sum
+    if (partitioning || selecting)
+      for (int j = 0; j < 4; ++j) {
+        if (4 * i4 + j >= pc.size) break;
+        if ((sg1Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg1Val[j]);
+        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg1Val[j]);
+      }
+
+    // Store exclusive sum
+    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+
+    // Store final aggregate
+    if (i4 == ((pc.size + 3) / 4) - 1) {
+      uint lastValue;
+      if (partitioning || selecting) lastValue = ((sg1Val[lastOffset] >> 31) == select);
+      else                           lastValue = sg1Val[lastOffset];
+      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+    }
   }
           
   i -= LANE_COUNT;
   if (i < partSize)
   {
+    uint i4 = i + PARTITION_START;
     g_sharedMem[i].x = LANE ? g_sharedMem[i - 1].x : 0;
-    gprt::store<uint4>(pc.output, i + PARTITION_START, g_sharedMem[i] + prev);
+    uint4 exclusiveSums = g_sharedMem[i] + prev;
+    // Scatter by exclusive sum
+    if (partitioning || selecting)
+      for (int j = 0; j < 4; ++j) {
+        if (4 * i4 + j >= pc.size) break;
+        if ((sg0Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg0Val[j]);
+        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg0Val[j]);
+      }
+    
+    // Store exclusive sum
+    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+    
+    // Store final aggregate
+    if (i4 == ((pc.size + 3) / 4) - 1) {
+      uint lastValue;
+      if (partitioning || selecting) lastValue = ((sg0Val[lastOffset] >> 31) == select);
+      else                           lastValue = sg0Val[lastOffset];
+      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+    }
   }
+}
+
+GPRT_COMPUTE_PROGRAM(InitScan, (ScanRecord, record), (1,1,1)) {
+  uint3 id = DispatchThreadID;
+  if (id.x == 0) gprt::store<uint2>(pc.state, 0, int2(0,0));
+  gprt::store<uint>(pc.state, STATE_START + id.x, FLAG_NOT_READY);
+}
+
+// Below are configued such that each y group ID is assigned to a different subgroup.
+// Each thread in a subgroup processes 16 items using 128 byte wide loads. 
+// Likewise, each subgroup processes a LANE_COUNT * 16 items. 
+// Therefore, we need SCAN_PARTITION_SIZE / LANE_COUNT * 16 threads for our Y group dimension
+
+// for 32 lane count GPUs
+GPRT_COMPUTE_PROGRAM(Scan_32, (ScanRecord, record), (32, (SCAN_PARTITON_SIZE / (16 * 32)), 1)) {
+  Scan<32>(GroupThreadID, GroupID);
+}
+
+// For 64 lane count GPUs
+GPRT_COMPUTE_PROGRAM(Scan_64, (ScanRecord, record), (64, (SCAN_PARTITON_SIZE / (16 * 64)), 1)) {
+  Scan<64>(GroupThreadID, GroupID);
 }

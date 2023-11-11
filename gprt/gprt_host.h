@@ -1745,11 +1745,13 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
 }
 
 /**
- * @brief Computes a device-wide exclusive prefix sum.
+ * @brief Computes a device-wide exclusive prefix sum, and returns the total amount.
  * Important note, currently the maximum aggregate sum supported is 2^30. 
  * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
  * 
  * Exclusive sum requires a temporary "scratch" space
+ * 
+ * Input and output buffers *can* reference the same buffer object.
  *
  * @param context The GPRT context
  * @param input An input buffer of 32-bit unsigned integers to be summed
@@ -1759,14 +1761,16 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  * Generally, requires 2*log_1024(N) ints of scratch memory.
  */
-GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
- * @brief Computes a device-wide exclusive prefix sum.
+ * @brief Computes a device-wide exclusive prefix sum, and returns the total amount.
  * Important note, currently the maximum aggregate sum supported is 2^30. 
  * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
  * 
  * Exclusive sum requires a temporary "scratch" space
+ * 
+ * Input and output buffers *can* reference the same buffer object.
  *
  * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
@@ -1779,9 +1783,101 @@ GPRT_API void gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRT
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
 template <typename T1, typename T2>
-void
+uint32_t
 gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
-  gprtBufferExclusiveSum(context, (GPRTBuffer) input, (GPRTBuffer) output, (GPRTBuffer) scratch);
+  return gprtBufferExclusiveSum(context, (GPRTBuffer) input, (GPRTBuffer) output, (GPRTBuffer) scratch);
+}
+
+/**
+ * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total number of 
+ * selections is then returned to the user.
+ * 
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering, 
+ * while copies of the unselected items are compacted into the rear of "output" in reverse order. 
+ * 
+ * Partition requires a temporary "scratch" space
+ * 
+ * Input and output buffers *cannot* reference the same buffer object.
+ *
+ * @param context The GPRT context
+ * @param input An input buffer containing a sequence of 32-bit integers to be reordered
+ * @param selectPositive If true, places positive integers to the left and negative integers to the right. 
+ *                       If false, places negative integers to the left and positive integers to the right.
+ * @param output An output buffer containing the partitioned sequences by their sign.
+ * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total number of 
+ * selections is then returned to the user.
+ * 
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering, 
+ * while copies of the unselected items are compacted into the rear of "output" in reverse order. 
+ * 
+ * Partition requires a temporary "scratch" space
+ * 
+ * Input and output buffers *cannot* reference the same buffer object.
+ *
+ * @param context The GPRT context
+ * @param input An input buffer containing a sequence of 32-bit integers to be reordered
+ * @param selectPositive If true, places positive integers to the left and negative integers to the right. 
+ *                       If false, places negative integers to the left and positive integers to the right.
+ * @param output An output buffer containing the partitioned sequences by their sign.
+ * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2>
+uint32_t
+gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  return gprtBufferPartition(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
+}
+
+/**
+ * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of 
+ * selections is then returned to the user.
+ * 
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering.
+ * 
+ * Select requires a temporary "scratch" space
+ * 
+ * Input and output buffers *cannot* reference the same buffer object.
+ *
+ * @param context The GPRT context
+ * @param input An input buffer containing a sequence of 32-bit integers to be reordered
+ * @param selectPositive If true, keeps positive integers. If false, keeps negative integers.
+ * @param output An output buffer containing the selected items
+ * @param scratch A scratch buffer to facilitate the selection. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of 
+ * selections is then returned to the user.
+ * 
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering.
+ * 
+ * Select requires a temporary "scratch" space
+ * 
+ * Input and output buffers *cannot* reference the same buffer object.
+ *
+ * @param context The GPRT context
+ * @param input An input buffer containing a sequence of 32-bit integers to be reordered
+ * @param selectPositive If true, keeps positive integers. If false, keeps negative integers.
+ * @param output An output buffer containing the selected items
+ * @param scratch A scratch buffer to facilitate the selection. If null, scratch memory will be allocated and released
+ * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
+ * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ */
+template <typename T1, typename T2>
+uint32_t
+gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  return gprtBufferSelect(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**
