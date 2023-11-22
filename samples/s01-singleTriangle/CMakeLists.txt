@@ -20,18 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
-    s01_deviceCode
+    s01_hlsl_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
+embed_slang_devicecode(
+  OUTPUT_TARGET
+    s01_slang_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
+)
+
 add_executable(s01_singleTriangle hostCode.cpp)
 target_link_libraries(s01_singleTriangle
   PRIVATE
-    s01_deviceCode
+    s01_hlsl_deviceCode
+    s01_slang_deviceCode
     gprt::gprt
 )

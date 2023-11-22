@@ -45,7 +45,7 @@ struct MissProgData {
 
 /* Constants that change each frame */
 struct PushConstants {
-  struct {
+  struct Camera {
     float3 pos;
     float3 dir_00;
     float3 dir_du;

@@ -38,7 +38,8 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s02_deviceCode;
+extern GPRTProgram s02_hlsl_deviceCode;
+extern GPRTProgram s02_slang_deviceCode;
 
 // Vertices and indices of a cube
 const int NUM_VERTICES = 8;
@@ -80,7 +81,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S02 Instances");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s02_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s02_slang_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

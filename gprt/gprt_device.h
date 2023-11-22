@@ -40,11 +40,11 @@
 // to compute and raster programs.
 //
 // Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
-[[vk::binding(0, 0)]] SamplerState samplers[];
-[[vk::binding(0, 1)]] Texture1D texture1Ds[];
-[[vk::binding(0, 2)]] Texture2D texture2Ds[];
-[[vk::binding(0, 3)]] Texture3D texture3Ds[];
-[[vk::binding(0, 4)]] RWByteAddressBuffer buffers[];
+[[vk::binding(0, 1)]] SamplerState samplers[];
+[[vk::binding(0, 2)]] Texture1D texture1Ds[];
+[[vk::binding(0, 3)]] Texture2D texture2Ds[];
+[[vk::binding(0, 4)]] Texture3D texture3Ds[];
+[[vk::binding(0, 5)]] RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -80,6 +80,74 @@ make_bgra(const float4 color) {
 // ideally this buffer type would be a struct...
 // but I'm running into a compiler bug reading one struct inside another one.
 
+
+
+#ifdef SLANGC
+struct Buffer {
+  uint64_t address;
+  uint64_t index;
+};
+
+struct Accel {
+  uint64_t address;
+  uint64_t index;
+};
+
+typedef uint32_t Texture;
+typedef uint32_t Sampler;
+
+T load<T>(in Buffer buffer, uint64_t index) {
+  return buffers[uint32_t(buffer.index)].Load<T>(uint32_t(index * sizeof(T)));
+}
+
+void store<T>(in Buffer buffer, uint64_t index, in T value) {
+  buffers[uint32_t(buffer.index)].Store<T>(uint32_t(index * sizeof(T)), value);
+}
+
+// [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
+
+RaytracingAccelerationStructure
+getAccelHandle(Accel accel) {
+  uint64_t address = accel.address;
+  return spirv_asm {
+    result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
+  };
+//   return getAccelHandle(accel.x);
+}
+
+RWByteAddressBuffer
+getBufferHandle(Buffer buffer) {
+  return buffers[int(buffer.address)];
+}
+
+Texture1D
+getTexture1DHandle(gprt::Texture texture) {
+  return texture1Ds[texture];
+}
+
+Texture2D
+getTexture2DHandle(gprt::Texture texture) {
+  return texture2Ds[texture];
+}
+
+Texture3D
+getTexture3DHandle(gprt::Texture texture) {
+  return texture3Ds[texture];
+}
+
+SamplerState
+getSamplerHandle(gprt::Sampler sampler) {
+  return samplers[sampler];
+}
+
+SamplerState
+getDefaultSampler() {
+  // We assume that there is a default sampler at address 0 here
+  return samplers[0];
+}
+
+}
+#else
 // x stores pointer, y stores size.
 typedef uint64_t2 Buffer;
 typedef uint64_t2 Accel;
@@ -91,7 +159,6 @@ T
 load(in Buffer buffer) {
   return vk::RawBufferLoad<T>(buffer.x);
 }
-
 template <typename T>
 T
 load(in Buffer buffer, uint64_t index) {
@@ -358,7 +425,7 @@ namespace gprt {
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
@@ -416,7 +483,7 @@ Position() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -444,7 +511,7 @@ Position() {
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  [[vk::binding(0, 5)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<RAW(TYPE_EXPAND RecordDecl)> CAT(RAW(progName), RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -467,4 +534,6 @@ Position() {
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   float4 progName(in RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
+#endif
+
 #endif

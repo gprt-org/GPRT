@@ -38,7 +38,8 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s04_deviceCode;
+extern GPRTProgram s04_hlsl_deviceCode;
+extern GPRTProgram s04_slang_deviceCode;
 
 // Vertices and radii that will be used to define spheres
 const int NUM_VERTICES = 11;
@@ -73,7 +74,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s04_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s04_slang_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

@@ -329,7 +329,15 @@ struct Module {
   // std::string program;
   GPRTProgram program;
 
-  Module(GPRTProgram program) { this->program = program; }
+  bool slang = false;
+
+  Module(GPRTProgram program) { 
+    this->program = program; 
+    if (program.find("SLANG") != program.end())
+    {
+      slang = true;
+    }
+  }
 
   ~Module() {}
 
@@ -1795,8 +1803,16 @@ struct Compute : public SBTEntry {
       address = (uint32_t)Compute::computes.size() - 1;
     }
 
-    entryPoint = std::string("__compute__") + std::string(_entryPoint);
-    auto binary = module->getBinary("COMPUTE");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      entryPoint = std::string(_entryPoint);
+      binary = module->getBinary("SLANG");
+    }
+    else 
+    {
+      entryPoint = std::string("__compute__") + std::string(_entryPoint);
+      binary = module->getBinary("COMPUTE");
+    }
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -1818,11 +1834,12 @@ struct Compute : public SBTEntry {
   }
   ~Compute() {}
 
-  void buildPipeline(VkDescriptorSetLayout samplerDescriptorSetLayout,
+  void buildPipeline(VkDescriptorSetLayout recordDescriptorSetLayout,
+                     VkDescriptorSetLayout samplerDescriptorSetLayout,
                      VkDescriptorSetLayout texture1DDescriptorSetLayout,
                      VkDescriptorSetLayout texture2DDescriptorSetLayout,
                      VkDescriptorSetLayout texture3DDescriptorSetLayout,
-                     VkDescriptorSetLayout bufferDescriptorSetLayout, VkDescriptorSetLayout recordDescriptorSetLayout) {
+                     VkDescriptorSetLayout bufferDescriptorSetLayout) {
     // If we already have a pipeline layout, free it so that we can make a new one
     if (pipelineLayout) {
       vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
@@ -1845,9 +1862,9 @@ struct Compute : public SBTEntry {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
-                                                  texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                                  bufferDescriptorSetLayout,    recordDescriptorSetLayout};
+    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,   
+                                                  texture1DDescriptorSetLayout, texture2DDescriptorSetLayout, 
+                                                  texture3DDescriptorSetLayout, bufferDescriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
@@ -1897,8 +1914,17 @@ struct RayGen : public SBTEntry {
   std::string entryPoint;
 
   RayGen(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
-    entryPoint = std::string("__raygen__") + std::string(_entryPoint);
-    auto binary = module->getBinary("RAYGEN");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+
+    if (module->slang) {
+      entryPoint = std::string(_entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      entryPoint = std::string("__raygen__") + std::string(_entryPoint);
+      binary = module->getBinary("RAYGEN");
+    }
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -1935,8 +1961,17 @@ struct Miss : public SBTEntry {
   std::string entryPoint;
 
   Miss(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
-    entryPoint = std::string("__miss__") + std::string(_entryPoint);
-    auto binary = module->getBinary("MISS");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+
+    if (module->slang) {
+      entryPoint = std::string(_entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      entryPoint = std::string("__miss__") + std::string(_entryPoint);
+      binary = module->getBinary("MISS");
+    }
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -2058,8 +2093,16 @@ struct GeomType : public SBTEntry {
 
   void setClosestHit(int rayType, Module *module, const char *entryPoint) {
     closestHitShaderUsed[rayType] = true;
-    closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
-    auto binary = module->getBinary("CLOSESTHIT");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      closestHitShaderEntryPoints[rayType] = std::string(entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
+      binary = module->getBinary("CLOSESTHIT");
+    }
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2077,8 +2120,16 @@ struct GeomType : public SBTEntry {
 
   void setAnyHit(int rayType, Module *module, const char *entryPoint) {
     anyHitShaderUsed[rayType] = true;
-    anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
-    auto binary = module->getBinary("ANYHIT");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      anyHitShaderEntryPoints[rayType] = std::string(entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
+      binary = module->getBinary("ANYHIT");
+    }
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2096,8 +2147,16 @@ struct GeomType : public SBTEntry {
 
   void setIntersection(int rayType, Module *module, const char *entryPoint) {
     intersectionShaderUsed[rayType] = true;
-    intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
-    auto binary = module->getBinary("INTERSECTION");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      intersectionShaderEntryPoints[rayType] = std::string(entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
+      binary = module->getBinary("INTERSECTION");
+    }
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2115,8 +2174,16 @@ struct GeomType : public SBTEntry {
 
   void setVertex(int rasterType, Module *module, const char *entryPoint) {
     vertexShaderUsed[rasterType] = true;
-    vertexShaderEntryPoints[rasterType] = std::string("__vertex__") + std::string(entryPoint);
-    auto binary = module->getBinary("VERTEX");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      vertexShaderEntryPoints[rasterType] = std::string(entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      vertexShaderEntryPoints[rasterType] = std::string("__vertex__") + std::string(entryPoint);
+      binary = module->getBinary("VERTEX");
+    }
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2134,8 +2201,16 @@ struct GeomType : public SBTEntry {
 
   void setPixel(int rasterType, Module *module, const char *entryPoint) {
     pixelShaderUsed[rasterType] = true;
-    pixelShaderEntryPoints[rasterType] = std::string("__pixel__") + std::string(entryPoint);
-    auto binary = module->getBinary("PIXEL");
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+    if (module->slang) {
+      pixelShaderEntryPoints[rasterType] = std::string(entryPoint);      
+      binary = module->getBinary("SLANG");
+    }
+    else
+    {
+      pixelShaderEntryPoints[rasterType] = std::string("__pixel__") + std::string(entryPoint);
+      binary = module->getBinary("PIXEL");
+    }
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2245,12 +2320,13 @@ struct GeomType : public SBTEntry {
     }
   }
 
-  void buildRasterPipeline(uint32_t rasterType, VkDescriptorSetLayout samplerDescriptorSetLayout,
+  void buildRasterPipeline(uint32_t rasterType, 
+                           VkDescriptorSetLayout recordDescriptorSetLayout,
+                           VkDescriptorSetLayout samplerDescriptorSetLayout,
                            VkDescriptorSetLayout texture1DDescriptorSetLayout,
                            VkDescriptorSetLayout texture2DDescriptorSetLayout,
                            VkDescriptorSetLayout texture3DDescriptorSetLayout,
-                           VkDescriptorSetLayout bufferDescriptorSetLayout,
-                           VkDescriptorSetLayout recordDescriptorSetLayout) {
+                           VkDescriptorSetLayout bufferDescriptorSetLayout) {
     // we need both of these to be set, otherwise we can't build a raster pipeline...
     if (!vertexShaderUsed[rasterType] || !pixelShaderUsed[rasterType])
       return;
@@ -2384,9 +2460,9 @@ struct GeomType : public SBTEntry {
     // The layout here describes descriptor sets and push constants used
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout,   texture1DDescriptorSetLayout,
-                                                  texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                                  bufferDescriptorSetLayout,    recordDescriptorSetLayout};
+    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,   
+                                                  texture1DDescriptorSetLayout, texture2DDescriptorSetLayout, 
+                                                  texture3DDescriptorSetLayout, bufferDescriptorSetLayout};
     pipelineLayoutInfo.setLayoutCount = (uint32_t)layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
@@ -5114,7 +5190,7 @@ struct Context {
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "GPRT";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_1;
+    appInfo.apiVersion = VK_API_VERSION_1_2;
     appInfo.pNext = VK_NULL_HANDLE;
 
     /// 1. Create Instance
@@ -5320,7 +5396,7 @@ struct Context {
 
     // Required for VK_KHR_ray_tracing_pipeline
     enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-
+    
     // required for vulkan memory model stuff
     enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
 
@@ -7131,7 +7207,8 @@ struct Context {
 
       VkPipelineLayoutCreateInfo pipelineLayoutCI{};
       pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-      std::vector<VkDescriptorSetLayout> layouts = {samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+      std::vector<VkDescriptorSetLayout> layouts = {computeRecordDescriptorSetLayout /* not actually using this one, but VK wants something valid...*/, 
+                                                    samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
                                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
                                                     bufferDescriptorSetLayout};
       pipelineLayoutCI.setLayoutCount = (uint32_t)layouts.size();
@@ -7303,9 +7380,9 @@ struct Context {
       for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
         if (!Compute::computes[i])
           continue;
-        Compute::computes[i]->buildPipeline(samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-                                            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                            bufferDescriptorSetLayout, computeRecordDescriptorSetLayout);
+        Compute::computes[i]->buildPipeline(computeRecordDescriptorSetLayout, samplerDescriptorSetLayout, 
+                                            texture1DDescriptorSetLayout, texture2DDescriptorSetLayout, 
+                                            texture3DDescriptorSetLayout, bufferDescriptorSetLayout);
       }
       computePipelinesOutOfDate = false;
     }
@@ -7316,9 +7393,10 @@ struct Context {
         if (!GeomType::geomTypes[i])
           continue;
         for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
-          geomTypes[i]->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-                                            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-                                            bufferDescriptorSetLayout, rasterRecordDescriptorSetLayout);
+          geomTypes[i]->buildRasterPipeline(rasterType, 
+                                            rasterRecordDescriptorSetLayout, samplerDescriptorSetLayout, 
+                                            texture1DDescriptorSetLayout, texture2DDescriptorSetLayout, 
+                                            texture3DDescriptorSetLayout, bufferDescriptorSetLayout);
         }
       }
       rasterPipelinesOutOfDate = false;
@@ -8666,8 +8744,8 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
       }
 
       std::vector<VkDescriptorSet> descriptorSets = {
-          context->samplerDescriptorSet,   context->texture1DDescriptorSet, context->texture2DDescriptorSet,
-          context->texture3DDescriptorSet, context->bufferDescriptorSet,    context->rasterRecordDescriptorSet};
+          context->rasterRecordDescriptorSet, context->samplerDescriptorSet,   context->texture1DDescriptorSet, 
+          context->texture2DDescriptorSet,    context->texture3DDescriptorSet, context->bufferDescriptorSet   };
 
       uint32_t offset = (uint32_t)geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -9902,7 +9980,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                                                  context->texture2DDescriptorSet, context->texture3DDescriptorSet,
                                                  context->bufferDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->raytracingPipelineLayout, 0, (uint32_t)descriptorSets.size(), descriptorSets.data(), 0, NULL);
+                          context->raytracingPipelineLayout, 1, (uint32_t)descriptorSets.size(), descriptorSets.data(), 0, NULL);
 
   if (context->queryRequested) {
     vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
@@ -10044,9 +10122,9 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
 
   uint32_t offset = (uint32_t)compute->address * recordSize;
-  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet,   context->texture1DDescriptorSet,
-                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                 context->bufferDescriptorSet,    context->computeRecordDescriptorSet};
+  std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
+                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet, 
+                                                 context->texture3DDescriptorSet, context->bufferDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
 

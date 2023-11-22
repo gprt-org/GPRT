@@ -42,7 +42,8 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s06_deviceCode;
+extern GPRTProgram s06_hlsl_deviceCode;
+extern GPRTProgram s06_slang_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -117,7 +118,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S06 Compute Transform");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s06_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s06_slang_deviceCode);
 
   // Structure of parameters that change each frame. We can edit these 
   // without rebuilding the shader binding table.

@@ -22,13 +22,14 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
-
-struct [raypayload] Payload {
-  float3 color : read(caller) : write(closesthit, miss);
+struct Payload {
+  float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+[[vk::push_constant]] PushConstants pc;
+
+[shader("raygeneration")]
+void simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -55,14 +56,9 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
 }
 
-GPRT_CLOSEST_HIT_PROGRAM(SphereClosestHit, (SphereGeomData, record), (Payload, payload), (Attribute, attribute)) {
-  float3 origin = attribute.posrad.xyz;
-  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
-  float3 normal = normalize(hitPos - origin);
-  payload.color = abs(normal);
-}
-
-GPRT_COMPUTE_PROGRAM(SphereBounds, (SphereBoundsData, record), (1, 1, 1)) {
+[shader("compute")]
+[numthreads(1,1,1)]
+void SphereBounds(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<SphereBoundsData> record) {
   int primID = DispatchThreadID.x;
   float3 position = gprt::load<float3>(record.vertex, primID);
   float radius = gprt::load<float>(record.radius, primID);
@@ -72,7 +68,8 @@ GPRT_COMPUTE_PROGRAM(SphereBounds, (SphereBoundsData, record), (1, 1, 1)) {
   gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
 }
 
-GPRT_INTERSECTION_PROGRAM(SphereIntersection, (SphereGeomData, record)) {
+[shader("intersection")]
+void SphereIntersection(uniform SphereGeomData record) {
   uint primID = PrimitiveIndex();
 
   float3 position = gprt::load<float3>(record.vertex, primID);
@@ -96,8 +93,17 @@ GPRT_INTERSECTION_PROGRAM(SphereIntersection, (SphereGeomData, record)) {
   ReportHit(tHit, /*hitKind*/ 0, attr);
 }
 
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+[shader("closesthit")]
+void SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in Attribute attribute) {
+  float3 origin = attribute.posrad.xyz;
+  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
+  float3 normal = normalize(hitPos - origin);
+  payload.color = abs(normal);
+}
+
+[shader("miss")]
+void miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = (pattern & 1) ? record.color1 : record.color0;
+  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
 }

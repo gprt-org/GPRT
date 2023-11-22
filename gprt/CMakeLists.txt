@@ -26,7 +26,7 @@ if (GPRT_BUILD_SHARED)
 endif()
 include(cmake/embed_devicecode.cmake)
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     gprtDeviceCode
   HEADERS
@@ -36,7 +36,7 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
 )
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
   HEADERS
@@ -45,7 +45,7 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/sort.hlsl
 )
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     lbvhDeviceCode
   HEADERS

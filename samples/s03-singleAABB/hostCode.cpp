@@ -38,7 +38,8 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s03_deviceCode;
+extern GPRTProgram s03_hlsl_deviceCode;
+extern GPRTProgram s03_slang_deviceCode;
 
 // The extents of our bounding box
 float3 aabbPositions[2] = {{-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}};
@@ -66,7 +67,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s03_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s03_slang_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

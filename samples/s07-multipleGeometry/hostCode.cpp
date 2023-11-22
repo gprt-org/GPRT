@@ -42,7 +42,8 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s07_deviceCode;
+extern GPRTProgram s07_hlsl_deviceCode;
+extern GPRTProgram s07_slang_deviceCode;
 
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
@@ -107,7 +108,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Multiple Geometry");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s07_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s07_slang_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

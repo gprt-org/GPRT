@@ -20,32 +20,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "gprt.h"
-#include "gprt_lbvh.h"
+#include "sharedCode.h"
 
-/* variables available to all programs */
-struct RayGenData {
-  gprt::Buffer frameBuffer;
-  gprt::Buffer accumBuffer;
-  LBVHData lbvh;
-};
+[shader("raygeneration")] 
+void simpleRayGen(uniform RayGenData record)
+{
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 fbSize = DispatchRaysDimensions().xy;
 
-/* variables for the miss program */
-struct MissProgData {
-  float3 color0;
-  float3 color1;
-};
+  if (pixelID.x == 0 && pixelID.y == 0) {
+    printf("Hello from your first raygen program!\n");
+  }
 
-/* Constants that change each frame */
-struct PushConstants {
-  float iTime;
-  int iFrame;
-  float cuttingPlane;
+  // Generate a simple checkerboard pattern as a test.
+  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
+  // alternate pattern, showing that pixel (0,0) is in the upper left corner
+  // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
+  const float3 color = bool(pattern & 1) ? record.color1 : record.color0;
 
-  struct {
-    float3 pos;
-    float3 dir_00;
-    float3 dir_du;
-    float3 dir_dv;
-  } camera;
-};
+  // find the frame buffer location (x + width*y) and put the result there
+  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(color));
+}

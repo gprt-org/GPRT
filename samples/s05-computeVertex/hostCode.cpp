@@ -40,7 +40,8 @@
 
 const int GRID_SIDE_LENGTH = 1000;
 
-extern GPRTProgram s05_deviceCode;
+extern GPRTProgram s05_hlsl_deviceCode;
+extern GPRTProgram s05_slang_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -63,7 +64,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S05 Compute Vertex");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s05_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s05_slang_deviceCode);
 
   // Structure of parameters that change each frame. We can edit these 
   // without rebuilding the shader binding table.

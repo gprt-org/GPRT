@@ -40,7 +40,8 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s08_deviceCode;
+extern GPRTProgram s08_hlsl_deviceCode;
+extern GPRTProgram s08_slang_deviceCode;
 
 // Vertices are the points that define our texture plane
 const int NUM_VERTICES = 4;
@@ -93,7 +94,7 @@ main(int ac, char **av) {
 
   gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s08_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s08_slang_deviceCode);
   PushConstants pc;
   pc.now = 0.f;
 
