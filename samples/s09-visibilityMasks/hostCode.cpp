@@ -38,8 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s09_hlsl_deviceCode;
-extern GPRTProgram s09_slang_deviceCode;
+extern GPRTProgram s09_deviceCode;
 
 // Scene geometry. Looks a bit intimidating, but basically just a couple
 // hand-plotted triangles, two definiting a floor plane, 16 triangles defining
@@ -124,7 +123,7 @@ main(int ac, char **av) {
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S09 Visibility Masks");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s09_slang_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s09_deviceCode);
 
   PushConstants pc;
 

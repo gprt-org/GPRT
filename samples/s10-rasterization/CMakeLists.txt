@@ -20,18 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_hlsl_devicecode(
-  OUTPUT_TARGET
-    s10_hlsl_deviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-)
-
 embed_slang_devicecode(
   OUTPUT_TARGET
-    s10_slang_deviceCode
+    s10_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
@@ -41,7 +32,6 @@ embed_slang_devicecode(
 add_executable(s10_raster hostCode.cpp)
 target_link_libraries(s10_raster
   PRIVATE
-    s10_hlsl_deviceCode
-    s10_slang_deviceCode
+    s10_deviceCode
     gprt::gprt
 )

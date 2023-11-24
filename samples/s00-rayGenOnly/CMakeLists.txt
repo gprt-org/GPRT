@@ -20,18 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_hlsl_devicecode(
-  OUTPUT_TARGET
-    s00_hlsl_deviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-)
-
 embed_slang_devicecode(
   OUTPUT_TARGET
-    s00_slang_deviceCode
+    s00_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
@@ -42,7 +33,6 @@ add_executable(s00_rayGenOnly hostCode.cpp)
 
 target_link_libraries(s00_rayGenOnly
   PRIVATE
-    s00_hlsl_deviceCode
-    s00_slang_deviceCode
+    s00_deviceCode
     gprt::gprt
 )

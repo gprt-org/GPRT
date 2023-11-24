@@ -35,8 +35,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s00_hlsl_deviceCode;
-extern GPRTProgram s00_slang_deviceCode;
+extern GPRTProgram s00_deviceCode;
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -70,7 +69,7 @@ main(int ac, char **av) {
   // is converted into. You can see the machine-centric SPIR-V code in
   // build\samples\cmd00-rayGenOnly\deviceCode.spv
   // We store this SPIR-V intermediate code representation in a GPRT module.
-  GPRTModule module = gprtModuleCreate(context, s00_slang_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s00_deviceCode);
 
   // All ray tracing programs start off with a "Ray Generation" kernel.
   // Allocate room for one RayGen shader, create it, and hold on to it with

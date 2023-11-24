@@ -20,18 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_hlsl_devicecode(
-  OUTPUT_TARGET
-    s07_hlsl_deviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-)
-
 embed_slang_devicecode(
   OUTPUT_TARGET
-    s07_slang_deviceCode
+    s07_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
@@ -41,8 +32,7 @@ embed_slang_devicecode(
 add_executable(s07_multipleGeometry hostCode.cpp)
 target_link_libraries(s07_multipleGeometry
   PRIVATE
-    s07_hlsl_deviceCode
-    s07_slang_deviceCode
+    s07_deviceCode
     gprt::gprt
     generator
 )

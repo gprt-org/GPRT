@@ -38,8 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s10_hlsl_deviceCode;
-extern GPRTProgram s10_slang_deviceCode;
+extern GPRTProgram s10_deviceCode;
 
 // Vertices are the points that define our triangles
 const int NUM_TRI_VERTICES = 3;
@@ -95,7 +94,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S10 Rasterization");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s10_slang_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
