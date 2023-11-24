@@ -1830,7 +1830,10 @@ struct Compute : public SBTEntry {
     assert(shaderStage.module != VK_NULL_HANDLE);
 
     this->recordSize = recordSize;
-    this->SBTRecord = (uint8_t *) malloc(recordSize);
+    if (this->SBTRecord > 0)
+      this->SBTRecord = (uint8_t *) malloc(recordSize);
+    else 
+      this->SBTRecord = nullptr;
   }
   ~Compute() {}
 
@@ -6511,7 +6514,9 @@ struct Context {
       for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
         size_t offset = recordSize * i;
         uint8_t *params = mapped + offset;
-        memcpy(params, Compute::computes[i]->SBTRecord, Compute::computes[i]->recordSize);
+        if (Compute::computes[i]->SBTRecord) {
+          memcpy(params, Compute::computes[i]->SBTRecord, Compute::computes[i]->recordSize);
+        }
       }
       computeRecordBuffer->unmap();
     }
@@ -8929,6 +8934,16 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
   return (GPRTCompute) compute;
 }
 
+template <>
+GPRTComputeOf<void> gprtComputeCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTComputeOf<void>) gprtComputeCreate(context, module, entrypoint, 0);
+}
+
+template <typename T>
+GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTComputeOf<T>)gprtComputeCreate(context, module, entrypoint, sizeof(T));
+}
+
 GPRT_API void
 gprtComputeDestroy(GPRTCompute _compute) {
   LOG_API_CALL();
@@ -10118,16 +10133,16 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
+  std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
+                                                context->texture1DDescriptorSet, context->texture2DDescriptorSet, 
+                                                context->texture3DDescriptorSet, context->bufferDescriptorSet};
+
   // for the moment, just assume the max group size
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-
   uint32_t offset = (uint32_t)compute->address * recordSize;
-  std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
-                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet, 
-                                                 context->texture3DDescriptorSet, context->bufferDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
-
+  
   if (dims_x >= context->deviceProperties.limits.maxComputeWorkGroupCount[0]) {
     LOG_ERROR("X workgroups (" + std::to_string(dims_x) +
               ") exceed the maximum number of compute workgroups! (max for this platform is " +

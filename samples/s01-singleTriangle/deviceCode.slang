@@ -24,10 +24,6 @@
 
 [[vk::push_constant]] PushConstants pc;
 
-// struct [raypayload] Payload {
-//   float3 color : read(caller) : write(closesthit, miss);
-// };
-
 struct Payload {
   float3 color;
 };

@@ -45,6 +45,7 @@ using namespace linalg::ostream_overloads;
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <type_traits>
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -631,10 +632,11 @@ GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, c
  * GPRT_COMPUTE_PROGRAM in the device code.
  */
 template <typename T>
-GPRTComputeOf<T>
-gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
-  return (GPRTComputeOf<T>) gprtComputeCreate(context, module, entrypoint, sizeof(T));
-}
+GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint);
+
+// Specialization for void
+template <>
+GPRTComputeOf<void> gprtComputeCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 GPRT_API void gprtComputeDestroy(GPRTCompute compute);
 
