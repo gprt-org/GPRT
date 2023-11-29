@@ -575,7 +575,7 @@ struct Buffer {
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
-        region.size = std::min(size, bytes);
+        region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
 
         err = vkEndCommandBuffer(commandBuffer);
@@ -652,7 +652,7 @@ struct Buffer {
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
-        region.size = std::min(size, bytes);
+        region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
         err = vkEndCommandBuffer(commandBuffer);
@@ -706,7 +706,7 @@ struct Buffer {
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
-        region.size = std::min(size, bytes);
+        region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
         err = vkEndCommandBuffer(commandBuffer);
