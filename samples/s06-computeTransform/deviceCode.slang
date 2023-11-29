@@ -46,14 +46,14 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuf
   float z = sin(pc.now + k * x) * cos(pc.now + k * y);
   float zoffset = x + y;
 
-  float4 transforma = float4(0.04, 0.0, 0.0, x * width);
-  float4 transformb = float4(0.0, 0.04, 0.0, y * depth);
-  float4 transformc = float4(0.0, 0.0, 0.04, z * height + zoffset);
+  float3x4 transform = float3x4(
+    float4(0.04, 0.0, 0.0, x * width),
+    float4(0.0, 0.04, 0.0, y * depth),
+    float4(0.0, 0.0, 0.04, z * height + zoffset)
+  );
 
   int transformID = DispatchThreadID.x;
-  gprt::store(record.transforms, transformID * 3 + 0, transforma);
-  gprt::store(record.transforms, transformID * 3 + 1, transformb);
-  gprt::store(record.transforms, transformID * 3 + 2, transformc);
+  gprt::store(record.transforms, transformID, transform);
 }
 
 struct Payload {

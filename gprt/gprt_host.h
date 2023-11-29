@@ -632,7 +632,9 @@ GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, c
  * GPRT_COMPUTE_PROGRAM in the device code.
  */
 template <typename T>
-GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint);
+GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTComputeOf<T>)gprtComputeCreate(context, module, entrypoint, sizeof(T));
+}
 
 // Specialization for void
 template <>

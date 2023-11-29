@@ -146,6 +146,58 @@ getDefaultSampler() {
   return samplers[0];
 }
 
+no_diff float
+atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  while (value < asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old) break;
+  }
+  return asfloat(ret_i);
+}
+
+// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// and the currently stored max is non-zero
+[BackwardDerivativeOf(atomicMin32f)]
+void atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+}
+
+no_diff float
+atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  while (value > asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// and the currently stored max is non-zero
+[BackwardDerivativeOf(atomicMax32f)]
+void atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+}
+
+float
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+  uint old, newint;
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  do {
+    old = ret_i;
+    newint = asuint(asfloat(old) + value);
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+  } while (ret_i != old);
+
+  return asfloat(ret_i);
+}
+
 }
 #else
 // x stores pointer, y stores size.

@@ -221,6 +221,7 @@ function(embed_slang_devicecode)
     -target spirv -emit-spirv-directly
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
+    -matrix-layout-row-major
     -I ${GPRT_INCLUDE_DIR}
     -D GPRT_DEVICE
     -D SLANGC

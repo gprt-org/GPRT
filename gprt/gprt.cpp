@@ -1830,7 +1830,7 @@ struct Compute : public SBTEntry {
     assert(shaderStage.module != VK_NULL_HANDLE);
 
     this->recordSize = recordSize;
-    if (this->SBTRecord > 0)
+    if (this->recordSize > 0)
       this->SBTRecord = (uint8_t *) malloc(recordSize);
     else 
       this->SBTRecord = nullptr;
@@ -8937,11 +8937,6 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
 template <>
 GPRTComputeOf<void> gprtComputeCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTComputeOf<void>) gprtComputeCreate(context, module, entrypoint, 0);
-}
-
-template <typename T>
-GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
-  return (GPRTComputeOf<T>)gprtComputeCreate(context, module, entrypoint, sizeof(T));
 }
 
 GPRT_API void

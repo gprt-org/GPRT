@@ -20,17 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(s00-rayGenOnly)
-add_subdirectory(s01-singleTriangle)
-add_subdirectory(s02-instances)
-add_subdirectory(s03-singleAABB)
-add_subdirectory(s04-computeAABBs)
-add_subdirectory(s05-computeVertex)
-add_subdirectory(s06-computeTransform)
-add_subdirectory(s07-multipleGeometry)
-add_subdirectory(s08-singleTexture)
-add_subdirectory(s09-visibilityMasks)
-add_subdirectory(s10-rasterization)
-add_subdirectory(s11-imgui-raster)
-add_subdirectory(s12-imgui-rt)
-add_subdirectory(s13-differentiable)
+embed_slang_devicecode(
+  OUTPUT_TARGET
+    s13_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
+)
+
+add_executable(s13_differentiable hostCode.cpp)
+target_link_libraries(s13_differentiable
+  PRIVATE
+    s13_deviceCode
+    gprt::gprt
+    generator
+)
