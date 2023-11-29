@@ -24,6 +24,8 @@ cmake_minimum_required(VERSION 3.12)
 
 include(FetchContent)
 
+find_program(CMAKE_SLANG_COMPILER slangc)
+
 if (NOT DEFINED CMAKE_SLANG_COMPILER) 
   message("Slang compiler not defined...")
   message("Downloading Slang Compiler...")
@@ -71,6 +73,8 @@ if (NOT DEFINED CMAKE_SLANG_COMPILER)
   if(NOT EXTRACT_RESULT EQUAL 0)
   message("Envoking Slang compiler failed with error code: ${EXTRACT_RESULT}")
   endif()
+else()
+message("Found slangc: ${CMAKE_SLANG_COMPILER}")
 endif()
 
 if (NOT DEFINED CMAKE_DXC_COMPILER) 
