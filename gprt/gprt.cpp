@@ -1186,7 +1186,7 @@ struct Texture {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for texture map! : \n" + errorString(err));
 
@@ -1250,7 +1250,7 @@ struct Texture {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
       LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
@@ -1382,7 +1382,7 @@ struct Texture {
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
       LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
@@ -1605,7 +1605,7 @@ struct Texture {
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, nullptr);
+      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
