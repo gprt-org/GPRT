@@ -1136,6 +1136,10 @@ gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind) {
   return (GPRTGeomTypeOf<T>) gprtGeomTypeCreate(context, kind, sizeof(T));
 }
 
+// Specialization for void
+template <>
+GPRTGeomTypeOf<void> gprtGeomTypeCreate<void>(GPRTContext context, GPRTGeomKind kind);
+
 GPRT_API void gprtGeomTypeDestroy(GPRTGeomType geomType);
 
 template <typename T>

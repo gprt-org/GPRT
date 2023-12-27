@@ -6445,10 +6445,11 @@ struct Context {
                         handleStride * (numRayGens + numMissProgs);
                     memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-                    // Then, copy params following handle
+                    // Then, copy params following handle (if used)
                     recordOffset = recordOffset + handleSize;
                     uint8_t *params = mapped + recordOffset;
-                    memcpy(params, geom->SBTRecord, geom->recordSize);
+                    if (geom->recordSize > 0)
+                      memcpy(params, geom->SBTRecord, geom->recordSize);
                   }
                 }
                 geomIDOffset += triAccel->geometries.size();
@@ -6479,7 +6480,8 @@ struct Context {
                     // Then, copy params following handle
                     recordOffset = recordOffset + handleSize;
                     uint8_t *params = mapped + recordOffset;
-                    memcpy(params, geom->SBTRecord, geom->recordSize);
+                    if (geom->recordSize > 0)
+                      memcpy(params, geom->SBTRecord, geom->recordSize);
                   }
                 }
                 geomIDOffset += aabbAccel->geometries.size();
@@ -9031,6 +9033,11 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
   context->geomTypes.push_back(geomType);
 
   return (GPRTGeomType) geomType;
+}
+
+template <>
+GPRTGeomTypeOf<void> gprtGeomTypeCreate<void>(GPRTContext context, GPRTGeomKind kind) {
+  return (GPRTGeomTypeOf<void>) gprtGeomTypeCreate(context, kind, 0);
 }
 
 GPRT_API void
