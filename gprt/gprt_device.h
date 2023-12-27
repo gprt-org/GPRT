@@ -80,9 +80,7 @@ make_bgra(const float4 color) {
 // ideally this buffer type would be a struct...
 // but I'm running into a compiler bug reading one struct inside another one.
 
-
-
-#ifdef SLANGC
+#ifdef __SLANG_COMPILER__
 struct Buffer {
   uint64_t address;
   uint64_t index;
@@ -199,7 +197,9 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
 }
 
 }
+
 #else
+
 // x stores pointer, y stores size.
 typedef uint64_t2 Buffer;
 typedef uint64_t2 Accel;

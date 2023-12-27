@@ -33,41 +33,41 @@ else ()
   message("Downloading Slang Compiler...")
   if (WIN32)
     FetchContent_Declare(SlangCompiler
-      URL https://github.com/shader-slang/slang/releases/download/v2023.4.9/slang-2023.4.9-win64.zip
-      URL_HASH SHA256=CE3029EA3870E4CA307996F026C5D183D3C942B986C5A3ED426B2A52731FCE14
+      URL https://github.com/shader-slang/slang/releases/download/v2023.5.4/slang-2023.5.4-win64.zip
+      URL_HASH SHA256=48201c552c32787212d4afd436bc452dc7d19ecef958a41c5036e9fcb9410a9c
       DOWNLOAD_NO_EXTRACT true
       DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
     )
     FetchContent_Populate(SlangCompiler)
     message("Extracting...")
-    execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/slang-2023.4.9-win64.zip" -DestinationPath "${CMAKE_BINARY_DIR}/slang-2023.4.9-win64" RESULT_VARIABLE EXTRACT_RESULT)
+    execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/slang-2023.5.4-win64.zip" -DestinationPath "${CMAKE_BINARY_DIR}/slang-2023.5.4-win64" RESULT_VARIABLE EXTRACT_RESULT)
     if(NOT EXTRACT_RESULT EQUAL 0)
         message(FATAL_ERROR "Extraction failed with error code: ${EXTRACT_RESULT}")
     else()
         message("Done.")
     endif()
-    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2023.4.9-win64/bin/windows-x64/release/slangc.exe" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
+    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2023.5.4-win64/bin/windows-x64/release/slangc.exe" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
   else() # linux
     FetchContent_Declare(HLSLCompiler
-      URL https://github.com/shader-slang/slang/releases/download/v2023.4.9/slang-2023.4.9-linux-x86_64.tar.gz
-      URL_HASH SHA256=B78C2831C191EC95A51E3A1516351B19C3BD812008CDF8258ACF815B511621C8
+      URL https://github.com/shader-slang/slang/releases/download/v2023.5.4/slang-2023.5.4-linux-x86_64.tar.gz
+      URL_HASH SHA256=55f2329bfc91d21b8af43006daf078dd77c0041373cf4264953187bedf685f99
       DOWNLOAD_NO_EXTRACT true
       DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
     )
     FetchContent_Populate(HLSLCompiler)
     message("Extracting...")
-    execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/slang-2023.4.9-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+    execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/slang-2023.5.4-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
     if(NOT EXTRACT_RESULT EQUAL 0)
         message(FATAL_ERROR "mkdir failed with error code: ${EXTRACT_RESULT}")
     endif()
-    execute_process(COMMAND tar xzf "${CMAKE_BINARY_DIR}/slang-2023.4.9-linux-x86_64.tar.gz" -C "${CMAKE_BINARY_DIR}/slang-2023.4.9-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
+    execute_process(COMMAND tar xzf "${CMAKE_BINARY_DIR}/slang-2023.5.4-linux-x86_64.tar.gz" -C "${CMAKE_BINARY_DIR}/slang-2023.5.4-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
     if(NOT EXTRACT_RESULT EQUAL 0)
         message(FATAL_ERROR "tar failed with error code: ${EXTRACT_RESULT}")
     else()
         message("Done.")
     endif()
-    execute_process(COMMAND chmod +x "${CMAKE_BINARY_DIR}/slang-2023.4.9-linux-x86_64/bin/linux-x64/release/slangc")
-    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2023.4.9-linux-x86_64/bin/linux-x64/release/slangc" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
+    execute_process(COMMAND chmod +x "${CMAKE_BINARY_DIR}/slang-2023.5.4-linux-x86_64/bin/linux-x64/release/slangc")
+    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2023.5.4-linux-x86_64/bin/linux-x64/release/slangc" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
   endif()
 
   # Test to see if compiler is working
@@ -228,7 +228,6 @@ function(embed_slang_devicecode)
     -matrix-layout-row-major
     -I ${GPRT_INCLUDE_DIR}
     -D GPRT_DEVICE
-    -D SLANGC
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_SLANG_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_SLANG_DEVICECODE_SOURCES} ${EMBED_SLANG_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt_device.h ${GPRT_INCLUDE_DIR}/gprt.h
   )
