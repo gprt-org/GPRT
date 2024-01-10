@@ -36,6 +36,16 @@ embed_hlsl_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
 )
 
+embed_slang_devicecode(
+  OUTPUT_TARGET
+    gprtDeviceCodeSlang
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slang
+)
+
 embed_hlsl_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
@@ -84,6 +94,7 @@ set_target_properties(gprt
 target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
+    gprtDeviceCodeSlang
     gprtDeviceCode
     sortDeviceCode
     lbvhDeviceCode
