@@ -24,9 +24,9 @@
 
 [[vk::push_constant]] PushConstants pc;
 
-struct [raypayload] Payload {
-  float spreadAngle : read(closesthit) : write(caller);
-  float3 color : read(caller) : write(closesthit, miss);
+struct Payload {
+  float spreadAngle;
+  float3 color;
 };
 
 float3x3
@@ -43,7 +43,9 @@ AngleAxis3x3(float angle, float3 axis) {
                   t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c);
 }
 
-GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
+[shader("compute")]
+[numthreads(1,1,1)]
+void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<TransformData> record) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
   int transformID = DispatchThreadID.x;
@@ -66,7 +68,8 @@ GPRT_COMPUTE_PROGRAM(Transform, (TransformData, record), (1, 1, 1)) {
   gprt::store(record.transforms, transformID * 4 + 3, transformd);
 }
 
-GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
+[shader("raygeneration")]
+void raygen(uniform RayGenData record) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -101,12 +104,8 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
   gprt::store(record.framebuffer, fbOfs, gprt::make_bgra(payload.color));
 }
 
-struct TriangleAttributes {
-  float2 bc;
-};
-
-GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payload),
-                         (TriangleAttributes, attributes)) {
+[shader("closesthit")]
+void closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   // compute normal:
   uint instanceID = InstanceIndex();
   uint primID = PrimitiveIndex();
@@ -120,7 +119,7 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
   float2 TCA = gprt::load<float2>(record.texcoord, index.x);
   float2 TCB = gprt::load<float2>(record.texcoord, index.y);
   float2 TCC = gprt::load<float2>(record.texcoord, index.z);
-  float2 TC = TCB * attributes.bc.x + TCC * attributes.bc.y + TCA * (1.f - (attributes.bc.x + attributes.bc.y));
+  float2 TC = TCB * bc.x + TCC * bc.y + TCA * (1.f - (bc.x + bc.y));
 
   // fetch the texture and sampler for this plane
   Texture2D texture = gprt::getTexture2DHandle(record.texture);
@@ -142,7 +141,7 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
   else if (instanceID == 1) {
     float w, h;
     texture.GetDimensions(w, h);
-    int levels = log2(max(w, h));
+    int levels = int(log2(max(w, h)));
     color = texture.SampleLevel(sampler, TC, lerp(levels, 0, abs(sin(pc.now))));
   }
 
@@ -183,9 +182,10 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
   payload.color = color.rgb;
 }
 
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+[shader("miss")]
+void miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  float3 color = (pattern & 1) ? record.color1 : record.color0;
+  float3 color = bool(pattern & 1) ? record.color1 : record.color0;
   payload.color = color;
 }

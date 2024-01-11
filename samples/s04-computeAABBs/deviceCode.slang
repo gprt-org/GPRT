@@ -22,20 +22,14 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
-
-struct [raypayload] Payload {
-  float3 color : read(caller) : write(closesthit, miss);
+struct Payload {
+  float3 color;
 };
 
-// This ray generation program will kick off the ray tracing process,
-// generating rays and tracing them into the world.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+[[vk::push_constant]] PushConstants pc;
+
+[shader("raygeneration")]
+void simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -45,7 +39,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
       normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
-  rayDesc.TMin = 0.001;
+  rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(world,                   // the tree
@@ -59,44 +53,57 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
 }
 
-struct Attributes {
-  float2 bc;
-};
-
-// This closest hit program will be called when rays hit triangles.
-// Here, we can fetch per-geometry data, process that data, and send
-// it back to our ray generation program.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-//
-// The third is the type of the ray payload structure. We use the ray payload
-// to pass data between this program and our ray generation program.
-//
-// The fourth is the type of the intersection attributes structure.
-// For triangles, this is always a struct containing two floats
-// called "barycentrics", which we use to interpolate per-vertex
-// values.
-GPRT_CLOSEST_HIT_PROGRAM(TriangleMesh, (TrianglesGeomData, record), (Payload, payload), (Attributes, attributes)) {
-  float2 bc = attributes.bc;
-  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+[shader("compute")]
+[numthreads(1,1,1)]
+void SphereBounds(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<SphereBoundsData> record) {
+  int primID = DispatchThreadID.x;
+  float3 position = gprt::load<float3>(record.vertex, primID);
+  float radius = gprt::load<float>(record.radius, primID);
+  float3 aabbMin = position - float3(radius, radius, radius);
+  float3 aabbMax = position + float3(radius, radius, radius);
+  gprt::store(record.aabbs, 2 * primID, aabbMin);
+  gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
 }
 
-// This miss program will be called when rays miss all primitives.
-// We often define some "default" ray payload behavior here,
-// for example, returning a background color.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+[shader("intersection")]
+void SphereIntersection(uniform SphereGeomData record) {
+  uint primID = PrimitiveIndex();
+
+  float3 position = gprt::load<float3>(record.vertex, primID);
+  float radius = gprt::load<float>(record.radius, primID);
+
+  float3 ro = ObjectRayOrigin();
+  float3 rd = ObjectRayDirection();
+
+  float3 oc = ro - position;
+  float b = dot(oc, rd);
+  float c = dot(oc, oc) - radius * radius;
+  float h = b * b - c;
+
+  if (h < 0.0)
+    return;
+  float tHit = -b - sqrt(h);
+
+  Attribute attr;
+  attr.posrad.w = radius;
+  attr.posrad.xyz = position;
+  ReportHit(tHit, /*hitKind*/ 0, attr);
+}
+
+[shader("closesthit")]
+void SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in Attribute attribute) {
+  float3 origin = attribute.posrad.xyz;
+  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
+  float3 normal = normalize(hitPos - origin);
+  payload.color = abs(normal);
+}
+
+[shader("miss")]
+void miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = (pattern & 1) ? record.color1 : record.color0;
+  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
 }

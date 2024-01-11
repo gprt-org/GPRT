@@ -41,6 +41,10 @@ foreach(idx RANGE ${NUM_INPUT_FILES_MINUS_ONE})
   # Read hex data from file
   file(READ ${bin} filedata HEX)
 
+  if (NOT filedata)
+    message(FATAL_ERROR "Error: File '${filedata}' is empty.")
+  endif()
+
   # Convert hex data for C compatibility
   string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," filedata ${filedata})
 

@@ -13,7 +13,7 @@ on:
 
 jobs:
   ubuntu:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v2
@@ -70,13 +70,6 @@ jobs:
         vulkan-query-version: 1.3.250.1
         vulkan-components: Vulkan-Headers, Vulkan-Loader
         vulkan-use-cache: true
-
-    - name: Pull and unpack dxc compiler
-      run: |
-        cd $HOME
-        C:\msys64\usr\bin\wget.exe https://anl.box.com/shared/static/91fgj668javyej2hfwx2ny1w8m1dxbfj.zip -O dxc-artifacts.zip
-        unzip dxc-artifacts
-
 
     - name: Build
       shell: bash

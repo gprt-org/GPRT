@@ -30,7 +30,7 @@
 
 #pragma once
 
-#ifdef GPRT_DEVICE
+#if defined(GPRT_DEVICE) || defined(__SLANG_COMPILER__)
 #include "gprt_device.h"
 #else
 #include "gprt_host.h"
