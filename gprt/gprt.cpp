@@ -9399,7 +9399,7 @@ gprtTextureDestroy(GPRTTexture _texture) {
 }
 
 GPRT_API GPRTBuffer
-gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init) {
+gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -9422,7 +9422,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
   buffer->map();
@@ -9435,7 +9435,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
 }
 
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init) {
+gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -9456,7 +9456,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   if (init) {
     buffer->map();
@@ -9468,7 +9468,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 }
 
 GPRT_API GPRTBuffer
-gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init) {
+gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -9493,7 +9493,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, 16);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
   buffer->map();
