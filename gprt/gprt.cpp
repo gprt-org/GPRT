@@ -268,7 +268,7 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   return VK_FALSE;
 }
 
-extern std::map<std::string, std::vector<uint8_t>> sortDeviceCode;
+extern std::vector<uint8_t> sortDeviceCode;
 
 // forward declarations...
 struct Geom;
@@ -322,27 +322,15 @@ struct Stage {
 };
 
 struct Module {
-  // std::string program;
-  GPRTProgram program;
-
-  bool slang = false;
+  std::vector<uint32_t> binary;
 
   Module(GPRTProgram program) { 
-    this->program = program; 
-    if (program.find("SLANG") != program.end())
-    {
-      slang = true;
-    }
+    size_t sizeOfProgram = program.size();
+    binary.resize(sizeOfProgram / 4);
+    memcpy(binary.data(), program.data(), sizeOfProgram);
   }
 
   ~Module() {}
-
-  std::vector<uint32_t> getBinary(std::string entryType) {
-    size_t sizeOfProgram = program[entryType].size() - 1;   // program is null terminated.
-    std::vector<uint32_t> finalProgram(sizeOfProgram / 4);
-    memcpy(finalProgram.data(), program[entryType].data(), sizeOfProgram);
-    return finalProgram;
-  }
 };
 
 struct Buffer {
@@ -1800,15 +1788,8 @@ struct Compute : public SBTEntry {
     }
 
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      entryPoint = std::string(_entryPoint);
-      binary = module->getBinary("SLANG");
-    }
-    else 
-    {
-      entryPoint = std::string("__compute__") + std::string(_entryPoint);
-      binary = module->getBinary("COMPUTE");
-    }
+    entryPoint = std::string(_entryPoint);
+    binary = module->binary;
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -1933,15 +1914,8 @@ struct RayGen : public SBTEntry {
 
     // Fetch the SPIRV
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      entryPoint = std::string(_entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      entryPoint = std::string("__raygen__") + std::string(_entryPoint);
-      binary = module->getBinary("RAYGEN");
-    }
+    entryPoint = std::string(_entryPoint);      
+    binary = module->binary;
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
@@ -2004,16 +1978,9 @@ struct Miss : public SBTEntry {
     // Fetch the SPIRV
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
 
-    if (module->slang) {
-      entryPoint = std::string(_entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      entryPoint = std::string("__miss__") + std::string(_entryPoint);
-      binary = module->getBinary("MISS");
-    }
-
+    entryPoint = std::string(_entryPoint);      
+    binary = module->binary;
+    
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
 
@@ -2146,15 +2113,9 @@ struct GeomType : public SBTEntry {
   void setClosestHit(int rayType, Module *module, const char *entryPoint) {
     closestHitShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      closestHitShaderEntryPoints[rayType] = std::string(entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      closestHitShaderEntryPoints[rayType] = std::string("__closesthit__") + std::string(entryPoint);
-      binary = module->getBinary("CLOSESTHIT");
-    }
+    closestHitShaderEntryPoints[rayType] = std::string(entryPoint);      
+    binary = module->binary;
+    
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2173,15 +2134,9 @@ struct GeomType : public SBTEntry {
   void setAnyHit(int rayType, Module *module, const char *entryPoint) {
     anyHitShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      anyHitShaderEntryPoints[rayType] = std::string(entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      anyHitShaderEntryPoints[rayType] = std::string("__anyhit__") + std::string(entryPoint);
-      binary = module->getBinary("ANYHIT");
-    }
+    anyHitShaderEntryPoints[rayType] = std::string(entryPoint);      
+    binary = module->binary;
+    
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2200,15 +2155,9 @@ struct GeomType : public SBTEntry {
   void setIntersection(int rayType, Module *module, const char *entryPoint) {
     intersectionShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      intersectionShaderEntryPoints[rayType] = std::string(entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      intersectionShaderEntryPoints[rayType] = std::string("__intersection__") + std::string(entryPoint);
-      binary = module->getBinary("INTERSECTION");
-    }
+    intersectionShaderEntryPoints[rayType] = std::string(entryPoint);      
+    binary = module->binary;
+    
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2227,15 +2176,9 @@ struct GeomType : public SBTEntry {
   void setVertex(int rasterType, Module *module, const char *entryPoint) {
     vertexShaderUsed[rasterType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      vertexShaderEntryPoints[rasterType] = std::string(entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      vertexShaderEntryPoints[rasterType] = std::string("__vertex__") + std::string(entryPoint);
-      binary = module->getBinary("VERTEX");
-    }
+    vertexShaderEntryPoints[rasterType] = std::string(entryPoint);      
+    binary = module->binary;
+    
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2254,15 +2197,9 @@ struct GeomType : public SBTEntry {
   void setPixel(int rasterType, Module *module, const char *entryPoint) {
     pixelShaderUsed[rasterType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    if (module->slang) {
-      pixelShaderEntryPoints[rasterType] = std::string(entryPoint);      
-      binary = module->getBinary("SLANG");
-    }
-    else
-    {
-      pixelShaderEntryPoints[rasterType] = std::string("__pixel__") + std::string(entryPoint);
-      binary = module->getBinary("PIXEL");
-    }
+    pixelShaderEntryPoints[rasterType] = std::string(entryPoint);      
+    binary = module->binary;
+    
     VkShaderModuleCreateInfo moduleCreateInfo{};
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
@@ -2276,25 +2213,6 @@ struct GeomType : public SBTEntry {
     pixelShaderStages[rasterType].module = shaderModule;
     pixelShaderStages[rasterType].pName = pixelShaderEntryPoints[rasterType].c_str();
     assert(pixelShaderStages[rasterType].module != VK_NULL_HANDLE);
-  }
-
-  void setClosestNeighbor(int rasterType, Module *module, const char *entryPoint) {
-    pixelShaderUsed[rasterType] = true;
-    pixelShaderEntryPoints[rasterType] = std::string("__closestneighbor__") + std::string(entryPoint);
-    auto binary = module->getBinary("CLOSESTNEIGHBOR");
-    VkShaderModuleCreateInfo moduleCreateInfo{};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
-
-    closestNeighborShaderStages[rasterType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    closestNeighborShaderStages[rasterType].stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
-    closestNeighborShaderStages[rasterType].module = shaderModule;
-    closestNeighborShaderStages[rasterType].pName = closestNeighborShaderEntryPoints[rasterType].c_str();
-    assert(closestNeighborShaderStages[rasterType].module != VK_NULL_HANDLE);
   }
 
   void setRasterAttachments(uint32_t rasterType, Texture *colorTexture, Texture *depthTexture) {
@@ -4190,7 +4108,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Count.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4222,7 +4140,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.CountReduce.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4254,7 +4172,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scan.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4286,7 +4204,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScanAdd.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4318,7 +4236,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scatter.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4350,7 +4268,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScatterPayload.entryPoint);
-      auto binary = module->getBinary("SLANG");
+      auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -9080,15 +8998,6 @@ gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mod
   Module *module = (Module *) _module;
 
   geomType->setPixel(rasterType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetClosestNeighborProg(GPRTGeomType _geomType, int rayType, GPRTModule _module, const char *progName) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Module *module = (Module *) _module;
-
-  geomType->setClosestNeighbor(rayType, module, progName);
 }
 
 GPRT_API void

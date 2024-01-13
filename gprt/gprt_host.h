@@ -120,7 +120,8 @@ template <typename T> using GPRTComputeOf = struct _GPRTComputeOf<T> *;
 template <typename T> using GPRTGeomOf = struct _GPRTGeomOf<T> *;
 template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
-using GPRTProgram = std::map<std::string, std::vector<uint8_t>>;
+// GPRTPrograms are just SPIR-V binaries under the hood
+using GPRTProgram = std::vector<uint8_t>;
 
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
@@ -1144,14 +1145,6 @@ template <typename T>
 void
 gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
   gprtGeomTypeSetClosestHitProg((GPRTGeomType) type, rayType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetClosestNeighborProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetClosestNeighborProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetClosestNeighborProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
 GPRT_API void gprtGeomTypeSetAnyHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
