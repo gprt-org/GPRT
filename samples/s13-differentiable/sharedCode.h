@@ -21,13 +21,20 @@
 // SOFTWARE.
 
 #include "gprt.h"
-#include "gprt_lbvh.h"
 
-/* variables available to all programs */
+struct TrianglesGeomData {
+  gprt::Buffer vertex;
+  gprt::Buffer index;
+};
+
+struct BoundingBoxData {
+  gprt::Buffer aabbs;
+};
+
 struct RayGenData {
-  gprt::Buffer frameBuffer;
-  gprt::Buffer accumBuffer;
-  LBVHData lbvh;
+  gprt::Buffer imageBuffer;
+  gprt::Accel triangleTLAS;
+  gprt::Accel obbAccel;
 };
 
 /* variables for the miss program */
@@ -36,16 +43,30 @@ struct MissProgData {
   float3 color1;
 };
 
-/* Constants that change each frame */
-struct PushConstants {
-  float iTime;
-  int iFrame;
-  float cuttingPlane;
-
-  struct {
+/* A small structure of constants that can change every frame without rebuilding the 
+  shader binding table. (must be 128 bytes or less) */
+struct RTPushConstants {
+  struct Camera {
     float3 pos;
     float3 dir_00;
     float3 dir_du;
     float3 dir_dv;
   } camera;
+};
+
+struct ComputeOBBConstants {
+  int numIndices;
+  gprt::Buffer vertices;
+  gprt::Buffer indices;
+  gprt::Buffer eulRots;
+  gprt::Buffer aabbs;
+  gprt::Buffer transforms;
+  int numTrisToInclude;
+};
+
+struct CompositeGuiConstants {
+  int2 fbSize;
+  gprt::Buffer imageBuffer;
+  gprt::Buffer frameBuffer;
+  gprt::Texture guiTexture;
 };

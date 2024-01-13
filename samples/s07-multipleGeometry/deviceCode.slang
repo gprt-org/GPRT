@@ -24,11 +24,12 @@
 
 [[vk::push_constant]] PushConstants pc;
 
-struct [raypayload] Payload {
-  float3 color : read(caller) : write(closesthit, miss);
+struct Payload {
+  float3 color;
 };
 
-GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
+[shader("raygeneration")]
+void raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -58,12 +59,8 @@ GPRT_RAYGEN_PROGRAM(raygen, (RayGenData, record)) {
   gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
 }
 
-struct TriangleAttributes {
-  float2 bc;
-};
-
-GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payload),
-                         (TriangleAttributes, attributes)) {
+[shader("closesthit")]
+void closesthit(uniform TrianglesGeomData record, inout Payload payload) {
   // compute normal:
   uint primID = PrimitiveIndex();
   int3 index = gprt::load<int3>(record.index, primID);
@@ -75,9 +72,10 @@ GPRT_CLOSEST_HIT_PROGRAM(closesthit, (TrianglesGeomData, record), (Payload, payl
   payload.color = (.2f + .8f * abs(dot(rayDir, Ng))) * record.color;
 }
 
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+[shader("miss")]
+void miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  float3 color = (pattern & 1) ? record.color1 : record.color0;
+  float3 color = bool(pattern & 1) ? record.color1 : record.color0;
   payload.color = color;
 }

@@ -27,3 +27,9 @@ struct RayGenData {
   float3 color1;
   gprt::Buffer frameBuffer;
 };
+
+struct PushConstants {
+  float3 color0;
+  float3 color1;
+  gprt::Buffer frameBuffer;
+};

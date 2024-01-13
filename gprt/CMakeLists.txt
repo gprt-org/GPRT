@@ -26,7 +26,7 @@ if (GPRT_BUILD_SHARED)
 endif()
 include(cmake/embed_devicecode.cmake)
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     gprtDeviceCode
   HEADERS
@@ -37,7 +37,17 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
 )
 
-embed_devicecode(
+embed_slang_devicecode(
+  OUTPUT_TARGET
+    gprtDeviceCodeSlang
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slang
+)
+
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
   HEADERS
@@ -46,7 +56,7 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.hlsl
 )
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     lbvhDeviceCode
   HEADERS
@@ -58,7 +68,7 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_lbvh.hlsl
 )
 
-embed_devicecode(
+embed_hlsl_devicecode(
   OUTPUT_TARGET
     nnDeviceCode
   HEADERS
@@ -112,6 +122,7 @@ set_target_properties(gprt
 target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
+    gprtDeviceCodeSlang
     gprtDeviceCode
     scanDeviceCode
     sortDeviceCode

@@ -24,13 +24,14 @@
 
 [[vk::push_constant]] PushConstants pc;
 
-struct [raypayload] Payload {
-  float3 color : read(caller) : write(closesthit, miss);
+struct Payload {
+  float3 color;
 };
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+[shader("raygeneration")] 
+void simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -40,7 +41,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
       normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
-  rayDesc.TMin = 0.0;
+  rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(world,                   // the tree
@@ -54,45 +55,41 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
 }
 
-struct Attribute {
-  float3 color;
-};
-
-// This intersection program will be called when rays hit our axis
-// aligned bounding boxes. Here, we can fetch per-geometry data and
-// process that data, but we do not have access to the ray payload
-// structure here.
-//
-// Instead, we pass data through a customizable Attributes structure
-// for further processing by closest hit / any hit programs.
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record)) {
-  Attribute attr;
-  attr.color = float3(1.f, 1.f, 1.f);
-  ReportHit(0.1f, /*hitKind*/ 0, attr);
+float3
+hsv2rgb(float3 input) {
+  float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
+  return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
 }
 
-// This closest hit program will be called when our intersection program
-// reports a hit between our ray and our custom primitives.
+// This closest hit program will be called when rays hit triangles.
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
-//
-// Note, since this is a custom AABB primitive, our intersection program
-// above defines what attributes are passed to our closest hit program.
-//
-// Also note, this program is also called after all ReportHit's have been
-// called and we can conclude which reported hit is closest.
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute)) {
-  payload.color = attribute.color;
+[shader("closesthit")] 
+void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+  // compute normal:
+  uint primID = PrimitiveIndex();
+  uint instanceID = InstanceIndex();
+  int3 index = gprt::load<int3>(record.index, primID);
+  float3 A = gprt::load<float3>(record.vertex, index.x);
+  float3 B = gprt::load<float3>(record.vertex, index.y);
+  float3 C = gprt::load<float3>(record.vertex, index.z);
+  float3 Ng = normalize(cross(B - A, C - A));
+  float3 rayDir = WorldRayDirection();
+
+  float3 color = hsv2rgb(float3(instanceID / 3.0, 1.0, 1.0));
+  payload.color = (.1f + .9f * abs(dot(rayDir, Ng))) * color;
 }
 
 // This miss program will be called when rays miss all primitives.
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
+[shader("miss")] 
+void miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = (pattern & 1) ? record.color1 : record.color0;
+  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
 }

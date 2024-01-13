@@ -22,11 +22,9 @@
 
 #include "sharedCode.h"
 
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+[shader("raygeneration")] 
+void simpleRayGen(uniform RayGenData record)
+{
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
 
@@ -38,7 +36,7 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   // alternate pattern, showing that pixel (0,0) is in the upper left corner
   // pattern = (pixelID.x*pixelID.x + pixelID.y*pixelID.y) / 100000;
-  const float3 color = (pattern & 1) ? record.color1 : record.color0;
+  const float3 color = bool(pattern & 1) ? record.color1 : record.color0;
 
   // find the frame buffer location (x + width*y) and put the result there
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;

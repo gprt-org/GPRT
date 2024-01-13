@@ -103,7 +103,7 @@ main(int ac, char **av) {
   LOG("executing the launch ...");
   do {
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, *data);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

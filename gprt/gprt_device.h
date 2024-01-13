@@ -92,15 +92,15 @@
 // to compute and raster programs.
 //
 // Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
-[[vk::binding(0, 0)]] SamplerState samplers[];
-[[vk::binding(0, 1)]] Texture1D texture1Ds[];
-[[vk::binding(0, 2)]] Texture2D texture2Ds[];
-[[vk::binding(0, 3)]] Texture3D texture3Ds[];
+[[vk::binding(0, 1)]] SamplerState samplers[];
+[[vk::binding(0, 2)]] Texture1D texture1Ds[];
+[[vk::binding(0, 3)]] Texture2D texture2Ds[];
+[[vk::binding(0, 4)]] Texture3D texture3Ds[];
 
 // globally coherent here causes memory barriers and syncs to flush data across
 // the entire GPU such that other groups can see writes. Without this specifier,
 // a memory barrier or sync will only flush a UAV within the current group.
-[[vk::binding(0, 4)]] globallycoherent RWByteAddressBuffer buffers[];
+[[vk::binding(0, 5)]] globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -142,12 +142,126 @@ float4 over(float4 a, float4 b) {
 //   uint64_t y;
 // };
 
+
+#ifdef __SLANG_COMPILER__
+
+T load<T>(in Buffer buffer, uint64_t index) {
+  return buffers[uint32_t(buffer.index)].Load<T>(uint32_t(index * sizeof(T)));
+}
+
+void store<T>(in Buffer buffer, uint64_t index, in T value) {
+  buffers[uint32_t(buffer.index)].Store<T>(uint32_t(index * sizeof(T)), value);
+}
+
+// [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
+
+RaytracingAccelerationStructure
+getAccelHandle(Accel accel) {
+  uint64_t address = accel.address;
+  return spirv_asm {
+    result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
+  };
+//   return getAccelHandle(accel.x);
+}
+
+RWByteAddressBuffer
+getBufferHandle(Buffer buffer) {
+  return buffers[int(buffer.address)];
+}
+
+Texture1D
+getTexture1DHandle(gprt::Texture texture) {
+  return texture1Ds[texture];
+}
+
+Texture2D
+getTexture2DHandle(gprt::Texture texture) {
+  return texture2Ds[texture];
+}
+
+Texture3D
+getTexture3DHandle(gprt::Texture texture) {
+  return texture3Ds[texture];
+}
+
+SamplerState
+getSamplerHandle(gprt::Sampler sampler) {
+  return samplers[sampler];
+}
+
+SamplerState
+getDefaultSampler() {
+  // We assume that there is a default sampler at address 0 here
+  return samplers[0];
+}
+
+no_diff float
+atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  while (value < asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old) break;
+  }
+  return asfloat(ret_i);
+}
+
+// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// and the currently stored max is non-zero
+[BackwardDerivativeOf(atomicMin32f)]
+void atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+}
+
+no_diff float
+atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  while (value > asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// and the currently stored max is non-zero
+[BackwardDerivativeOf(atomicMax32f)]
+void atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+}
+
+float
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+  uint old, newint;
+  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  do {
+    old = ret_i;
+    newint = asuint(asfloat(old) + value);
+    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+  } while (ret_i != old);
+
+  return asfloat(ret_i);
+}
+
+}
+
+#else
+
+// x stores pointer, y stores size.
+typedef uint64_t2 Buffer;
+typedef uint64_t2 Accel;
+typedef uint32_t Texture;
+typedef uint32_t Sampler;
+
 template <typename T>
 T
 load(in Buffer buffer) {
   return vk::RawBufferLoad<T>(buffer.x);
 }
-
 template <typename T>
 T
 load(in Buffer buffer, uint64_t index) {
@@ -382,9 +496,7 @@ where ARG is "(type_, name)". */
   [[vk::shader_record_ext]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName),                             \
                                                                             GPRT_RAW(TYPE_EXPAND RecordDecl));              \
                                                                                                                        \
-  [shader("raygeneration")] void __raygen__##progName() {                                                              \
-    progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl)));                                                         \
-  }                                                                                                                    \
+  [shader("raygeneration")] void __raygen__##progName() { progName(GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl))); } \
                                                                                                                        \
   /* now the actual device code that the user is writing: */                                                           \
   void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
@@ -517,7 +629,7 @@ namespace gprt {
 #ifndef GPRT_COMPUTE_PROGRAM
 #ifdef COMPUTE
 #define GPRT_COMPUTE_PROGRAM(progName, RecordDecl, NumThreads)                                                         \
-  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   void progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl, uint3 GroupThreadID, uint3 GroupID, uint3 DispatchThreadID,       \
@@ -575,7 +687,7 @@ Position() {
     float2 barycentrics : TEXCOORD0;                                                                                   \
   };                                                                                                                   \
                                                                                                                        \
-  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -603,7 +715,7 @@ Position() {
 #ifndef GPRT_PIXEL_PROGRAM
 #ifdef PIXEL
 #define GPRT_PIXEL_PROGRAM(progName, RecordDecl)                                                                       \
-  [[vk::binding(0, 5)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
+  [[vk::binding(0, 0)]] ConstantBuffer<GPRT_RAW(TYPE_EXPAND RecordDecl)> GPRT_CAT(GPRT_RAW(progName), GPRT_RAW(TYPE_EXPAND RecordDecl));   \
                                                                                                                        \
   /* fwd decl for the kernel func to call */                                                                           \
   float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl);                                                                \
@@ -626,4 +738,6 @@ Position() {
   /* Dont add entry point decorators, instead treat as just a function. */                                             \
   float4 progName(in GPRT_RAW(TYPE_NAME_EXPAND) RecordDecl) /* program args and body supplied by user ... */
 #endif
+#endif
+
 #endif

@@ -28,7 +28,7 @@ struct TrianglesGeomData {
   /*! array/buffer of vertex positions */
   gprt::Buffer vertex;
   /*! the number of triangles along a row */
-  unsigned int gridSize;
+  uint32_t gridSize;
 };
 
 struct RayGenData {
@@ -44,7 +44,7 @@ struct MissProgData {
 
 /* Constants that change each frame */
 struct PushConstants {
-  struct {
+  struct Camera {
     float3 pos;
     float3 dir_00;
     float3 dir_du;

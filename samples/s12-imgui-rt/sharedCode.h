@@ -22,36 +22,12 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-struct SphereBoundsData {
-  /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  gprt::Buffer aabbs;
-};
-
-struct SphereBoundsData2 {
-  /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  gprt::Buffer aabbs;
-};
-
-/* variables for the triangle mesh geometry */
-struct SphereGeomData {
-  /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
+struct TrianglesGeomData {
+  int tmp; // unused
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  gprt::Buffer imageBuffer;
   gprt::Accel world;
 };
 
@@ -61,8 +37,9 @@ struct MissProgData {
   float3 color1;
 };
 
-/* Constants that change each frame */
-struct PushConstants {
+/* A small structure of constants that can change every frame without rebuilding the 
+  shader binding table. (must be 128 bytes or less) */
+struct RTPushConstants {
   struct Camera {
     float3 pos;
     float3 dir_00;
@@ -71,6 +48,9 @@ struct PushConstants {
   } camera;
 };
 
-struct Attribute {
-  float4 posrad;
+struct CompositeGuiConstants {
+  int2 fbSize;
+  gprt::Buffer imageBuffer;
+  gprt::Buffer frameBuffer;
+  gprt::Texture guiTexture;
 };

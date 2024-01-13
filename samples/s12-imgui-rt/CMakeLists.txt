@@ -20,23 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_devicecode(
+embed_slang_devicecode(
   OUTPUT_TARGET
     s12_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s12_swBVH hostCode.cpp)
-target_link_libraries(s12_swBVH
+add_executable(s12_imgui_rt hostCode.cpp)
+target_link_libraries(s12_imgui_rt
   PRIVATE
     s12_deviceCode
     gprt::gprt
-    tiny_obj_loader
-)
-
-target_compile_definitions(s12_swBVH
-  PRIVATE ASSETS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../3rdParty/GPRT-SampleAssets/"
 )
