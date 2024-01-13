@@ -21,6 +21,8 @@
 // SOFTWARE.
 #pragma once
 
+#error "This file needs refactoring to use slang"
+
 #include "gprt.h"
 
 struct LBVHData {

@@ -39,6 +39,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+#pragma once
 
 #include "gprt.h"
 
@@ -57,7 +58,9 @@ typedef gprt::ScanRecord ScanRecord;
 #define VECTOR_MASK         3
 #define VECTOR_LOG          2
 
+#ifndef SCAN_PARTITON_SIZE 
 #define SCAN_PARTITON_SIZE 8192
+#endif
 
 #define FLAG_NOT_READY  0
 #define FLAG_AGGREGATE  1
@@ -91,8 +94,7 @@ uint getReverseAddr(int i, int size, int exclusiveSum) {
   return (size - 1) - (i - exclusiveSum);
 }
 
-template <unsigned int LANE_COUNT>
-void Scan(uint3 GroupThreadID, uint3 GroupID) {
+void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
 
@@ -104,7 +106,7 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
   partitionIndex = WaveReadLaneAt(g_sharedMem[0].x, 0);
   GroupMemoryBarrierWithGroupSync();
 
-  int select = (pc.flags & SCAN_SELECT_POSITIVE) ? 0 : 1;
+  int select = ((pc.flags & SCAN_SELECT_POSITIVE) != 0) ? 0 : 1;
 
   bool partitioning = ((pc.flags & SCAN_PARTITION) > 0);
   bool selecting = ((pc.flags & SCAN_SELECT) > 0);
@@ -112,12 +114,12 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
   int4 sg0Val = int4(0,0,0,0), sg1Val = int4(0,0,0,0), sg2Val = int4(0,0,0,0), sg3Val = int4(0,0,0,0);
 
   // four warp-sized-radix ranking reduce scans
-  const int partSize = partitionIndex == PARTITIONS ? (pc.size >> VECTOR_LOG) + (pc.size & VECTOR_MASK ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
+  const int partSize = (partitionIndex == PARTITIONS) ? (pc.size >> VECTOR_LOG) + (((pc.size & VECTOR_MASK) != 0) ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
   // printf("PartSize %d\n", partSize);
   int i = LANE + WAVE_PART_START;
   if (i < partSize)
   {
-    sg0Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    sg0Val = gprt::load<int4>(pc.input, i + PARTITION_START);
     if (partitioning || selecting) g_sharedMem[i] = (sg0Val >> 31) == select;
     else g_sharedMem[i] = sg0Val;
     
@@ -138,7 +140,7 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg1Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    sg1Val = gprt::load<int4>(pc.input, i + PARTITION_START);
     if (partitioning || selecting) g_sharedMem[i] = (sg1Val >> 31) == select;
     else g_sharedMem[i] = sg1Val;
     
@@ -159,7 +161,7 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg2Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    sg2Val = gprt::load<int4>(pc.input, i + PARTITION_START);
     if (partitioning || selecting) g_sharedMem[i] = (sg2Val >> 31) == select;
     else g_sharedMem[i] = sg2Val;
     
@@ -180,7 +182,7 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg3Val = gprt::atomicLoad<int4>(pc.input, i + PARTITION_START);
+    sg3Val = gprt::load<int4>(pc.input, i + PARTITION_START);
     if (partitioning || selecting) g_sharedMem[i] = (sg3Val >> 31) == select;
     else g_sharedMem[i] = sg3Val;
     
@@ -214,13 +216,13 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
 
   // Decoupled lookback
   uint aggregate = 0;
-  if (partitionIndex)
+  if (partitionIndex != 0)
   {
     if (WAVE_INDEX == 0)
     {
       for (int k = partitionIndex - LANE - 1; 0 <= k;)
       {
-        uint flagPayload = gprt::atomicLoad<uint>(pc.state, STATE_START + k);
+        uint flagPayload = gprt::load<uint>(pc.state, STATE_START + k);
         const int inclusiveIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE ? LANE_COUNT : 0));
         const int gapIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_NOT_READY ? LANE_COUNT : 0));
         if (inclusiveIndex < gapIndex)
@@ -251,7 +253,7 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
     GroupMemoryBarrierWithGroupSync();
         
     // Propogate aggregate values
-    if (WAVE_INDEX || LANE)
+    if ((WAVE_INDEX != 0) || (LANE != 0))
       aggregate = WaveReadLaneAt(g_sharedMem[PART_VEC_MASK].x, 1);
   }
 
@@ -363,8 +365,9 @@ void Scan(uint3 GroupThreadID, uint3 GroupID) {
     }
   }
 }
-
-GPRT_COMPUTE_PROGRAM(InitScan, (ScanRecord, record), (1,1,1)) {
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID) {
   uint3 id = DispatchThreadID;
   if (id.x == 0) gprt::store<uint2>(pc.state, 0, int2(0,0));
   gprt::store<uint>(pc.state, STATE_START + id.x, FLAG_NOT_READY);
@@ -376,11 +379,15 @@ GPRT_COMPUTE_PROGRAM(InitScan, (ScanRecord, record), (1,1,1)) {
 // Therefore, we need SCAN_PARTITION_SIZE / LANE_COUNT * 16 threads for our Y group dimension
 
 // for 32 lane count GPUs
-GPRT_COMPUTE_PROGRAM(Scan_32, (ScanRecord, record), (32, (SCAN_PARTITON_SIZE / (16 * 32)), 1)) {
+[shader("compute")]
+[numthreads(32, (SCAN_PARTITON_SIZE / (16 * 32)), 1)]
+void Scan_32(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID) {
   Scan<32>(GroupThreadID, GroupID);
 }
 
 // For 64 lane count GPUs
-GPRT_COMPUTE_PROGRAM(Scan_64, (ScanRecord, record), (64, (SCAN_PARTITON_SIZE / (16 * 64)), 1)) {
+[shader("compute")]
+[numthreads(64, (SCAN_PARTITON_SIZE / (16 * 64)), 1)]
+void Scan_64(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID) {
   Scan<64>(GroupThreadID, GroupID);
 }

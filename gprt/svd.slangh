@@ -212,16 +212,16 @@ float3x3 cholesky_decomp(float3x3 A)
     float3x3 L = float3x3(0,0,0,0,0,0,0,0,0);
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j <= i; ++j) {
-            int sum = 0;
+            float sum = 0;
             if (j == i) // summation for diagonals
             {
                 for (int k = 0; k < j; k++)
-                    sum += pow(L[j][k], 2);
+                    sum += L[j][k] * L[j][k];
                 L[j][j] = sqrt(A[j][j] - sum);
             } else {
                 // Evaluating L(i, j) using L(j, j)
                 for (int k = 0; k < j; k++)
-                    sum += (L[i][k] * L[j][k]);
+                    sum += L[i][k] * L[j][k];
                 L[i][j] = (A[i][j] - sum) / L[j][j];
             }
         }

@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_slang_devicecode(
+embed_devicecode(
   OUTPUT_TARGET
     s11_deviceCode
   HEADERS

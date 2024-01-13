@@ -227,15 +227,15 @@ float2 getTriangleDist2( float3 p, float3 a, float3 b, float3 c )
   return sqrt(float2(minDist, maxDist));
 }
 
-#ifdef GPRT_DEVICE
+#ifdef __SLANG_COMPILER__
 
 // Payload for nearest neighbor queries
-struct [raypayload] NNPayload {
-  float closestDistance : read(anyhit, caller) : write(anyhit, caller);
-  int closestPrimitive : read(anyhit, caller) : write(anyhit, caller);
+struct NNPayload {
+  float closestDistance;
+  int closestPrimitive;
   #ifdef COLLECT_STATS
-  int primsHit : read(anyhit, caller) : write(anyhit, caller);
-  int lHit[MAX_LEVELS] : read(anyhit, caller) : write(anyhit, caller);
+  int primsHit;
+  int lHit[MAX_LEVELS];
   #endif
 };
 
@@ -250,11 +250,11 @@ typedef uint32_t halfmask_t;
 do {                                                                    \
       /* rotation = (rotation + 1 + ffs(bits)) % nDims; */              \
       bits &= -bits & nd1Ones;                                          \
-      while (bits)                                                      \
+      while (bits != 0)                                                 \
         bits >>= 1, ++rotation;                                         \
-      if ( ++rotation >= nDims )                                        \
+      if ( (++rotation) >= nDims )                                      \
         rotation -= nDims;                                              \
-} while (0)
+} while (false)
 
 #define ones(T,k) ((((T)2) << (k-1)) - 1)
 
@@ -269,51 +269,49 @@ do {                                                                    \
 inline bitmask_t
 bitTranspose(uint32_t nDims, uint32_t nBits, bitmask_t inCoords)
 {
-  uint32_t const nDims1 = nDims-1;
+  uint32_t nDims1 = nDims - 1;
   uint32_t inB = nBits;
   uint32_t utB;
   bitmask_t inFieldEnds = 1;
   bitmask_t inMask = ones(bitmask_t,inB);
   bitmask_t coords = 0;
 
-  while ((utB = inB / 2))
+  while ((utB = inB / 2) != 0)
+  {
+    uint32_t shiftAmt = nDims1 * utB;
+    bitmask_t utFieldEnds = inFieldEnds | (inFieldEnds << (shiftAmt+utB));
+    bitmask_t utMask = (utFieldEnds << utB) - utFieldEnds;
+    bitmask_t utCoords = 0;
+    uint32_t d;
+    if ((inB & 1) != 0)
     {
-      uint32_t const shiftAmt = nDims1 * utB;
-      bitmask_t const utFieldEnds =
-	inFieldEnds | (inFieldEnds << (shiftAmt+utB));
-      bitmask_t const utMask =
-	(utFieldEnds << utB) - utFieldEnds;
-      bitmask_t utCoords = 0;
-      uint32_t d;
-      if (inB & 1)
-	{
-	  bitmask_t const inFieldStarts = inFieldEnds << (inB-1);
-	  uint32_t oddShift = 2*shiftAmt;
-	  for (d = 0; d < nDims; ++d)
-	    {
-	      bitmask_t temp = inCoords & inMask;
-	      inCoords >>= inB;
-	      coords |= (temp & inFieldStarts) <<	oddShift++;
-	      temp &= ~inFieldStarts;
-	      temp = (temp | (temp << shiftAmt)) & utMask;
-	      utCoords |= temp << (d*utB);
-	    }
-	}
-      else
-	{
-	  for (d = 0; d < nDims; ++d)
-	    {
-	      bitmask_t temp = inCoords & inMask;
-	      inCoords >>= inB;
-	      temp = (temp | (temp << shiftAmt)) & utMask;
-	      utCoords |= temp << (d*utB);
-	    }
-	}
-      inCoords = utCoords;
-      inB = utB;
-      inFieldEnds = utFieldEnds;
-      inMask = utMask;
+      bitmask_t inFieldStarts = inFieldEnds << (inB-1);
+      uint32_t oddShift = 2*shiftAmt;
+      for (d = 0; d < nDims; ++d)
+        {
+          bitmask_t temp = inCoords & inMask;
+          inCoords >>= inB;
+          coords |= (temp & inFieldStarts) <<	oddShift++;
+          temp &= ~inFieldStarts;
+          temp = (temp | (temp << shiftAmt)) & utMask;
+          utCoords |= temp << (d*utB);
+        }
     }
+    else
+    {
+      for (d = 0; d < nDims; ++d)
+        {
+          bitmask_t temp = inCoords & inMask;
+          inCoords >>= inB;
+          temp = (temp | (temp << shiftAmt)) & utMask;
+          utCoords |= temp << (d*utB);
+        }
+    }
+    inCoords = utCoords;
+    inB = utB;
+    inFieldEnds = utFieldEnds;
+    inMask = utMask;
+  }
   coords |= inCoords;
   return coords;
 }
@@ -330,12 +328,12 @@ bitTranspose(uint32_t nDims, uint32_t nBits, bitmask_t inCoords)
  * Assumptions:
  *      nDims*nBits <= (sizeof bitmask_t) * (bits_per_byte)
  */
-// inline bitmask_t hilbert_c2i(uint32_t nBits, bitmask_t const coord[3])
+// inline bitmask_t hilbert_c2i(uint32_t nBits, bitmask_t coord[3])
 // {
 //   int nDims = 3;
 //   if (nDims > 1)
 //     {
-//       uint32_t const nDimsBits = nDims*nBits;
+//       uint32_t nDimsBits = nDims*nBits;
 //       bitmask_t index;
 //       uint32_t d;
 //       bitmask_t coords = 0;
@@ -347,12 +345,12 @@ bitTranspose(uint32_t nDims, uint32_t nBits, bitmask_t inCoords)
 
 //       if (nBits > 1)
 // 	{
-// 	  halfmask_t const ndOnes = ones(halfmask_t,nDims);
-// 	  halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+// 	  halfmask_t ndOnes = ones(halfmask_t,nDims);
+// 	  halfmask_t nd1Ones= ndOnes >> 1; /* for adjust_rotation */
 // 	  uint32_t b = nDimsBits;
 // 	  uint32_t rotation = 0;
 // 	  halfmask_t flipBit = 0;
-// 	  bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+// 	  bitmask_t nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
 // 	  coords = bitTranspose(nDims, nBits, coords);
 // 	  coords ^= coords >> nDims;
 // 	  index = 0;
@@ -377,27 +375,27 @@ bitTranspose(uint32_t nDims, uint32_t nBits, bitmask_t inCoords)
 //     return coord[0];
 // }
 
-inline bitmask_t hilbert_c2i_3d(uint nBits, bitmask_t const coord[3])
+inline bitmask_t hilbert_c2i_3d(uint nBits, bitmask_t coord[3])
 {
   int nDims = 3;
   
-  uint const nDimsBits = nDims*nBits;
+  uint nDimsBits = nDims*nBits;
   bitmask_t index;
   uint d;
   bitmask_t coords = 0;
-  for (d = nDims; d--; )
+  for (d = nDims; d > 0; d--)
   {
     coords <<= nBits;
     coords |= coord[d];
   }
   if (nBits > 1)
   {
-    halfmask_t const ndOnes = ones(halfmask_t,nDims);
-    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    halfmask_t ndOnes = ones(halfmask_t,nDims);
+    halfmask_t nd1Ones= ndOnes >> 1; /* for adjust_rotation */
     uint b = nDimsBits;
     uint rotation = 0;
     halfmask_t flipBit = 0;
-    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    bitmask_t nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
     coords = bitTranspose(nDims, nBits, coords);
     coords ^= coords >> nDims;
     index = 0;
@@ -408,7 +406,7 @@ inline bitmask_t hilbert_c2i_3d(uint nBits, bitmask_t const coord[3])
         index |= bits;
         flipBit = (halfmask_t)1 << rotation;
         adjust_rotation(rotation,nDims,bits);
-    } while (b);
+    } while (b != 0);
     index ^= nthbits >> 1;
   }
   else
@@ -418,27 +416,27 @@ inline bitmask_t hilbert_c2i_3d(uint nBits, bitmask_t const coord[3])
   return index;
 }
 
-inline bitmask_t hilbert_c2i_4d(uint nBits, bitmask_t const coord[4])
+inline bitmask_t hilbert_c2i_4d(uint nBits, bitmask_t coord[4])
 {
   int nDims = 4;
   
-  uint const nDimsBits = nDims*nBits;
+  uint nDimsBits = nDims*nBits;
   bitmask_t index;
   uint d;
   bitmask_t coords = 0;
-  for (d = nDims; d--; )
+  for (d = nDims; d > 0; d--)
   {
     coords <<= nBits;
     coords |= coord[d];
   }
   if (nBits > 1)
   {
-    halfmask_t const ndOnes = ones(halfmask_t,nDims);
-    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    halfmask_t ndOnes = ones(halfmask_t,nDims);
+    halfmask_t nd1Ones= ndOnes >> 1; /* for adjust_rotation */
     uint b = nDimsBits;
     uint rotation = 0;
     halfmask_t flipBit = 0;
-    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    bitmask_t nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
     coords = bitTranspose(nDims, nBits, coords);
     coords ^= coords >> nDims;
     index = 0;
@@ -449,7 +447,7 @@ inline bitmask_t hilbert_c2i_4d(uint nBits, bitmask_t const coord[4])
         index |= bits;
         flipBit = (halfmask_t)1 << rotation;
         adjust_rotation(rotation,nDims,bits);
-    } while (b);
+    } while (b != 0);
     index ^= nthbits >> 1;
   }
   else
@@ -464,17 +462,17 @@ inline void hilbert_i2c_3d(uint nBits, bitmask_t index, out bitmask_t coord[3])
   uint nDims = 3;
   
   bitmask_t coords;
-  halfmask_t const nbOnes = ones(halfmask_t,nBits);
+  halfmask_t nbOnes = ones(halfmask_t,nBits);
   uint d;
 
   if (nBits > 1) {
-    uint const nDimsBits = nDims*nBits;
-    halfmask_t const ndOnes = ones(halfmask_t,nDims);
-    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    uint nDimsBits = nDims*nBits;
+    halfmask_t ndOnes = ones(halfmask_t,nDims);
+    halfmask_t nd1Ones= ndOnes >> 1; /* for adjust_rotation */
     uint b = nDimsBits;
     uint rotation = 0;
     halfmask_t flipBit = 0;
-    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    bitmask_t nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
     index ^= (index ^ nthbits) >> 1;
     coords = 0;
     do
@@ -484,7 +482,7 @@ inline void hilbert_i2c_3d(uint nBits, bitmask_t index, out bitmask_t coord[3])
         coords |= rotateLeft(bits, rotation, nDims) ^ flipBit;
         flipBit = (halfmask_t)1 << rotation;
         adjust_rotation(rotation,nDims,bits);
-      } while (b);
+      } while (b != 0);
     for (b = nDims; b < nDimsBits; b *= 2)
       coords ^= coords >> b;
     coords = bitTranspose(nBits, nDims, coords);
@@ -503,17 +501,17 @@ inline void hilbert_i2c_4d(uint nBits, bitmask_t index, out bitmask_t coord[4])
   uint nDims = 4;
   
   bitmask_t coords;
-  halfmask_t const nbOnes = ones(halfmask_t,nBits);
+  halfmask_t nbOnes = ones(halfmask_t,nBits);
   uint d;
 
   if (nBits > 1) {
-    uint const nDimsBits = nDims*nBits;
-    halfmask_t const ndOnes = ones(halfmask_t,nDims);
-    halfmask_t const nd1Ones= ndOnes >> 1; /* for adjust_rotation */
+    uint nDimsBits = nDims*nBits;
+    halfmask_t ndOnes = ones(halfmask_t,nDims);
+    halfmask_t nd1Ones= ndOnes >> 1; /* for adjust_rotation */
     uint b = nDimsBits;
     uint rotation = 0;
     halfmask_t flipBit = 0;
-    bitmask_t const nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
+    bitmask_t nthbits = ones(bitmask_t,nDimsBits) / ndOnes;
     index ^= (index ^ nthbits) >> 1;
     coords = 0;
     do
@@ -523,7 +521,7 @@ inline void hilbert_i2c_4d(uint nBits, bitmask_t index, out bitmask_t coord[4])
         coords |= rotateLeft(bits, rotation, nDims) ^ flipBit;
         flipBit = (halfmask_t)1 << rotation;
         adjust_rotation(rotation,nDims,bits);
-      } while (b);
+      } while (b != 0);
     for (b = nDims; b < nDimsBits; b *= 2)
       coords ^= coords >> b;
     coords = bitTranspose(nBits, nDims, coords);
@@ -645,23 +643,23 @@ uint compact_bits(uint n)
 
 uint64_t separate_bits_64(uint64_t n)
 {
-    n &=                  0x00000000003FFFFF;//0b0000000000000000000000000000000000000000001111111111111111111111ull;
-    n = (n ^ (n << 32)) & 0xFFFF00000000FFFF;//0b1111111111111111000000000000000000000000000000001111111111111111ull;
-    n = (n ^ (n << 16)) & 0x00FF0000FF0000FF;//0b0000000011111111000000000000000011111111000000000000000011111111ull;
-    n = (n ^ (n <<  8)) & 0xF00F00F00F00F00F;//0b1111000000001111000000001111000000001111000000001111000000001111ull;
-    n = (n ^ (n <<  4)) & 0x30C30C30C30C30C3;//0b0011000011000011000011000011000011000011000011000011000011000011ull;
-    n = (n ^ (n <<  2)) & 0x9249249249249249;//0b1001001001001001001001001001001001001001001001001001001001001001ull;
+    n &=                  0x00000000003FFFFFULL;//0b0000000000000000000000000000000000000000001111111111111111111111ull;
+    n = (n ^ (n << 32)) & 0xFFFF00000000FFFFULL;//0b1111111111111111000000000000000000000000000000001111111111111111ull;
+    n = (n ^ (n << 16)) & 0x00FF0000FF0000FFULL;//0b0000000011111111000000000000000011111111000000000000000011111111ull;
+    n = (n ^ (n <<  8)) & 0xF00F00F00F00F00FULL;//0b1111000000001111000000001111000000001111000000001111000000001111ull;
+    n = (n ^ (n <<  4)) & 0x30C30C30C30C30C3ULL;//0b0011000011000011000011000011000011000011000011000011000011000011ull;
+    n = (n ^ (n <<  2)) & 0x9249249249249249ULL;//0b1001001001001001001001001001001001001001001001001001001001001001ull;
     return n;
 };
 
 uint64_t compact_bits_64(uint64_t n)
 {
-  n &=                  0x9249249249249249; // 0b1001001001001001001001001001001001001001001001001001001001001001ull;
-  n = (n ^ (n >>  2)) & 0x30C30C30C30C30C3; // 0b0011000011000011000011000011000011000011000011000011000011000011ull;
-  n = (n ^ (n >>  4)) & 0xF00F00F00F00F00F; // 0b1111000000001111000000001111000000001111000000001111000000001111ull;
-  n = (n ^ (n >>  8)) & 0x00FF0000FF0000FF; // 0b0000000011111111000000000000000011111111000000000000000011111111ull;
-  n = (n ^ (n >> 16)) & 0xFFFF00000000FFFF; // 0b1111111111111111000000000000000000000000000000001111111111111111ull;
-  n = (n ^ (n >> 32)) & 0x00000000003FFFFF; // 0b0000000000000000000000000000000000000000001111111111111111111111ull;
+  n &=                  0x9249249249249249ULL; // 0b1001001001001001001001001001001001001001001001001001001001001001ull;
+  n = (n ^ (n >>  2)) & 0x30C30C30C30C30C3ULL; // 0b0011000011000011000011000011000011000011000011000011000011000011ull;
+  n = (n ^ (n >>  4)) & 0xF00F00F00F00F00FULL; // 0b1111000000001111000000001111000000001111000000001111000000001111ull;
+  n = (n ^ (n >>  8)) & 0x00FF0000FF0000FFULL; // 0b0000000011111111000000000000000011111111000000000000000011111111ull;
+  n = (n ^ (n >> 16)) & 0xFFFF00000000FFFFULL; // 0b1111111111111111000000000000000000000000000000001111111111111111ull;
+  n = (n ^ (n >> 32)) & 0x00000000003FFFFFULL; // 0b0000000000000000000000000000000000000000001111111111111111111111ull;
   return n;
 };
 
@@ -670,7 +668,7 @@ inline uint morton_encode3D(float x, float y, float z)
   x = x * (float)(1ul << 10);
   y = y * (float)(1ul << 10);
   z = z * (float)(1ul << 10);
-  return separate_bits(x) | (separate_bits(y) << 1) | (separate_bits(z) << 2); 
+  return separate_bits(uint(x)) | (separate_bits(uint(y)) << 1) | (separate_bits(uint(z)) << 2); 
 }
 
 inline uint morton_encode4D(float x, float y, float z, float w)
@@ -679,7 +677,7 @@ inline uint morton_encode4D(float x, float y, float z, float w)
   y = y * (float)(1ul << 8);
   z = z * (float)(1ul << 8);
   w = w * (float)(1ul << 8);
-  return separate_bits(x) | (separate_bits(y) << 1) | (separate_bits(z) << 2) | separate_bits(w) << 3; 
+  return separate_bits(uint(x)) | (separate_bits(uint32_t(y)) << 1) | (separate_bits(uint32_t(z)) << 2) | separate_bits(uint32_t(w)) << 3; 
 }
 
 inline float3 morton_decode3D(uint32_t index)
@@ -715,7 +713,7 @@ inline uint64_t morton64_encode3D(float x, float y, float z)
   x = x * (float)(1ull << 20);
   y = y * (float)(1ull << 20);
   z = z * (float)(1ull << 20);
-  return separate_bits_64(x) | (separate_bits_64(y) << 1) | (separate_bits_64(z) << 2); 
+  return separate_bits_64(uint64_t(x)) | (separate_bits_64(uint64_t(y)) << 1) | (separate_bits_64(uint64_t(z)) << 2); 
 }
 
 inline float3 morton64_decode3D(uint64_t index)
@@ -736,7 +734,7 @@ inline uint64_t morton64_encode4D(float x, float y, float z, float w)
   y = y * (float)(1ull << 16);
   z = z * (float)(1ull << 16);
   w = w * (float)(1ull << 16);
-  return separate_bits_64(x) | (separate_bits_64(y) << 1) | (separate_bits_64(z) << 2) | (separate_bits_64(w) << 3); 
+  return separate_bits_64(uint64_t(x)) | (separate_bits_64(uint64_t(y)) << 1) | (separate_bits_64(uint64_t(z)) << 2) | (separate_bits_64(uint64_t(w)) << 3); 
 }
 
 inline float4 morton64_decode4D(uint64_t index)
@@ -866,7 +864,7 @@ float4 mat3_to_quat(float3x3 mat)
   
   if (mat[2][2] < 0.0f) {
     if (mat[0][0] > mat[1][1]) {
-      const float trace = 1.0f + mat[0][0] - mat[1][1] - mat[2][2];
+     float trace = 1.0f + mat[0][0] - mat[1][1] - mat[2][2];
       float s = 2.0f * sqrt(trace);
       if (mat[2][1] < mat[1][2]) {
         /* Ensure W is non-negative for a canonical result. */
@@ -883,7 +881,7 @@ float4 mat3_to_quat(float3x3 mat)
       }
     }
     else {
-      const float trace = 1.0f - mat[0][0] + mat[1][1] - mat[2][2];
+     float trace = 1.0f - mat[0][0] + mat[1][1] - mat[2][2];
       float s = 2.0f * sqrt(trace);
       if (mat[0][2] < mat[2][0]) {
         /* Ensure W is non-negative for a canonical result. */
@@ -902,7 +900,7 @@ float4 mat3_to_quat(float3x3 mat)
   }
   else {
     if (mat[0][0] < -mat[1][1]) {
-      const float trace = 1.0f - mat[0][0] - mat[1][1] + mat[2][2];
+     float trace = 1.0f - mat[0][0] - mat[1][1] + mat[2][2];
       float s = 2.0f * sqrt(trace);
       if (mat[1][0] < mat[0][1]) {
         /* Ensure W is non-negative for a canonical result. */
@@ -921,7 +919,7 @@ float4 mat3_to_quat(float3x3 mat)
     else {
       /* NOTE(@campbellbarton): A zero matrix will fall through to this block,
        * needed so a zero scaled matrices to return a quaternion without rotation, see: T101848. */
-      const float trace = 1.0f + mat[0][0] + mat[1][1] + mat[2][2];
+     float trace = 1.0f + mat[0][0] + mat[1][1] + mat[2][2];
       float s = 2.0f * sqrt(trace);
       q[0] = 0.25f * s;
       s = 1.0f / s;
@@ -1016,12 +1014,15 @@ struct StackItem {
 
 struct Stack {
   StackItem items[BRANCHING_FACTOR];
+
+  [mutating]
   void clear() {
     for (int i = 0; i < BRANCHING_FACTOR; ++i) {
       items[i] = StackItem::Create();
     }
   };
 
+  [mutating]
   void insert(StackItem newItem) {
     if (items[0].value() > newItem.value()) {
       items[0] = newItem;
@@ -1069,7 +1070,7 @@ int getPrimsInNode(
 ) {
   int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
   // Theoretical maximum primitives in a node at this level
-  int maxPrimsInLevel = pow(BRANCHING_FACTOR, level + 1);
+  int maxPrimsInLevel = int(pow(BRANCHING_FACTOR, level + 1));
   // Account for when primitive counts don't exactly match a multiple of the branching factor
   return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
 }
@@ -1445,9 +1446,9 @@ void TraceNN(
   payload.closestPrimitive = -1;
   payload.closestDistance = tMax;
   #ifdef COLLECT_STATS
-  payload.primsHit = stats.primsHit;
+  payload.primsHit = int(stats.primsHit);
   for (int i = 0; i < MAX_LEVELS; ++i) {
-    payload.lHit[i] = stats.lHit[i];
+    payload.lHit[i] = int(stats.lHit[i]);
   }
   #endif
 

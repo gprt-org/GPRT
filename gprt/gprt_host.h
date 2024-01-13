@@ -120,7 +120,8 @@ template <typename T> using GPRTComputeOf = struct _GPRTComputeOf<T> *;
 template <typename T> using GPRTGeomOf = struct _GPRTGeomOf<T> *;
 template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
-using GPRTProgram = std::map<std::string, std::vector<uint8_t>>;
+// GPRTPrograms are just SPIR-V binaries under the hood
+using GPRTProgram = std::vector<uint8_t>;
 
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
@@ -1272,14 +1273,6 @@ gprtGeomTypeSetClosestHitProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule mo
   gprtGeomTypeSetClosestHitProg((GPRTGeomType) type, rayType, module, entrypoint);
 }
 
-GPRT_API void gprtGeomTypeSetClosestNeighborProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetClosestNeighborProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetClosestNeighborProg((GPRTGeomType) type, rayType, module, entrypoint);
-}
-
 GPRT_API void gprtGeomTypeSetAnyHitProg(GPRTGeomType type, int rayType, GPRTModule module, const char *entrypoint);
 
 template <typename T>
@@ -1539,39 +1532,157 @@ gprtTextureDestroy(GPRTTextureOf<T> texture) {
   gprtTextureDestroy((GPRTTexture) texture);
 }
 
-/*! Creates a buffer that uses memory located on the host; that memory is
-accessible to all devices, but is slower to access on device.  */
-GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
-                                         const void *init GPRT_IF_CPP(= nullptr));
+/**
+ * @brief Creates a buffer using host memory.
+ * 
+ * This function creates a buffer that utilizes memory located on the host, and that is accessible to all devices. 
+ * The buffer created by this function is optimized for high-speed access from the host. 
+ * It is suitable for operations where the buffer is primarily accessed and manipulated by 
+ * the CPU.
+ * 
+ * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged), 
+ * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back 
+ * into RAM before the GPU can access it. Reads and writes from the GPU are done using the system's
+ * Direct Memory Access (DMA) controller. 
+ * 
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param size      The size of each element in the buffer.
+ * @param count     The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @return GPRTBuffer Returns a handle to the created buffer that resides in host memory.
+ */
+GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count = 1, const void *init = nullptr, size_t alignment = 16);
 
+/**
+ * @brief Creates a typed buffer using host memory.
+ * 
+ * This templated function creates a buffer of type T that allows for stricter type safety. Like the non-templated
+ * version, the created buffer is accessible to all devices and is pre-mapped to the host, but 
+ * with slower access speeds on devices compared to the host.
+ * 
+ * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged), 
+ * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back 
+ * into RAM before the GPU can access it. Reads and writes from the GPU are done using the system's
+ * Direct Memory Access (DMA) controller. 
+ * 
+ * @tparam T        The data type of elements in the buffer.
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param count     The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @return GPRTBufferOf<T> Returns a handle to the created buffer that resides in host memory
+ *                         and is typed according to the specified template parameter T.
+ */
 template <typename T>
 GPRTBufferOf<T>
-gprtHostBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTBufferOf<T>) gprtHostBufferCreate(context, sizeof(T), count, init);
+gprtHostBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16) {
+  return (GPRTBufferOf<T>) gprtHostBufferCreate(context, sizeof(T), count, init, alignment);
 }
 
-/*! Creates a buffer that uses memory located on the device; that memory is
-accessible only to the device, and requires mapping and unmapping to access
-on the host. */
-GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
-                                           const void *init GPRT_IF_CPP(= nullptr));
+/**
+ * @brief Creates a buffer using device memory.
+ * 
+ * This function creates a buffer that utilizes memory located on the device (GPU). 
+ * The buffer created by this function is optimized for high-speed access from the device. 
+ * It is suitable for operations where the buffer is primarily accessed and manipulated by 
+ * the GPU. Reading from and writing to the buffer from the host requires mapping, which triggers 
+ * an underlying buffer copy to and from the host system.
+ * 
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param size      The size of each element in the buffer.
+ * @param count     The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @return GPRTBuffer Returns a handle to the created buffer that resides in device memory.
+ */
+GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count = 1,
+                                           const void *init = nullptr, size_t alignment = 16);
 
+/**
+ * @brief Creates a typed buffer using device memory.
+ * 
+ * This templated function creates a buffer of type T that utilizes memory located on the device (GPU).
+ * It allows for the buffer to be easily used with specific data types. Like the non-templated
+ * version, this buffer is optimized for high-speed GPU access, making it well-suited for operations
+ * where the buffer is primarily accessed and manipulated by the device. Reading from and writing to the 
+ * buffer from the host requires mapping, which triggers an underlying buffer copy to and from the host system.
+ * 
+ * @tparam T        The data type of elements in the buffer.
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param count     The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @return GPRTBufferOf<T> Returns a handle to the created buffer that resides in device memory
+ *                         and is typed according to the specified template parameter T.
+ */
 template <typename T>
 GPRTBufferOf<T>
-gprtDeviceBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init);
+gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16) {
+  return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init, alignment);
 }
 
-/*! Creates a buffer that uses memory located on the device; that memory is
-accessible to all devices, but is slower to access on the host, and is typically
-limited in size depending on resizable BAR availability. */
-GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count GPRT_IF_CPP(= 1),
-                                           const void *init GPRT_IF_CPP(= nullptr));
+/**
+ * @brief Creates a shared buffer using device memory accessible to all devices.
+ * 
+ * This function creates a buffer in the device memory, accessible by both the host and other 
+ * devices. Access from the host might be slower compared to direct device access. The buffer's 
+ * size may be influenced by resizable BAR, allowing the CPU to access more of the device's memory.
+ * 
+ * @note In the PCI configuration space, BARs are used to 
+ * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device. 
+ * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the 
+ * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this 
+ * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to 
+ * access more of the device's memory directly.
+ * 
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param size      The size of each element in the buffer.
+ * @param count     The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @return GPRTBuffer Returns a handle to the created buffer that uses shared device memory.
+ */
+GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count = 1,
+                                           const void *init = nullptr, size_t alignment = 16);
 
+/**
+ * @brief Creates a shared, typed buffer using device memory accessible to all devices.
+ * 
+ * This templated function creates a buffer of type T in the device memory, 
+ * accessible by both the host and other devices. While the buffer can be accessed 
+ * by the host, such access might be slower compared to direct device access. 
+ * The buffer's size and efficiency may be influenced by resizable BAR technology, 
+ * enabling more direct CPU access to the device's memory.
+ * 
+ * @note In the PCI configuration space, BARs are used to 
+ * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device. 
+ * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the 
+ * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this 
+ * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to 
+ * access more of the device's memory directly.
+ * 
+ * @tparam T        The data type of elements in the buffer.
+ * @param context   The GPRTContext in which the buffer is to be created.
+ * @param count     The number of elements of type T in the buffer. Defaults to 1.
+ * @param init      Optional pointer to an array of type T for initializing the buffer. 
+ *                  Defaults to nullptr.
+ * @param alignment Byte alignment for the buffer, must be a power of two.
+ *                  Larger alignment values may optimize device access at the cost of 
+ *                  increased memory usage, while smaller values are more memory-efficient 
+ *                  but might lead to reduced performance. Defaults to 16.
+ * @return GPRTBufferOf<T> Returns a handle to the created buffer using shared device memory,
+ *                         and is typed according to the specified template parameter T.
+ */
 template <typename T>
 GPRTBufferOf<T>
-gprtSharedBufferCreate(GPRTContext context, size_t count GPRT_IF_CPP(= 1), const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init);
+gprtSharedBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16) {
+  return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init, alignment);
 }
 
 /**

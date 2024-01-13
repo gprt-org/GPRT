@@ -1,7 +1,7 @@
 /**
  * @file gprt.h
  * @author Nate Morrical (natemorrical@gmail.com)
- * @brief This file includes either gprt_host.h or gprt_device.h depending on
+ * @brief This file includes either gprt_host.h or gprt.slangh depending on
  * the architecture.
  * @version 0.1
  * @date 2022-11-03
@@ -30,8 +30,8 @@
 
 #pragma once
 
-#if defined(GPRT_DEVICE) || defined(__SLANG_COMPILER__)
-#include "gprt_device.h"
+#if defined(__SLANG_COMPILER__)
+#include "gprt.slangh"
 #else
 #include "gprt_host.h"
 #endif

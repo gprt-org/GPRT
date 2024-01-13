@@ -26,49 +26,16 @@ if (GPRT_BUILD_SHARED)
 endif()
 include(cmake/embed_devicecode.cmake)
 
-embed_hlsl_devicecode(
-  OUTPUT_TARGET
-    gprtDeviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.hlsl
-)
-
-embed_slang_devicecode(
-  OUTPUT_TARGET
-    gprtDeviceCodeSlang
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slang
-)
-
-embed_hlsl_devicecode(
+embed_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.slang
 )
 
-embed_hlsl_devicecode(
-  OUTPUT_TARGET
-    lbvhDeviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_lbvh.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_lbvh.hlsl
-)
-
-embed_hlsl_devicecode(
+embed_devicecode(
   OUTPUT_TARGET
     nnDeviceCode
   HEADERS
@@ -77,7 +44,7 @@ embed_hlsl_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.slang
 )
 
 embed_devicecode(
@@ -88,14 +55,13 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang
 )
 
 target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
     gprt_knn.h
-    gprt_lbvh.h
     gprt_sort.h
 )
 
@@ -122,11 +88,8 @@ set_target_properties(gprt
 target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
-    gprtDeviceCodeSlang
-    gprtDeviceCode
     scanDeviceCode
     sortDeviceCode
-    lbvhDeviceCode
     nnDeviceCode
     glfw
     stb_image
