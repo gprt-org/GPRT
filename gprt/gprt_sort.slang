@@ -107,7 +107,7 @@ uint32_t ParallelSort_BlockScanPrefix(uint32_t localSum, uint32_t localID)
 
 // FPS Count
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	// Call the uint32_t version of the count part of the algorithm
 	// ParallelSort_Count_uint(localID, groupID, CBuffer, rootConstData.CShiftBit, SrcBuffer, SumTable);  
@@ -177,7 +177,7 @@ void __compute__Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV
 
 // FPS Reduce
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	// Call the reduce part of the algorithm
 	// ParallelSort_ReduceCount(localID, groupID, CBuffer,  SumTable, ReduceTable);
@@ -210,7 +210,7 @@ void __compute__CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupI
 
 // FPS Scan
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	uint32_t BaseIndex = PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE * groupID;
 	// ParallelSort_ScanPrefix(rootConstData.NumScanValues, localID, groupID, 0, BaseIndex, false,
@@ -277,7 +277,7 @@ void __compute__Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_
 
 // // FPS ScanAdd
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	// When doing adds, we need to access data differently because reduce 
 	// has a more specialized access pattern to match optimized count
@@ -351,7 +351,7 @@ void __compute__ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 
 // FPS Scatter
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	uint32_t ShiftBit = rootConstData.CShiftBit;
 
@@ -489,7 +489,7 @@ void __compute__Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : 
 }
 
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
-void __compute__ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
+void ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
 	uint32_t ShiftBit = rootConstData.CShiftBit;
 

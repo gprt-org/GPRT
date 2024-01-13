@@ -4107,7 +4107,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Count.entryPoint);
+      std::string entryPoint = sortStages.Count.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
@@ -4139,7 +4139,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.CountReduce.entryPoint);
+      std::string entryPoint = sortStages.CountReduce.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
@@ -4171,7 +4171,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scan.entryPoint);
+      std::string entryPoint = sortStages.Scan.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
@@ -4203,7 +4203,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScanAdd.entryPoint);
+      std::string entryPoint = sortStages.ScanAdd.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
@@ -4235,7 +4235,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scatter.entryPoint);
+      std::string entryPoint = sortStages.Scatter.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
@@ -4267,7 +4267,7 @@ struct Context {
 
     {
       VkResult err = VK_SUCCESS;
-      std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScatterPayload.entryPoint);
+      std::string entryPoint = sortStages.ScatterPayload.entryPoint;
       auto binary = module->binary;
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
