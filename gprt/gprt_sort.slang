@@ -69,7 +69,7 @@ uint32_t ParallelSort_ThreadgroupReduce(uint32_t localSum, uint32_t localID)
 	GroupMemoryBarrierWithGroupSync();
 
 	// First wave worth of threads sum up wave reductions
-	if (!waveID)
+	if (waveID == 0)
 		waveReduced = WaveActiveSum( (localID < PARALLELSORT_THREADGROUP_SIZE / WaveGetLaneCount()) ? gs_PARALLELSORT_LDSSums[localID] : 0);
 
 	// Returned the reduced sum
@@ -93,7 +93,7 @@ uint32_t ParallelSort_BlockScanPrefix(uint32_t localSum, uint32_t localID)
 	GroupMemoryBarrierWithGroupSync();
 
 	// First wave prefixes partial sums
-	if (!waveID)
+	if (waveID == 0)
 		gs_PARALLELSORT_LDSSums[localID] = WavePrefixSum(gs_PARALLELSORT_LDSSums[localID]);
 
 	// Wait for everyone to catch up
@@ -201,7 +201,7 @@ void __compute__CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupI
 	threadgroupSum = ParallelSort_ThreadgroupReduce(threadgroupSum, localID);
 
 	// First thread of the group writes out the reduced sum for the bin
-	if (!localID)
+	if (localID == 0)
 		ReduceTable[groupID] = threadgroupSum;
 
 	// What this will look like in the reduced table is:

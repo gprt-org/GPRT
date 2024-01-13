@@ -4190,7 +4190,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Count.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4222,7 +4222,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.CountReduce.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4254,7 +4254,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scan.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4286,7 +4286,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScanAdd.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4318,7 +4318,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.Scatter.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -4350,7 +4350,7 @@ struct Context {
     {
       VkResult err = VK_SUCCESS;
       std::string entryPoint = std::string("__compute__") + std::string(sortStages.ScatterPayload.entryPoint);
-      auto binary = module->getBinary("COMPUTE");
+      auto binary = module->getBinary("SLANG");
 
       VkShaderModuleCreateInfo moduleCreateInfo = {};
       moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;

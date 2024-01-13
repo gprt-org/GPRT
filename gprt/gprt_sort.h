@@ -44,7 +44,7 @@ struct ParallelSortCB
     uint32_t CShiftBit;
 };
 
-#ifndef GPRT_DEVICE
+#ifndef __SLANG_COMPILER__
 	void ParallelSort_CalculateScratchResourceSize(uint32_t MaxNumKeys, uint64_t& ScratchBufferSize, uint64_t& ReduceScratchBufferSize)
 	{
 		uint64_t BlockSize = PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE;

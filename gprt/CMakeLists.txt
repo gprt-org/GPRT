@@ -26,13 +26,13 @@ if (GPRT_BUILD_SHARED)
 endif()
 include(cmake/embed_devicecode.cmake)
 
-embed_hlsl_devicecode(
+embed_devicecode(
   OUTPUT_TARGET
     sortDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.slang
 )
 
 target_sources(gprt PRIVATE
