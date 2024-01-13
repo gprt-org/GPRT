@@ -75,10 +75,6 @@
 // For FFX radix sort
 #include "gprt_sort.h"
 
-// The software linear bvh builder included in GPRT. Useful for 
-// scenarios where full control over traversal is required
-#include "gprt_lbvh.h"
-
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
  * platforms.
