@@ -177,7 +177,7 @@ main(int ac, char **av) {
   // acceleration structure an unpopulated buffer of transforms, so long as
   // those transforms are filled in before we go to build our acceleration
   // structure.
-  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, numInstances, nullptr);
+  GPRTBufferOf<float3x4> transformBuffer = gprtHostBufferCreate<float3x4>(context, numInstances, nullptr);
   GPRTAccel world = gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
 

@@ -214,7 +214,7 @@ main(int ac, char **av) {
   std::vector<float3> euls = {eul, deul, tmp};
   GPRTBufferOf<float3> eulRots = gprtDeviceBufferCreate<float3>(context, 3, euls.data());
   GPRTBufferOf<float3> aabbPositions = gprtDeviceBufferCreate<float3>(context, 2, nullptr);
-  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, 1, nullptr);
+  GPRTBufferOf<float3x4> transformBuffer = gprtHostBufferCreate<float3x4>(context, 1, nullptr);
 
   ComputeOBBConstants obbPC;
   obbPC.aabbs = gprtBufferGetHandle(aabbPositions);

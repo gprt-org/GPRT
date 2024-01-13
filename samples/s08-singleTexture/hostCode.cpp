@@ -170,7 +170,7 @@ main(int ac, char **av) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
 
-  GPRTBufferOf<float4x4> transformBuffer = gprtDeviceBufferCreate<float4x4>(context, samplers.size(), nullptr);
+  GPRTBufferOf<float4x4> transformBuffer = gprtHostBufferCreate<float4x4>(context, samplers.size(), nullptr);
 
   TransformData *transformData = gprtComputeGetParameters(transformProgram);
   transformData->transforms = gprtBufferGetHandle(transformBuffer);

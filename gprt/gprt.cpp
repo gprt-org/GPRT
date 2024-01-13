@@ -272,10 +272,6 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   return VK_FALSE;
 }
 
-// Contains definitions for internal entry points
-// (bounds programs, transform programs...)
-extern std::map<std::string, std::vector<uint8_t>> gprtDeviceCode;
-
 extern std::map<std::string, std::vector<uint8_t>> sortDeviceCode;
 
 // forward declarations...
@@ -2933,22 +2929,9 @@ struct Context {
   Buffer *missTable = nullptr;
   Buffer *hitgroupTable = nullptr;
 
-  // uint32_t numRayTypes = 1;
-
-  // struct InternalStages {
-  //   // for copying transforms into the instance buffer
-  //   std::string fillInstanceDataEntryPoint = "gprtFillInstanceData";
-  //   VkPipelineLayout fillInstanceDataPipelineLayout;
-  //   VkShaderModule fillInstanceDataShaderModule;
-  //   VkPipeline fillInstanceDataPipeline;
-  // }
-
   std::map<std::string, Compute*> internalComputePrograms;
 
-  Stage fillInstanceDataStage;
-  Module *internalModule = nullptr;
   Module *radixSortModule = nullptr;
-
   struct SortStages {
     Stage Count;
     Stage CountReduce;
@@ -3614,9 +3597,6 @@ struct Context {
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
 
     // 7. Create a module for internal device entry points
-    internalModule = new Module(gprtDeviceCode);
-    setupInternalStages(internalModule);
-
     radixSortModule = new Module(sortDeviceCode);
     setupSortStages(radixSortModule);
 
@@ -4023,13 +4003,6 @@ struct Context {
     if (raytracingPipeline)
       vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
 
-    if (fillInstanceDataStage.layout)
-      vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
-    if (fillInstanceDataStage.pipeline)
-      vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
-    if (fillInstanceDataStage.module)
-      vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
-
     destroySortStages();
     
     if (raygenTable) {
@@ -4106,57 +4079,6 @@ struct Context {
   // }
 
   void buildPipeline();
-
-  void setupInternalStages(Module *module) {
-    fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
-
-    // todo, consider refactoring this into a more official "Compute" shader
-    // object
-
-    VkResult err;
-    // currently not using cache.
-    VkPipelineCache cache = VK_NULL_HANDLE;
-
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
-    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCreateInfo.setLayoutCount = 0;      // if ever we use descriptors
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr;   // if ever we use descriptors
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-    err = vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
-
-    std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
-    auto binary = module->getBinary("COMPUTE");
-
-    VkShaderModuleCreateInfo moduleCreateInfo = {};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fillInstanceDataStage.module);
-
-    VkPipelineShaderStageCreateInfo shaderStage = {};
-    shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = fillInstanceDataStage.module;
-    shaderStage.pName = entryPoint.c_str();
-
-    VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-    computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
-    computePipelineCreateInfo.flags = 0;
-    computePipelineCreateInfo.stage = shaderStage;
-
-    // At this point, create all internal compute pipelines as well.
-    err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                   &fillInstanceDataStage.pipeline);
-  }
 
   void setupSortStages(Module *module) {
     // currently not using cache.
@@ -6139,14 +6061,11 @@ struct InstanceAccel : public Accel {
 
   // caching these for fast updates
   size_t instanceOffset = -1;
-  uint64_t referencesAddress;
   uint64_t visibilityMasksAddress;
-  uint64_t instanceOffsetsAddress;
   uint64_t transformBufferAddress;
 
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
-  Buffer *instanceOffsetsBuffer = nullptr;
 
   struct {
     Buffer *buffer = nullptr;
@@ -6158,19 +6077,7 @@ struct InstanceAccel : public Accel {
     Buffer *buffer = nullptr;
     // uint32_t stride = 0;
     // uint32_t offset = 0;
-  } references;
-
-  struct {
-    Buffer *buffer = nullptr;
-    // uint32_t stride = 0;
-    // uint32_t offset = 0;
   } visibilityMasks;
-
-  struct {
-    Buffer *buffer = nullptr;
-    // uint32_t stride = 0;
-    // uint32_t offset = 0;
-  } offsets;
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
@@ -6225,28 +6132,12 @@ struct InstanceAccel : public Accel {
     this->transforms.offset = offset;
   }
 
-  void setReferences(Buffer *references = nullptr   //,
-                                                    // size_t count,
-                                                    // size_t stride,
-                                                    // size_t offset
-  ) {
-    this->references.buffer = references;
-  }
-
   void setVisibilityMasks(Buffer *masks = nullptr   //,
                                                     // size_t count,
                                                     // size_t stride,
                                                     // size_t offset
   ) {
     this->visibilityMasks.buffer = masks;
-  }
-
-  void setOffsets(Buffer *offsets = nullptr   //,
-                                              // size_t count,
-                                              // size_t stride,
-                                              // size_t offset
-  ) {
-    this->offsets.buffer = offsets;
   }
 
   void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
@@ -6279,105 +6170,11 @@ struct InstanceAccel : public Accel {
         instanceOffset += numGeometry * requestedFeatures.numRayTypes;
       }
     }
-
-    // No instance addressed provided, so we need to supply our own.
-    if (references.buffer == nullptr) {
-      // delete if not big enough
-      if (accelAddressesBuffer && accelAddressesBuffer->size != numInstances * sizeof(uint64_t)) {
-        accelAddressesBuffer->destroy();
-        delete accelAddressesBuffer;
-        accelAddressesBuffer = nullptr;
-      }
-
-      // make buffer if not made yet
-      if (accelAddressesBuffer == nullptr) {
-        accelAddressesBuffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer, context->graphicsQueue,
-                                          // I guess I need this to use these buffers as input to tree builds?
-                                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                              // means we can get this buffer's address with
-                                              // vkGetBufferDeviceAddress
-                                              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                              // means we can use this buffer as a storage buffer
-                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                          // means that this memory is stored directly on the device
-                                          //  (rather than the host, or in a special host/device section)
-                                          // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
-                                          // on AMD)
-                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
-                                          sizeof(uint64_t) * numInstances, 16);
-      }
-
-      // transfer over addresses
-      std::vector<uint64_t> addresses(numInstances);
-      for (uint32_t i = 0; i < numInstances; ++i)
-        addresses[i] = this->instances[i]->address;
-      accelAddressesBuffer->map();
-      memcpy(accelAddressesBuffer->mapped, addresses.data(), sizeof(uint64_t) * numInstances);
-      accelAddressesBuffer->unmap();
-      referencesAddress = accelAddressesBuffer->deviceAddress;
-    }
-    // Instance acceleration structure references provided by the user
-    else {
-      referencesAddress = references.buffer->deviceAddress;
-    }
-
+    
     // If the visibility mask address is -1, we assume a mask of 0xFF
     visibilityMasksAddress = -1;
     if (visibilityMasks.buffer != nullptr) {
       visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
-    }
-
-    // No instance offsets provided, so we need to supply our own.
-    if (offsets.buffer == nullptr) {
-      // delete if not big enough
-      if (instanceOffsetsBuffer && instanceOffsetsBuffer->size != numInstances * sizeof(uint64_t)) {
-        instanceOffsetsBuffer->destroy();
-        delete instanceOffsetsBuffer;
-        instanceOffsetsBuffer = nullptr;
-      }
-
-      // make buffer if not made yet
-      if (instanceOffsetsBuffer == nullptr) {
-        instanceOffsetsBuffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer, context->graphicsQueue,
-                                           // I guess I need this to use these buffers as input to tree builds?
-                                           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                               // means we can get this buffer's address with
-                                               // vkGetBufferDeviceAddress
-                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                               // means we can use this buffer as a storage buffer
-                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                           // means that this memory is stored directly on the device
-                                           // (rather than the host, or in a special host/device section)
-                                           // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | // temporary (doesn't work
-                                           // on AMD)
-                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
-                                           sizeof(uint64_t) * numInstances, 16);
-      }
-
-      // transfer over offsets
-      std::vector<int32_t> blasOffsets(numInstances);
-      int offset = 0;
-      for (uint32_t i = 0; i < numInstances; ++i) {
-        blasOffsets[i] = offset;
-
-        if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) {
-          TriangleAccel *triAccel = (TriangleAccel *) this->instances[i];
-          offset += (uint32_t)triAccel->geometries.size() * requestedFeatures.numRayTypes;
-        } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
-          AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
-          offset += (uint32_t)aabbAccel->geometries.size() * requestedFeatures.numRayTypes;
-        } else {
-          LOG_ERROR("Error, unknown instance type");
-        }
-      }
-      instanceOffsetsBuffer->map();
-      memcpy(instanceOffsetsBuffer->mapped, blasOffsets.data(), sizeof(int32_t) * numInstances);
-      instanceOffsetsBuffer->unmap();
-      instanceOffsetsAddress = instanceOffsetsBuffer->deviceAddress;
-    }
-    // Instance acceleration structure references provided by the user
-    else {
-      instanceOffsetsAddress = offsets.buffer->deviceAddress;
     }
 
     // If transform buffer address is -1, we assume an identity transformation.
@@ -6386,59 +6183,126 @@ struct InstanceAccel : public Accel {
       transformBufferAddress = transforms.buffer->deviceAddress;
     }
 
-    // Use a compute shader to copy transforms into instances buffer
-    {
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      struct PushConstants {
-        uint64_t instanceBufferAddr;
-        uint64_t transformBufferAddr;
-        uint64_t accelReferencesAddr;
-        uint64_t instanceShaderBindingTableRecordOffset;
-        uint64_t transformOffset;
-        uint64_t transformStride;
-        uint64_t instanceOffsetsBufferAddr;
-        uint64_t instanceVisibilityMasksBufferAddr;
-        uint64_t pad[16 - 8];
-      } pushConstants;
+    // Currently, we always compute the instance addresses and offsets ourselves. Its too complex with the current API 
+    // for an end user to compute... 
+    std::vector<uint64_t> addresses(numInstances);
+    for (uint32_t i = 0; i < numInstances; ++i)
+      addresses[i] = this->instances[i]->address;
 
-      pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
-      pushConstants.transformBufferAddr = transformBufferAddress;
-      pushConstants.accelReferencesAddr = referencesAddress;
-      pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
-      pushConstants.transformOffset = transforms.offset;
-      pushConstants.transformStride = transforms.stride;
-      pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
-      pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
-
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      vkCmdPushConstants(context->graphicsCommandBuffer, context->fillInstanceDataStage.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         sizeof(PushConstants), &pushConstants);
-      vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, context->fillInstanceDataStage.pipeline);
-      // vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-      vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+    // Offsets currently computed using an exclusive prefix sum over geometry counts per BLAS.
+    std::vector<int32_t> blasOffsets(numInstances);
+    int offset = 0;
+    for (uint32_t i = 0; i < numInstances; ++i) {
+      blasOffsets[i] = offset;
+      if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) {
+        TriangleAccel *triAccel = (TriangleAccel *) this->instances[i];
+        offset += (uint32_t)triAccel->geometries.size() * requestedFeatures.numRayTypes;
+      } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
+        AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
+        offset += (uint32_t)aabbAccel->geometries.size() * requestedFeatures.numRayTypes;
+      } else {
+        LOG_ERROR("Error, unknown instance type");
+      }
     }
+
+    // Temporary... In the future, we need to be able to construct these instances on the device. However, 
+    // the current GPRT API is heavily dependent on the "MultiplierForGeometryContributionToHitGroupIndex", 
+    // which dramatically complicates SBT construction and management. Until we're able to shift the API over
+    // to a zero multiplier workflow, we'll just do this on the host for now.
+    {
+      uint32_t* maskPtr = nullptr;
+      uint8_t* transformPtr = nullptr;
+
+      if (visibilityMasks.buffer) {
+        visibilityMasks.buffer->map();
+        maskPtr = (uint32_t*)visibilityMasks.buffer->mapped;
+      }
+
+      if (transforms.buffer) {
+        transforms.buffer->map();
+        transformPtr = (uint8_t*)transforms.buffer->mapped;
+      }
+
+      instancesBuffer->map();
+
+      for (uint32_t i = 0; i < numInstances; ++i) {
+        VkAccelerationStructureInstanceKHR *instance = &((VkAccelerationStructureInstanceKHR *)instancesBuffer->mapped)[i];
+
+        instance->mask = 0xFF;
+        instance->instanceCustomIndex = i;
+        instance->instanceShaderBindingTableRecordOffset = instanceOffset + blasOffsets[i];
+        instance->flags = 0;
+        instance->accelerationStructureReference = addresses[i];
+        instance->transform = {
+          {
+              {1.0f, 0.0f, 0.0f, 0.0f}, // First row
+              {0.0f, 1.0f, 0.0f, 0.0f}, // Second row
+              {0.0f, 0.0f, 1.0f, 0.0f}  // Third row
+          }
+        };
+
+        if (maskPtr) instance->mask = maskPtr[i];
+        if (transformPtr) {
+          memcpy(&instance->transform, transformPtr + transforms.offset + transforms.stride * i, sizeof(float3x4));
+        }
+      }
+
+      if (transforms.buffer) transforms.buffer->unmap();
+      if (visibilityMasks.buffer) visibilityMasks.buffer->unmap();
+    }
+    
+    // {
+    //   VkCommandBufferBeginInfo cmdBufInfo{};
+    //   struct PushConstants {
+    //     uint64_t instanceBufferAddr;
+    //     uint64_t transformBufferAddr;
+    //     uint64_t accelReferencesAddr;
+    //     uint64_t instanceShaderBindingTableRecordOffset;
+    //     uint64_t transformOffset;
+    //     uint64_t transformStride;
+    //     uint64_t instanceOffsetsBufferAddr;
+    //     uint64_t instanceVisibilityMasksBufferAddr;
+    //     uint64_t pad[16 - 8];
+    //   } pushConstants;
+
+    //   pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
+    //   pushConstants.transformBufferAddr = transformBufferAddress;
+    //   pushConstants.accelReferencesAddr = referencesAddress;
+    //   pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
+    //   pushConstants.transformOffset = transforms.offset;
+    //   pushConstants.transformStride = transforms.stride;
+    //   pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+    //   pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+
+    //   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    //   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+    //   vkCmdPushConstants(context->graphicsCommandBuffer, context->fillInstanceDataStage.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    //                      sizeof(PushConstants), &pushConstants);
+    //   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, context->fillInstanceDataStage.pipeline);
+    //   // vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+    //   // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+    //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
+    //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+
+    //   VkSubmitInfo submitInfo;
+    //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    //   submitInfo.pNext = NULL;
+    //   submitInfo.waitSemaphoreCount = 0;
+    //   submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    //   submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    //   submitInfo.commandBufferCount = 1;
+    //   submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+    //   submitInfo.signalSemaphoreCount = 0;
+    //   submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    //   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    //   if (err)
+    //     LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+    //   err = vkQueueWaitIdle(context->graphicsQueue);
+    //   if (err)
+    //     LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+    // }
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -6691,59 +6555,88 @@ struct InstanceAccel : public Accel {
     // assuming instanceOffsetsAddress is already configured from previous build
     // assuming transformBufferAddress is already configured from previous build
 
-    // Use a compute shader to copy data into instances buffer
+    // Temporary... In the future, I'd like this to be doable from the device...
     {
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      struct PushConstants {
-        uint64_t instanceBufferAddr;
-        uint64_t transformBufferAddr;
-        uint64_t accelReferencesAddr;
-        uint64_t instanceShaderBindingTableRecordOffset;
-        uint64_t transformOffset;
-        uint64_t transformStride;
-        uint64_t instanceOffsetsBufferAddr;
-        uint64_t instanceVisibilityMasksBufferAddr;
-        uint64_t pad[16 - 8];
-      } pushConstants;
+      instancesBuffer->map();
 
-      pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
-      pushConstants.transformBufferAddr = transformBufferAddress;
-      pushConstants.accelReferencesAddr = referencesAddress;
-      pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
-      pushConstants.transformOffset = transforms.offset;
-      pushConstants.transformStride = transforms.stride;
-      pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
-      pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+      uint32_t* maskPtr = nullptr;
+      uint8_t* transformPtr = nullptr;
 
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      vkCmdPushConstants(context->graphicsCommandBuffer, context->fillInstanceDataStage.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                         sizeof(PushConstants), &pushConstants);
-      vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, context->fillInstanceDataStage.pipeline);
-      // vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-      vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+      if (visibilityMasks.buffer) {
+        visibilityMasks.buffer->map();
+        maskPtr = (uint32_t*)visibilityMasks.buffer->mapped;
+      }
 
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      if (transforms.buffer) {
+        transforms.buffer->map();
+        transformPtr = (uint8_t*)transforms.buffer->mapped;
+      }
 
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+      for (uint32_t i = 0; i < numInstances; ++i) {
+        VkAccelerationStructureInstanceKHR *instance = &((VkAccelerationStructureInstanceKHR *)instancesBuffer->mapped)[i];
+        if (maskPtr) instance->mask = maskPtr[i];
+        if (transformPtr) {
+          memcpy(&instance->transform, transformPtr + transforms.offset + transforms.stride * i, sizeof(float3x4));
+        }
+      }
+      instancesBuffer->unmap();
     }
+
+
+
+    // // Use a compute shader to copy data into instances buffer
+    // {
+    //   VkCommandBufferBeginInfo cmdBufInfo{};
+    //   struct PushConstants {
+    //     uint64_t instanceBufferAddr;
+    //     uint64_t transformBufferAddr;
+    //     uint64_t accelReferencesAddr;
+    //     uint64_t instanceShaderBindingTableRecordOffset;
+    //     uint64_t transformOffset;
+    //     uint64_t transformStride;
+    //     uint64_t instanceOffsetsBufferAddr;
+    //     uint64_t instanceVisibilityMasksBufferAddr;
+    //     uint64_t pad[16 - 8];
+    //   } pushConstants;
+
+    //   pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
+    //   pushConstants.transformBufferAddr = transformBufferAddress;
+    //   pushConstants.accelReferencesAddr = referencesAddress;
+    //   pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
+    //   pushConstants.transformOffset = transforms.offset;
+    //   pushConstants.transformStride = transforms.stride;
+    //   pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
+    //   pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
+
+    //   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    //   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+    //   vkCmdPushConstants(context->graphicsCommandBuffer, context->fillInstanceDataStage.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    //                      sizeof(PushConstants), &pushConstants);
+    //   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, context->fillInstanceDataStage.pipeline);
+    //   // vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+    //   // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+    //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
+    //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+
+    //   VkSubmitInfo submitInfo;
+    //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    //   submitInfo.pNext = NULL;
+    //   submitInfo.waitSemaphoreCount = 0;
+    //   submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    //   submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    //   submitInfo.commandBufferCount = 1;
+    //   submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+    //   submitInfo.signalSemaphoreCount = 0;
+    //   submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+    //   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    //   if (err)
+    //     LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
+
+    //   err = vkQueueWaitIdle(context->graphicsQueue);
+    //   if (err)
+    //     LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
+    // }
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -7095,12 +6988,6 @@ struct InstanceAccel : public Accel {
       accelAddressesBuffer->destroy();
       delete accelAddressesBuffer;
       accelAddressesBuffer = nullptr;
-    }
-
-    if (instanceOffsetsBuffer) {
-      instanceOffsetsBuffer->destroy();
-      delete instanceOffsetsBuffer;
-      instanceOffsetsBuffer = nullptr;
     }
   };
 };
@@ -10003,25 +9890,6 @@ gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBuffer _masks) 
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *masks = (Buffer *) _masks;
   accel->setVisibilityMasks(masks);
-}
-
-GPRT_API void
-gprtInstanceAccelSetReferences(GPRTAccel instanceAccel,
-                               GPRTBuffer _references   //,
-                                                        // size_t offset, // maybe I can support these too?
-                                                        // size_t stride  // maybe I can support these too?
-) {
-  LOG_API_CALL();
-  InstanceAccel *accel = (InstanceAccel *) instanceAccel;
-  Buffer *references = (Buffer *) _references;
-  accel->setReferences(references);
-}
-
-GPRT_API void
-gprtInstanceAccelSetNumGeometries(GPRTAccel instanceAccel, uint32_t numGeometries) {
-  LOG_API_CALL();
-  InstanceAccel *accel = (InstanceAccel *) instanceAccel;
-  accel->setNumGeometries(numGeometries);
 }
 
 GPRT_API void
