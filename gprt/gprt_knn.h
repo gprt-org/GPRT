@@ -998,7 +998,7 @@ struct StackItem {
   float _val;
   int key() {return _key;}
   float value() {return _val;}
-
+  
   static StackItem Create(uint key, float value) {
     StackItem pair;
     pair._key = key;
@@ -1093,7 +1093,7 @@ int getPrimParentNode(
 // void insertionSort(inout StackItem list[BRANCHING_FACTOR]) {
 //   StackItem item;
 //   int i, j;
-//   for (int i = 1; i < BRANCHING_FACTOR; ++i) {
+//   for (i = 1; i < BRANCHING_FACTOR; ++i) {
 //     item = list[i];
 //     for (j = i - 1; j >= 0 && list[j].key > item.key; j--)
 //       list[j + 1] = list[j];
@@ -1105,6 +1105,7 @@ int getPrimParentNode(
 float getAABBDist(float3 p, gprt::Buffer aabbs, uint32_t index) {
   float3 aabbMin = gprt::load<float3>(aabbs, index * 2 + 0);
   float3 aabbMax = gprt::load<float3>(aabbs, index * 2 + 1);
+  // return float2(getMinDist(p, aabbMin, aabbMax), getMinMaxDist(p, aabbMin, aabbMax));
   return getMinDist(p, aabbMin, aabbMax);
 }
 
@@ -1115,10 +1116,11 @@ float getOOBBDist(float3 p, gprt::Buffer oobbs, uint32_t index) {
   float3 obbEul = gprt::load<float3>(oobbs, index * 3 + 2);
   float3x3 obbRot = eul_to_mat3(obbEul);
   float3 pRot = mul(obbRot, p);
+  // return float2(getMinDist(pRot, obbMin, obbMax), getMinMaxDist(pRot, obbMin, obbMax));
   return getMinDist(pRot, obbMin, obbMax);
 }
 
-void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, bool useAABBs, bool useOOBBs, float3 queryOrigin, inout NNPayload payload, bool debug) {
+void TraverseLeaf(in gprt::NNAccel record, uint32_t leafID, bool useAABBs, bool useOOBBs, uint distanceLevel, float3 queryOrigin, inout NNPayload payload, bool debug) {
   int numPrims = record.numPrims;
 
   // At this point, it appears that the fastest thing to do is just 
@@ -1189,15 +1191,18 @@ Stack intersectAndSortChildren(
     }
 
     float minDist = 0.f;
+    float maxDist = 1e38f;
 
     // Upward Culling: skip superclusters father than current closest primitive
     if (useAABBs) {
-      minDist = max(minDist, getAABBDist(queryOrigin, aabbs, index));
+      float dist = getAABBDist(queryOrigin, aabbs, index);
+      minDist = max(minDist, dist);
       if (minDist > closestDistance) continue;
     }
     
     if (useOOBBs) {
-      minDist = max(minDist, getOOBBDist(queryOrigin, oobbs, index));
+      float dist = getOOBBDist(queryOrigin, oobbs, index);
+      minDist = max(minDist, dist);
       if (minDist > closestDistance) continue;
     }
 
@@ -1257,7 +1262,7 @@ void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool use
 
       // if at this point we're at the bottom of the tree, traverse the leaf
       if (level == 0) {
-        TraverseLeaf(record, childIndex, useAABBs, useOOBBs, queryOrigin, payload, debug);
+        TraverseLeaf(record, childIndex, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug);
         // Advance the trail now that we've processed this child.
         trail[level]++;
       } else {
@@ -1290,7 +1295,7 @@ void TraverseTreeFullStack(in gprt::NNAccel record, uint distanceLevel, bool use
 void TraverseTree ## N(                                                                                              \
   in gprt::NNAccel record,                                                                                           \
   int parentIndex,                                                                                                   \
-  bool useAABBs, bool useOOBBs,                                                                                      \
+  bool useAABBs, bool useOOBBs, int distanceLevel,                                                                   \
   float3 queryOrigin, inout NNPayload payload, bool debug) {                                                         \
   int start = parentIndex * BRANCHING_FACTOR;                                                                        \
   Stack stack = intersectAndSortChildren(queryOrigin, payload.closestDistance,                                        \
@@ -1301,7 +1306,7 @@ void TraverseTree ## N(                                                         
     int currentIndex = stack.key(i);                                                                                 \
     float mindist = stack.value(i);                                                                                  \
     if (currentIndex == -1 || mindist > payload.closestDistance) return;                               \
-    RECURSION(record, currentIndex, useAABBs, useOOBBs, queryOrigin, payload, debug);                        \
+    RECURSION(record, currentIndex, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug);                        \
   }                                                                                                                  \
 }                                                                                        
 
@@ -1343,16 +1348,16 @@ void TraverseTreeRecursive(in gprt::NNAccel record, uint distanceLevel, bool use
   payload.closestDistance = tmax;  
   switch (record.numLevels)
   {
-    case  1 :  TraverseTree1(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  2 :  TraverseTree2(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  3 :  TraverseTree3(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  4 :  TraverseTree4(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  5 :  TraverseTree5(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  6 :  TraverseTree6(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  7 :  TraverseTree7(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  8 :  TraverseTree8(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case  9 :  TraverseTree9(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
-    case 10 : TraverseTree10(record, 0, useAABBs, useOOBBs, queryOrigin, payload, debug); break;
+    case  1 :  TraverseTree1(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  2 :  TraverseTree2(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  3 :  TraverseTree3(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  4 :  TraverseTree4(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  5 :  TraverseTree5(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  6 :  TraverseTree6(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  7 :  TraverseTree7(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  8 :  TraverseTree8(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case  9 :  TraverseTree9(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
+    case 10 : TraverseTree10(record, 0, useAABBs, useOOBBs, distanceLevel, queryOrigin, payload, debug); break;
     default: break;
   }  
   if (payload.closestPrimitive != -1) {

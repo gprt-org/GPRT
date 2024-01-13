@@ -4680,6 +4680,9 @@ struct Context {
       internalComputePrograms.insert({"ComputeTriangleRootBounds", new Compute(logicalDevice, nnModule, "ComputeTriangleRootBounds", sizeof(gprt::NNAccel))});
       internalComputePrograms.insert({"ComputeTriangleAABBsAndCenters", new Compute(logicalDevice, nnModule, "ComputeTriangleAABBsAndCenters", sizeof(gprt::NNAccel))});
       internalComputePrograms.insert({"ComputeTriangleCodes", new Compute(logicalDevice, nnModule, "ComputeTriangleCodes", sizeof(gprt::NNAccel))});
+      internalComputePrograms.insert({"ComputeNeighbors", new Compute(logicalDevice, nnModule, "ComputeNeighbors", sizeof(gprt::NNAccel))});
+      internalComputePrograms.insert({"CheckNeighbors", new Compute(logicalDevice, nnModule, "CheckNeighbors", sizeof(gprt::NNAccel))});
+      internalComputePrograms.insert({"ClaimNeighbors", new Compute(logicalDevice, nnModule, "ClaimNeighbors", sizeof(gprt::NNAccel))});
       internalComputePrograms.insert({"ComputeAABBsAndCenters", new Compute(logicalDevice, nnModule, "ComputeAABBsAndCenters", sizeof(gprt::NNAccel))});    
       internalComputePrograms.insert({"ComputeTriangleOBBCovariances", new Compute(logicalDevice, nnModule, "ComputeTriangleOBBCovariances", sizeof(gprt::NNAccel))});    
       internalComputePrograms.insert({"ComputeOBBCovariances", new Compute(logicalDevice, nnModule, "ComputeOBBCovariances", sizeof(gprt::NNAccel))});    
@@ -7634,6 +7637,13 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<uint64_t> codes;
   GPRTBufferOf<uint64_t> ids;
   GPRTBufferOf<float3> aabb;
+  
+  GPRTBufferOf<int> neighbors;
+  GPRTBufferOf<int> distances;
+  GPRTBufferOf<int> connections;
+  GPRTBufferOf<int> flags;
+  GPRTBufferOf<int> claimCounts;
+  GPRTBufferOf<int> totalClaimed;
 
   GPRTBufferOf<float3> aabbs[MAX_LEVELS];
   GPRTBufferOf<float3> centers[MAX_LEVELS];
@@ -7682,6 +7692,13 @@ struct NNTriangleAccel : public Accel {
     codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     ids = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
     aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
+    
+    neighbors = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    distances = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    connections = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    flags = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+    claimCounts = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+    totalClaimed = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
 
     // #ifdef ENABLE_OBBS
     for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
@@ -7816,6 +7833,8 @@ struct NNTriangleAccel : public Accel {
   }
 
   #include "hilbert.h"
+  #include <iostream>
+  #include <fstream>
   void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     
     typedef uint32_t uint;
@@ -7829,6 +7848,10 @@ struct NNTriangleAccel : public Accel {
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], &nnAccelHandle);
     gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ExpandTriangles"], &nnAccelHandle);
+
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeNeighbors"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["CheckNeighbors"], &nnAccelHandle);
+    gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ClaimNeighbors"], &nnAccelHandle);
 
     gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
@@ -7900,6 +7923,64 @@ struct NNTriangleAccel : public Accel {
       // buffers go out of date. Updating descriptors through this call
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
     }
+
+    // // Create and open a text file
+    // std::ofstream MyFile("codes.csv");
+
+    // {
+    //   // gprtBufferClear(claimCounts);
+
+    //   pc.buffer1 = gprtBufferGetHandle(codes);
+    //   pc.buffer2 = gprtBufferGetHandle(distances);
+    //   pc.buffer3 = gprtBufferGetHandle(claimCounts);
+    //   // pc.buffer4 = gprtBufferGetHandle(neighbors);
+    //   // pc.buffer4 = gprtBufferGetHandle(connections);
+    //   // pc.buffer5 = gprtBufferGetHandle(flags);
+    //   // gprtBeginProfile((GPRTContext)context);
+    //   gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
+    //   // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["CheckNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
+      
+    //   // pc.buffer1 = gprtBufferGetHandle(flags);
+    //   // pc.buffer2 = gprtBufferGetHandle(neighbors);
+    //   // pc.buffer3 = gprtBufferGetHandle(connections);
+    //   // pc.buffer4 = gprtBufferGetHandle(claimCounts);
+    //   // pc.buffer5 = gprtBufferGetHandle(totalClaimed);
+    //   gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ClaimNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
+
+    //   gprtBufferMap(codes);
+    //   gprtBufferMap(neighbors);
+    //   gprtBufferMap(distances);
+    //   gprtBufferMap(connections);
+    //   gprtBufferMap(flags);
+    //   gprtBufferMap(claimCounts);
+    //   gprtBufferMap(totalClaimed);
+    //   uint64_t* codesPtr = gprtBufferGetPointer(codes);
+    //   int* neighborsPtr = gprtBufferGetPointer(neighbors);
+    //   int* distancesPtr = gprtBufferGetPointer(distances);
+    //   int* connectionsPtr = gprtBufferGetPointer(connections);
+    //   int* flagsPtr = gprtBufferGetPointer(flags);
+    //   int* claimCountsPtr = gprtBufferGetPointer(claimCounts);
+    //   int* totalClaimedPtr = gprtBufferGetPointer(totalClaimed);
+    //   // MyFile << "Primitive, Codes, N1, N2, N3, D1, D2, D3, C1, C2, C3, Flag, ClaimCounts, TotalClaimed" << std::endl;
+    //   MyFile << "Primitive, Codes, KthDistance, Padding" << std::endl;
+
+    //   for (uint32_t i = 0; i < nnAccelHandle.numPrims; ++i) {
+    //     // std::cout<<"i " << i << " Diff " << diffsPtr[i] << " Code " << codesPtr[i] << std::endl;
+    //     //std::cout<< codesPtr[i] << std::endl;
+
+    //     MyFile << i << "," << codesPtr[i] << "," << distancesPtr[i] << "," << claimCountsPtr[i] << std::endl;
+
+    //     // MyFile << std::to_string(i) << "," << std::to_string(codesPtr[i]) << "," <<std::to_string(neighborsPtr[i * 3 + 0]) << "," <<std::to_string(neighborsPtr[i * 3 + 1]) << "," <<std::to_string(neighborsPtr[i * 3 + 2]) << "," <<std::to_string(distancesPtr[i * 3 + 0]) << "," <<std::to_string(distancesPtr[i * 3 + 1]) << "," <<std::to_string(distancesPtr[i * 3 + 2]) << "," <<std::to_string(connectionsPtr[i * 3 + 0]) << "," <<std::to_string(connectionsPtr[i * 3 + 1]) << "," <<std::to_string(connectionsPtr[i * 3 + 2]) << "," <<std::to_string(flagsPtr[i]) << "," <<std::to_string(claimCountsPtr[i]) << "," <<std::to_string(totalClaimedPtr[i]) << std::endl;
+    //     // std::cout << std::to_string(i) << "," << std::to_string(codesPtr[i]) << "," <<std::to_string(neighborsPtr[i * 3 + 0]) << "," <<std::to_string(neighborsPtr[i * 3 + 1]) << "," <<std::to_string(neighborsPtr[i * 3 + 2]) << "," <<std::to_string(distancesPtr[i * 3 + 0]) << "," <<std::to_string(distancesPtr[i * 3 + 1]) << "," <<std::to_string(distancesPtr[i * 3 + 2]) << "," <<std::to_string(connectionsPtr[i * 3 + 0]) << "," <<std::to_string(connectionsPtr[i * 3 + 1]) << "," <<std::to_string(connectionsPtr[i * 3 + 2]) << "," <<std::to_string(flagsPtr[i]) << "," <<std::to_string(claimCountsPtr[i]) << std::endl;
+    //   }
+    //   gprtBufferUnmap(neighbors);
+    //   gprtBufferUnmap(distances);
+    //   gprtBufferUnmap(codes);
+    //   gprtBufferUnmap(connections);
+    //   gprtBufferUnmap(claimCounts);
+    //   gprtBufferUnmap(totalClaimed);
+    // }
+    // MyFile.close();
 
     // Use sorted primitive codes to optimize triangle indices
     float timeToExpandTriangles = 0.f;
@@ -7985,7 +8066,7 @@ struct NNTriangleAccel : public Accel {
         gprtBeginProfile((GPRTContext)context);
         gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], (((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR) + 31) / 32, sizeof(gprt::NNConstants), &pc);
         computeBoundsTime += gprtEndProfile((GPRTContext)context);
-      }      
+      }
     }
     computeCovarianceTime /= 100.f;
     computeAnglesTime /= 100.f;

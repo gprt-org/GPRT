@@ -258,10 +258,297 @@ GPRT_COMPUTE_PROGRAM(ComputeTriangleCodes, (NNAccel, record), (32, 1, 1)) {
   float3 aabbMin = gprt::load<float3>(pc.buffer2, 0);
   float3 aabbMax = gprt::load<float3>(pc.buffer2, 1);
   c = (c - aabbMin) / (aabbMax - aabbMin);
-  uint64_t code = hilbert64_encode3D(c.x, c.y, c.z);
-  gprt::store<uint64_t>(pc.buffer3, primID, code);
+  uint32_t code = hilbert_encode3D(c.x, c.y, c.z);
+  gprt::store<uint64_t>(pc.buffer3, primID, uint64_t(code));
   gprt::store<uint64_t>(pc.buffer4, primID, primID);
 }
+
+// Assuming at least 9 items...
+// Very suboptimal kernel, moreso just for testing
+#define KNN_RADIUS 8
+GPRT_COMPUTE_PROGRAM(ComputeNeighbors, (NNAccel, record), (32, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= pc.numPrims) return;
+
+  uint32_t neighborhood[2 * KNN_RADIUS + 1];
+
+  for (int i = 0; i < 2 * KNN_RADIUS + 1; ++i) {
+    int addr = primID + (i - KNN_RADIUS);
+    if (addr < 0 || addr >= pc.numPrims) neighborhood[i] = -1;
+    else neighborhood[i] = uint32_t(gprt::load<uint64_t>(pc.buffer1, addr));
+  }
+
+  uint32_t distances[2 * KNN_RADIUS + 1];
+  uint32_t primIDs[2 * KNN_RADIUS + 1];
+  for (int i = 0; i < 2 * KNN_RADIUS + 1; ++i) {  
+    if (neighborhood[i] == -1) {
+      primIDs[i] = -1;
+      distances[i] = -1;
+    }
+    primIDs[i] = primID + (i - KNN_RADIUS);
+    distances[i] = abs(neighborhood[i] - neighborhood[KNN_RADIUS]);
+  }
+
+  // insertion sort
+  int i, j;
+  for (i = 1; i < 2 * KNN_RADIUS + 1; ++i) {
+    uint32_t primID = primIDs[i];
+    uint32_t distance = distances[i];
+    for (j = i - 1; j >= 0 && distances[j] > distance; j--) {
+      primIDs[j + 1] = primIDs[j];
+      distances[j + 1] = distances[j];
+    }
+    primIDs[j + 1] = primID;  
+    distances[j + 1] = distance;  
+  }
+
+  // Store Kth distance
+  gprt::store<int>(pc.buffer2, primID, distances[8]);
+
+
+  // // Clear our neighbors
+  // for (int i = 0; i < 3; ++i) {
+  //   gprt::store<int>(pc.buffer4, primID * 3 + i, 2147483647);
+  // }
+
+  // store knn
+  // for (int i = 0; i < 3; ++i) {
+  //   // ID
+  //   gprt::store<int>(pc.buffer2, primID * 3 + i, primIDs[i + 1]);
+  //   // Distance
+  //   gprt::store<int>(pc.buffer3, primID * 3 + i, distances[i + 1]);
+  // }
+}
+
+// Collect up to K=4 mutual neighbors
+GPRT_COMPUTE_PROGRAM(CheckNeighbors, (NNAccel, record), (32, 1, 1)) {
+  // int primID = DispatchThreadID.x;
+  // if (primID >= pc.numPrims) return;
+
+  // // Our code and Kth distance
+  // int code = uint32_t(gprt::load<uint64_t>(pc.buffer1, primID));
+  // int dist = uint32_t(gprt::load<uint32_t>(pc.buffer2, primID));
+
+
+  // uint32_t neighborhood[2 * KNN_RADIUS + 1];
+  // for (int i = 0; i < 2 * KNN_RADIUS + 1; ++i) {
+  //   int addr = primID + (i - KNN_RADIUS);
+  //   if (addr < 0 || addr >= pc.numPrims) neighborhood[i] = -1;
+  //   else neighborhood[i] = uint32_t(gprt::load<uint64_t>(pc.buffer1, addr));
+  // }
+
+  // uint32_t distances[2 * KNN_RADIUS + 1];
+  // uint32_t primIDs[2 * KNN_RADIUS + 1];
+  // for (int i = 0; i < 2 * KNN_RADIUS + 1; ++i) {  
+  //   if (neighborhood[i] == -1) {
+  //     primIDs[i] = -1;
+  //     distances[i] = -1;
+  //   }
+  //   primIDs[i] = primID + (i - KNN_RADIUS);
+  //   distances[i] = abs(neighborhood[i] - neighborhood[KNN_RADIUS]);
+  // }
+
+  // // insertion sort
+  // int i, j;
+  // for (i = 1; i < 2 * KNN_RADIUS + 1; ++i) {
+  //   uint32_t primID = primIDs[i];
+  //   uint32_t distance = distances[i];
+  //   for (j = i - 1; j >= 0 && distances[j] > distance; j--) {
+  //     primIDs[j + 1] = primIDs[j];
+  //     distances[j + 1] = distances[j];
+  //   }
+  //   primIDs[j + 1] = primID;  
+  //   distances[j + 1] = distance;  
+  // }
+
+
+  // // Look at the queue of neighbors, and figure out which are connections
+  // uint32_t connectedDistances[4];
+  // uint32_t connectedPrimIDs[4];
+  // for (int i = 0; i < 4; ++i) {
+  //   connectedDistances[i] = -1;
+  //   connectedPrimIDs[i] = -1;
+  // }
+
+
+  // for (i = 1; i < 2 * KNN_RADIUS + 1; ++i) {
+    
+  // }
+
+
+  // // Load K closest neighbors
+  // int neighbors[3];
+  // int distances[3];
+  // for (int i = 0; i < 3; ++i) {
+  //   // ID
+  //   neighbors[i] = gprt::load<int>(pc.buffer2, primID * 3 + i);
+  //   // Distance
+  //   distances[i] = gprt::load<int>(pc.buffer3, primID * 3 + i);
+  // }
+
+  // bool smallest = true;
+  // bool full = true;
+  
+  // int connections[3];
+  // // Check for mutual connections
+  // for (int i = 0; i < 3; ++i) {
+  //   int neighbor = neighbors[i];
+  //   if (neighbor != -1) {
+  //     // Load Neighbor's K closest neighbors
+  //     int neighborsNeighbors[3];
+  //     int neighborsDistances[3];
+
+  //     for (int i = 0; i < 3; ++i) {
+  //       // ID
+  //       neighborsNeighbors[i] = gprt::load<int>(pc.buffer2, neighbor * 3 + i);
+  //       // Distance
+  //       neighborsDistances[i] = gprt::load<int>(pc.buffer3, neighbor * 3 + i);
+  //     }
+
+  //     // See if we are in our neighbor's KNN
+  //     bool connection = false;
+  //     for (int i = 0; i < 3; ++i) {
+  //       if (neighborsNeighbors[i] == primID) connection = true;
+  //     }
+
+  //     // If our neighbor's index is smaller than ours...
+  //     // With normal PLOC, this would be used to resolve ambiguity between nearest neighbors.
+  //     if (neighbor < primID) smallest = false;
+
+  //     // Save connectivity
+  //     if (connection) connections[i] = true;
+  //     else {
+  //       connections[i] = false;
+  //       // A missed connection means we aren't a completely full group (maybe we should try keeping K > 3 neighbors then? Just trying to encourage K connections...)
+  //       full = false;
+  //     }
+  //   } else {
+  //     // we aren't full if we have an empty neighbor. (I don't think this ever happens, since the KNN is untruncated)
+  //     full = false;
+  //   }
+  // }
+
+  // // Store connectivity
+  // for (int i = 0; i < 3; ++i) {
+  //   gprt::store<int>(pc.buffer4, primID * 3 + i, connections[i]);
+  // }
+
+  // // Store flag
+  // int flag = 0;
+  // if (smallest) flag |= 1;
+  // if (full) flag |= 2;
+  // gprt::store<int>(pc.buffer5, primID, flag);
+}
+
+GPRT_COMPUTE_PROGRAM(ClaimNeighbors, (NNAccel, record), (32, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= pc.numPrims) return;
+
+  // If we're 0, assume we're part of a cluster
+  if (primID == 0) {
+    gprt::store<int>(pc.buffer3, primID, 1);
+    return;
+  }
+
+  // Our code and Kth distance
+  int code = uint32_t(gprt::load<uint64_t>(pc.buffer1, primID));
+  int dist = uint32_t(gprt::load<uint32_t>(pc.buffer2, primID));
+
+  bool mutualFound = false;
+
+  // Look over prior neighbors, hunt for mutual neighbors
+  for (int i = 0; i < 2 * KNN_RADIUS + 1; ++i) {
+    int addr = primID + (i - KNN_RADIUS);
+    if (addr < 0 || addr >= pc.numPrims) continue;
+
+    // Don't count ourselves
+    if (addr == primID) break;
+    
+    int nCode = uint32_t(gprt::load<uint64_t>(pc.buffer1, addr));
+    int nDist = uint32_t(gprt::load<uint32_t>(pc.buffer2, addr));
+    int toN = abs(code - nCode);
+    
+    // If we are mutual neighbors
+    if ((toN <= nDist) && (toN <= dist)) {
+      // We belong in the cluster.
+      mutualFound = true;
+    }
+  }
+
+  // If we found a mutual neighbor, let ourselves combine with the prior cluster
+  if (mutualFound) {
+    gprt::store<int>(pc.buffer3, primID, 1);
+  }
+  else {
+    // generate the start of a new cluster. 
+    int locationInCluster = primID % 4; // assuming cluster size of 4
+    // To start a new cluster, we insert some padding to finish off the previous cluster
+    int padding = 4 - locationInCluster;
+    gprt::store<int>(pc.buffer3, primID, padding);
+  }
+}
+
+// GPRT_COMPUTE_PROGRAM(ClaimNeighbors, (NNAccel, record), (32, 1, 1)) {
+//   int primID = DispatchThreadID.x;
+//   if (primID >= pc.numPrims) return;
+
+//   // Load the flag
+//   int flag = gprt::load<int>(pc.buffer1, primID);
+
+//   // Load K closest neighbors
+//   int neighbors[3];
+//   int connections[3];
+//   for (int i = 0; i < 3; ++i) {
+//     neighbors[i] = gprt::load<int>(pc.buffer2, primID * 3 + i);
+//     connections[i] = gprt::load<int>(pc.buffer3, primID * 3 + i);
+//   }
+
+//   // If we're the smallest index of a fully connected group
+//   // claim every neighbor
+
+//   int priorClaims[3];
+//   // // If we're a fully connected group, claim every neighbor
+//   // if (((flag & 2) != 0)) {
+//   //   for (int i = 0; i < 3; ++i) {
+//   //     int neighbor = neighbors[i];
+//   //     priorClaims[i] = gprt::atomicAdd(pc.buffer4, neighbor, 1);
+//   //   }
+//   // }
+
+//   int totalClaimed = 0;
+
+//   // If we're a connected to a neighbor, and we're the smaller of the two, try to claim them
+//   // This is the PLOC base case
+//   for (int i = 0; i < 3; ++i) {
+//     // If we're connected, and we're smaller than this neighbor
+//     if (connections[i] && primID < neighbors[i]) {
+      
+//       // Who else is connected to this neighbor? 
+//       int neighborConnections[3];
+//       int neighborNeighbors[3];
+//       for (int j = 0; j < 3; ++j) {
+//         neighborNeighbors[j] = gprt::load<int>(pc.buffer2, neighbors[i] * 3 + j);
+//         neighborConnections[j] = gprt::load<int>(pc.buffer3, neighbors[i] * 3 + j);
+//       }
+
+//       // Are we the connection with the smallest index?
+//       bool smallest = true;
+//       for (int j = 0; j < 3; ++j) {
+//         if (neighborConnections[j] && neighborNeighbors[j] < primID) smallest = false;
+//       }
+
+//       // If so, we can claim this neighbor
+//       if (smallest) {
+//         // This appears to work uniquely. Generalized PLOC, though it might be weaker than I'd like?
+//         priorClaims[i] = gprt::atomicAdd(pc.buffer4, neighbors[i], 1);
+//         totalClaimed++;
+//       }
+//     }
+//   }
+
+//   // track how many neighbors we claimed.
+//   gprt::store<int>(pc.buffer5, primID, totalClaimed);
+// }
 
 GPRT_COMPUTE_PROGRAM(ExpandTriangles, (NNAccel, record), (32,1,1)) {
   int primID = DispatchThreadID.x;

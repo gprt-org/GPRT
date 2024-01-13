@@ -273,6 +273,13 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float3x3 value) {
 }
 
 uint32_t
+atomicMin(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.y].InterlockedMin(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
+uint32_t
 atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
   uint32_t old;
   buffers[buffer.y].InterlockedAdd(index * sizeof(uint32_t), value, old);

@@ -1,8 +1,6 @@
 #pragma once
 
-#define WAVE_SIZE 32
-
-// #define COLLECT_STATS
+#define COLLECT_STATS
 
 // The higher this number is, the more primitives we can store in our tree.
 #define MAX_LEVELS 10
