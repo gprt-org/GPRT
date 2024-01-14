@@ -29,6 +29,8 @@ struct TrianglesGeomData {
   gprt::Buffer vertex;
   /*! the number of triangles along a row */
   uint32_t gridSize;
+  /* the current time */
+  float now;
 };
 
 struct RayGenData {

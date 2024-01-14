@@ -119,16 +119,16 @@ main(int ac, char **av) {
   geomData->vertex = gprtBufferGetHandle(vertexBuffer);
   geomData->radius = gprtBufferGetHandle(radiusBuffer);
 
-  SphereBoundsData *boundsData = gprtComputeGetParameters(boundsProgram);
-  boundsData->vertex = gprtBufferGetHandle(vertexBuffer);
-  boundsData->radius = gprtBufferGetHandle(radiusBuffer);
-  boundsData->aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
+  SphereBoundsData boundsData;
+  boundsData.vertex = gprtBufferGetHandle(vertexBuffer);
+  boundsData.radius = gprtBufferGetHandle(radiusBuffer);
+  boundsData.aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
 
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
-  gprtComputeLaunch1D(context, boundsProgram, NUM_VERTICES);
+  gprtComputeLaunch<1,1,1>({NUM_VERTICES, 1, 1}, boundsProgram, boundsData);
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure

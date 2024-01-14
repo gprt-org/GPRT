@@ -26,9 +26,8 @@
 
 [shader("compute")]
 [numthreads(1,1,1)]
-void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<TransformData> record) {
-  int numTransforms = record.numTransforms;
-  int length = int(sqrt(numTransforms));
+void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
+  int length = int(sqrt(pc.numTransforms));
 
   int xid = DispatchThreadID.x % length;
   int yid = DispatchThreadID.x / length;
@@ -53,7 +52,7 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuf
   );
 
   int transformID = DispatchThreadID.x;
-  gprt::store(record.transforms, transformID, transform);
+  gprt::store(pc.transforms, transformID, transform);
 }
 
 struct Payload {

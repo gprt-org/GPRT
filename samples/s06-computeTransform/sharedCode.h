@@ -22,13 +22,6 @@
 
 #include "gprt.h"
 
-struct TransformData {
-  /*! array/buffer of instance transforms */
-  gprt::Buffer transforms;
-  /*! the number of transforms stored in the buffer */
-  int numTransforms;
-};
-
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
   gprt::Buffer index;
@@ -58,4 +51,9 @@ struct PushConstants {
 
   /*! the current time */
   float now;
+
+  /*! array/buffer of instance transforms */
+  gprt::Buffer transforms;
+  /*! the number of transforms stored in the buffer */
+  int numTransforms;
 };

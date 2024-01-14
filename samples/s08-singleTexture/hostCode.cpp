@@ -104,7 +104,7 @@ main(int ac, char **av) {
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  GPRTComputeOf<TransformData> transformProgram = gprtComputeCreate<TransformData>(context, module, "Transform");
+  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
 
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
@@ -172,11 +172,10 @@ main(int ac, char **av) {
 
   GPRTBufferOf<float4x4> transformBuffer = gprtHostBufferCreate<float4x4>(context, samplers.size(), nullptr);
 
-  TransformData *transformData = gprtComputeGetParameters(transformProgram);
-  transformData->transforms = gprtBufferGetHandle(transformBuffer);
-  transformData->numTransforms = (uint32_t)samplers.size();
+  pc.transforms = gprtBufferGetHandle(transformBuffer);
+  pc.numTransforms = (uint32_t)samplers.size();
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch1D(context, transformProgram, (uint32_t)samplers.size(), pc);
+  gprtComputeLaunch<1,1,1>({samplers.size(),1,1}, transformProgram, pc);
 
   GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
 
@@ -259,7 +258,7 @@ main(int ac, char **av) {
 
     // Animate transforms
     pc.now = .5f * (float)gprtGetTime(context);
-    gprtComputeLaunch1D(context, transformProgram, instances.size(), pc);
+    gprtComputeLaunch<1,1,1>({instances.size(), 1, 1}, transformProgram, pc);
     gprtAccelUpdate(context, trianglesTLAS);
 
     // Calls the GPU raygen kernel function

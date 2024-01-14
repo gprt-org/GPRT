@@ -57,7 +57,7 @@ const int NUM_INDICES = 1;
 int3 indices[NUM_INDICES] = {{0, 1, 2}};
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const uint2 fbSize = {1400, 460};
 
 // final image output
 const char *outFileName = "s12-imgui.png";
@@ -85,7 +85,7 @@ main(int ac, char **av) {
   // ##################################################################
 
   // A kernel for compositing imgui and handling temporal antialiasing 
-  auto CompositeGui = gprtComputeCreate<void>(context, module, "CompositeGui");
+  GPRTComputeOf<CompositeGuiConstants> CompositeGui = gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
 
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
@@ -243,7 +243,7 @@ main(int ac, char **av) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, guiPC);
+    gprtComputeLaunch<1,1,1>({fbSize.x, fbSize.y, 1}, CompositeGui, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

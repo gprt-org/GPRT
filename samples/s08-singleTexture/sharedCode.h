@@ -24,12 +24,6 @@
 
 /* variables available to all programs */
 
-struct TransformData {
-  /*! array/buffer of instance transforms */
-  gprt::Buffer transforms;
-  int numTransforms;
-};
-
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
@@ -68,4 +62,8 @@ struct PushConstants {
 
   /*! the current time */
   float now;
+
+  /*! array/buffer of instance transforms */
+  gprt::Buffer transforms;
+  int numTransforms;
 };
