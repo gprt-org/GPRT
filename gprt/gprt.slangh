@@ -138,13 +138,12 @@ float4 over(float4 a, float4 b) {
 //   uint64_t y;
 // };
 
-
-T load<T>(in Buffer buffer, uint64_t index) {
-  return buffers[uint32_t(buffer.index)].Load<T>(uint32_t(index * sizeof(T)));
+T load<T>(in Buffer buffer, uint32_t index) {
+  return buffers[buffer.index].Load<T>(index * sizeof(T));
 }
 
-void store<T>(in Buffer buffer, uint64_t index, in T value) {
-  buffers[uint32_t(buffer.index)].Store<T>(uint32_t(index * sizeof(T)), value);
+void store<T>(in Buffer buffer, uint32_t index, in T value) {
+  buffers[buffer.index].Store<T>(index * sizeof(T), value);
 }
 
 // [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
@@ -160,7 +159,7 @@ getAccelHandle(Accel accel) {
 
 RWByteAddressBuffer
 getBufferHandle(Buffer buffer) {
-  return buffers[int(buffer.address)];
+  return buffers[buffer.index];
 }
 
 Texture1D
@@ -191,10 +190,10 @@ getDefaultSampler() {
 
 no_diff float
 atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
-  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
   while (value < asfloat(ret_i)) {
     uint old = ret_i;
-    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
     if (ret_i == old) break;
   }
   return asfloat(ret_i);
@@ -204,16 +203,16 @@ atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value
 // and the currently stored max is non-zero
 [BackwardDerivativeOf(atomicMin32f)]
 void atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
-  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
 }
 
 no_diff float
 atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
-  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
   while (value > asfloat(ret_i)) {
     uint old = ret_i;
-    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
     if (ret_i == old)
       break;
   }
@@ -224,18 +223,18 @@ atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value
 // and the currently stored max is non-zero
 [BackwardDerivativeOf(atomicMax32f)]
 void atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
-  float ret = buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float));
+  float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
 }
 
 float
 atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   uint old, newint;
-  uint ret_i = asuint(buffers[uint32_t(buffer.index)].Load<float>(index * sizeof(float)));
+  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
   do {
     old = ret_i;
     newint = asuint(asfloat(old) + value);
-    buffers[uint32_t(buffer.index)].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
   } while (ret_i != old);
 
   return asfloat(ret_i);

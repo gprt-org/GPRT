@@ -78,12 +78,12 @@ namespace gprt{
 
     // Shared between Slang and C++
     struct Buffer {
-        uint64_t address;
-        uint64_t index;
+        // eventually will become address as features progress
+        uint32_t index;
+        uint32_t temp; 
     };
 
     struct Accel {
         uint64_t address;
-        uint64_t index;
     };
 };
