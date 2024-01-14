@@ -271,6 +271,7 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 extern std::vector<uint8_t> sortDeviceCode;
 
 // forward declarations...
+struct Context;
 struct Geom;
 struct GeomType;
 struct TriangleGeom;
@@ -1758,13 +1759,14 @@ struct SBTEntry {
 // we can recycle the SBT records mechanism for compute IO, without
 // introducing VK descriptor sets.
 struct Compute : public SBTEntry {
-
   // Our own virtual "compute address space".
   uint32_t address = -1;
   static std::vector<Compute *> computes;
 
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
+
+  Context *context;
   VkDevice logicalDevice;
   std::string entryPoint;
 
@@ -1772,7 +1774,7 @@ struct Compute : public SBTEntry {
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
 
-  Compute(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+  Compute(Context* _context, VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
     // Hunt for an existing free address for this compute kernel
     for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
       if (Compute::computes[i] == nullptr) {
@@ -1793,6 +1795,9 @@ struct Compute : public SBTEntry {
 
     // store a reference to the logical device this module is made on
     logicalDevice = _logicalDevice;
+
+    // store a reference to the compute device this program was made on
+    context  = _context;
 
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
@@ -8830,13 +8835,13 @@ gprtRayGenSetParameters(GPRTRayGen _rayGen, void *parameters, int deviceID) {
   memcpy(rayGen->SBTRecord, parameters, rayGen->recordSize);
 }
 
-GPRT_API GPRTCompute
-gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programName, size_t recordSize) {
+GPRT_API
+GPRTCompute gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programName) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
 
-  Compute *compute = new Compute(context->logicalDevice, module, programName, recordSize);
+  Compute *compute = new Compute(context, context->logicalDevice, module, programName, 0);
 
   // Notify context that we need to build this compute pipeline
   context->computePipelinesOutOfDate = true;
@@ -8844,32 +8849,13 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
   return (GPRTCompute) compute;
 }
 
-template <>
-GPRTComputeOf<void> gprtComputeCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint) {
-  return (GPRTComputeOf<void>) gprtComputeCreate(context, module, entrypoint, 0);
-}
-
-GPRT_API void
-gprtComputeDestroy(GPRTCompute _compute) {
+GPRT_API
+void gprtComputeDestroy(GPRTCompute _compute) {
   LOG_API_CALL();
   Compute *compute = (Compute *) _compute;
   compute->destroy();
   delete compute;
   compute = nullptr;
-}
-
-GPRT_API void *
-gprtComputeGetParameters(GPRTCompute _compute, int deviceID) {
-  LOG_API_CALL();
-  Compute *compute = (Compute *) _compute;
-  return compute->SBTRecord;
-}
-
-GPRT_API void
-gprtComputeSetParameters(GPRTCompute _compute, void *parameters, int deviceID) {
-  LOG_API_CALL();
-  Compute *compute = (Compute *) _compute;
-  memcpy(compute->SBTRecord, parameters, compute->recordSize);
 }
 
 GPRT_API GPRTMiss
@@ -9986,12 +9972,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
-void
-gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, size_t pushConstantsSize, void* pushConstants) {
-  assert(_compute);
-
-  Context *context = (Context *) _context;
+void _gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute _compute, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
+  Context *context = compute->context;
   VkResult err;
 
   VkCommandBufferBeginInfo cmdBufInfo{};
@@ -10024,30 +10007,13 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
   uint32_t offset = (uint32_t)compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
-  
-  if (dims_x >= context->deviceProperties.limits.maxComputeWorkGroupCount[0]) {
-    LOG_ERROR("X workgroups (" + std::to_string(dims_x) +
-              ") exceed the maximum number of compute workgroups! (max for this platform is " +
-              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[0]) + ")\n");
-  }
-  if (dims_y >= context->deviceProperties.limits.maxComputeWorkGroupCount[1]) {
-    LOG_ERROR("Y workgroups (" + std::to_string(dims_y) +
-              ") exceed the maximum number of compute workgroups! (max for this platform is " +
-              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[1]) + ")\n");
-  }
-  if (dims_z >= context->deviceProperties.limits.maxComputeWorkGroupCount[2]) {
-    LOG_ERROR("Z workgroups (" + std::to_string(dims_z) +
-              ") exceed the maximum number of compute workgroups! (max for this platform is " +
-              std::to_string(context->deviceProperties.limits.maxComputeWorkGroupCount[2]) + ")\n");
-  }
 
-  if (pushConstantsSize > 0) {
-    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+  if (pushConstants.size() > 0) {
     vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout,
-                      VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantsSize, pushConstants);
+                      VK_SHADER_STAGE_COMPUTE_BIT, 0, PUSH_CONSTANTS_LIMIT, pushConstants.data());
   }
 
-  vkCmdDispatch(context->graphicsCommandBuffer, dims_x, dims_y, dims_z);
+  vkCmdDispatch(context->graphicsCommandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
 
   if (context->queryRequested)
     vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
@@ -10074,24 +10040,6 @@ gprtComputeLaunch(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, u
   err = vkQueueWaitIdle(context->graphicsQueue);
   if (err)
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
-}
-
-GPRT_API void
-gprtComputeLaunch1D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, size_t pushConstantsSize, void* pushConstants) {
-  LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, 1, 1, pushConstantsSize, pushConstants);
-}
-
-GPRT_API void
-gprtComputeLaunch2D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, size_t pushConstantsSize, void* pushConstants) {
-  LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
-}
-
-GPRT_API void
-gprtComputeLaunch3D(GPRTContext _context, GPRTCompute _compute, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, size_t pushConstantsSize, void* pushConstants) {
-  LOG_API_CALL();
-  gprtComputeLaunch(_context, _compute, dims_x, dims_y, dims_z, pushConstantsSize, pushConstants);
 }
 
 GPRT_API void

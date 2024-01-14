@@ -45,7 +45,7 @@ AngleAxis3x3(float angle, float3 axis) {
 
 [shader("compute")]
 [numthreads(1,1,1)]
-void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<TransformData> record) {
+void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
   int transformID = DispatchThreadID.x;
@@ -53,7 +53,7 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuf
   int transformX = transformID / 2;
   int transformY = transformID % 2;
 
-  int numTransforms = record.numTransforms;
+  int numTransforms = pc.numTransforms;
   float angle = pc.now;
   float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
@@ -62,10 +62,10 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuf
   float4 transformc = float4(aa[2], 0.0);
   float4 transformd = float4(0.0, 0.0, 0.0, 1.0);
 
-  gprt::store(record.transforms, transformID * 4 + 0, transforma);
-  gprt::store(record.transforms, transformID * 4 + 1, transformb);
-  gprt::store(record.transforms, transformID * 4 + 2, transformc);
-  gprt::store(record.transforms, transformID * 4 + 3, transformd);
+  gprt::store(pc.transforms, transformID * 4 + 0, transforma);
+  gprt::store(pc.transforms, transformID * 4 + 1, transformb);
+  gprt::store(pc.transforms, transformID * 4 + 2, transformc);
+  gprt::store(pc.transforms, transformID * 4 + 3, transformd);
 }
 
 [shader("raygeneration")]

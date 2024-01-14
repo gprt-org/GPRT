@@ -51,7 +51,7 @@ using namespace generator;
 extern GPRTProgram s13_deviceCode;
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const uint2 fbSize = {1400, 460};
 
 // final image output
 const char *outFileName = "s12-imgui.png";
@@ -120,7 +120,7 @@ template <typename T> struct Mesh {
   };
 };
 
-int divUp(int x, int y) {
+uint32_t divUp(int x, int y) {
   return (x + (y - 1)) / y;
 }
 
@@ -154,12 +154,12 @@ main(int ac, char **av) {
   // ##################################################################
 
   // A kernel for compositing imgui and handling temporal antialiasing 
-  auto CompositeGui = gprtComputeCreate<void>(context, module, "CompositeGui");
+  auto CompositeGui = gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
   
   // Differentiable kernel for computing a tightly fitting oriented bounding box
-  auto ClearOBB = gprtComputeCreate<void>(context, module, "ClearOBB");
-  auto ComputeOBB = gprtComputeCreate<void>(context, module, "ComputeOBB");
-  auto BackPropOBB = gprtComputeCreate<void>(context, module, "BackPropOBB");
+  auto ClearOBB = gprtComputeCreate<ComputeOBBConstants>(context, module, "ClearOBB");
+  auto ComputeOBB = gprtComputeCreate<ComputeOBBConstants >(context, module, "ComputeOBB");
+  auto BackPropOBB = gprtComputeCreate<ComputeOBBConstants >(context, module, "BackPropOBB");
 
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "hitTriangle");
@@ -226,9 +226,9 @@ main(int ac, char **av) {
   obbPC.numTrisToInclude = mesh.indices.size();
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-  gprtComputeLaunch1D(context, ClearOBB, 1, obbPC);
-  gprtComputeLaunch1D(context, ComputeOBB, divUp(obbPC.numTrisToInclude, 128), obbPC);
-  gprtComputeLaunch1D(context, BackPropOBB, divUp(obbPC.numTrisToInclude, 128), obbPC);
+  gprtComputeLaunch<1,1,1>({1,1,1}, ClearOBB, obbPC);
+  gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, ComputeOBB, obbPC);
+  gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, BackPropOBB, obbPC);
   
   LOG("building geometries ...");
 
@@ -347,9 +347,9 @@ main(int ac, char **av) {
     if (step == 1) surfaceAreas.clear();
 
     gprtBufferClear(aabbPositions);
-    gprtComputeLaunch1D(context, ClearOBB, 1, obbPC);
-    gprtComputeLaunch1D(context, ComputeOBB, divUp(obbPC.numTrisToInclude, 128), obbPC);
-    gprtComputeLaunch1D(context, BackPropOBB, divUp(obbPC.numTrisToInclude, 128), obbPC);
+    gprtComputeLaunch<1,1,1>({1,1,1}, ClearOBB, obbPC);
+    gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, ComputeOBB, obbPC);
+    gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, BackPropOBB, obbPC);
       
     // Optimize using Adam
     gprtBufferMap(eulRots);
@@ -426,7 +426,7 @@ main(int ac, char **av) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, guiPC);
+    gprtComputeLaunch<1,1,1>({fbSize.x, fbSize.y, 1}, CompositeGui, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

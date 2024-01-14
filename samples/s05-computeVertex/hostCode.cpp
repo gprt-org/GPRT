@@ -121,16 +121,16 @@ main(int ac, char **av) {
   geomData->gridSize = GRID_SIDE_LENGTH;
 
   // Parameters for our vertex program that'll animate our vertices
-  TrianglesGeomData *vertexData = gprtComputeGetParameters(vertexProgram);
-  vertexData->vertex = gprtBufferGetHandle(vertexBuffer);
-  vertexData->index = gprtBufferGetHandle(indexBuffer);
-  vertexData->gridSize = GRID_SIDE_LENGTH;
+  TrianglesGeomData vertexData;
+  vertexData.vertex = gprtBufferGetHandle(vertexBuffer);
+  vertexData.index = gprtBufferGetHandle(indexBuffer);
+  vertexData.gridSize = GRID_SIDE_LENGTH;
 
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute triangles in parallel with a vertex compute shader
-  gprtComputeLaunch1D(context, vertexProgram, numTriangles, pc);
+  gprtComputeLaunch<32,1,1>({(numTriangles + 31u) / 32u,1,1}, vertexProgram, vertexData);
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
@@ -220,8 +220,8 @@ main(int ac, char **av) {
     }
 
     // update time to move primitives. then, rebuild accel.
-    pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch1D(context, vertexProgram, numTriangles, pc);
+    vertexData.now = float(gprtGetTime(context));
+    gprtComputeLaunch<32,1,1>({(numTriangles + 31) / 32, 1, 1}, vertexProgram, vertexData);
 
     // Now that the vertices have moved, we need to update our bottom level tree.
     // Note, updates should only be used when primitive counts are unchanged and 

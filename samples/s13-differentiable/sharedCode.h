@@ -65,7 +65,7 @@ struct ComputeOBBConstants {
 };
 
 struct CompositeGuiConstants {
-  int2 fbSize;
+  uint2 fbSize;
   gprt::Buffer imageBuffer;
   gprt::Buffer frameBuffer;
   gprt::Texture guiTexture;

@@ -48,6 +48,8 @@ using namespace linalg::ostream_overloads;
 #include <unordered_map>
 #include <vector>
 #include <type_traits>
+#include <iostream>
+#include <cstdlib>
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -109,14 +111,14 @@ template <typename T> struct _GPRTBufferOf;
 template <typename T> struct _GPRTTextureOf;
 template <typename T> struct _GPRTRayGenOf;
 template <typename T> struct _GPRTMissOf;
-template <typename T> struct _GPRTComputeOf;
+template <typename ...T> struct _GPRTComputeOf;
 template <typename T> struct _GPRTGeomOf;
 template <typename T> struct _GPRTGeomTypeOf;
 template <typename T> using GPRTRayGenOf = struct _GPRTRayGenOf<T> *;
 template <typename T> using GPRTBufferOf = struct _GPRTBufferOf<T> *;
 template <typename T> using GPRTTextureOf = struct _GPRTTextureOf<T> *;
 template <typename T> using GPRTMissOf = struct _GPRTMissOf<T> *;
-template <typename T> using GPRTComputeOf = struct _GPRTComputeOf<T> *;
+template <typename ...T> using GPRTComputeOf = struct _GPRTComputeOf<T...> *;
 template <typename T> using GPRTGeomOf = struct _GPRTGeomOf<T> *;
 template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
@@ -125,6 +127,29 @@ using GPRTProgram = std::vector<uint8_t>;
 
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
+
+// General helper functions
+static void runtime_assert(bool condition, const char* message) {
+    if (!condition) {
+        std::cerr << "Runtime assertion failed: " << message << std::endl;
+        std::abort(); // or throw an exception, depending on your needs
+    }
+}
+
+template<typename T>
+void handleArg(std::array<char, PUSH_CONSTANTS_LIMIT>& buffer, size_t& offset, const T& arg) {
+  static_assert(std::is_trivially_copyable<T>::value, "Non-trivially copyable types are not supported.");
+  std::memcpy(buffer.data() + offset, &arg, sizeof(T));
+  offset += sizeof(T);
+}
+
+template <typename... Args>
+constexpr size_t totalSizeOf() {
+    return (sizeof(Args) + ... + 0);
+}
+
+template<typename T, typename... Args>
+struct are_all_same : std::bool_constant<(std::is_same_v<T, Args> && ...)> {};
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -606,86 +631,29 @@ GPRT_API void gprtContextDestroy(GPRTContext context);
  * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.
  * @param entrypoint The name of the compute program to run, ie the first parameter following
  * GPRT_COMPUTE_PROGRAM in the device code.
- * @param recordSize The size of the parameters structure that will be passed into that compute program
  */
-GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint,
-                                       size_t recordSize);
+GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 /**
  * @brief Creates a "compute" handle which describes a compute device program to call and the parameters to
  * pass into that compute device program. Compute programs handle data generation and transformation, but
  * can also trace rays so long as inline ray tracing is used.
  *
- * @tparam T The type of the parameters structure stored in the record.
  * @param context The GPRT context
  * @param module The GPRT module containing device entrypoint definitions, made with @ref gprtModuleCreate.
  * @param entrypoint The name of the compute program to run, ie the first parameter following
  * GPRT_COMPUTE_PROGRAM in the device code.
  */
-template <typename T>
-GPRTComputeOf<T> gprtComputeCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
-  return (GPRTComputeOf<T>)gprtComputeCreate(context, module, entrypoint, sizeof(T));
+template <typename... Uniforms>
+GPRTComputeOf<Uniforms...> gprtComputeCreate(GPRTContext context, GPRTModule module, std::string entrypoint) {
+  return (GPRTComputeOf<Uniforms...>) gprtComputeCreate(context, module, entrypoint.c_str());
 }
-
-// Specialization for void
-template <>
-GPRTComputeOf<void> gprtComputeCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 GPRT_API void gprtComputeDestroy(GPRTCompute compute);
 
-template <typename T>
-void
-gprtComputeDestroy(GPRTComputeOf<T> compute) {
+template <typename... Uniforms>
+void gprtComputeDestroy(GPRTComputeOf<Uniforms...> compute) {
   gprtComputeDestroy((GPRTCompute) compute);
-}
-
-/**
- * @brief Returns a pointer to the parameters section of the record for this compute program, made
- * available on the device through the second parameter in GPRT_COMPUTE_PROGRAM. Note, call
- * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
- *
- * @param compute The compute program who's record pointer is to be returned.
- * @returns a pointer to the parameters section of the record.
- */
-GPRT_API void *gprtComputeGetParameters(GPRTCompute compute, int deviceID GPRT_IF_CPP(= 0));
-
-/**
- * @brief Returns a pointer to the parameters section of the record for this compute program, made
- * available on the device through the second parameter in GPRT_COMPUTE_PROGRAM. Note, call
- * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
- *
- * @tparam T The type of the parameters structure stored in the record
- * @param compute The compute program who's record pointer is to be returned.
- * @returns a pointer to the parameters section of the record.
- */
-template <typename T>
-T *
-gprtComputeGetParameters(GPRTComputeOf<T> compute) {
-  return (T *) gprtComputeGetParameters((GPRTCompute) compute);
-}
-
-/**
- * @brief Copies the contents of the given parameters into the compute record. Note, call
- * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
- *
- * @param compute The compute program who's record to assign the parameters to.
- * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes,
- * as specified by @ref gprtComputeCreate.
- */
-GPRT_API void gprtComputeSetParameters(GPRTCompute compute, void *parameters, int deviceID GPRT_IF_CPP(= 0));
-
-/**
- * @brief Copies the contents of the given parameters into the geometry record. Note, call
- * @ref gprtBuildShaderBindingTable for these parameters to be uploaded to the device.
- * @tparam T The type of the parameters structure stored in the record.
- * @param compute The compute program who's record to assign the parameters to.
- * @param parameters A pointer to a parameters structure. Assumed to be "recordSize" bytes,
- * as specified by @ref gprtComputeCreate.
- */
-template <typename T>
-void
-gprtComputeSetParameters(GPRTComputeOf<T> compute, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtComputeSetParameters((GPRTCompute) compute, (void *) parameters, deviceID);
 }
 
 /**
@@ -1886,63 +1854,49 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 template <typename RecordType, typename PushConstantsType>
 void
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
+  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Current GPRT push constant size limited to " + PUSH_CONSTANTS_LIMIT + " bytes or less");
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
-GPRT_API void gprtComputeLaunch1D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                                  void *pushConstants GPRT_IF_CPP(= 0));
+// declaration for internal implementation
+void _gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute compute, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
-template <typename RecordType>
-void
-gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups) {
-  gprtComputeLaunch1D(context, (GPRTCompute) compute, x_workgroups);
+// Case where compute program uniforms are non-type-safe
+template<size_t numThreadsX, size_t numThreadsY, size_t numThreadsZ, typename... Uniforms>
+void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute compute, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
+  static_assert(numThreadsX * numThreadsY * numThreadsX <= THREADGROUP_LIMIT, 
+    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
+
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
+    "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
+
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
+  size_t offset = 0;
+  
+  // Serialize each argument into the buffer
+  (handleArg(pushConstants, offset, uniforms), ...);
+
+  _gprtComputeLaunch(numGroups, compute, pushConstants);
 }
 
-template <typename RecordType, typename PushConstantsType>
-void
-gprtComputeLaunch1D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtComputeLaunch1D(context, (GPRTCompute) compute, x_workgroups, sizeof(PushConstantsType), &pushConstants);
-}
+// Case where compute program has type-safe uniform arguments
+template<size_t numThreadsX, size_t numThreadsY, size_t numThreadsZ, typename... Uniforms, typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
+void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTComputeOf<Uniforms...> compute, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
+  static_assert(numThreadsX * numThreadsY * numThreadsZ <= THREADGROUP_LIMIT, 
+    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
 
-GPRT_API void gprtComputeLaunch2D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
-                                  uint32_t y_workgroups,
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                                  void *pushConstants GPRT_IF_CPP(= 0));
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
+    "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
 
-template <typename RecordType>
-void
-gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups, uint32_t y_workgroups) {
-  gprtComputeLaunch2D(context, (GPRTCompute) compute, x_workgroups, y_workgroups);
-}
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
+  size_t offset = 0;
+  
+  // Serialize each argument into the buffer
+  (handleArg(pushConstants, offset, uniforms), ...);
 
-template <typename RecordType, typename PushConstantsType>
-void
-gprtComputeLaunch2D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups, uint32_t y_workgroups, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtComputeLaunch2D(context, (GPRTCompute) compute, x_workgroups, y_workgroups, sizeof(PushConstantsType), &pushConstants);
-}
-
-GPRT_API void gprtComputeLaunch3D(GPRTContext context, GPRTCompute compute, uint32_t x_workgroups,
-                                  uint32_t y_workgroups, uint32_t z_workgroups,
-                                  size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                                  void *pushConstants GPRT_IF_CPP(= 0));
-
-template <typename RecordType>
-void
-gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups, uint32_t y_workgroups,
-                    uint32_t z_workgroups) {
-  gprtComputeLaunch3D(context, (GPRTCompute) compute, x_workgroups, y_workgroups, z_workgroups);
-}
-
-template <typename RecordType, typename PushConstantsType>
-void
-gprtComputeLaunch3D(GPRTContext context, GPRTComputeOf<RecordType> compute, uint32_t x_workgroups, uint32_t y_workgroups,
-                    uint32_t z_workgroups, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtComputeLaunch3D(context, (GPRTCompute) compute, x_workgroups, y_workgroups, z_workgroups, sizeof(PushConstantsType), &pushConstants);
+  _gprtComputeLaunch(numGroups, (GPRTCompute)compute, pushConstants);
 }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);

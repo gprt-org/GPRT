@@ -22,8 +22,6 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
-
 float3
 getPos(float px, float py, float k, float width, float depth, float height, float now) {
   float x = lerp(-1.f, 1.f, px);
@@ -34,9 +32,10 @@ getPos(float px, float py, float k, float width, float depth, float height, floa
 }
 
 [shader("compute")]
-[numthreads(1,1,1)]
-void Vertex(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<TrianglesGeomData> record) {
-  uint gridSize = record.gridSize;
+[numthreads(32,1,1)]
+void Vertex(uint3 DispatchThreadID : SV_DispatchThreadID, uniform TrianglesGeomData uniforms) 
+{
+  int gridSize = uniforms.gridSize;
   int TriID = DispatchThreadID.x;
 
   bool even = (TriID % 2) == 0;
@@ -56,24 +55,26 @@ void Vertex(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer
   float k = 20.f;
 
   if (even) {
-    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
-    v1 = getPos(gx + dx, gy, k, width, depth, height, pc.now);
-    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
+    v0 = getPos(gx, gy, k, width, depth, height, uniforms.now);
+    v1 = getPos(gx + dx, gy, k, width, depth, height, uniforms.now);
+    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, uniforms.now);
   } else {
-    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
-    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
-    v2 = getPos(gx, gy + dy, k, width, depth, height, pc.now);
+    v0 = getPos(gx, gy, k, width, depth, height, uniforms.now);
+    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, uniforms.now);
+    v2 = getPos(gx, gy + dy, k, width, depth, height, uniforms.now);
   }
 
-  gprt::store(record.index, TriID, index);
-  gprt::store(record.vertex, index.x, v0);
-  gprt::store(record.vertex, index.y, v1);
-  gprt::store(record.vertex, index.z, v2);
+  gprt::store(uniforms.index, TriID, index);
+  gprt::store(uniforms.vertex, index.x, v0);
+  gprt::store(uniforms.vertex, index.y, v1);
+  gprt::store(uniforms.vertex, index.z, v2);
 }
 
 struct Payload {
   float3 color;
 };
+
+[[vk::push_constant]] PushConstants pc;
 
 [shader("raygeneration")]
 void RayGen(uniform RayGenData record) {

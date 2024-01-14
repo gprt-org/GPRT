@@ -58,7 +58,7 @@ void simpleRayGen(uniform RayGenData record) {
 
 [shader("compute")]
 [numthreads(1,1,1)]
-void SphereBounds(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ConstantBuffer<SphereBoundsData> record) {
+void SphereBounds(uint3 DispatchThreadID : SV_DispatchThreadID, uniform SphereBoundsData record) {
   int primID = DispatchThreadID.x;
   float3 position = gprt::load<float3>(record.vertex, primID);
   float radius = gprt::load<float>(record.radius, primID);

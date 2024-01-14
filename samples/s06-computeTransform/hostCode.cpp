@@ -138,7 +138,7 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // set up instance transform program to animate instances
   // -------------------------------------------------------
-  GPRTComputeOf<TransformData> transformProgram = gprtComputeCreate<TransformData>(context, module, "Transform");
+  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -163,7 +163,7 @@ main(int ac, char **av) {
   // Next, we'll create a grid of references to the same bottom level
   // acceleration structure. This saves memory and improves performance over
   // creating duplicate meshes.
-  int numInstances = 50 * 50;
+  uint32_t numInstances = 50 * 50;
   std::vector<GPRTAccel> instanceTrees(numInstances);
   for (int i = 0; i < numInstances; ++i) {
     instanceTrees[i] = instanceMesh.accel;
@@ -182,15 +182,14 @@ main(int ac, char **av) {
   gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
 
   // Parameters for our transform program that'll animate our transforms
-  TransformData *transformData = gprtComputeGetParameters(transformProgram);
-  transformData->transforms = gprtBufferGetHandle(transformBuffer);
-  transformData->numTransforms = numInstances;
+  pc.transforms = gprtBufferGetHandle(transformBuffer);
+  pc.numTransforms = numInstances;
 
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch1D(context, transformProgram, numInstances, pc);
+  gprtComputeLaunch<1,1,1>({numInstances,1,1}, transformProgram, pc);
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
@@ -272,7 +271,7 @@ main(int ac, char **av) {
     // update time to move instance transforms. Then, update only instance
     // accel.
     pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch1D(context, transformProgram, numInstances, pc);
+    gprtComputeLaunch<1,1,1>({numInstances, 1, 1}, transformProgram, pc);
     gprtAccelUpdate(context, world);
 
     // Now, trace rays
