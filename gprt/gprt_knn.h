@@ -23,12 +23,80 @@
 
 #include "gprt.h"
 
-#ifndef FLT_MAX 
-#define FLT_MAX 3.402823466e+38
-#endif
-#ifndef FLT_MIN
-#define FLT_MIN 1.175494351e-38
-#endif
+// Uniform parameters for entry points
+
+struct ComputeTriangleRootBoundsParams {
+    int numPrims;
+    gprt::Buffer triangles;
+    gprt::Buffer vertices;
+    gprt::Buffer centers;
+    gprt::Buffer rootBounds;
+};
+
+struct ComputeTriangleCodesParams {
+    int numPrims;
+    gprt::Buffer centers;
+    gprt::Buffer rootBounds;
+    gprt::Buffer hilbertCodes;
+    gprt::Buffer primIDs;
+};
+
+struct ExpandTrianglesParams {
+    int numPrims;
+    gprt::Buffer primIDs;
+    gprt::Buffer triangles;
+    gprt::Buffer vertices;
+    gprt::Buffer trianglesExp;
+};
+
+struct ComputeTriangleAABBsAndCentersParams {
+    int numPrims;
+    int level;
+    gprt::Buffer trianglesExp;
+    gprt::Buffer aabbs;
+    gprt::Buffer centers;
+};
+
+struct ComputeAABBsAndCentersParams {
+    int numPrims;
+    int level;
+    gprt::Buffer childAABBs;
+    gprt::Buffer childCenters;
+    gprt::Buffer parentAABBs;
+    gprt::Buffer parentCenters;
+};
+
+struct ComputeTriangleOBBCovariancesParams {
+    int numPrims;
+    int level;
+    gprt::Buffer trianglesExp;
+    gprt::Buffer parentCenters;
+    gprt::Buffer parentOBBs;
+};
+
+struct ComputeOBBCovariancesParams {
+    int numPrims;
+    int level;
+    gprt::Buffer childOBBs;
+    gprt::Buffer childCenters;
+    gprt::Buffer parentOBBs;
+    gprt::Buffer parentCenters;
+};
+
+struct ComputeOBBAnglesParams {
+    int numPrims;
+    int level;
+    gprt::Buffer OBBs;
+};
+
+struct ComputeTriangleOBBBoundsParams {
+    int numPrims;
+    int numLevels;
+    int stride;
+    int iteration;
+    gprt::Buffer trianglesExp;
+    gprt::Buffer OBBHierarchy[MAX_LEVELS];
+}
 
 enum NN_FLAG : uint32_t
 {
