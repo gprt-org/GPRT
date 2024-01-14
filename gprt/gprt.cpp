@@ -10856,7 +10856,7 @@ GPRT_API gprt::Buffer
 gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
-  return gprt::Buffer{buffer->deviceAddress, buffer->virtualAddress};
+  return gprt::Buffer{buffer->virtualAddress, 0};
 }
 
 GPRT_API void
@@ -11067,7 +11067,7 @@ gprtAccelGetSize(GPRTAccel _accel, int deviceID) {
 GPRT_API gprt::Accel
 gprtAccelGetHandle(GPRTAccel _accel, int deviceID) {
   Accel *accel = (Accel *) _accel;
-  return {accel->address, /* unused */ 0};
+  return {accel->address};
 }
 
 GPRT_API gprt::NNAccel
