@@ -11223,7 +11223,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
-void _gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute _compute, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
   VkResult err;

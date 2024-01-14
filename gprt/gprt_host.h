@@ -2121,17 +2121,18 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute compute, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
-// Case where compute program uniforms are non-type-safe
-template<size_t numThreadsX, size_t numThreadsY, size_t numThreadsZ, typename... Uniforms>
-void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute compute, Uniforms... uniforms) {
+// Case where compute program uniforms are not known at compilation time
+template<typename... Uniforms>
+void gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
-  static_assert(numThreadsX * numThreadsY * numThreadsX <= THREADGROUP_LIMIT, 
-    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
 
   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
     "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
+  
+  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
+    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
 
   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
   size_t offset = 0;
@@ -2139,18 +2140,19 @@ void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTCompute compute, Uni
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch(numGroups, compute, pushConstants);
+  _gprtComputeLaunch(compute, numGroups, pushConstants);
 }
 
-// Case where compute program has type-safe uniform arguments
-template<size_t numThreadsX, size_t numThreadsY, size_t numThreadsZ, typename... Uniforms, typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
-void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTComputeOf<Uniforms...> compute, Uniforms... uniforms) {
+// Case where compute program has compile-time type-safe uniform arguments
+template<typename... Uniforms, typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
+void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
-  static_assert(numThreadsX * numThreadsY * numThreadsZ <= THREADGROUP_LIMIT, 
-    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
-
+  
   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
     "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
+  
+  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
+    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
 
   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
   size_t offset = 0;
@@ -2158,7 +2160,7 @@ void gprtComputeLaunch(std::array<size_t, 3> numGroups, GPRTComputeOf<Uniforms..
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch(numGroups, (GPRTCompute)compute, pushConstants);
+  _gprtComputeLaunch((GPRTCompute)compute, numGroups, pushConstants);
 }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);

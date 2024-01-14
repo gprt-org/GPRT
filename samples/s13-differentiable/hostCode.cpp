@@ -226,9 +226,9 @@ main(int ac, char **av) {
   obbPC.numTrisToInclude = mesh.indices.size();
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-  gprtComputeLaunch<1,1,1>({1,1,1}, ClearOBB, obbPC);
-  gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, ComputeOBB, obbPC);
-  gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, BackPropOBB, obbPC);
+  gprtComputeLaunch(ClearOBB, {1,1,1}, {1,1,1}, obbPC);
+  gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
+  gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
   
   LOG("building geometries ...");
 
@@ -347,9 +347,9 @@ main(int ac, char **av) {
     if (step == 1) surfaceAreas.clear();
 
     gprtBufferClear(aabbPositions);
-    gprtComputeLaunch<1,1,1>({1,1,1}, ClearOBB, obbPC);
-    gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, ComputeOBB, obbPC);
-    gprtComputeLaunch<128,1,1>({divUp(obbPC.numTrisToInclude, 128), 1, 1}, BackPropOBB, obbPC);
+    gprtComputeLaunch(ClearOBB, {1,1,1}, {1,1,1}, obbPC);
+    gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
+    gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
       
     // Optimize using Adam
     gprtBufferMap(eulRots);
@@ -426,7 +426,7 @@ main(int ac, char **av) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch<1,1,1>({fbSize.x, fbSize.y, 1}, CompositeGui, guiPC);
+    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1,1,1}, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);

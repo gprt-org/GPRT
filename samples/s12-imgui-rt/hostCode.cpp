@@ -243,7 +243,7 @@ main(int ac, char **av) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch<1,1,1>({fbSize.x, fbSize.y, 1}, CompositeGui, guiPC);
+    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1,1,1}, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);
