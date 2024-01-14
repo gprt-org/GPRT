@@ -189,7 +189,7 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch<1,1,1>({numInstances,1,1}, transformProgram, pc);
+  gprtComputeLaunch(transformProgram, {numInstances,1,1}, {1,1,1}, pc);
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
@@ -271,7 +271,7 @@ main(int ac, char **av) {
     // update time to move instance transforms. Then, update only instance
     // accel.
     pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch<1,1,1>({numInstances, 1, 1}, transformProgram, pc);
+    gprtComputeLaunch(transformProgram, {numInstances, 1, 1}, {1,1,1}, pc);
     gprtAccelUpdate(context, world);
 
     // Now, trace rays

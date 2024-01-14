@@ -128,7 +128,7 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
-  gprtComputeLaunch<1,1,1>({NUM_VERTICES, 1, 1}, boundsProgram, boundsData);
+  gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1,1,1}, boundsData);
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure

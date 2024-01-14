@@ -175,7 +175,7 @@ main(int ac, char **av) {
   pc.transforms = gprtBufferGetHandle(transformBuffer);
   pc.numTransforms = (uint32_t)samplers.size();
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch<1,1,1>({samplers.size(),1,1}, transformProgram, pc);
+  gprtComputeLaunch(transformProgram, {samplers.size(),1,1}, {1,1,1}, pc);
 
   GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
 
@@ -258,7 +258,7 @@ main(int ac, char **av) {
 
     // Animate transforms
     pc.now = .5f * (float)gprtGetTime(context);
-    gprtComputeLaunch<1,1,1>({instances.size(), 1, 1}, transformProgram, pc);
+    gprtComputeLaunch(transformProgram, {instances.size(), 1, 1}, {1,1,1}, pc);
     gprtAccelUpdate(context, trianglesTLAS);
 
     // Calls the GPU raygen kernel function

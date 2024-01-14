@@ -130,7 +130,7 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute triangles in parallel with a vertex compute shader
-  gprtComputeLaunch<32,1,1>({(numTriangles + 31u) / 32u,1,1}, vertexProgram, vertexData);
+  gprtComputeLaunch(vertexProgram, {(numTriangles + 31u) / 32u,1,1}, {32,1,1}, vertexData);
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
@@ -221,7 +221,7 @@ main(int ac, char **av) {
 
     // update time to move primitives. then, rebuild accel.
     vertexData.now = float(gprtGetTime(context));
-    gprtComputeLaunch<32,1,1>({(numTriangles + 31) / 32, 1, 1}, vertexProgram, vertexData);
+    gprtComputeLaunch(vertexProgram, {(numTriangles + 31) / 32, 1, 1}, {32,1,1}, vertexData);
 
     // Now that the vertices have moved, we need to update our bottom level tree.
     // Note, updates should only be used when primitive counts are unchanged and 
