@@ -288,7 +288,7 @@ void ComputeAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID, uniform
 
 [shader("compute")]
 [numthreads(32, 1, 1)]
-void ComputeTriangleOBBCovariances(uint3 DispatchThreadID: SV_DispatchThreadID, ComputeTriangleOBBCovariancesParams params)
+void ComputeTriangleOBBCovariances(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeTriangleOBBCovariancesParams params)
 {
     int PID = DispatchThreadID.x;
     int numParents = getNumNodesInLevel(params.level, params.numPrims);
@@ -369,7 +369,7 @@ void ComputeOBBAngles(uint3 DispatchThreadID: SV_DispatchThreadID, uniform Compu
 // Run this "BRANCHING_FACTOR" times, sweeping pc.iteration from 0 to BRANCHING_FACTOR-1
 [shader("compute")]
 [numthreads(32, 1, 1)]
-void ComputeTriangleOBBBounds(uint3 DispatchThreadID: SV_DispatchThreadID, ComputeTriangleOBBBoundsParams params)
+void ComputeTriangleOBBBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeTriangleOBBBoundsParams params)
 {
     int N0ID = DispatchThreadID.x * params.stride + params.iteration;
     int numNClusters = getNumNodesInLevel(0, params.numPrims);

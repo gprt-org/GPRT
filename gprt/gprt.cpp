@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <variant>
+#include <any>
 #include <algorithm>
 #include <assert.h>
 #include <climits>
@@ -74,6 +76,9 @@
 
 // For FFX radix sort
 #include "gprt_sort.h"
+
+// For nearest neighbor parameter structs
+#include "gprt_knn.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -1880,6 +1885,7 @@ struct Compute : public SBTEntry {
     computePipelineCreateInfo.flags = 0;
     computePipelineCreateInfo.stage = shaderStage;
 
+    // If the below function is crashing, double check that all parameters to the compute kernel are tagged as "uniform".
     VkResult err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
     if (err) {
       LOG_ERROR("failed to create compute pipeline! Please verify that \"" + entryPoint + "\" is an existing entrypoint name\n" + errorString(err));
@@ -2834,6 +2840,9 @@ struct AABBGeomType : public GeomType {
 struct Accel;
 
 struct Context {
+  // For convenience, an opaque handle to the context
+  GPRTContext context = (GPRTContext)this;
+
   VkApplicationInfo appInfo;
 
   // Vulkan instance, stores all per-application states
@@ -3005,11 +3014,12 @@ struct Context {
   Buffer *missTable = nullptr;
   Buffer *hitgroupTable = nullptr;
 
-  std::map<std::string, Compute*> internalComputePrograms;
+  std::map<std::string, std::any> internalComputePrograms;
   
   Module *radixSortModule = nullptr;
-  Module *scanModule = nullptr;
-  Module *nnModule = nullptr;
+
+  GPRTModule scanModule = nullptr;
+  GPRTModule nnModule = nullptr;
 
   struct SortStages {
     Stage Count;
@@ -3693,9 +3703,9 @@ struct Context {
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
 
     // 7. Create a module for internal device entry points
-    scanModule = new Module(scanDeviceCode);
     radixSortModule = new Module(sortDeviceCode);
-    nnModule = new Module(nnDeviceCode);
+    scanModule = gprtModuleCreate(context, scanDeviceCode);
+    nnModule = gprtModuleCreate(context, nnDeviceCode);
 
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4576,25 +4586,47 @@ struct Context {
   
     // Scanning stages
     {
-      internalComputePrograms.insert({"InitScan", new Compute(logicalDevice, scanModule, "InitScan", sizeof(gprt::ScanRecord))});
-      internalComputePrograms.insert({"Scan", new Compute(logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), sizeof(gprt::ScanRecord))});
+      internalComputePrograms.insert({
+        {"InitScan", gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "InitScan")},
+        {"Scan_32",  gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "Scan_32")},
+        {"Scan_64",  gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "Scan_64")},
+      });
       computePipelinesOutOfDate = true;
     }
 
     // Nearest neighbor stages
     {
-      internalComputePrograms.insert({"ComputeTriangleRootBounds", new Compute(logicalDevice, nnModule, "ComputeTriangleRootBounds")});
-      internalComputePrograms.insert({"ComputeTriangleAABBsAndCenters", new Compute(logicalDevice, nnModule, "ComputeTriangleAABBsAndCenters")});
-      internalComputePrograms.insert({"ComputeTriangleCodes", new Compute(logicalDevice, nnModule, "ComputeTriangleCodes")});
-      internalComputePrograms.insert({"ComputeAABBsAndCenters", new Compute(logicalDevice, nnModule, "ComputeAABBsAndCenters")});    
-      internalComputePrograms.insert({"ComputeTriangleOBBCovariances", new Compute(logicalDevice, nnModule, "ComputeTriangleOBBCovariances")});    
-      internalComputePrograms.insert({"ComputeOBBCovariances", new Compute(logicalDevice, nnModule, "ComputeOBBCovariances")});    
-      internalComputePrograms.insert({"ComputeOBBAngles", new Compute(logicalDevice, nnModule, "ComputeOBBAngles")});    
-      internalComputePrograms.insert({"ComputeTriangleOBBBounds", new Compute(logicalDevice, nnModule, "ComputeTriangleOBBBounds")});    
-      internalComputePrograms.insert({"ExpandTriangles", new Compute(logicalDevice, nnModule, "ExpandTriangles")});
+      // for some reason, driver is crashing when we try using any of the kernels below that are commented out...
+      internalComputePrograms.insert({
+        {"ComputeTriangleRootBounds",      gprtComputeCreate<ComputeTriangleRootBoundsParams>(context, nnModule, "ComputeTriangleRootBounds")},
+        {"ComputeTriangleAABBsAndCenters", gprtComputeCreate<ComputeTriangleAABBsAndCentersParams>(context, nnModule, "ComputeTriangleAABBsAndCenters")},
+        {"ComputeTriangleCodes",           gprtComputeCreate<ComputeTriangleCodesParams>(context, nnModule, "ComputeTriangleCodes")},
+        {"ComputeAABBsAndCenters",         gprtComputeCreate<ComputeAABBsAndCentersParams>(context, nnModule, "ComputeAABBsAndCenters")},  
+        {"ComputeTriangleOBBCovariances",  gprtComputeCreate<ComputeTriangleOBBCovariancesParams>(context, nnModule, "ComputeTriangleOBBCovariances")},
+        {"ComputeOBBCovariances",          gprtComputeCreate<ComputeOBBCovariancesParams>(context, nnModule, "ComputeOBBCovariances")},
+        {"ComputeOBBAngles",               gprtComputeCreate<ComputeOBBAnglesParams>(context, nnModule, "ComputeOBBAngles")},
+        {"ComputeTriangleOBBBounds",       gprtComputeCreate<ComputeTriangleOBBBoundsParams>(context, nnModule, "ComputeTriangleOBBBounds")},
+        {"ExpandTriangles",                gprtComputeCreate<ExpandTrianglesParams>(context, nnModule, "ExpandTriangles")}
+      });
     }
 
     computePipelinesOutOfDate = true;    
+  }
+
+  // Template function for fetching kernels
+  template<typename T>
+  GPRTComputeOf<T> FetchCompute(const std::string& key) {
+      auto it = internalComputePrograms.find(key);
+      if (it != internalComputePrograms.end()) {
+          try {
+              return std::any_cast<GPRTComputeOf<T>&>(it->second);
+          } catch (const std::bad_any_cast&) {
+              // Handle error (e.g., logging, throw exception)
+          }
+      }
+      // Handle case where key is not found
+      // For example, throw an exception or return a default object
+      throw std::runtime_error("Error, could not find compute program with key: " + key);
   }
 
   void destroyInternalPrograms() {
@@ -4646,8 +4678,8 @@ struct Context {
     }
 
     for (auto &progName : progNames) {
-      internalComputePrograms[progName]->destroy();
-      delete internalComputePrograms[progName];
+      auto &program = std::any_cast<GPRTCompute&>(internalComputePrograms[progName]);
+      gprtComputeDestroy(program);
       internalComputePrograms.erase(progName);
     }
   }
@@ -7479,11 +7511,11 @@ struct NNEdgeAccel : public Accel {
 struct NNTriangleAccel : public Accel {
   std::vector<NNTriangleGeom *> geometries;
 
-  GPRTBufferOf<float3> triangleLists;
+  GPRTBufferOf<float3> triangleExpansionBuffer;
 
-  GPRTBufferOf<uint64_t> codes;
-  GPRTBufferOf<uint64_t> ids;
-  GPRTBufferOf<float3> aabb;
+  GPRTBufferOf<uint64_t> codesBuffer;
+  GPRTBufferOf<uint64_t> idsBuffer;
+  GPRTBufferOf<float3> rootBoundsBuffer;
   
   GPRTBufferOf<int> neighbors;
   GPRTBufferOf<int> distances;
@@ -7492,11 +7524,11 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<int> claimCounts;
   GPRTBufferOf<int> totalClaimed;
 
-  GPRTBufferOf<float3> aabbs[MAX_LEVELS];
-  GPRTBufferOf<float3> centers[MAX_LEVELS];
-  GPRTBufferOf<float3> oobbs[MAX_LEVELS];
+  GPRTBufferOf<float3> aabbBuffers[MAX_LEVELS];
+  GPRTBufferOf<float3> centerBuffers[MAX_LEVELS];
+  GPRTBufferOf<float3> oobbBuffers[MAX_LEVELS];
 
-  GPRTBufferOf<uint8_t> scratch;
+  GPRTBufferOf<uint8_t> scratchBuffer;
 
   // GPRTGeomOf<gprt::NNAccel> geom;
   // GPRTAccel geomAccel;
@@ -7536,9 +7568,9 @@ struct NNTriangleAccel : public Accel {
       throw std::runtime_error("Too many prims in tree! Max is 2^29 primitives");
 
     // create these
-    codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    ids = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
+    codesBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
+    idsBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
+    rootBoundsBuffer = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
     
     neighbors = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
     distances = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
@@ -7549,35 +7581,35 @@ struct NNTriangleAccel : public Accel {
 
     // #ifdef ENABLE_OBBS
     for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      oobbs[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
-      centers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
-      aabbs[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
+      oobbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
+      centerBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
+      aabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
     }
 
     // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL4Clusters * 2 - 1);
     // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL4Clusters * 2 - 1));
-    triangleLists = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numPrims * 7);
+    triangleExpansionBuffer = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numPrims * 7);
 
     nnAccelHandle.maxSearchRange = 0.f; 
     
     // to be resized as needed
-    scratch = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
+    scratchBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
 
     nnAccelHandle.points = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
     nnAccelHandle.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
 
-    nnAccelHandle.triangleLists = gprtBufferGetHandle(triangleLists);
+    nnAccelHandle.triangleLists = gprtBufferGetHandle(triangleExpansionBuffer);
     
-    nnAccelHandle.codes = gprtBufferGetHandle(codes);
-    nnAccelHandle.ids = gprtBufferGetHandle(ids);
-    nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
+    nnAccelHandle.codes = gprtBufferGetHandle(codesBuffer);
+    nnAccelHandle.ids = gprtBufferGetHandle(idsBuffer);
+    nnAccelHandle.aabb = gprtBufferGetHandle(rootBoundsBuffer);
     
     for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      nnAccelHandle.oobbs[i] = gprtBufferGetHandle(oobbs[i]);
-      nnAccelHandle.aabbs[i] = gprtBufferGetHandle(aabbs[i]);
-      nnAccelHandle.centers[i] = gprtBufferGetHandle(centers[i]);
+      nnAccelHandle.oobbs[i] = gprtBufferGetHandle(oobbBuffers[i]);
+      nnAccelHandle.aabbs[i] = gprtBufferGetHandle(aabbBuffers[i]);
+      nnAccelHandle.centers[i] = gprtBufferGetHandle(centerBuffers[i]);
     }
 
     // for (int i = 0; i < MAX_LEVELS; ++i) {
@@ -7683,42 +7715,67 @@ struct NNTriangleAccel : public Accel {
   #include <iostream>
   #include <fstream>
   void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+    gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+
+    // Fetch kernels
+    auto ComputeTriangleRootBounds      = context->FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
+    auto ComputeTriangleAABBsAndCenters = context->FetchCompute<ComputeTriangleAABBsAndCentersParams>("ComputeTriangleAABBsAndCenters");
+    auto ComputeTriangleCodes           = context->FetchCompute<ComputeTriangleCodesParams>("ComputeTriangleCodes");
+    auto ComputeAABBsAndCenters         = context->FetchCompute<ComputeAABBsAndCentersParams>("ComputeAABBsAndCenters");
+    auto ComputeTriangleOBBCovariances  = context->FetchCompute<ComputeTriangleOBBCovariancesParams>("ComputeTriangleOBBCovariances");
+    auto ComputeOBBCovariances          = context->FetchCompute<ComputeOBBCovariancesParams>("ComputeOBBCovariances");
+    auto ComputeOBBAngles               = context->FetchCompute<ComputeOBBAnglesParams>("ComputeOBBAngles");
+    auto ComputeTriangleOBBBounds       = context->FetchCompute<ComputeTriangleOBBBoundsParams>("ComputeTriangleOBBBounds");
+    auto ExpandTriangles                = context->FetchCompute<ExpandTrianglesParams>("ExpandTriangles");
     
+    GPRTContext context = (GPRTContext)this->context;
     typedef uint32_t uint;
 
-    gprt::NNConstants pc;
-    pc.numPrims = nnAccelHandle.numPrims;
-    pc.triangles = gprtBufferGetHandle(triangleLists);
-    pc.numLevels = nnAccelHandle.numLevels;
+    uint32_t numPrims = nnAccelHandle.numPrims;
+    
+    // For common launches over primitives in parallel
+    std::array<size_t, 3> numPrimGroups = {(numPrims + 31) / 32, 1, 1};
+    std::array<size_t, 3> numPrimThreads = {32, 1, 1};
+
+    // Buffers used for construction
+    gprt::Buffer triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
+    gprt::Buffer vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    gprt::Buffer trianglesExp = gprtBufferGetHandle(triangleExpansionBuffer);
+    gprt::Buffer rootBounds = gprtBufferGetHandle(this->rootBoundsBuffer);
+    gprt::Buffer codes = gprtBufferGetHandle(this->codesBuffer);
+    gprt::Buffer ids = gprtBufferGetHandle(this->idsBuffer);
+
+    gprt::Buffer aabbHierarchy[MAX_LEVELS];
+    gprt::Buffer centerHierarchy[MAX_LEVELS];
+    gprt::Buffer oobbHierarchy[MAX_LEVELS];
+    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
+      aabbHierarchy[i] = gprtBufferGetHandle(aabbBuffers[i]);
+      centerHierarchy[i] = gprtBufferGetHandle(centerBuffers[i]);
+      oobbHierarchy[i] = gprtBufferGetHandle(oobbBuffers[i]);
+    }
     
     // initialize root AABB
-    gprtBufferMap(aabb);
-    float3* aabbPtr = gprtBufferGetPointer(aabb);
+    gprtBufferMap(rootBoundsBuffer);
+    float3* aabbPtr = gprtBufferGetPointer(rootBoundsBuffer);
     aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
     aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
-    gprtBufferUnmap(aabb);
+    gprtBufferUnmap(rootBoundsBuffer);
 
     // warmup... 
     for (int i = 0; i < 100; ++i) {
-      pc.buffer1 = gprtBufferGetHandle(triangleLists);
-      pc.buffer2 = gprtBufferGetHandle(aabb);
-      pc.buffer3 = nnAccelHandle.triangles;
-      pc.buffer4 = nnAccelHandle.points;
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
+        ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
+      gprtEndProfile(context);
     }
 
     // Compute the global bounds
     float timeToComputeRootBounds = 0.f;
     for (int i = 0; i < 100; ++i) {
-      pc.buffer1 = gprtBufferGetHandle(triangleLists); // temporarily using to store centers
-      pc.buffer2 = gprtBufferGetHandle(aabb);
-      pc.buffer3 = nnAccelHandle.triangles;
-      pc.buffer4 = nnAccelHandle.points;
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      timeToComputeRootBounds += gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
+        ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
+      timeToComputeRootBounds += gprtEndProfile(context);
     }
     timeToComputeRootBounds /= 100.f;
     std::cout<<"Time to compute root bounds in ms: " << timeToComputeRootBounds << std::endl;
@@ -7726,28 +7783,25 @@ struct NNTriangleAccel : public Accel {
     // Use global bounds to compute codes
     float timeToComputeCodes = 0.f;
     for (int i = 0; i < 100; ++i) {
-      pc.buffer1 = gprtBufferGetHandle(triangleLists);
-      pc.buffer2 = gprtBufferGetHandle(aabb);
-      pc.buffer3 = gprtBufferGetHandle(codes);
-      pc.buffer4 = gprtBufferGetHandle(ids);
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      timeToComputeCodes += gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      gprtComputeLaunch(ComputeTriangleCodes, numPrimGroups, numPrimThreads, 
+        ComputeTriangleCodesParams(numPrims, /*reading back centers*/trianglesExp, rootBounds, codes, ids));
+      timeToComputeCodes += gprtEndProfile(context);
     }
     timeToComputeCodes /= 100.f;
     std::cout<<"Time to compute codes in ms: " << timeToComputeCodes << std::endl;
 
     // Sort the primitive codes
     float timeToSortCodeIDPairs = 0.f;
-    int lastScratchSize = gprtBufferGetSize(scratch);
+    int lastScratchSize = gprtBufferGetSize(scratchBuffer);
     for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile((GPRTContext)context);
-      gprtBufferSortPayload((GPRTContext)context, codes, ids, scratch);
-      timeToSortCodeIDPairs += gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      gprtBufferSortPayload((GPRTContext)context, this->codesBuffer, this->idsBuffer, scratchBuffer);
+      timeToSortCodeIDPairs += gprtEndProfile(context);
     }
     timeToSortCodeIDPairs /= 100.f;
     std::cout<<"Time to sort code-id pairs in ms: " << timeToSortCodeIDPairs << std::endl;
-    int currentScratchSize = gprtBufferGetSize(scratch);
+    int currentScratchSize = gprtBufferGetSize(scratchBuffer);
 
     if (lastScratchSize != currentScratchSize) {
       // when scratch buffer changes, some descriptor sets keeping track of all 
@@ -7755,73 +7809,13 @@ struct NNTriangleAccel : public Accel {
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
     }
 
-    // // Create and open a text file
-    // std::ofstream MyFile("codes.csv");
-
-    // {
-    //   // gprtBufferClear(claimCounts);
-
-    //   pc.buffer1 = gprtBufferGetHandle(codes);
-    //   pc.buffer2 = gprtBufferGetHandle(distances);
-    //   pc.buffer3 = gprtBufferGetHandle(claimCounts);
-    //   // pc.buffer4 = gprtBufferGetHandle(neighbors);
-    //   // pc.buffer4 = gprtBufferGetHandle(connections);
-    //   // pc.buffer5 = gprtBufferGetHandle(flags);
-    //   // gprtBeginProfile((GPRTContext)context);
-    //   gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-    //   // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["CheckNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      
-    //   // pc.buffer1 = gprtBufferGetHandle(flags);
-    //   // pc.buffer2 = gprtBufferGetHandle(neighbors);
-    //   // pc.buffer3 = gprtBufferGetHandle(connections);
-    //   // pc.buffer4 = gprtBufferGetHandle(claimCounts);
-    //   // pc.buffer5 = gprtBufferGetHandle(totalClaimed);
-    //   gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ClaimNeighbors"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-
-    //   gprtBufferMap(codes);
-    //   gprtBufferMap(neighbors);
-    //   gprtBufferMap(distances);
-    //   gprtBufferMap(connections);
-    //   gprtBufferMap(flags);
-    //   gprtBufferMap(claimCounts);
-    //   gprtBufferMap(totalClaimed);
-    //   uint64_t* codesPtr = gprtBufferGetPointer(codes);
-    //   int* neighborsPtr = gprtBufferGetPointer(neighbors);
-    //   int* distancesPtr = gprtBufferGetPointer(distances);
-    //   int* connectionsPtr = gprtBufferGetPointer(connections);
-    //   int* flagsPtr = gprtBufferGetPointer(flags);
-    //   int* claimCountsPtr = gprtBufferGetPointer(claimCounts);
-    //   int* totalClaimedPtr = gprtBufferGetPointer(totalClaimed);
-    //   // MyFile << "Primitive, Codes, N1, N2, N3, D1, D2, D3, C1, C2, C3, Flag, ClaimCounts, TotalClaimed" << std::endl;
-    //   MyFile << "Primitive, Codes, KthDistance, Padding" << std::endl;
-
-    //   for (uint32_t i = 0; i < nnAccelHandle.numPrims; ++i) {
-    //     // std::cout<<"i " << i << " Diff " << diffsPtr[i] << " Code " << codesPtr[i] << std::endl;
-    //     //std::cout<< codesPtr[i] << std::endl;
-
-    //     MyFile << i << "," << codesPtr[i] << "," << distancesPtr[i] << "," << claimCountsPtr[i] << std::endl;
-
-    //     // MyFile << std::to_string(i) << "," << std::to_string(codesPtr[i]) << "," <<std::to_string(neighborsPtr[i * 3 + 0]) << "," <<std::to_string(neighborsPtr[i * 3 + 1]) << "," <<std::to_string(neighborsPtr[i * 3 + 2]) << "," <<std::to_string(distancesPtr[i * 3 + 0]) << "," <<std::to_string(distancesPtr[i * 3 + 1]) << "," <<std::to_string(distancesPtr[i * 3 + 2]) << "," <<std::to_string(connectionsPtr[i * 3 + 0]) << "," <<std::to_string(connectionsPtr[i * 3 + 1]) << "," <<std::to_string(connectionsPtr[i * 3 + 2]) << "," <<std::to_string(flagsPtr[i]) << "," <<std::to_string(claimCountsPtr[i]) << "," <<std::to_string(totalClaimedPtr[i]) << std::endl;
-    //     // std::cout << std::to_string(i) << "," << std::to_string(codesPtr[i]) << "," <<std::to_string(neighborsPtr[i * 3 + 0]) << "," <<std::to_string(neighborsPtr[i * 3 + 1]) << "," <<std::to_string(neighborsPtr[i * 3 + 2]) << "," <<std::to_string(distancesPtr[i * 3 + 0]) << "," <<std::to_string(distancesPtr[i * 3 + 1]) << "," <<std::to_string(distancesPtr[i * 3 + 2]) << "," <<std::to_string(connectionsPtr[i * 3 + 0]) << "," <<std::to_string(connectionsPtr[i * 3 + 1]) << "," <<std::to_string(connectionsPtr[i * 3 + 2]) << "," <<std::to_string(flagsPtr[i]) << "," <<std::to_string(claimCountsPtr[i]) << std::endl;
-    //   }
-    //   gprtBufferUnmap(neighbors);
-    //   gprtBufferUnmap(distances);
-    //   gprtBufferUnmap(codes);
-    //   gprtBufferUnmap(connections);
-    //   gprtBufferUnmap(claimCounts);
-    //   gprtBufferUnmap(totalClaimed);
-    // }
-    // MyFile.close();
-
     // Use sorted primitive codes to optimize triangle indices
     float timeToExpandTriangles = 0.f;
     for (int i = 0; i < 100; ++i) {
-      pc.buffer1 = gprtBufferGetHandle(ids);
-      pc.buffer3 = nnAccelHandle.triangles;
-      pc.buffer4 = nnAccelHandle.points;
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ExpandTriangles"], (nnAccelHandle.numPrims + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      timeToExpandTriangles += gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      gprtComputeLaunch(ExpandTriangles, numPrimGroups, numPrimThreads, 
+        ExpandTrianglesParams(numPrims, ids, triangles, vertices, trianglesExp));
+      timeToExpandTriangles += gprtEndProfile(context);
     }
     timeToExpandTriangles /= 100.f;
     std::cout<<"Time to expand triangles in ms: " << timeToExpandTriangles << std::endl;
@@ -7829,21 +7823,23 @@ struct NNTriangleAccel : public Accel {
     float computeAABBsAndCentersTime = 0.f;
     for (int i = 0; i < 100; ++i) {
       // Now compute cluster bounding boxes...   
-      pc.level = 0;
-      pc.buffer1 = gprtBufferGetHandle(aabbs[0]);
-      pc.buffer3 = gprtBufferGetHandle(centers[0]);
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
+      gprtBeginProfile(context);
+      std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+      std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+      gprtComputeLaunch(ComputeTriangleAABBsAndCenters, numClusterGroups, numClusterThreads, 
+        ComputeTriangleAABBsAndCentersParams(numPrims, 0, trianglesExp, aabbHierarchy[0], centerHierarchy[0]));
+      computeAABBsAndCentersTime += gprtEndProfile(context);
       for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        pc.level = lid;
-        pc.buffer2 = gprtBufferGetHandle(aabbs[lid-1]);
-        pc.buffer1 = gprtBufferGetHandle(aabbs[lid]);
-        pc.buffer4 = gprtBufferGetHandle(centers[lid-1]);
-        pc.buffer3 = gprtBufferGetHandle(centers[lid]);
-        gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBsAndCenters"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-        computeAABBsAndCentersTime += gprtEndProfile((GPRTContext)context);
+        std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+        std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+        gprtBeginProfile(context);
+        gprtComputeLaunch(ComputeAABBsAndCenters, numClusterGroups, numClusterThreads, 
+          ComputeAABBsAndCentersParams(numPrims, lid, 
+            aabbHierarchy[lid-1], centerHierarchy[lid-1], // children nodes
+            aabbHierarchy[lid], centerHierarchy[lid]      // parent nodes
+          )
+        );
+        computeAABBsAndCentersTime += gprtEndProfile(context);
       }
     }
     computeAABBsAndCentersTime /= 100.f;
@@ -7862,41 +7858,47 @@ struct NNTriangleAccel : public Accel {
     float computeBoundsTime = 0.f;
 
     for (int i = 0; i < 100; ++i) {
-      pc.level = 0;
-      pc.buffer1 = gprtBufferGetHandle(oobbs[0]);
-      pc.buffer3 = gprtBufferGetHandle(centers[0]);
-      gprtBeginProfile((GPRTContext)context);
-      gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"], (nnAccelHandle.numClusters[0] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-      computeCovarianceTime += gprtEndProfile((GPRTContext)context);
+      std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+      std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+      gprtBeginProfile(context);
+      gprtComputeLaunch(ComputeTriangleOBBCovariances, numClusterGroups, numClusterThreads, 
+        ComputeTriangleOBBCovariancesParams(
+          numPrims, 0, trianglesExp, centerHierarchy[0], oobbHierarchy[0]
+        )
+      );
+      computeCovarianceTime += gprtEndProfile(context);
       for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        pc.level = lid;
-        pc.buffer4 = gprtBufferGetHandle(centers[lid-1]);
-        pc.buffer3 = gprtBufferGetHandle(centers[lid]);
-        pc.buffer2 = gprtBufferGetHandle(oobbs[lid-1]);
-        pc.buffer1 = gprtBufferGetHandle(oobbs[lid]);
-        gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-        computeCovarianceTime += gprtEndProfile((GPRTContext)context);
+        std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+        std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+        gprtBeginProfile(context);
+        gprtComputeLaunch(ComputeOBBCovariances, numClusterGroups, numClusterThreads,
+          ComputeOBBCovariancesParams(numPrims, lid, 
+            oobbHierarchy[lid-1], centerHierarchy[lid-1], // Child obbs
+            oobbHierarchy[lid], centerHierarchy[lid]     // Parent obbs
+          )
+        );
+        computeCovarianceTime += gprtEndProfile(context);
       }
       for (int lid = 0; lid < nnAccelHandle.numLevels; ++lid) {
-        pc.level = lid;
-        pc.buffer1 = gprtBufferGetHandle(oobbs[lid]);
-        gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"], (nnAccelHandle.numClusters[lid] + 31) / 32, sizeof(gprt::NNConstants), &pc);
-        computeAnglesTime += gprtEndProfile((GPRTContext)context);
+        gprtBeginProfile(context);
+        gprtComputeLaunch(ComputeOBBAngles, numClusterGroups, numClusterThreads, 
+          ComputeOBBAnglesParams(numPrims, lid, oobbHierarchy[lid])
+        );
+        computeAnglesTime += gprtEndProfile(context);
       }
       
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
-      pc.numLevels = nnAccelHandle.numLevels;
-      pc.stride = BRANCHING_FACTOR;
-      pc.numPrims = nnAccelHandle.numPrims;
-      pc.triangles = gprtBufferGetHandle(triangleLists);
+      uint32_t numLevels = nnAccelHandle.numLevels;
+      uint32_t stride = BRANCHING_FACTOR;
       for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-        pc.iteration = pid;
-        gprtBeginProfile((GPRTContext)context);
-        gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"], (((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR) + 31) / 32, sizeof(gprt::NNConstants), &pc);
-        computeBoundsTime += gprtEndProfile((GPRTContext)context);
+        std::array<size_t, 3> numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
+        std::array<size_t, 3> numThreads = {32, 1, 1};
+        gprtBeginProfile(context);
+        gprtComputeLaunch(ComputeTriangleOBBBounds, numGroups, numThreads, 
+          ComputeTriangleOBBBoundsParams(numPrims, numLevels, stride, pid, trianglesExp, oobbHierarchy)
+        );
+        computeBoundsTime += gprtEndProfile(context);
       }
     }
     computeCovarianceTime /= 100.f;
@@ -7968,15 +7970,15 @@ struct NNTriangleAccel : public Accel {
   }
 
   void destroy() {
-    gprtBufferDestroy(codes);
-    gprtBufferDestroy(ids);
-    gprtBufferDestroy(aabb);
+    gprtBufferDestroy(codesBuffer);
+    gprtBufferDestroy(idsBuffer);
+    gprtBufferDestroy(rootBoundsBuffer);
     for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      gprtBufferDestroy(centers[i]);
-      gprtBufferDestroy(oobbs[i]);
-      gprtBufferDestroy(aabbs[i]);
+      gprtBufferDestroy(centerBuffers[i]);
+      gprtBufferDestroy(oobbBuffers[i]);
+      gprtBufferDestroy(aabbBuffers[i]);
     }
-    gprtBufferDestroy(scratch);
+    gprtBufferDestroy(scratchBuffer);
 
     // gprtBufferDestroy(lbvhMortonCodes);
     // gprtBufferDestroy(lbvhIds);
@@ -10550,16 +10552,19 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
   // note, input->getSize() here should always be a multiple of 16 bytes
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitScan"];
-  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["Scan"];
-  uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
+  uint32_t subgroupSize = context->subgroupProperties.subgroupSize;
+  auto InitScan = context->FetchCompute<gprt::ScanConstants>("InitScan");
+  auto Scan_32 = context->FetchCompute<gprt::ScanConstants>("Scan_32");
+  auto Scan_64 = context->FetchCompute<gprt::ScanConstants>("Scan_64");
+
+  std::array<size_t, 3> numThreadGroups = {(numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE, 1, 1};
 
   // Each group gets an aggregate/inclusive prefix and a status flag.
   // We also reserve one int for the total aggregate count, and one
   // for group-to-partition scheduling
-  if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
+  if (scratch->getSize() < (numThreadGroups[0] + 2) * sizeof(uint32_t)) {
     // updating SBT, since we're using atomics here...
-    scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
+    scratch->resize((numThreadGroups[0] + 2) * sizeof(uint32_t), false);
     gprtBuildShaderBindingTable(_context);
   }
 
@@ -10574,8 +10579,13 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
   
   if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
 
-  gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, numThreadBlocks, scanConstants);
-  gprtComputeLaunch1D(_context, ChainedDecoupledExclusive, numThreadBlocks, scanConstants);
+  gprtComputeLaunch(InitScan, numThreadGroups, {1,1,1}, scanConstants);
+  if (subgroupSize == 32)
+    gprtComputeLaunch(Scan_32, numThreadGroups, {32, (SCAN_PARTITON_SIZE / (16 * 32)), 1}, scanConstants);
+  else if (subgroupSize == 64)
+    gprtComputeLaunch(Scan_64, numThreadGroups, {64, (SCAN_PARTITON_SIZE / (16 * 64)), 1}, scanConstants);
+  else
+    LOG_ERROR("Unsupported subgroup size: " + std::to_string(subgroupSize) + "\n");
   
   scratch->map(sizeof(uint32_t), 0);
   uint32_t total = *((uint32_t*)scratch->mapped);

@@ -23,14 +23,17 @@
 
 #include "gprt.h"
 
-// Uniform parameters for entry points
-
+// Uniform parameters for entry points. Shared between Slang and C++
 struct ComputeTriangleRootBoundsParams {
     int numPrims;
     gprt::Buffer triangles;
     gprt::Buffer vertices;
     gprt::Buffer centers;
     gprt::Buffer rootBounds;
+#ifndef __SLANG_COMPILER__
+    ComputeTriangleRootBoundsParams(int numPrims, gprt::Buffer triangles, gprt::Buffer vertices, gprt::Buffer centers, gprt::Buffer rootBounds) :
+      numPrims(numPrims), triangles(triangles), vertices(vertices), centers(centers), rootBounds(rootBounds) {}
+#endif
 };
 
 struct ComputeTriangleCodesParams {
@@ -39,6 +42,10 @@ struct ComputeTriangleCodesParams {
     gprt::Buffer rootBounds;
     gprt::Buffer hilbertCodes;
     gprt::Buffer primIDs;
+#ifndef __SLANG_COMPILER__
+    ComputeTriangleCodesParams(int numPrims, gprt::Buffer centers, gprt::Buffer rootBounds, gprt::Buffer hilbertCodes, gprt::Buffer primIDs) :
+      numPrims(numPrims), centers(centers), rootBounds(rootBounds), hilbertCodes(hilbertCodes), primIDs(primIDs) {}
+#endif
 };
 
 struct ExpandTrianglesParams {
@@ -47,6 +54,10 @@ struct ExpandTrianglesParams {
     gprt::Buffer triangles;
     gprt::Buffer vertices;
     gprt::Buffer trianglesExp;
+#ifndef __SLANG_COMPILER__
+    ExpandTrianglesParams(int numPrims, gprt::Buffer primIDs, gprt::Buffer triangles, gprt::Buffer vertices, gprt::Buffer trianglesExp) :
+      numPrims(numPrims), primIDs(primIDs), triangles(triangles), vertices(vertices), trianglesExp(trianglesExp) {}
+#endif
 };
 
 struct ComputeTriangleAABBsAndCentersParams {
@@ -55,6 +66,10 @@ struct ComputeTriangleAABBsAndCentersParams {
     gprt::Buffer trianglesExp;
     gprt::Buffer aabbs;
     gprt::Buffer centers;
+#ifndef __SLANG_COMPILER__
+    ComputeTriangleAABBsAndCentersParams(int numPrims, int level, gprt::Buffer trianglesExp, gprt::Buffer aabbs, gprt::Buffer centers) :
+      numPrims(numPrims), level(level), trianglesExp(trianglesExp), aabbs(aabbs), centers(centers) {}
+#endif
 };
 
 struct ComputeAABBsAndCentersParams {
@@ -64,6 +79,10 @@ struct ComputeAABBsAndCentersParams {
     gprt::Buffer childCenters;
     gprt::Buffer parentAABBs;
     gprt::Buffer parentCenters;
+#ifndef __SLANG_COMPILER__
+    ComputeAABBsAndCentersParams(int numPrims, int level, gprt::Buffer childAABBs, gprt::Buffer childCenters, gprt::Buffer parentAABBs, gprt::Buffer parentCenters) :
+      numPrims(numPrims), level(level), childAABBs(childAABBs), childCenters(childCenters), parentAABBs(parentAABBs), parentCenters(parentCenters) {}
+#endif
 };
 
 struct ComputeTriangleOBBCovariancesParams {
@@ -72,6 +91,10 @@ struct ComputeTriangleOBBCovariancesParams {
     gprt::Buffer trianglesExp;
     gprt::Buffer parentCenters;
     gprt::Buffer parentOBBs;
+#ifndef __SLANG_COMPILER__
+    ComputeTriangleOBBCovariancesParams(int numPrims, int level, gprt::Buffer trianglesExp, gprt::Buffer parentCenters, gprt::Buffer parentOBBs) :
+      numPrims(numPrims), level(level), trianglesExp(trianglesExp), parentCenters(parentCenters), parentOBBs(parentOBBs) {}
+#endif
 };
 
 struct ComputeOBBCovariancesParams {
@@ -81,12 +104,20 @@ struct ComputeOBBCovariancesParams {
     gprt::Buffer childCenters;
     gprt::Buffer parentOBBs;
     gprt::Buffer parentCenters;
+#ifndef __SLANG_COMPILER__
+    ComputeOBBCovariancesParams(int numPrims, int level, gprt::Buffer childOBBs, gprt::Buffer childCenters, gprt::Buffer parentOBBs, gprt::Buffer parentCenters) :
+      numPrims(numPrims), level(level), childOBBs(childOBBs), childCenters(childCenters), parentOBBs(parentOBBs), parentCenters(parentCenters) {}
+#endif
 };
 
 struct ComputeOBBAnglesParams {
     int numPrims;
     int level;
     gprt::Buffer OBBs;
+#ifndef __SLANG_COMPILER__
+    ComputeOBBAnglesParams(int numPrims, int level, gprt::Buffer OBBs) :
+      numPrims(numPrims), level(level), OBBs(OBBs) {}
+#endif
 };
 
 struct ComputeTriangleOBBBoundsParams {
@@ -96,7 +127,40 @@ struct ComputeTriangleOBBBoundsParams {
     int iteration;
     gprt::Buffer trianglesExp;
     gprt::Buffer OBBHierarchy[MAX_LEVELS];
-}
+#ifndef __SLANG_COMPILER__
+    ComputeTriangleOBBBoundsParams(int numPrims, int numLevels, int stride, int iteration, gprt::Buffer trianglesExp, gprt::Buffer OBBHierarchy[MAX_LEVELS]) :
+      numPrims(numPrims), numLevels(numLevels), stride(stride), iteration(iteration), trianglesExp(trianglesExp) {
+        for (int i = 0; i < MAX_LEVELS; ++i) {
+          this->OBBHierarchy[i] = OBBHierarchy[i];
+        }
+      }
+#endif
+};
+
+struct NNStats {
+    float primsHit;
+    float lHit[MAX_LEVELS];
+
+    float getTotalTouched() {
+        float totalTouched = primsHit;
+        for (int i = 0; i < MAX_LEVELS; ++i) {
+            totalTouched += lHit[i];
+        }
+        return totalTouched;
+    }
+
+    static NNStats Create() {
+        NNStats stats;
+        stats.primsHit = 0;
+        for (int i = 0; i < MAX_LEVELS; ++i) {
+            stats.lHit[i] = 0;
+        }
+        return stats;
+    };
+};
+
+// Below code is device-code specific
+#ifdef __SLANG_COMPILER__
 
 enum NN_FLAG : uint32_t
 {
@@ -108,27 +172,7 @@ enum NN_FLAG : uint32_t
   NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE = 0x08,  
 };
 
-struct NNStats {
-  float primsHit;
-  float lHit[MAX_LEVELS];
-  
-  float getTotalTouched() {
-    float totalTouched = primsHit;
-    for (int i = 0; i < MAX_LEVELS; ++i) {
-      totalTouched += lHit[i];
-    }
-    return totalTouched;
-  }
 
-  static NNStats Create() {
-    NNStats stats;
-    stats.primsHit = 0;
-    for (int i = 0; i < MAX_LEVELS; ++i) {
-      stats.lHit[i] = 0;
-    }
-    return stats;
-  };
-};
 
 inline float rm(float p, float rp, float rq) {
     if (p <= (rp+rq)/2.f) {
@@ -294,8 +338,6 @@ float2 getTriangleDist2( float3 p, float3 a, float3 b, float3 c )
   float maxDist = max(max(_dot2(pa), _dot2(pb)), _dot2(pc));
   return sqrt(float2(minDist, maxDist));
 }
-
-#ifdef __SLANG_COMPILER__
 
 // Payload for nearest neighbor queries
 struct NNPayload {
