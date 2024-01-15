@@ -690,6 +690,10 @@ gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint)
   return (GPRTRayGenOf<T>) gprtRayGenCreate(context, module, entrypoint, sizeof(T));
 }
 
+// Specialization for void
+template <>
+GPRTRayGenOf<void> gprtRayGenCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
+
 GPRT_API void gprtRayGenDestroy(GPRTRayGen rayGen);
 
 template <typename T>
@@ -777,6 +781,10 @@ gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTMissOf<T>) gprtMissCreate(context, module, entrypoint, sizeof(T));
 }
 
+// Specialization for void
+template <>
+GPRTMissOf<void> gprtMissCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
+
 GPRT_API void gprtMissSet(GPRTContext context, int rayType, GPRTMiss missProgToUse);
 
 template <typename T>
@@ -849,6 +857,10 @@ GPRTCallableOf<T>
 gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
   return (GPRTCallableOf<T>) gprtCallableCreate(context, module, entrypoint, sizeof(T));
 }
+
+// Specialization for void
+template <>
+GPRTCallableOf<void> gprtCallableCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 GPRT_API void gprtCallableDestroy(GPRTCallable callableProg);
 

@@ -60,7 +60,7 @@ void simpleRayGen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
 }
 
 // This closest hit program will be called when rays hit triangles.
