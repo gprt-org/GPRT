@@ -279,7 +279,8 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 // Contains definitions for internal entry points
 extern std::vector<uint8_t> scanDeviceCode;
 extern std::vector<uint8_t> sortDeviceCode;
-extern std::vector<uint8_t> nnDeviceCode;
+extern std::vector<uint8_t> nnBuildDeviceCode;
+extern std::vector<uint8_t> nnTraverseDeviceCode;
 
 // forward declarations...
 struct Context;
@@ -3086,7 +3087,9 @@ struct Context {
   Module *radixSortModule = nullptr;
 
   GPRTModule scanModule = nullptr;
-  GPRTModule nnModule = nullptr;
+  GPRTModule nnBuildModule = nullptr;
+  GPRTModule nnTraverseModule = nullptr;
+  GPRTCallable traverseCallable = nullptr;
 
   struct SortStages {
     Stage Count;
@@ -3772,7 +3775,8 @@ struct Context {
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
     scanModule = gprtModuleCreate(context, scanDeviceCode);
-    nnModule = gprtModuleCreate(context, nnDeviceCode);
+    nnBuildModule = gprtModuleCreate(context, nnBuildDeviceCode);
+    nnTraverseModule = gprtModuleCreate(context, nnTraverseDeviceCode);
 
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4670,16 +4674,19 @@ struct Context {
     {
       // for some reason, driver is crashing when we try using any of the kernels below that are commented out...
       internalComputePrograms.insert({
-        {"ComputeTriangleRootBounds",      gprtComputeCreate<ComputeTriangleRootBoundsParams>(context, nnModule, "ComputeTriangleRootBounds")},
-        {"ComputeTriangleAABBsAndCenters", gprtComputeCreate<ComputeTriangleAABBsAndCentersParams>(context, nnModule, "ComputeTriangleAABBsAndCenters")},
-        {"ComputeTriangleCodes",           gprtComputeCreate<ComputeTriangleCodesParams>(context, nnModule, "ComputeTriangleCodes")},
-        {"ComputeAABBsAndCenters",         gprtComputeCreate<ComputeAABBsAndCentersParams>(context, nnModule, "ComputeAABBsAndCenters")},  
-        {"ComputeTriangleOBBCovariances",  gprtComputeCreate<ComputeTriangleOBBCovariancesParams>(context, nnModule, "ComputeTriangleOBBCovariances")},
-        {"ComputeOBBCovariances",          gprtComputeCreate<ComputeOBBCovariancesParams>(context, nnModule, "ComputeOBBCovariances")},
-        {"ComputeOBBAngles",               gprtComputeCreate<ComputeOBBAnglesParams>(context, nnModule, "ComputeOBBAngles")},
-        {"ComputeTriangleOBBBounds",       gprtComputeCreate<ComputeTriangleOBBBoundsParams>(context, nnModule, "ComputeTriangleOBBBounds")},
-        {"ExpandTriangles",                gprtComputeCreate<ExpandTrianglesParams>(context, nnModule, "ExpandTriangles")}
+        {"ComputeTriangleRootBounds",      gprtComputeCreate<ComputeTriangleRootBoundsParams>(context, nnBuildModule, "ComputeTriangleRootBounds")},
+        {"ComputeTriangleAABBsAndCenters", gprtComputeCreate<ComputeTriangleAABBsAndCentersParams>(context, nnBuildModule, "ComputeTriangleAABBsAndCenters")},
+        {"ComputeTriangleCodes",           gprtComputeCreate<ComputeTriangleCodesParams>(context, nnBuildModule, "ComputeTriangleCodes")},
+        {"ComputeAABBsAndCenters",         gprtComputeCreate<ComputeAABBsAndCentersParams>(context, nnBuildModule, "ComputeAABBsAndCenters")},  
+        {"ComputeTriangleOBBCovariances",  gprtComputeCreate<ComputeTriangleOBBCovariancesParams>(context, nnBuildModule, "ComputeTriangleOBBCovariances")},
+        {"ComputeOBBCovariances",          gprtComputeCreate<ComputeOBBCovariancesParams>(context, nnBuildModule, "ComputeOBBCovariances")},
+        {"ComputeOBBAngles",               gprtComputeCreate<ComputeOBBAnglesParams>(context, nnBuildModule, "ComputeOBBAngles")},
+        {"ComputeTriangleOBBBounds",       gprtComputeCreate<ComputeTriangleOBBBoundsParams>(context, nnBuildModule, "ComputeTriangleOBBBounds")},
+        {"ExpandTriangles",                gprtComputeCreate<ExpandTrianglesParams>(context, nnBuildModule, "ExpandTriangles")}
       });
+
+      // Testing out using a callable for recursive traversal...
+      traverseCallable = gprtCallableCreate(context, nnTraverseModule, "TraverseRecursive", 0);
     }
 
     computePipelinesOutOfDate = true;    
@@ -4754,6 +4761,9 @@ struct Context {
       gprtComputeDestroy(program);
       internalComputePrograms.erase(progName);
     }
+
+    // also remove the recursive traversal callable
+    gprtCallableDestroy(traverseCallable);
   }
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
@@ -7804,6 +7814,9 @@ struct NNTriangleAccel : public Accel {
     typedef uint32_t uint;
 
     uint32_t numPrims = nnAccelHandle.numPrims;
+    uint32_t numLevels = nnAccelHandle.numLevels;
+
+    std::cout<<"Building NN tree with " << numPrims << " primitives and " << numLevels << " levels" << std::endl;
     
     // For common launches over primitives in parallel
     std::array<size_t, 3> numPrimGroups = {(numPrims + 31) / 32, 1, 1};
@@ -7961,7 +7974,6 @@ struct NNTriangleAccel : public Accel {
       
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
-      uint32_t numLevels = nnAccelHandle.numLevels;
       uint32_t stride = BRANCHING_FACTOR;
       for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
         std::array<size_t, 3> numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
