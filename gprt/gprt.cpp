@@ -98,6 +98,9 @@ static struct RequestedFeatures {
 
   uint32_t numRayTypes = 1;
 
+  // On AMD, might require RADV driver...
+  uint32_t rayRecursionDepth = 31;
+
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
@@ -9236,7 +9239,7 @@ void Context::updatePipeline() {
       rayTracingPipelineCI.pStages = shaderStages.data();
       rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
       rayTracingPipelineCI.pGroups = shaderGroups.data();
-      rayTracingPipelineCI.maxPipelineRayRecursionDepth = 1;   // WHA!?
+      rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
 
       if (raytracingPipeline != VK_NULL_HANDLE) {
@@ -9301,6 +9304,12 @@ GPRT_API void
 gprtRequestRayQueries() {
   LOG_API_CALL();
   requestedFeatures.rayQueries = true;
+}
+
+GPRT_API void
+gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth) {
+  LOG_API_CALL();
+  requestedFeatures.rayRecursionDepth = rayRecursionDepth;
 }
 
 GPRT_API bool
