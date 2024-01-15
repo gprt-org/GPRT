@@ -2016,6 +2016,68 @@ struct Miss : public SBTEntry {
 
 std::vector<Miss *> Miss::misses;
 
+struct Callable : public SBTEntry {
+  // Our own virtual "callable address space".
+  uint32_t address = -1;
+  static std::vector<Callable *> callables;
+
+  VkShaderModule shaderModule;
+  VkPipelineShaderStageCreateInfo shaderStage{};
+  VkShaderModuleCreateInfo moduleCreateInfo{};
+  VkDevice logicalDevice;
+  std::string entryPoint;
+
+  Callable(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    // Hunt for an existing free address for this callable kernel
+    for (uint32_t i = 0; i < Callable::callables.size(); ++i) {
+      if (Callable::callables[i] == nullptr) {
+        Callable::callables[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      Callable::callables.push_back(this);
+      address = (uint32_t)Callable::callables.size() - 1;
+    }
+
+    // Fetch the SPIRV
+    std::vector<unsigned int, std::allocator<unsigned int>> binary;
+
+    entryPoint = std::string(_entryPoint);      
+    binary = module->binary;
+    
+    // store a reference to the logical device this module is made on
+    logicalDevice = _logicalDevice;
+
+    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
+    moduleCreateInfo.pCode = binary.data();                         //(uint32_t*)binary->wordCount;//programBytes;
+
+    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+
+    shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStage.stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+    shaderStage.module = shaderModule;
+    shaderStage.pName = entryPoint.c_str();
+    assert(shaderStage.module != VK_NULL_HANDLE);
+
+    this->recordSize = recordSize;
+    this->SBTRecord = (uint8_t *) malloc(recordSize);
+  }
+  ~Callable() {}
+  void destroy() {
+    // Free callable slot for use by subsequently made callable kernels
+    Callable::callables[address] = nullptr;
+
+    vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    free(this->SBTRecord);
+  }
+};
+
+std::vector<Callable *> Callable::callables;
+
 /* An abstraction for any sort of geometry type - describes the
     programs to use, and structure of the SBT records, when building
     shader binding tables (SBTs) with geometries of this type. This
@@ -2792,6 +2854,7 @@ struct Context {
 
   std::vector<RayGen *> raygenPrograms;
   std::vector<Miss *> missPrograms;
+  std::vector<Callable *> callablePrograms;
 
   bool computePipelinesOutOfDate = true;
   bool rasterPipelinesOutOfDate = true;
@@ -2846,6 +2909,7 @@ struct Context {
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer *raygenTable = nullptr;
   Buffer *missTable = nullptr;
+  Buffer *callableTable = nullptr;
   Buffer *hitgroupTable = nullptr;
 
   std::map<std::string, Compute*> internalComputePrograms;
@@ -3933,6 +3997,11 @@ struct Context {
       missTable->destroy();
       delete missTable;
       missTable = nullptr;
+    }
+    if (callableTable) {
+      callableTable->destroy();
+      delete callableTable;
+      callableTable = nullptr;
     }
     if (hitgroupTable) {
       hitgroupTable->destroy();
@@ -6984,6 +7053,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
+    // allocate / resize miss table
     size_t numMissProgs = missPrograms.size();
     if (missTable && missTable->size != recordSize * numMissProgs) {
       missTable->destroy();
@@ -6996,6 +7066,20 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                               rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
+    // allocate / resize callable table
+    size_t numCallableProgs = callablePrograms.size();
+    if (callableTable && callableTable->size != recordSize * numCallableProgs) {
+      callableTable->destroy();
+      delete callableTable;
+      callableTable = nullptr;
+    }
+    if (!callableTable && callablePrograms.size() > 0) {
+      callableTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                              bufferUsageFlags, memoryUsageFlags, recordSize * numCallableProgs,
+                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
+    }
+
+    // allocate / resize hit group table
     size_t numHitRecords = getNumHitRecords();
     if (hitgroupTable && hitgroupTable->size != recordSize * numHitRecords) {
       hitgroupTable->destroy();
@@ -7008,7 +7092,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
-    size_t numRecords = numRayGens + numMissProgs + numHitRecords;
+    size_t numRecords = numRayGens + numMissProgs + numCallableProgs + numHitRecords;
 
     // if (shaderBindingTable.size != recordSize * numRecords) {
     //   shaderBindingTable.destroy();
@@ -7066,6 +7150,30 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
       }
 
       missTable->unmap();
+    }
+
+    // Callable records
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_CALLABLE) != 0 && callablePrograms.size() > 0) {
+      callableTable->map();
+      uint8_t *mapped = ((uint8_t *) (callableTable->mapped));
+
+      for (uint32_t idx = 0; idx < callablePrograms.size(); ++idx) {
+        size_t recordStride = recordSize;
+        size_t handleStride = handleSize;
+
+        // First, copy handle
+        size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
+        size_t handleOffset = handleStride * idx + handleStride * numRayGens;
+        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+        // Then, copy params following handle
+        recordOffset = recordOffset + handleSize;
+        uint8_t *params = mapped + recordOffset;
+        Callable *callable = callablePrograms[idx];
+        memcpy(params, callable->SBTRecord, callable->recordSize);
+      }
+
+      callableTable->unmap();
     }
 
     // Hit records
@@ -7216,7 +7324,8 @@ void Context::buildPipeline() {
     binding.binding = 0;
     binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                          VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                           VK_SHADER_STAGE_COMPUTE_BIT;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
@@ -7319,7 +7428,8 @@ void Context::buildPipeline() {
     binding.binding = 0;
     binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                          VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                           VK_SHADER_STAGE_COMPUTE_BIT;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
@@ -7427,7 +7537,8 @@ void Context::buildPipeline() {
     binding.binding = 0;
     binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                          VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                           VK_SHADER_STAGE_COMPUTE_BIT;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
@@ -7535,7 +7646,8 @@ void Context::buildPipeline() {
     binding.binding = 0;
     binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                          VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                           VK_SHADER_STAGE_COMPUTE_BIT;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
@@ -7643,7 +7755,8 @@ void Context::buildPipeline() {
     binding.binding = 0;
     binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                           VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                          VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR | 
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
                           VK_SHADER_STAGE_COMPUTE_BIT;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
@@ -7867,7 +7980,7 @@ void Context::buildPipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+                                    VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -7908,10 +8021,25 @@ void Context::buildPipeline() {
       }
     }
 
-    // Miss group
+    // Miss groups
     {
       for (auto miss : missPrograms) {
         shaderStages.push_back(miss->shaderStage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+      }
+    }
+
+    // Callable groups
+    {
+      for (auto callable : callablePrograms) {
+        shaderStages.push_back(callable->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
         shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
@@ -8905,6 +9033,53 @@ gprtMissSetParameters(GPRTMiss _miss, void *parameters, int deviceID) {
   memcpy(miss->SBTRecord, parameters, miss->recordSize);
 }
 
+GPRT_API GPRTCallable
+gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *programName, size_t recordSize) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  Module *module = (Module *) _module;
+
+  Callable *callableProg = new Callable(context->logicalDevice, module, programName, recordSize);
+
+  context->callablePrograms.push_back(callableProg);
+
+  // Creating a callable program requires rebuilding a RT pipeline.
+  context->raytracingPipelineOutOfDate = true;
+
+  return (GPRTCallable) callableProg;
+}
+
+/*! sets the given callable program for the given ray type */
+GPRT_API void
+gprtCallableSet(GPRTContext _context, int rayType, GPRTCallable _callableToUse) {
+  GPRT_NOTIMPLEMENTED;
+}
+
+GPRT_API void
+gprtCallableDestroy(GPRTCallable _callable) {
+  LOG_API_CALL();
+  Callable *callableProg = (Callable *) _callable;
+  callableProg->destroy();
+  delete callableProg;
+  callableProg = nullptr;
+
+  // todo, update context->callablePrograms list... rebuild pipelines
+}
+
+GPRT_API void *
+gprtCallableGetParameters(GPRTCallable _callable, int deviceID) {
+  LOG_API_CALL();
+  Callable *callable = (Callable *) _callable;
+  return callable->SBTRecord;
+}
+
+GPRT_API void
+gprtCallableSetParameters(GPRTCallable _callable, void *parameters, int deviceID) {
+  LOG_API_CALL();
+  Callable *callable = (Callable *) _callable;
+  memcpy(callable->SBTRecord, parameters, callable->recordSize);
+}
+
 GPRT_API GPRTGeomType
 gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
   LOG_API_CALL();
@@ -9876,9 +10051,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   if (pushConstantsSize > 0) {
     if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
     vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
-                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                          VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                          VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                        VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                        VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR,
                       0, pushConstantsSize, pushConstants);
   }
 
@@ -9903,6 +10078,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
+  uint64_t callableBaseAddr =
+      (context->callableTable) ? getBufferDeviceAddress(context->logicalDevice, context->callableTable->buffer) : 0;
   uint64_t hitgroupBaseAddr =
       (context->hitgroupTable) ? getBufferDeviceAddress(context->logicalDevice, context->hitgroupTable->buffer) : 0;
 
@@ -9924,23 +10101,25 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->missPrograms.size() > 0) {
-    missShaderSbtEntry.deviceAddress = missBaseAddr;   // baseAddr + recordSize * context->raygenPrograms.size();
+    missShaderSbtEntry.deviceAddress = missBaseAddr;
     missShaderSbtEntry.stride = recordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
   }
+
+  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
+  if (context->callablePrograms.size() > 0) {
+    callableShaderSbtEntry.deviceAddress = callableBaseAddr;
+    callableShaderSbtEntry.stride = recordSize;
+    callableShaderSbtEntry.size = callableShaderSbtEntry.stride * context->callablePrograms.size();
+  }
+
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
     hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
-    // baseAddr + recordSize * (context->raygenPrograms.size() + context->missPrograms.size());
     hitShaderSbtEntry.stride = recordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
-
-  VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};   // empty
-  callableShaderSbtEntry.deviceAddress = 0;
-  // callableShaderSbtEntry.stride = handleSizeAligned;
-  // callableShaderSbtEntry.size = handleSizeAligned;
 
   gprt::vkCmdTraceRays(context->graphicsCommandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);

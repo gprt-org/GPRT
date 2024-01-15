@@ -105,12 +105,14 @@ using GPRTGeom = struct _GPRTGeom *;
 using GPRTGeomType = struct _GPRTGeomType *;
 using GPRTRayGen = struct _GPRTRayGen *;
 using GPRTMiss = struct _GPRTMiss *;
+using GPRTCallable = struct _GPRTCallable *;
 using GPRTCompute = struct _GPRTCompute *;
 
 template <typename T> struct _GPRTBufferOf;
 template <typename T> struct _GPRTTextureOf;
 template <typename T> struct _GPRTRayGenOf;
 template <typename T> struct _GPRTMissOf;
+template <typename T> struct _GPRTCallableOf;
 template <typename ...T> struct _GPRTComputeOf;
 template <typename T> struct _GPRTGeomOf;
 template <typename T> struct _GPRTGeomTypeOf;
@@ -118,6 +120,7 @@ template <typename T> using GPRTRayGenOf = struct _GPRTRayGenOf<T> *;
 template <typename T> using GPRTBufferOf = struct _GPRTBufferOf<T> *;
 template <typename T> using GPRTTextureOf = struct _GPRTTextureOf<T> *;
 template <typename T> using GPRTMissOf = struct _GPRTMissOf<T> *;
+template <typename T> using GPRTCallableOf = struct _GPRTCallableOf<T> *;
 template <typename ...T> using GPRTComputeOf = struct _GPRTComputeOf<T...> *;
 template <typename T> using GPRTGeomOf = struct _GPRTGeomOf<T> *;
 template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
@@ -160,9 +163,10 @@ typedef enum {
   GPRT_SBT_GEOM = GPRT_SBT_HITGROUP,
   GPRT_SBT_RAYGEN = 2,
   GPRT_SBT_MISS = 4,
-  GPRT_SBT_COMPUTE = 8,
-  GPRT_SBT_RASTER = 16,
-  GPRT_SBT_ALL = 31
+  GPRT_SBT_CALLABLE = 8,
+  GPRT_SBT_COMPUTE = 16,
+  GPRT_SBT_RASTER = 32,
+  GPRT_SBT_ALL = 63
 } GPRTBuildSBTFlags;
 
 /*! enum that specifies the different possible memory layouts for
@@ -836,6 +840,39 @@ template <typename T>
 void
 gprtMissSetParameters(GPRTMissOf<T> miss, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
   gprtMissSetParameters((GPRTMiss) miss, (void *) parameters, deviceID);
+}
+
+GPRT_API GPRTCallable gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
+
+template <typename T>
+GPRTCallableOf<T>
+gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
+  return (GPRTCallableOf<T>) gprtCallableCreate(context, module, entrypoint, sizeof(T));
+}
+
+GPRT_API void gprtCallableDestroy(GPRTCallable callableProg);
+
+template <typename T>
+void
+gprtCallableDestroy(GPRTCallableOf<T> callableProg) {
+  gprtCallableDestroy((GPRTCallable) callableProg);
+}
+
+GPRT_API void *gprtCallableGetParameters(GPRTCallable callableProg, int deviceID GPRT_IF_CPP(= 0));
+
+
+template <typename T>
+T *
+gprtCallableGetParameters(GPRTCallableOf<T> callableProg, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtCallableGetParameters((GPRTCallable) callableProg, deviceID);
+}
+
+GPRT_API void gprtCallableSetParameters(GPRTCallable callable, void *parameters, int deviceID GPRT_IF_CPP(= 0));
+
+template <typename T>
+void
+gprtCallableSetParameters(GPRTCallableOf<T> callable, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtCallableSetParameters((GPRTCallable) callable, (void *) parameters, deviceID);
 }
 
 // ------------------------------------------------------------------
