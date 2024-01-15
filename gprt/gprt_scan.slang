@@ -42,10 +42,7 @@
 #pragma once
 
 #include "gprt.h"
-
-[[vk::push_constant]] gprt::ScanConstants pc;
-
-typedef gprt::ScanRecord ScanRecord;
+#include "gprt_scan_shared.h"
 
 #define PARTITION_SIZE      8192
 #define PART_VEC_SIZE       2048
@@ -94,7 +91,7 @@ uint getReverseAddr(int i, int size, int exclusiveSum) {
   return (size - 1) - (i - exclusiveSum);
 }
 
-void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID) {
+void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanConstants pc) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
 
@@ -367,7 +364,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID) {
 }
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID) {
+void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ScanConstants pc) {
   uint3 id = DispatchThreadID;
   if (id.x == 0) gprt::store<uint2>(pc.state, 0, int2(0,0));
   gprt::store<uint>(pc.state, STATE_START + id.x, FLAG_NOT_READY);
@@ -381,13 +378,13 @@ void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID) {
 // for 32 lane count GPUs
 [shader("compute")]
 [numthreads(32, (SCAN_PARTITON_SIZE / (16 * 32)), 1)]
-void Scan_32(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID) {
-  Scan<32>(GroupThreadID, GroupID);
+void Scan_32(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID, uniform ScanConstants pc) {
+  Scan<32>(GroupThreadID, GroupID, pc);
 }
 
 // For 64 lane count GPUs
 [shader("compute")]
 [numthreads(64, (SCAN_PARTITON_SIZE / (16 * 64)), 1)]
-void Scan_64(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID) {
-  Scan<64>(GroupThreadID, GroupID);
+void Scan_64(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID, uniform ScanConstants pc) {
+  Scan<64>(GroupThreadID, GroupID, pc);
 }

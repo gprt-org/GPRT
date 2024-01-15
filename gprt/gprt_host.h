@@ -51,6 +51,9 @@ using namespace linalg::ostream_overloads;
 #include <iostream>
 #include <cstdlib>
 
+// Needed for gprt::NNAccel handle
+#include "gprt_knn_shared.h"
+
 #ifdef __cplusplus
 #include <cstddef>
 #endif

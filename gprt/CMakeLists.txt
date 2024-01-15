@@ -40,20 +40,21 @@ embed_devicecode(
     nnDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_shared.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn.slang
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_build.slang
 )
 
 embed_devicecode(
   OUTPUT_TARGET
     scanDeviceCode
   HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan_shared.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang
 )
@@ -61,7 +62,8 @@ embed_devicecode(
 target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
-    gprt_knn.h
+    gprt_knn_shared.h
+    gprt_scan_shared.h
     gprt_sort.h
 )
 

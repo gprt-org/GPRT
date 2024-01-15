@@ -21,146 +21,9 @@
 // SOFTWARE.
 #pragma once
 
-#include "gprt.h"
-
-// Uniform parameters for entry points. Shared between Slang and C++
-struct ComputeTriangleRootBoundsParams {
-    int numPrims;
-    gprt::Buffer triangles;
-    gprt::Buffer vertices;
-    gprt::Buffer centers;
-    gprt::Buffer rootBounds;
-#ifndef __SLANG_COMPILER__
-    ComputeTriangleRootBoundsParams(int numPrims, gprt::Buffer triangles, gprt::Buffer vertices, gprt::Buffer centers, gprt::Buffer rootBounds) :
-      numPrims(numPrims), triangles(triangles), vertices(vertices), centers(centers), rootBounds(rootBounds) {}
-#endif
-};
-
-struct ComputeTriangleCodesParams {
-    int numPrims;
-    gprt::Buffer centers;
-    gprt::Buffer rootBounds;
-    gprt::Buffer hilbertCodes;
-    gprt::Buffer primIDs;
-#ifndef __SLANG_COMPILER__
-    ComputeTriangleCodesParams(int numPrims, gprt::Buffer centers, gprt::Buffer rootBounds, gprt::Buffer hilbertCodes, gprt::Buffer primIDs) :
-      numPrims(numPrims), centers(centers), rootBounds(rootBounds), hilbertCodes(hilbertCodes), primIDs(primIDs) {}
-#endif
-};
-
-struct ExpandTrianglesParams {
-    int numPrims;
-    gprt::Buffer primIDs;
-    gprt::Buffer triangles;
-    gprt::Buffer vertices;
-    gprt::Buffer trianglesExp;
-#ifndef __SLANG_COMPILER__
-    ExpandTrianglesParams(int numPrims, gprt::Buffer primIDs, gprt::Buffer triangles, gprt::Buffer vertices, gprt::Buffer trianglesExp) :
-      numPrims(numPrims), primIDs(primIDs), triangles(triangles), vertices(vertices), trianglesExp(trianglesExp) {}
-#endif
-};
-
-struct ComputeTriangleAABBsAndCentersParams {
-    int numPrims;
-    int level;
-    gprt::Buffer trianglesExp;
-    gprt::Buffer aabbs;
-    gprt::Buffer centers;
-#ifndef __SLANG_COMPILER__
-    ComputeTriangleAABBsAndCentersParams(int numPrims, int level, gprt::Buffer trianglesExp, gprt::Buffer aabbs, gprt::Buffer centers) :
-      numPrims(numPrims), level(level), trianglesExp(trianglesExp), aabbs(aabbs), centers(centers) {}
-#endif
-};
-
-struct ComputeAABBsAndCentersParams {
-    int numPrims;
-    int level;
-    gprt::Buffer childAABBs;
-    gprt::Buffer childCenters;
-    gprt::Buffer parentAABBs;
-    gprt::Buffer parentCenters;
-#ifndef __SLANG_COMPILER__
-    ComputeAABBsAndCentersParams(int numPrims, int level, gprt::Buffer childAABBs, gprt::Buffer childCenters, gprt::Buffer parentAABBs, gprt::Buffer parentCenters) :
-      numPrims(numPrims), level(level), childAABBs(childAABBs), childCenters(childCenters), parentAABBs(parentAABBs), parentCenters(parentCenters) {}
-#endif
-};
-
-struct ComputeTriangleOBBCovariancesParams {
-    int numPrims;
-    int level;
-    gprt::Buffer trianglesExp;
-    gprt::Buffer parentCenters;
-    gprt::Buffer parentOBBs;
-#ifndef __SLANG_COMPILER__
-    ComputeTriangleOBBCovariancesParams(int numPrims, int level, gprt::Buffer trianglesExp, gprt::Buffer parentCenters, gprt::Buffer parentOBBs) :
-      numPrims(numPrims), level(level), trianglesExp(trianglesExp), parentCenters(parentCenters), parentOBBs(parentOBBs) {}
-#endif
-};
-
-struct ComputeOBBCovariancesParams {
-    int numPrims;
-    int level;
-    gprt::Buffer childOBBs;
-    gprt::Buffer childCenters;
-    gprt::Buffer parentOBBs;
-    gprt::Buffer parentCenters;
-#ifndef __SLANG_COMPILER__
-    ComputeOBBCovariancesParams(int numPrims, int level, gprt::Buffer childOBBs, gprt::Buffer childCenters, gprt::Buffer parentOBBs, gprt::Buffer parentCenters) :
-      numPrims(numPrims), level(level), childOBBs(childOBBs), childCenters(childCenters), parentOBBs(parentOBBs), parentCenters(parentCenters) {}
-#endif
-};
-
-struct ComputeOBBAnglesParams {
-    int numPrims;
-    int level;
-    gprt::Buffer OBBs;
-#ifndef __SLANG_COMPILER__
-    ComputeOBBAnglesParams(int numPrims, int level, gprt::Buffer OBBs) :
-      numPrims(numPrims), level(level), OBBs(OBBs) {}
-#endif
-};
-
-struct ComputeTriangleOBBBoundsParams {
-    int numPrims;
-    int numLevels;
-    int stride;
-    int iteration;
-    gprt::Buffer trianglesExp;
-    gprt::Buffer OBBHierarchy[MAX_LEVELS];
-#ifndef __SLANG_COMPILER__
-    ComputeTriangleOBBBoundsParams(int numPrims, int numLevels, int stride, int iteration, gprt::Buffer trianglesExp, gprt::Buffer OBBHierarchy[MAX_LEVELS]) :
-      numPrims(numPrims), numLevels(numLevels), stride(stride), iteration(iteration), trianglesExp(trianglesExp) {
-        for (int i = 0; i < MAX_LEVELS; ++i) {
-          this->OBBHierarchy[i] = OBBHierarchy[i];
-        }
-      }
-#endif
-};
-
-struct NNStats {
-    float primsHit;
-    float lHit[MAX_LEVELS];
-
-    float getTotalTouched() {
-        float totalTouched = primsHit;
-        for (int i = 0; i < MAX_LEVELS; ++i) {
-            totalTouched += lHit[i];
-        }
-        return totalTouched;
-    }
-
-    static NNStats Create() {
-        NNStats stats;
-        stats.primsHit = 0;
-        for (int i = 0; i < MAX_LEVELS; ++i) {
-            stats.lHit[i] = 0;
-        }
-        return stats;
-    };
-};
-
-// Below code is device-code specific
 #ifdef __SLANG_COMPILER__
+
+#include "gprt_knn_shared.h"
 
 enum NN_FLAG : uint32_t
 {
@@ -171,8 +34,6 @@ enum NN_FLAG : uint32_t
   // Doesn't return a primitive ID. Useful for walk on spheres and signed distance fields
   NN_FLAG_ACCEPT_UNDERESTIMATE_DISTANCE = 0x08,  
 };
-
-
 
 inline float rm(float p, float rp, float rq) {
     if (p <= (rp+rq)/2.f) {
@@ -349,15 +210,6 @@ struct NNPayload {
   #endif
 };
 
-float3x3 outerProduct(float3 a, float3 b) {
-  return float3x3(a * b.x, a * b.y, a * b.z);
-}
-
-// outer product of a vector with itself
-float3x3 outer2(float3 a) {
-  return outerProduct(a,a);
-}
-
 float3 getCorner(float3 aabbMin, float3 aabbMax, int cornerID) {
   int x = ((cornerID & (1 << 0)) != 0) ? 1 : 0;
   int y = ((cornerID & (1 << 1)) != 0) ? 1 : 0;
@@ -382,212 +234,6 @@ float getSurfaceArea(float3 aabbMin, float3 aabbMax) {
   float d = aabbMax.z - aabbMin.z;
   return 2 * w * h + 2 * w * d + 2 * h * d;
 }
-
-#define _EPSILON .00001f
-#define _PI 3.14159265358979323846264f
-
-
-// Assuming matrix is normalized... Returns two euler results, so that we can pick the best one.
-void mat3_to_eul2(in float3x3 mat, out float3 eul1, out float3 eul2)
-{
-  // float cy = hypot(mat[0][0], mat[1][0]);
-  float cy = sqrt(mat[0][0] * mat[0][0] + mat[1][0] * mat[1][0]);
-
-  if (cy > 16.0f * _EPSILON) {
-
-    eul1[0] = atan2(mat[2][1], mat[2][2]);
-    eul1[1] = atan2(-mat[2][0], cy);
-    eul1[2] = atan2(mat[1][0], mat[0][0]);
-
-    eul2[0] = atan2(-mat[2][1], -mat[2][2]);
-    eul2[1] = atan2(-mat[2][0], -cy);
-    eul2[2] = atan2(-mat[1][0], -mat[0][0]);
-  }
-  else {
-    eul1[0] = atan2(-mat[1][2], mat[1][1]);
-    eul1[1] = atan2(-mat[2][0], cy);
-    eul1[2] = 0.0f;
-    eul2 = eul1;
-  }
-}
-
-// Assuming matrix is normalized 
-float3 mat3_to_eul(in float3x3 mat)
-{
-  float3 eul1; 
-  float3 eul2;
-
-  mat3_to_eul2(mat, eul1, eul2);
-
-  /* return best, which is just the one with lowest values it in */
-  if (abs(eul1[0]) + abs(eul1[1]) + abs(eul1[2]) >
-      abs(eul2[0]) + abs(eul2[1]) + abs(eul2[2]))
-  {
-    return eul2;
-  }
-  else {
-    return eul1;
-  }
-}
-
-float3x3 eul_to_mat3(float3 eul)
-{
-  float3x3 mat;
-  float ci, cj, ch, si, sj, sh, cc, cs, sc, ss;
-
-  sincos(eul[0], si, ci);
-  sincos(eul[1], sj, cj);
-  sincos(eul[2], sh, ch);
-  cc = ci * ch;
-  cs = ci * sh;
-  sc = si * ch;
-  ss = si * sh;
-
-  mat[0][0] = cj * ch;
-  mat[0][1] = sj * sc - cs;
-  mat[0][2] = sj * cc + ss;
-  mat[1][0] = cj * sh;
-  mat[1][1] = sj * ss + cc;
-  mat[1][2] = sj * cs - sc;
-  mat[2][0] = -sj;
-  mat[2][1] = cj * si;
-  mat[2][2] = cj * ci;
-  return mat;
-}
-
-// Note, determinant of matrix must be positive for valid results
-float4 mat3_to_quat(float3x3 mat)
-{
-  float4 q;
-  
-  if (mat[2][2] < 0.0f) {
-    if (mat[0][0] > mat[1][1]) {
-     float trace = 1.0f + mat[0][0] - mat[1][1] - mat[2][2];
-      float s = 2.0f * sqrt(trace);
-      if (mat[2][1] < mat[1][2]) {
-        /* Ensure W is non-negative for a canonical result. */
-        s = -s;
-      }
-      q[1] = 0.25f * s;
-      s = 1.0f / s;
-      q[0] = (mat[2][1] - mat[1][2]) * s;
-      q[2] = (mat[1][0] + mat[0][1]) * s;
-      q[3] = (mat[0][2] + mat[2][0]) * s;
-      if (((trace == 1.0f) && (q[0] == 0.0f && q[2] == 0.0f && q[3] == 0.0f))) {
-        /* Avoids the need to normalize the degenerate case. */
-        q[1] = 1.0f;
-      }
-    }
-    else {
-     float trace = 1.0f - mat[0][0] + mat[1][1] - mat[2][2];
-      float s = 2.0f * sqrt(trace);
-      if (mat[0][2] < mat[2][0]) {
-        /* Ensure W is non-negative for a canonical result. */
-        s = -s;
-      }
-      q[2] = 0.25f * s;
-      s = 1.0f / s;
-      q[0] = (mat[0][2] - mat[2][0]) * s;
-      q[1] = (mat[1][0] + mat[0][1]) * s;
-      q[3] = (mat[2][1] + mat[1][2]) * s;
-      if (((trace == 1.0f) && (q[0] == 0.0f && q[1] == 0.0f && q[3] == 0.0f))) {
-        /* Avoids the need to normalize the degenerate case. */
-        q[2] = 1.0f;
-      }
-    }
-  }
-  else {
-    if (mat[0][0] < -mat[1][1]) {
-     float trace = 1.0f - mat[0][0] - mat[1][1] + mat[2][2];
-      float s = 2.0f * sqrt(trace);
-      if (mat[1][0] < mat[0][1]) {
-        /* Ensure W is non-negative for a canonical result. */
-        s = -s;
-      }
-      q[3] = 0.25f * s;
-      s = 1.0f / s;
-      q[0] = (mat[1][0] - mat[0][1]) * s;
-      q[1] = (mat[0][2] + mat[2][0]) * s;
-      q[2] = (mat[2][1] + mat[1][2]) * s;
-      if (((trace == 1.0f) && (q[0] == 0.0f && q[1] == 0.0f && q[2] == 0.0f))) {
-        /* Avoids the need to normalize the degenerate case. */
-        q[3] = 1.0f;
-      }
-    }
-    else {
-      /* NOTE(@campbellbarton): A zero matrix will fall through to this block,
-       * needed so a zero scaled matrices to return a quaternion without rotation, see: T101848. */
-     float trace = 1.0f + mat[0][0] + mat[1][1] + mat[2][2];
-      float s = 2.0f * sqrt(trace);
-      q[0] = 0.25f * s;
-      s = 1.0f / s;
-      q[1] = (mat[2][1] - mat[1][2]) * s;
-      q[2] = (mat[0][2] - mat[2][0]) * s;
-      q[3] = (mat[1][0] - mat[0][1]) * s;
-      if (((trace == 1.0f) && (q[1] == 0.0f && q[2] == 0.0f && q[3] == 0.0f))) {
-        /* Avoids the need to normalize the degenerate case. */
-        q[0] = 1.0f;
-      }
-    }
-  }
-  return q;
-}
-
-#define M_SQRT2 1.41421356237309504880 /* sqrt(2) */
-float3x3 mat3_from_quat(float4 q) {
-  float3x3 m;
-  float q0, q1, q2, q3, qda, qdb, qdc, qaa, qab, qac, qbb, qbc, qcc;
-
-  q0 = M_SQRT2 * q[0];
-  q1 = M_SQRT2 * q[1];
-  q2 = M_SQRT2 * q[2];
-  q3 = M_SQRT2 * q[3];
-
-  qda = q0 * q1;
-  qdb = q0 * q2;
-  qdc = q0 * q3;
-  qaa = q1 * q1;
-  qab = q1 * q2;
-  qac = q1 * q3;
-  qbb = q2 * q2;
-  qbc = q2 * q3;
-  qcc = q3 * q3;
-
-  m[0][0] = (float)(1.0 - qbb - qcc);
-  m[1][0] = (float)(qdc + qab);
-  m[2][0] = (float)(-qdb + qac);
-
-  m[0][1] = (float)(-qdc + qab);
-  m[1][1] = (float)(1.0 - qaa - qcc);
-  m[2][1] = (float)(qda + qbc);
-
-  m[0][2] = (float)(qdb + qac);
-  m[1][2] = (float)(-qda + qbc);
-  m[2][2] = (float)(1.0 - qaa - qbb);
-  return m;
-}
-
-// Uses a Cayley transform to generate an orthogonal basis.
-// The given vector "v" contains rotations in x, y, and z, where 0 to 1 map to 0 to 90 degrees.
-float3x3 genOrthoBasis(float3 v) {
-  float w = -1.f;
-
-  float3x3 mat;
-  mat._11 = w*w + v.x*v.x - v.y*v.y - v.z*v.z;
-  mat._21 = 2*(v.x*v.y + w*v.z);
-  mat._31 = 2*(v.x*v.z - w*v.y);
-
-  mat._12 = 2*(v.x*v.y - w*v.z);
-  mat._22 = w*w - v.x*v.x + v.y*v.y - v.z*v.z;
-  mat._32 =  2*(w*v.x + v.y*v.z);
-
-  mat._13 = 2*(w*v.y + v.x*v.z);
-  mat._23 = 2*(v.y*v.z - w*v.x);
-  mat._33 = w*w - v.x*v.x - v.y*v.y + v.z*v.z;
-
-  mat /= (v.x*v.x + v.y*v.y + v.z*v.z + w*w);
-  return mat;
-};
 
 struct StackItem {
   uint32_t _key;
@@ -647,47 +293,7 @@ struct Stack {
   };
 };
 
-int getNumNodesInLevel(int level, int numPrimitives) {
-  int numNodes = numPrimitives;
-  for (int i = 0; i <= level; ++i) {
-    numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-  }
-  return numNodes;
-}
 
-/**
- * @brief Returns the number of primitives in a given node in our "complete" tree 
- * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
- * @param index What node are we asking about relative to the given level?
- * @param numPrimitives How many primitives in total are there in the tree?
- */
-int getPrimsInNode(
-  int level,   
-  int index,    
-  int numPrimitives
-) {
-  int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
-  // Theoretical maximum primitives in a node at this level
-  int maxPrimsInLevel = int(pow(BRANCHING_FACTOR, level + 1));
-  // Account for when primitive counts don't exactly match a multiple of the branching factor
-  return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
-}
-
-/**
- * @brief Returns the parent node ID for the given primitive and parent level 
- * @param level What level is the parent node in the tree? 0 is the first level, 1 is the second, etc
- * @param index What primitive are we asking about?
- */
-int getPrimParentNode(
-  int level,   
-  int primIndex
-) {
-  int parentIndex = primIndex;
-  for (int i = 0; i <= level; ++i) {
-    parentIndex = parentIndex / BRANCHING_FACTOR;
-  }
-  return parentIndex;
-}
 
 // void insertionSort(inout StackItem list[BRANCHING_FACTOR]) {
 //   StackItem item;
@@ -1109,4 +715,5 @@ void TraceNN(
   }
   #endif
 }
+
 #endif

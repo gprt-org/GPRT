@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "gprt_knn.h"
+#include "gprt_knn_shared.h"
 
 #include "svd.slangh"
 
@@ -129,8 +129,20 @@ bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points,
 }
 
 float dot2(float3 v) {return dot(v, v);}
+
+float3x3 outerProduct(float3 a, float3 b) {
+    return float3x3(a * b.x, a * b.y, a * b.z);
+}
+
+// outer product of a vector with itself
+float3x3 outer2(float3 a) {
+    return outerProduct(a, a);
+}
+
 void swap(inout float3 a, inout float3 b) { float3 tmp = a; a = b; b = tmp;}
+
 void swap(inout float a, inout float b) { float tmp = a; a = b; b = tmp;}
+
 float4 makeMinimumBoundingSphere(in float3 p1, in float3 p2, in float3 p3) {
     float4 s;
 
@@ -157,6 +169,48 @@ float4 makeMinimumBoundingSphere(in float3 p1, in float3 p2, in float3 p3) {
             ((dot2(cross(alpha, beta))) * 2.f) + c;
     }
     return s;
+}
+
+int getNumNodesInLevel(int level, int numPrimitives) {
+    int numNodes = numPrimitives;
+    for (int i = 0; i <= level; ++i) {
+        numNodes = (numNodes + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    }
+    return numNodes;
+}
+
+/**
+ * @brief Returns the number of primitives in a given node in our "complete" tree
+ * @param level What level is the node in the tree? 0 is the first level, 1 is the second, etc
+ * @param index What node are we asking about relative to the given level?
+ * @param numPrimitives How many primitives in total are there in the tree?
+ */
+int getPrimsInNode(
+    int level,
+    int index,
+    int numPrimitives
+) {
+    int numNodesInLevel = getNumNodesInLevel(level, numPrimitives);
+    // Theoretical maximum primitives in a node at this level
+    int maxPrimsInLevel = int(pow(BRANCHING_FACTOR, level + 1));
+    // Account for when primitive counts don't exactly match a multiple of the branching factor
+    return (index == (numNodesInLevel - 1)) ? (numPrimitives % maxPrimsInLevel) : maxPrimsInLevel;
+}
+
+/**
+ * @brief Returns the parent node ID for the given primitive and parent level
+ * @param level What level is the parent node in the tree? 0 is the first level, 1 is the second, etc
+ * @param index What primitive are we asking about?
+ */
+int getPrimParentNode(
+    int level,
+    int primIndex
+) {
+    int parentIndex = primIndex;
+    for (int i = 0; i <= level; ++i) {
+        parentIndex = parentIndex / BRANCHING_FACTOR;
+    }
+    return parentIndex;
 }
 
 [shader("compute")]

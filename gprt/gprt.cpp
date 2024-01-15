@@ -77,8 +77,11 @@
 // For FFX radix sort
 #include "gprt_sort.h"
 
+// For Decoupled lookback scan
+#include "gprt_scan_shared.h"
+
 // For nearest neighbor parameter structs
-#include "gprt_knn.h"
+#include "gprt_knn_shared.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -4587,9 +4590,9 @@ struct Context {
     // Scanning stages
     {
       internalComputePrograms.insert({
-        {"InitScan", gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "InitScan")},
-        {"Scan_32",  gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "Scan_32")},
-        {"Scan_64",  gprtComputeCreate<gprt::ScanRecord>(context, scanModule, "Scan_64")},
+        {"InitScan", gprtComputeCreate<ScanConstants>(context, scanModule, "InitScan")},
+        {"Scan_32",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_32")},
+        {"Scan_64",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_64")},
       });
       computePipelinesOutOfDate = true;
     }
@@ -10553,9 +10556,9 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
   uint32_t subgroupSize = context->subgroupProperties.subgroupSize;
-  auto InitScan = context->FetchCompute<gprt::ScanConstants>("InitScan");
-  auto Scan_32 = context->FetchCompute<gprt::ScanConstants>("Scan_32");
-  auto Scan_64 = context->FetchCompute<gprt::ScanConstants>("Scan_64");
+  auto InitScan = context->FetchCompute<ScanConstants>("InitScan");
+  auto Scan_32 = context->FetchCompute<ScanConstants>("Scan_32");
+  auto Scan_64 = context->FetchCompute<ScanConstants>("Scan_64");
 
   std::array<size_t, 3> numThreadGroups = {(numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE, 1, 1};
 
@@ -10568,7 +10571,7 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
     gprtBuildShaderBindingTable(_context);
   }
 
-  gprt::ScanConstants scanConstants;
+  ScanConstants scanConstants;
   scanConstants.size = numItems;
   scanConstants.output = gprtBufferGetHandle(_output);
   scanConstants.input = gprtBufferGetHandle(_input);
