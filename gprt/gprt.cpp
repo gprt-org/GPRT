@@ -8180,19 +8180,6 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
-    size_t numRecords = numRayGens + numMissProgs + numCallableProgs + numHitRecords;
-
-    // if (shaderBindingTable.size != recordSize * numRecords) {
-    //   shaderBindingTable.destroy();
-    // }
-    // if (shaderBindingTable.buffer == VK_NULL_HANDLE) {
-    //   shaderBindingTable = Buffer(physicalDevice, logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-    //                               memoryUsageFlags, recordSize * numRecords);
-    // }
-
-    // shaderBindingTable.map();
-    // uint8_t *mapped = ((uint8_t *) (shaderBindingTable.mapped));
-
     // Raygen records
     if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygenPrograms.size() > 0) {
       raygenTable->map();
@@ -8251,7 +8238,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
 
         // First, copy handle
         size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
-        size_t handleOffset = handleStride * idx + handleStride * numRayGens;
+        size_t handleOffset = handleStride * idx + handleStride * (numRayGens + numMissProgs);
         memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
         // Then, copy params following handle
@@ -8304,7 +8291,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                   // recordStride * (numRayGens + numMissProgs);
                   size_t handleOffset =
                       handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
-                      handleStride * (numRayGens + numMissProgs);
+                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                   // Then, copy params following handle
@@ -8335,7 +8322,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
                   // + recordStride * (numRayGens + numMissProgs);
                   size_t handleOffset =
                       handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instanceOffset) +
-                      handleStride * (numRayGens + numMissProgs);
+                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
                   // Then, copy params following handle
@@ -10070,6 +10057,11 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
   return (GPRTRayGen) raygen;
 }
 
+template <>
+GPRTRayGenOf<void> gprtRayGenCreate<void>(GPRTContext _context, GPRTModule _module, const char *programName) {
+  return (GPRTRayGenOf<void>) gprtRayGenCreate(_context, _module, programName, 0);
+}
+
 GPRT_API void
 gprtRayGenDestroy(GPRTRayGen _rayGen) {
   LOG_API_CALL();
@@ -10134,6 +10126,11 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
   return (GPRTMiss) missProg;
 }
 
+template <>
+GPRTMissOf<void> gprtMissCreate<void>(GPRTContext _context, GPRTModule _module, const char *programName) {
+  return (GPRTMissOf<void>) gprtMissCreate(_context, _module, programName, 0);
+}
+
 /*! sets the given miss program for the given ray type */
 GPRT_API void
 gprtMissSet(GPRTContext _context, int rayType, GPRTMiss _missToUse) {
@@ -10183,6 +10180,11 @@ gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *program
   context->raytracingPipelineOutOfDate = true;
 
   return (GPRTCallable) callableProg;
+}
+
+template <>
+GPRTCallableOf<void> gprtCallableCreate<void>(GPRTContext _context, GPRTModule _module, const char *programName) {
+  return (GPRTCallableOf<void>) gprtCallableCreate(_context, _module, programName, 0);
 }
 
 /*! sets the given callable program for the given ray type */
