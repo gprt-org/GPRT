@@ -8142,6 +8142,8 @@ void Context::buildPipeline() {
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
 
+      LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " + std::to_string(requestedFeatures.rayRecursionDepth) + ".");
+
       if (raytracingPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
         raytracingPipeline = VK_NULL_HANDLE;
