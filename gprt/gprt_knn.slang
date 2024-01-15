@@ -24,6 +24,9 @@
 
 #include "svd.slangh"
 
+// space filling curve routines
+#include "sfc.slang"
+
 bool getPointBounds(gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
 {
     float3 p = gprt::load<float3>(points, primID);
@@ -194,7 +197,7 @@ void ComputeTriangleCodes(uint3 DispatchThreadID: SV_DispatchThreadID, uniform C
     float3 aabbMin = gprt::load<float3>(params.rootBounds, 0);
     float3 aabbMax = gprt::load<float3>(params.rootBounds, 1);
     c = (c - aabbMin) / (aabbMax - aabbMin);
-    uint32_t code = hilbert_encode3D(c.x, c.y, c.z);
+    uint32_t code = hilbert_encode(c);
     gprt::store<uint64_t>(params.hilbertCodes, primID, uint64_t(code));
     gprt::store<uint64_t>(params.primIDs, primID, primID);
 }
