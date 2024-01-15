@@ -151,9 +151,6 @@ constexpr size_t totalSizeOf() {
     return (sizeof(Args) + ... + 0);
 }
 
-template<typename T, typename... Args>
-struct are_all_same : std::bool_constant<(std::is_same_v<T, Args> && ...)> {};
-
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
 typedef struct _GPRTLaunchParams *GPRTLaunchParams, *GPRTParams, *GPRTGlobals;
