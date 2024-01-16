@@ -595,6 +595,10 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  */
 GPRT_API void gprtGuiRasterize(GPRTContext context);
 
+/*! Requests the given size (in bytes) to reserve for parameters 
+  of ray tracing programs. Defaults to 256 bytes */
+GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
+
 /*! set number of ray types to be used; this should be
   done before any programs, pipelines, geometries, etc get
   created */

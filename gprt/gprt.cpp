@@ -93,6 +93,8 @@ static struct RequestedFeatures {
   // On AMD, might require RADV driver...
   uint32_t rayRecursionDepth = 31;
 
+  uint32_t recordSize = 256;
+
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
@@ -4665,69 +4667,6 @@ struct Context {
     // Record dear imgui primitives into command buffer
     ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
 
-    // if (imgui.pipeline == VK_NULL_HANDLE) {
-    //   geometryType->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-    //                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-    //                                     rasterRecordDescriptorSetLayout);
-    // }
-
-    // // Bind the rendering pipeline
-    // // todo, if pipeline doesn't exist, create it.
-    // vkCmdBindPipeline(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                   geometryType->raster[rasterType].pipeline);
-
-    // VkViewport viewport{};
-    // viewport.x = 0.0f;
-    // viewport.y = 0.0f;
-    // viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
-    // viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
-    // viewport.minDepth = 0.0f;
-    // viewport.maxDepth = 1.0f;
-    // vkCmdSetViewport(graphicsCommandBuffer, 0, 1, &viewport);
-
-    // VkRect2D scissor{};
-    // scissor.offset = {0, 0};
-    // scissor.extent.width = geometryType->raster[rasterType].width;
-    // scissor.extent.height = geometryType->raster[rasterType].height;
-    // vkCmdSetScissor(graphicsCommandBuffer, 0, 1, &scissor);
-
-    // auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    //   return (value + alignment - 1) & ~(alignment - 1);
-    // };
-
-    // const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
-    // const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    // const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    // const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
-
-    // // for the moment, just assume the max group size
-    // const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-
-    // for (uint32_t i = 0; i < numGeometry; ++i) {
-    //   GeomType *geomType = geometry[i]->geomType;
-
-    //   if (geomType->getKind() == GPRT_TRIANGLES) {
-    //     TriangleGeom *geom = (TriangleGeom *) geometry[i];
-    //     VkDeviceSize offsets[1] = {0};
-
-    //     uint32_t instanceCount = 1;
-    //     if (instanceCounts != nullptr) {
-    //       instanceCount = instanceCounts[i];
-    //     }
-
-    //     std::vector<VkDescriptorSet> descriptorSets = {samplerDescriptorSet, texture1DDescriptorSet,
-    //                                                    texture2DDescriptorSet, texture3DDescriptorSet,
-    //                                                    rasterRecordDescriptorSet};
-
-    //     uint32_t offset = geom->address * recordSize;
-    //     vkCmdBindDescriptorSets(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                             geomType->raster[rasterType].pipelineLayout, 0, descriptorSets.size(),
-    //                             descriptorSets.data(), 1, &offset);
-    //     vkCmdBindIndexBuffer(graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-    //     vkCmdDrawIndexed(graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
-    //   }
-    // }
-
     vkCmdEndRenderPass(graphicsCommandBuffer);
 
     // At the end of the renderpass, we'll transition the layout back to it's previous layout
@@ -7013,8 +6952,11 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
   const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  if (requestedFeatures.recordSize > maxGroupSize) {
+    LOG_ERROR("Requested record size is too large! Max record size for this platform is " + std::to_string(maxGroupSize) + " bytes.");
+  }
+
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
@@ -7850,7 +7792,7 @@ void Context::buildPipeline() {
     const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                           // device access
 
-    // for the moment, just assume the max group size
+
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -7859,7 +7801,7 @@ void Context::buildPipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
     rasterRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -7918,7 +7860,7 @@ void Context::buildPipeline() {
     const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                           // device access
 
-    // for the moment, just assume the max group size
+
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -7927,7 +7869,7 @@ void Context::buildPipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
     computeRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -8212,6 +8154,12 @@ GPRT_API void
 gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth) {
   LOG_API_CALL();
   requestedFeatures.rayRecursionDepth = rayRecursionDepth;
+}
+
+GPRT_API void 
+gprtRequestRecordSize(uint32_t recordSize) {
+  LOG_API_CALL();
+  requestedFeatures.recordSize = recordSize;
 }
 
 GPRT_API bool
@@ -8774,8 +8722,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
   for (uint32_t i = 0; i < numGeometry; ++i) {
     GeomType *geomType = geometry[i]->geomType;
@@ -10086,8 +10033,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
@@ -10194,8 +10140,7 @@ void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, s
                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet, 
                                                 context->texture3DDescriptorSet, context->bufferDescriptorSet};
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
   uint32_t offset = (uint32_t)compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
