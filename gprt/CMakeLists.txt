@@ -65,6 +65,8 @@ target_sources(gprt PRIVATE
     gprt_knn_shared.h
     gprt_scan_shared.h
     gprt_sort.h
+    spirv_reflect.h
+    spirv_reflect.cpp
 )
 
 set_target_properties(gprt

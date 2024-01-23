@@ -1,10 +1,7 @@
 #pragma once
 
-// Minimum guaranteed PC size
-// Intel supports 256
-// NVIDIA supports 256
-// AMD supports 128
-#define PUSH_CONSTANTS_LIMIT 128
+// Minimum guaranteed PC size (might require RADV on AMD)
+#define PUSH_CONSTANTS_LIMIT 256
 
 // By limiting ourselves to the following, we can improve compatibility across 
 // AMD, NVIDIA and Intel with compile time checks
