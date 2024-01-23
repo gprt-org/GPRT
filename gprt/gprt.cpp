@@ -333,6 +333,28 @@ struct Stage {
 struct Module {
   spv_reflect::ShaderModule shaderModule;
   std::vector<uint32_t> binary;
+
+  struct DescriptorBinding {
+    uint32_t bindingNumber;
+    std::string variableName;
+    SpvReflectDescriptorType type;
+    uint32_t count;
+  };
+
+  struct DescriptorSet {
+    uint32_t setNumber;
+    uint32_t bindingCount;
+    std::map<uint32_t, DescriptorBinding> bindings;
+  };
+
+  struct EntryPoint {
+    std::string name;
+    uint32_t descriptorSetCount;
+    std::map<uint32_t, DescriptorSet> descriptorSets;
+  };
+
+  std::map<std::string, EntryPoint> EntryPoints;
+  std::vector<std::string> EntryPointNames;
   
   Module(GPRTProgram program) {
     size_t sizeOfProgram = program.size();
@@ -340,16 +362,46 @@ struct Module {
     memcpy(binary.data(), program.data(), sizeOfProgram);
     
     shaderModule = spv_reflect::ShaderModule(program.size(), program.data(), SPV_REFLECT_MODULE_FLAG_NONE);
+
+    // Enumerate entry points
+    uint32_t numEntryPoints = shaderModule.GetEntryPointCount();
+    for (uint32_t eid = 0; eid < numEntryPoints; ++eid) {
+      std::string entrypointName = std::string(shaderModule.GetEntryPointName(eid));        
+      EntryPoint entry = {};
+      entry.name = entrypointName;
+      
+      // Enumerate descriptor sets for the given entry point
+      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, nullptr);
+      std::vector<SpvReflectDescriptorSet*> descriptorSets(entry.descriptorSetCount);
+      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, descriptorSets.data());
+      for (uint32_t did = 0; did < entry.descriptorSetCount; ++did) {
+        DescriptorSet descriptorSet = {};
+        descriptorSet.setNumber = descriptorSets[did]->set;
+        
+        // Enumerate bindings for the given descriptor set and entry point
+        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, nullptr);
+        std::vector<SpvReflectDescriptorBinding*> bindings(descriptorSet.bindingCount);
+        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, bindings.data());
+
+        for (uint32_t bid = 0; bid < descriptorSet.bindingCount; ++bid) {
+          DescriptorBinding binding = {};
+          binding.bindingNumber = bindings[bid]->binding;
+          binding.type = bindings[bid]->descriptor_type;
+          binding.count = bindings[bid]->count;
+          binding.variableName = std::string(bindings[bid]->name);
+          descriptorSet.bindings[binding.bindingNumber] = binding;
+        }
+
+        entry.descriptorSets[descriptorSet.setNumber] = descriptorSet;
+      }
+
+      EntryPoints[entrypointName] = entry;
+      EntryPointNames.push_back(entrypointName);
+    }
   }
 
   bool checkForEntrypoint(const char* entrypoint) {
-    for (uint32_t i = 0; i < shaderModule.GetEntryPointCount(); ++i) {
-      const char* name = shaderModule.GetEntryPointName(i);
-      if (strcmp(name, entrypoint) == 0) {
-        return true;
-      }
-    }
-    return false;
+    return EntryPoints.find(entrypoint) != EntryPoints.end();
   }
 
   ~Module() {}
