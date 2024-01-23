@@ -57,6 +57,9 @@
 // library for windowing
 #include <GLFW/glfw3.h>
 
+// For SPIRV reflection
+#include "spirv_reflect.h"
+
 // library for image output
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -328,12 +331,25 @@ struct Stage {
 };
 
 struct Module {
+  spv_reflect::ShaderModule shaderModule;
   std::vector<uint32_t> binary;
-
-  Module(GPRTProgram program) { 
+  
+  Module(GPRTProgram program) {
     size_t sizeOfProgram = program.size();
     binary.resize(sizeOfProgram / 4);
     memcpy(binary.data(), program.data(), sizeOfProgram);
+    
+    shaderModule = spv_reflect::ShaderModule(program.size(), program.data(), SPV_REFLECT_MODULE_FLAG_NONE);
+  }
+
+  bool checkForEntrypoint(const char* entrypoint) {
+    for (uint32_t i = 0; i < shaderModule.GetEntryPointCount(); ++i) {
+      const char* name = shaderModule.GetEntryPointName(i);
+      if (strcmp(name, entrypoint) == 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   ~Module() {}
@@ -8873,6 +8889,10 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("RayGen program " + std::string(programName) + " not found in module!");
+  }
+
   RayGen *raygen = new RayGen(context->logicalDevice, module, programName, recordSize);
 
   context->raygenPrograms.push_back(raygen);
@@ -8919,6 +8939,10 @@ GPRTCompute gprtComputeCreate(GPRTContext _context, GPRTModule _module, const ch
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Compute program " + std::string(programName) + " not found in module!");
+  }
+
   Compute *compute = new Compute(context, context->logicalDevice, module, programName, 0);
 
   // Notify context that we need to build this compute pipeline
@@ -8941,6 +8965,10 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Miss program " + std::string(programName) + " not found in module!");
+  }
 
   Miss *missProg = new Miss(context->logicalDevice, module, programName, recordSize);
 
@@ -8993,6 +9021,10 @@ gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *program
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Callable program " + std::string(programName) + " not found in module!");
+  }
 
   Callable *callableProg = new Callable(context->logicalDevice, module, programName, recordSize);
 
@@ -9082,6 +9114,10 @@ gprtGeomTypeSetClosestHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _m
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("ClosestHit program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setClosestHit(rayType, module, progName);
 }
 
@@ -9090,6 +9126,10 @@ gprtGeomTypeSetAnyHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _modul
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("AnyHit program " + std::string(progName) + " not found in module!");
+  }
 
   geomType->setAnyHit(rayType, module, progName);
 }
@@ -9100,6 +9140,10 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Intersection program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setIntersection(rayType, module, progName);
 }
 
@@ -9109,6 +9153,10 @@ gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mo
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Vertex program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setVertex(rasterType, module, progName);
 }
 
@@ -9117,6 +9165,10 @@ gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mod
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Pixel program " + std::string(progName) + " not found in module!");
+  }
 
   geomType->setPixel(rasterType, module, progName);
 }
@@ -10110,7 +10162,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
-void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
   VkResult err;

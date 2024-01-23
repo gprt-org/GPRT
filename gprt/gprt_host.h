@@ -1913,7 +1913,7 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
 // Case where compute program uniforms are not known at compilation time
 template<typename... Uniforms>
@@ -1932,11 +1932,11 @@ void gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch(compute, numGroups, pushConstants);
+  _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
 }
 
 // Case where compute program has compile-time type-safe uniform arguments
-template<typename... Uniforms, typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
+template<typename... Uniforms>
 void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
   
@@ -1952,7 +1952,7 @@ void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3>
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch((GPRTCompute)compute, numGroups, pushConstants);
+  _gprtComputeLaunch((GPRTCompute)compute, numGroups, groupSize, pushConstants);
 }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);

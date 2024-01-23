@@ -39,6 +39,8 @@ target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
     gprt_sort.h
+    spirv_reflect.h
+    spirv_reflect.cpp
 )
 
 set_target_properties(gprt
