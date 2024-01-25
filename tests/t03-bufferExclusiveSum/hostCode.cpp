@@ -28,7 +28,7 @@
 int
 main(int ac, char **av) {
   int prime = 9973;
-  int numItems = prime; //1024 * 1024;//2 << 28;
+  int numItems = 0; //1024 * 1024;//2 << 28;
 
   for (int round = 0; round < 100; ++round) {
     std::cout<<"\rRound " << round;
@@ -46,7 +46,7 @@ main(int ac, char **av) {
 
     // Act
     // std::cout<<"Computing exclusive sum on device" << std::endl;
-    uint32_t total = gprtBufferExclusiveSum(context, data, exclusiveSum, scratch);
+    uint32_t total = gprtBufferExclusiveSum(context, data, 0, numItems, exclusiveSum, scratch);
     // std::cout<<"Done! Total is " << total <<std::endl;
 
     // std::cout<<"Computing exclusive sum on host" << std::endl;
@@ -107,7 +107,7 @@ main(int ac, char **av) {
 
     // Act
     // std::cout<<"Computing paritioning on device" << std::endl;
-    uint32_t total = gprtBufferPartition(context, data, true, partition, scratch);
+    uint32_t total = gprtBufferPartition(context, data, 0, numItems, true, partition, scratch);
     // std::cout<<"Done!"<<std::endl;
 
     // std::cout<<"Computing exclusive sum on host" << std::endl;
@@ -187,7 +187,7 @@ main(int ac, char **av) {
 
     // Act
     // std::cout<<"Computing selection on device" << std::endl;
-    uint32_t total = gprtBufferSelect(context, data, true, partition, scratch);
+    uint32_t total = gprtBufferSelect(context, data, 0, numItems, true, partition, scratch);
     // std::cout<<"Done!"<<std::endl;
 
     // std::cout<<"Computing exclusive sum on host" << std::endl;

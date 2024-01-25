@@ -23,9 +23,9 @@
 // SOFTWARE.
 #pragma once
 
-#include "gprt.h"
-
 #define SCAN_PARTITON_SIZE 8192
+
+// flags
 #define SCAN_PARTITION (1 << 0)
 #define SCAN_SELECT (1 << 1)
 #define SCAN_SELECT_POSITIVE (1 << 2)
@@ -33,7 +33,4 @@
 struct ScanConstants {        
     uint32_t size;
     uint32_t flags;
-    gprt::Buffer input;
-    gprt::Buffer output;
-    gprt::Buffer state;
 };

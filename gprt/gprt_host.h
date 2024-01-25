@@ -1905,7 +1905,7 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  * Generally, requires 2*log_1024(N) ints of scratch memory.
  */
-GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, uint32_t offset, uint32_t count, GPRTBuffer output, GPRTBuffer scratch = 0);
 
 /**
  * @brief Computes a device-wide exclusive prefix sum, and returns the total amount.
@@ -1928,8 +1928,8 @@ GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, 
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
-  return gprtBufferExclusiveSum(context, (GPRTBuffer) input, (GPRTBuffer) output, (GPRTBuffer) scratch);
+gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, uint32_t offset, uint32_t count, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch = 0) {
+  return gprtBufferExclusiveSum(context, (GPRTBuffer) input, offset, count, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**
@@ -1952,7 +1952,7 @@ gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, uint32_t offset, uint32_t count, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total number of 
@@ -1976,8 +1976,8 @@ GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, boo
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
-  return gprtBufferPartition(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
+gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, uint32_t offset, uint32_t count, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  return gprtBufferPartition(context, (GPRTBuffer) input, offset, count, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**
@@ -1998,7 +1998,7 @@ gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPosi
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, uint32_t offset, uint32_t count, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of 
@@ -2020,8 +2020,8 @@ GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool s
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
-  return gprtBufferSelect(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
+gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, uint32_t offset, uint32_t count, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+  return gprtBufferSelect(context, (GPRTBuffer) input, offset, count, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**

@@ -22,6 +22,9 @@
  * =====================================================================================
  */
 
+namespace sfc {
+
+
 uint bitTranspose<let nDims : uint, let nBits : uint>(uint inCoords)
 {
     uint nDims1 = nDims - 1;
@@ -424,3 +427,5 @@ inline float3 morton64_decode(uint64_t index)
     c.z /= (float) (1ull << 20);
     return c;
 }
+
+}; // namespace sfc

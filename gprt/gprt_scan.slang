@@ -41,10 +41,8 @@
  ******************************************************************************/
 #pragma once
 
-#include "gprt.h"
 #include "gprt_scan_shared.h"
 
-#define PARTITION_SIZE      8192
 #define PART_VEC_SIZE       2048
 #define PART_VEC_MASK       2047
 #define GROUP_SIZE          512
@@ -77,11 +75,21 @@
 #define WAVE_PART_END   (WAVE_INDEX + 1 << WAVE_PART_LOG)
 #define PARTITION_START (partitionIndex << PART_VEC_LOG)
 
-// using 0th value to hold the aggregate (or total selected) 
-// and the 1st to hold the partition index
-#define STATE_START     2
-
 groupshared uint4 g_sharedMem[PART_VEC_SIZE];
+
+// Using byte address buffers here for a mix of 4 wide and 1 wide stores
+RWByteAddressBuffer b_input;
+RWByteAddressBuffer b_output;
+
+// Buffer of partition flags and aggregates combined, one per partition
+// top 2 bits are flags, bottom 30 bits are aggregates. (for 64 bits, a 64 bit interlocked "OR" is required.)
+globallycoherent RWStructuredBuffer<uint> b_state;
+
+// A counter to schedule workgroups
+globallycoherent RWStructuredBuffer<uint> b_index;
+
+// The total aggregate value
+RWStructuredBuffer<int> b_aggregate;
 
 uint getForwardAddr(int i, int size, int exclusiveSum) {
   return exclusiveSum;
@@ -91,6 +99,18 @@ uint getReverseAddr(int i, int size, int exclusiveSum) {
   return (size - 1) - (i - exclusiveSum);
 }
 
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void InitScan(uint3 DispatchThreadID : SV_DispatchThreadID, uniform ScanConstants pc) {
+  uint3 id = DispatchThreadID;
+  if (id.x == 0) {
+    b_index[0] = 0;
+    b_aggregate[0] = 0;
+  }
+  // clear the flag and aggregate
+  b_state[id.x] = 0;
+}
+
 void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanConstants pc) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
@@ -98,7 +118,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   //Acquire the partition index
   int partitionIndex;
   if (WAVE_INDEX == 0 && LANE == 0)
-    g_sharedMem[0].x = gprt::atomicAdd(pc.state, 1, 1);
+    InterlockedAdd(b_index[0], 1, g_sharedMem[0].x);
   GroupMemoryBarrierWithGroupSync();
   partitionIndex = WaveReadLaneAt(g_sharedMem[0].x, 0);
   GroupMemoryBarrierWithGroupSync();
@@ -116,7 +136,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   int i = LANE + WAVE_PART_START;
   if (i < partSize)
   {
-    sg0Val = gprt::load<int4>(pc.input, i + PARTITION_START);
+    sg0Val = reinterpret<int4>(b_input.Load4(i * sizeof(int4)));
     if (partitioning || selecting) g_sharedMem[i] = (sg0Val >> 31) == select;
     else g_sharedMem[i] = sg0Val;
     
@@ -137,7 +157,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg1Val = gprt::load<int4>(pc.input, i + PARTITION_START);
+    sg1Val = reinterpret<int4>(b_input.Load4(i * sizeof(int4)));
     if (partitioning || selecting) g_sharedMem[i] = (sg1Val >> 31) == select;
     else g_sharedMem[i] = sg1Val;
     
@@ -158,7 +178,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg2Val = gprt::load<int4>(pc.input, i + PARTITION_START);
+    sg2Val = reinterpret<int4>(b_input.Load4(i * sizeof(int4)));
     if (partitioning || selecting) g_sharedMem[i] = (sg2Val >> 31) == select;
     else g_sharedMem[i] = sg2Val;
     
@@ -179,7 +199,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   i += LANE_COUNT;
   if (i < partSize)
   {
-    sg3Val = gprt::load<int4>(pc.input, i + PARTITION_START);
+    sg3Val = reinterpret<int4>(b_input.Load4(i * sizeof(int4)));
     if (partitioning || selecting) g_sharedMem[i] = (sg3Val >> 31) == select;
     else g_sharedMem[i] = sg3Val;
     
@@ -206,9 +226,9 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   if (WAVE_INDEX == 0 && LANE == 0)
   {
     if (partitionIndex == 0)
-      gprt::atomicOr(pc.state, STATE_START + partitionIndex, FLAG_INCLUSIVE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
+      InterlockedOr(b_state[partitionIndex], FLAG_INCLUSIVE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
     else
-      gprt::atomicOr(pc.state, STATE_START + partitionIndex, FLAG_AGGREGATE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
+      InterlockedOr(b_state[partitionIndex], FLAG_AGGREGATE ^ (g_sharedMem[PART_VEC_MASK].x << 2));
   }
 
   // Decoupled lookback
@@ -219,7 +239,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
     {
       for (int k = partitionIndex - LANE - 1; 0 <= k;)
       {
-        uint flagPayload = gprt::load<uint>(pc.state, STATE_START + k);
+        uint flagPayload = b_state[k];
         const int inclusiveIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE ? LANE_COUNT : 0));
         const int gapIndex = WaveActiveMin(LANE + LANE_COUNT - ((flagPayload & FLAG_MASK) == FLAG_NOT_READY ? LANE_COUNT : 0));
         if (inclusiveIndex < gapIndex)
@@ -227,7 +247,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
           aggregate += WaveActiveSum(LANE <= inclusiveIndex ? (flagPayload >> 2) : 0);
           if (LANE == 0)
           {
-            gprt::atomicAdd(pc.state, STATE_START + partitionIndex, 1 | aggregate << 2);
+            InterlockedAdd(b_state[partitionIndex], 1 | aggregate << 2);
             g_sharedMem[PART_VEC_MASK].x = aggregate;
           }
           break;
@@ -263,24 +283,24 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   {
     uint i4 = i + PARTITION_START;
     g_sharedMem[i].x = g_sharedMem[i - 1].x + (LANE != LANE_MASK ? 0 : prev - aggregate);
-    uint4 exclusiveSums = g_sharedMem[i] + (LANE != LANE_MASK ? prev : aggregate);
+    int4 exclusiveSums = g_sharedMem[i] + (LANE != LANE_MASK ? prev : aggregate);
     // Scatter by exclusive sum
     if (partitioning || selecting)
       for (int j = 0; j < 4; ++j) {
         if (4 * i4 + j >= pc.size) break;
-        if ((sg3Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg3Val[j]);
-        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg3Val[j]);
+        if ((sg3Val[j] >> 31) == select)            b_output.Store<int>(getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg3Val[j]);
+        else if (partitioning)                      b_output.Store<int>(getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg3Val[j]);
       }
-    
+
     // Store exclusive sum
-    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+    else b_output.Store4(i4 * sizeof(uint4), reinterpret<uint4>(exclusiveSums));
 
     // Store final aggregate
     if (i4 == ((pc.size + 3) / 4) - 1) {
       uint lastValue;
       if (partitioning || selecting) lastValue = ((sg3Val[lastOffset] >> 31) == select);
       else                           lastValue = sg3Val[lastOffset];
-      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+      b_aggregate[0] = exclusiveSums[lastOffset] + lastValue;
     }
   }
   
@@ -294,19 +314,19 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
     if (partitioning || selecting)
       for (int j = 0; j < 4; ++j) {
         if (4 * i4 + j >= pc.size) break;
-        if ((sg2Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg2Val[j]);
-        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg2Val[j]);
+        if ((sg2Val[j] >> 31) == select)            b_output.Store<int>(getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg2Val[j]);
+        else if (partitioning)                      b_output.Store<int>(getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg2Val[j]);
       }
-    
+
     // Store exclusive sum
-    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+    else b_output.Store4(i4 * sizeof(uint4), reinterpret<uint4>(exclusiveSums));
 
     // Store final aggregate
     if (i4 == ((pc.size + 3) / 4) - 1) {
       uint lastValue;
       if (partitioning || selecting) lastValue = ((sg2Val[lastOffset] >> 31) == select);
       else                           lastValue = sg2Val[lastOffset];
-      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+      b_aggregate[0] = exclusiveSums[lastOffset] + lastValue;
     }
   }
           
@@ -320,19 +340,19 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
     if (partitioning || selecting)
       for (int j = 0; j < 4; ++j) {
         if (4 * i4 + j >= pc.size) break;
-        if ((sg1Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg1Val[j]);
-        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg1Val[j]);
+        if ((sg1Val[j] >> 31) == select)            b_output.Store<int>(getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg1Val[j]);
+        else if (partitioning)                      b_output.Store<int>(getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg1Val[j]);
       }
 
     // Store exclusive sum
-    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+    else b_output.Store4(i4 * sizeof(uint4), reinterpret<uint4>(exclusiveSums));
 
     // Store final aggregate
     if (i4 == ((pc.size + 3) / 4) - 1) {
       uint lastValue;
       if (partitioning || selecting) lastValue = ((sg1Val[lastOffset] >> 31) == select);
       else                           lastValue = sg1Val[lastOffset];
-      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+      b_aggregate[0] = exclusiveSums[lastOffset] + lastValue;
     }
   }
           
@@ -346,28 +366,21 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
     if (partitioning || selecting)
       for (int j = 0; j < 4; ++j) {
         if (4 * i4 + j >= pc.size) break;
-        if ((sg0Val[j] >> 31) == select)    gprt::store<int>(pc.output, getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg0Val[j]);
-        else if (partitioning)              gprt::store<int>(pc.output, getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]), sg0Val[j]);
+        if ((sg0Val[j] >> 31) == select)            b_output.Store<int>(getForwardAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg0Val[j]);
+        else if (partitioning)                      b_output.Store<int>(getReverseAddr(4 * i4 + j, pc.size, exclusiveSums[j]) * sizeof(int), sg0Val[j]);
       }
-    
+
     // Store exclusive sum
-    else gprt::store<uint4>(pc.output, i4, exclusiveSums);
+    else b_output.Store4(i4 * sizeof(uint4), reinterpret<uint4>(exclusiveSums));
     
     // Store final aggregate
     if (i4 == ((pc.size + 3) / 4) - 1) {
       uint lastValue;
       if (partitioning || selecting) lastValue = ((sg0Val[lastOffset] >> 31) == select);
       else                           lastValue = sg0Val[lastOffset];
-      gprt::store<uint>(pc.state, 0, exclusiveSums[lastOffset] + lastValue);
+      b_aggregate[0] = exclusiveSums[lastOffset] + lastValue;
     }
   }
-}
-[shader("compute")]
-[numthreads(1, 1, 1)]
-void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ScanConstants pc) {
-  uint3 id = DispatchThreadID;
-  if (id.x == 0) gprt::store<uint2>(pc.state, 0, int2(0,0));
-  gprt::store<uint>(pc.state, STATE_START + id.x, FLAG_NOT_READY);
 }
 
 // Below are configued such that each y group ID is assigned to a different subgroup.

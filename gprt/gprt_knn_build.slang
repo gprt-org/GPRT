@@ -251,7 +251,7 @@ void ComputeTriangleCodes(uint3 DispatchThreadID: SV_DispatchThreadID, uniform C
     float3 aabbMin = gprt::load<float3>(params.rootBounds, 0);
     float3 aabbMax = gprt::load<float3>(params.rootBounds, 1);
     c = (c - aabbMin) / (aabbMax - aabbMin);
-    uint32_t code = hilbert_encode(c);
+    uint32_t code = sfc::hilbert_encode(c);
     gprt::store<uint64_t>(params.hilbertCodes, primID, uint64_t(code));
     gprt::store<uint64_t>(params.primIDs, primID, primID);
 }

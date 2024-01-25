@@ -345,77 +345,347 @@ struct Module {
   spv_reflect::ShaderModule shaderModule;
   std::vector<uint32_t> binary;
 
-  struct DescriptorBinding {
+  struct Binding {
+    // Each binding has a number, relative to the set
     uint32_t bindingNumber;
-    std::string variableName;
-    SpvReflectDescriptorType type;
+
+    // This is the variable name in the shader
+    std::string bindingName;
+
+    // A binding comes in a count. For example, a storage buffer might have 3 elements
     uint32_t count;
+
+    // This is like the "class" of the type of the variable.
+    // Could be storage buffers, uniform buffers, etc
+    VkDescriptorType type;
   };
 
   struct DescriptorSet {
+    // Each descriptor set has a number. 
+    // In slang, these are automatically assigned. 
     uint32_t setNumber;
-    uint32_t bindingCount;
-    std::map<uint32_t, DescriptorBinding> bindings;
+
+    // Each descriptor set has a number of bindings   
+    std::vector<Binding> bindings;
+
+    // Each binding has a layout, which describes things like count, binding number, etc
+    // We break this out into a separate vector for convenience
+    std::vector<VkDescriptorSetLayoutBinding> bindingLayouts;
+  };
+
+  struct ConstantVariable {
+    // The name of the constant variable
+    std::string name;
+
+    // The offset of the constant variable
+    uint32_t offset;
+
+    // The size of the constant variable
+    uint32_t size;
   };
 
   struct EntryPoint {
+    // The name of the entry point, similar to "main"
     std::string name;
-    uint32_t descriptorSetCount;
-    std::map<uint32_t, DescriptorSet> descriptorSets;
+    
+    // What appears in [shader(...)]
+    VkShaderStageFlagBits stageType;
+
+    // The number of descriptor sets for the given entry point.
+    // By default, slang will use only one descriptor set.
+    std::vector<DescriptorSet> descriptorSets;
+
+    // The number of push constants requested by the given entry point
+    uint32_t pushConstantBlockSize = 0;
+
+    // The constant members found in the push constant block
+    std::vector<ConstantVariable> constants;
+
+    // Each descriptor in the set has a layout, which describes the contained bindings. 
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
+
+    // We create a descriptor pool for each entry point reserving enough space for each binding
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+
+    // We allocate one "descriptor set" using the above reflection.
+    std::vector<VkDescriptorSet> descriptorSetHandles;
+
+    // We also create a pipeline layout, which contains a description of all the descriptors
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    
+    // The entry point's pipeline handle for dispatching
+    VkPipeline pipeline;
+
+    std::vector<VkWriteDescriptorSet> queuedDescriptorWrites;
+    void writeBuffer(std::string bindingName, VkDescriptorBufferInfo info, uint32_t set = 0) {
+      // find the binding by name
+      auto it = std::find_if(descriptorSets[0].bindings.begin(), descriptorSets[0].bindings.end(), [&](Binding& binding) {
+        return binding.bindingName == bindingName;
+      });
+
+      if (it == descriptorSets[0].bindings.end()) {
+        LOG_ERROR("Could not find binding " + bindingName + " in entry point " + name);
+      }
+
+      VkWriteDescriptorSet writeDescriptorSet = {};
+      writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeDescriptorSet.dstSet = descriptorSetHandles[set];
+      writeDescriptorSet.dstBinding = it->bindingNumber;
+      writeDescriptorSet.descriptorCount = 1;
+      writeDescriptorSet.descriptorType = it->type;
+      writeDescriptorSet.pBufferInfo = &info;
+      queuedDescriptorWrites.push_back(writeDescriptorSet);
+    };
+
+    void updateDescriptorSets(VkDevice device) {
+      vkUpdateDescriptorSets(device, (uint32_t)queuedDescriptorWrites.size(), queuedDescriptorWrites.data(), 0, nullptr);
+      queuedDescriptorWrites.clear();
+    }
+
+    void bindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint) {
+      vkCmdBindDescriptorSets(commandBuffer, bindPoint, pipelineLayout, 0, descriptorSetHandles.size(), descriptorSetHandles.data(), 0, nullptr);
+    }
+
+    template<typename T>
+    void pushConstantBlock(VkCommandBuffer commandBuffer, T constants) {
+      if (sizeof(T) > pushConstantBlockSize) {
+        LOG_ERROR("Push constant block size exceeded!");
+      }
+      vkCmdPushConstants(commandBuffer, pipelineLayout, stageType, 0, sizeof(T), &constants);
+    }
+
+    void bindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint) {
+      vkCmdBindPipeline(commandBuffer, bindPoint, pipeline);
+    }
+
+    void dispatch(VkCommandBuffer commandBuffer, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+      vkCmdDispatch(commandBuffer, groupCountX, groupCountY, groupCountZ);
+    }
   };
 
-  std::map<std::string, EntryPoint> EntryPoints;
+  std::vector<EntryPoint> EntryPoints;
   std::vector<std::string> EntryPointNames;
+
+  VkDevice device;
+
+  // The shader module contains the compiled SPIR-V binary
+  VkShaderModule module;
   
-  Module(GPRTProgram program) {
+  Module(VkDevice _device, std::vector<uint8_t>  program) {
+    // Cache the logical device
+    device = _device;
+
     size_t sizeOfProgram = program.size();
     binary.resize(sizeOfProgram / 4);
     memcpy(binary.data(), program.data(), sizeOfProgram);
-    
-    shaderModule = spv_reflect::ShaderModule(program.size(), program.data(), SPV_REFLECT_MODULE_FLAG_NONE);
 
+    // Create the shader module
+    VkShaderModuleCreateInfo shaderModuleCreateInfo{};
+    shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shaderModuleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+    shaderModuleCreateInfo.pCode = binary.data();
+    VK_CHECK_RESULT(vkCreateShaderModule(device, &shaderModuleCreateInfo, nullptr, &module));
+    
+    // Reflect on the shader module
+    shaderModule = spv_reflect::ShaderModule(program.size(), program.data(), SPV_REFLECT_MODULE_FLAG_NONE);
+    
     // Enumerate entry points
     uint32_t numEntryPoints = shaderModule.GetEntryPointCount();
-    for (uint32_t eid = 0; eid < numEntryPoints; ++eid) {
-      std::string entrypointName = std::string(shaderModule.GetEntryPointName(eid));        
-      EntryPoint entry = {};
-      entry.name = entrypointName;
+    EntryPoints.resize(numEntryPoints);
+    for (uint32_t eid = 0; eid < numEntryPoints; ++eid) {      
+      EntryPoint &entry = EntryPoints[eid];
+      entry.name = std::string(shaderModule.GetEntryPointName(eid));
+      entry.stageType = (VkShaderStageFlagBits)shaderModule.GetEntryPointShaderStage(eid);
+      EntryPointNames.push_back(entry.name);
       
       // Enumerate descriptor sets for the given entry point
-      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, nullptr);
-      std::vector<SpvReflectDescriptorSet*> descriptorSets(entry.descriptorSetCount);
-      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, descriptorSets.data());
-      for (uint32_t did = 0; did < entry.descriptorSetCount; ++did) {
-        DescriptorSet descriptorSet = {};
+      uint32_t numDescriptorSets;
+      shaderModule.EnumerateEntryPointDescriptorSets(entry.name.c_str(), &numDescriptorSets, nullptr);
+      std::vector<SpvReflectDescriptorSet*> descriptorSets(numDescriptorSets);
+      shaderModule.EnumerateEntryPointDescriptorSets(entry.name.c_str(), &numDescriptorSets, descriptorSets.data());
+
+      entry.descriptorSets.resize(numDescriptorSets);
+      for (uint32_t did = 0; did < numDescriptorSets; ++did) {
+        DescriptorSet &descriptorSet = entry.descriptorSets[did];
         descriptorSet.setNumber = descriptorSets[did]->set;
         
         // Enumerate bindings for the given descriptor set and entry point
-        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, nullptr);
-        std::vector<SpvReflectDescriptorBinding*> bindings(descriptorSet.bindingCount);
-        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, bindings.data());
+        uint32_t numBindings;
+        shaderModule.EnumerateEntryPointDescriptorBindings(entry.name.c_str(), &numBindings, nullptr);
+        std::vector<SpvReflectDescriptorBinding*> bindings(numBindings);
+        shaderModule.EnumerateEntryPointDescriptorBindings(entry.name.c_str(), &numBindings, bindings.data());
 
-        for (uint32_t bid = 0; bid < descriptorSet.bindingCount; ++bid) {
-          DescriptorBinding binding = {};
+        descriptorSet.bindings.resize(numBindings);
+        for (uint32_t bid = 0; bid < numBindings; ++bid) {
+          Binding &binding = descriptorSet.bindings[bid];
+          binding.bindingName = std::string(bindings[bid]->name);
           binding.bindingNumber = bindings[bid]->binding;
-          binding.type = bindings[bid]->descriptor_type;
+          binding.type = (VkDescriptorType)bindings[bid]->descriptor_type;
           binding.count = bindings[bid]->count;
-          binding.variableName = std::string(bindings[bid]->name);
-          descriptorSet.bindings[binding.bindingNumber] = binding;
         }
-
-        entry.descriptorSets[descriptorSet.setNumber] = descriptorSet;
       }
+    
+      // edit: at the moment this doesn't appear to work... 
+      // for now, just assuming a constant push constant block size
+      entry.pushConstantBlockSize = PUSH_CONSTANTS_LIMIT;
+      // // Enumerate constants
+      // auto pushConstantsBlock = shaderModule.GetEntryPointPushConstantBlock(entry.name.c_str());
+      // if (!pushConstantsBlock) entry.pushConstantBlockSize = 0;
+      // else {
+      //   entry.pushConstantBlockSize = pushConstantsBlock->size;
+        
+      //   uint32_t numMembers = pushConstantsBlock->member_count;
+      //   entry.constants.resize(numMembers);
 
-      EntryPoints[entrypointName] = entry;
-      EntryPointNames.push_back(entrypointName);
+      //   for (uint32_t mid = 0; mid < numMembers; ++mid) {
+      //     auto member = pushConstantsBlock->members[mid];
+      //     ConstantVariable &constant = entry.constants[mid];
+      //     constant.name = std::string(member.name);
+      //     constant.offset = member.offset;
+      //     constant.size = member.size;
+      //   }
+      // }
     }
   }
 
   bool checkForEntrypoint(const char* entrypoint) {
-    return EntryPoints.find(entrypoint) != EntryPoints.end();
+    return std::find(EntryPointNames.begin(), EntryPointNames.end(), std::string(entrypoint)) != EntryPointNames.end();
+  }
+
+  EntryPoint* getEntryPoint(std::string entrypoint) {
+    auto it = std::find(EntryPointNames.begin(), EntryPointNames.end(), entrypoint);
+    if (it == EntryPointNames.end()) return nullptr;
+    return &EntryPoints[it - EntryPointNames.begin()];
+  }
+
+  void CreatePipelines() {
+    // Create layouts for each descriptor set 
+    for (auto& entry : EntryPoints) {
+      
+      // Each entry point has multiple "sets" of descriptors.
+      for (auto& descriptorSet : entry.descriptorSets) {
+        
+        // Every descriptor set has multiple "bindings"
+        for (auto& binding : descriptorSet.bindings) {
+          VkDescriptorSetLayoutBinding descriptorBinding; 
+          descriptorBinding.binding = binding.bindingNumber;
+          descriptorBinding.descriptorType = binding.type; 
+          descriptorBinding.descriptorCount = binding.count;
+          descriptorBinding.stageFlags = VK_SHADER_STAGE_ALL; // might change this to be more specific
+          descriptorBinding.pImmutableSamplers = nullptr;
+
+          descriptorSet.bindingLayouts.push_back(descriptorBinding);
+        }
+
+        // Combine all these bindings into a common set
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.pBindings = descriptorSet.bindingLayouts.data();
+        descriptorSetLayoutCreateInfo.bindingCount = (uint32_t)(descriptorSet.bindingLayouts.size());
+        descriptorSetLayoutCreateInfo.pNext = nullptr;
+        VkDescriptorSetLayout descriptorSetLayout;
+        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout));
+
+        entry.descriptorSetLayouts.push_back(descriptorSetLayout);
+      }
+
+      // Create a pipeline layout for the entry point
+      VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+      pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      pipelineLayoutCreateInfo.pSetLayouts = entry.descriptorSetLayouts.data();
+      pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)(entry.descriptorSetLayouts.size());
+      
+      // Now account for the push constant block
+      VkPushConstantRange pushConstantRange = {};
+      pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+      if (entry.pushConstantBlockSize > 0) {
+        pushConstantRange.size = entry.pushConstantBlockSize;
+        pushConstantRange.stageFlags = entry.stageType;
+        pushConstantRange.offset = 0;
+
+        pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+        pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+      }
+      pipelineLayoutCreateInfo.pNext = nullptr;
+      VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &entry.pipelineLayout));
+
+      // Create a descriptor pool for the entry point
+      // Pool size assumes a unique descriptor for every binding of every set
+      std::vector<VkDescriptorPoolSize> poolSizes;
+      for (auto& descriptorSet : entry.descriptorSets) {
+        for (auto& binding : descriptorSet.bindings) {
+          VkDescriptorPoolSize poolSize;
+          poolSize.type = binding.type;
+          poolSize.descriptorCount = binding.count;
+          poolSizes.push_back(poolSize);
+        }
+      }
+
+      VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
+      descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolCreateInfo.poolSizeCount = (uint32_t)poolSizes.size();
+      descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
+      descriptorPoolCreateInfo.maxSets = 1;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, &entry.descriptorPool));
+
+      // Allocate descriptor sets from the pool, one per descriptor set on the entry point
+      entry.descriptorSetHandles.resize(entry.descriptorSetLayouts.size());
+
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = entry.descriptorPool;
+      descriptorSetAllocateInfo.pSetLayouts = entry.descriptorSetLayouts.data();
+      descriptorSetAllocateInfo.descriptorSetCount = (uint32_t)(entry.descriptorSetLayouts.size());
+      VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, entry.descriptorSetHandles.data()));
+      
+      // Create the pipeline
+      if (entry.stageType == VK_SHADER_STAGE_COMPUTE_BIT) {
+        VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo{};
+        pipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        pipelineShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;//entry.stageType;
+        pipelineShaderStageCreateInfo.module = module;
+        pipelineShaderStageCreateInfo.pName = entry.name.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.stage = pipelineShaderStageCreateInfo;
+        computePipelineCreateInfo.layout = entry.pipelineLayout;
+        VK_CHECK_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &entry.pipeline));
+      }
+
+      // todo, consider other pipeline types...
+    }
   }
 
   ~Module() {}
+
+  void destroy() {
+    // traverse through the entrypoint and destroy all created vulkan handles
+    for (auto& entry : EntryPoints) {
+      if (entry.pipelineLayout != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device, entry.pipelineLayout, nullptr);
+
+      if (entry.pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(device, entry.pipeline, nullptr);
+      
+      // Free all descriptor sets
+      if (entry.descriptorSetHandles.size() > 0)
+        vkFreeDescriptorSets(device, entry.descriptorPool, (uint32_t)entry.descriptorSetHandles.size(), entry.descriptorSetHandles.data());
+
+      if (entry.descriptorPool != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(device, entry.descriptorPool, nullptr);
+      
+      for (auto& descriptorSetLayout : entry.descriptorSetLayouts) {
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+      }
+    }
+
+    if (module != VK_NULL_HANDLE)
+      vkDestroyShaderModule(device, module, nullptr);
+
+    EntryPoints.clear();
+    EntryPointNames.clear();
+  }
 };
 
 struct Buffer {
@@ -833,6 +1103,23 @@ struct Buffer {
   }
 
   size_t getSize() { return (size_t) size; }
+
+  void uavBarrier(VkCommandBuffer commandBuffer) {
+    VkBufferMemoryBarrier bufferBarrier = {};
+
+    bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarrier.buffer = buffer;
+    bufferBarrier.size = VK_WHOLE_SIZE;
+    // bufferBarrier.offset = offset;
+    // bufferBarrier.size = size;
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                         nullptr, 1, &bufferBarrier, 0, nullptr);
+  }
 
   /* Default Constructor */
   Buffer(){};
@@ -1895,17 +2182,12 @@ struct Compute : public SBTEntry {
 
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
-    subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
-    // subgroupSizeInfo.requiredSubgroupSize = 32;
-    subgroupSizeInfo.pNext = nullptr;
-
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     shaderStage.flags = 0;
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    shaderStage.pNext = &subgroupSizeInfo;
 
     this->recordSize = recordSize;
     if (this->recordSize > 0)
@@ -3157,8 +3439,8 @@ struct Context {
   std::map<std::string, std::any> internalComputePrograms;
   
   Module *radixSortModule = nullptr;
+  Module *scanModule = nullptr;
 
-  GPRTModule scanModule = nullptr;
   GPRTModule nnModule = nullptr;
 
   struct SortStages {
@@ -3843,8 +4125,9 @@ struct Context {
     vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
 
     // 7. Create a module for internal device entry points
-    radixSortModule = new Module(sortDeviceCode);
-    scanModule = gprtModuleCreate(context, scanDeviceCode);
+    radixSortModule = new Module(logicalDevice, sortDeviceCode);
+    scanModule = new Module(logicalDevice, scanDeviceCode);
+    scanModule->CreatePipelines();
     nnModule = gprtModuleCreate(context, nnDeviceCode);
 
     // Swapchain semaphores and fences
@@ -4097,6 +4380,95 @@ struct Context {
 
       VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
     }
+
+    // For scan kernel
+    {
+      auto scanModule = ((Module*) this->scanModule);
+      // scanModule->createLayouts();
+
+      // auto reflDescriptorSet = shaderModule.GetDescriptorSet(0);
+
+      // uint32_t numEntryPoints = shaderModule.GetEntryPointCount();
+      // for (uint32_t eid = 0; eid < numEntryPoints; ++eid) {
+      //   std::string entrypointName = std::string(shaderModule.GetEntryPointName(eid));        
+      //   EntryPoint entry = {};
+      //   entry.name = entrypointName;
+        
+      //   shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, nullptr);
+      //   std::vector<SpvReflectDescriptorSet*> descriptorSets(entry.descriptorSetCount);
+      //   shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, descriptorSets.data());
+      //   for (uint32_t did = 0; did < entry.descriptorSetCount; ++did) {
+      //     DescriptorSet descriptorSet = {};
+      //     descriptorSet.setNumber = descriptorSets[did]->set;
+          
+      //     shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, nullptr);
+      //     std::vector<SpvReflectDescriptorBinding*> bindings(descriptorSet.bindingCount);
+      //     shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, bindings.data());
+
+      //     for (uint32_t bid = 0; bid < descriptorSet.bindingCount; ++bid) {
+      //       DescriptorBinding binding = {};
+      //       binding.bindingNumber = bindings[bid]->binding;
+      //       binding.type = bindings[bid]->descriptor_type;
+      //       binding.count = bindings[bid]->count;
+      //       descriptorSet.bindings[binding.bindingNumber] = binding;
+      //     }
+
+      //     entry.descriptorSets[descriptorSet.setNumber] = descriptorSet;
+      //   }
+
+      //   Scan.EntryPoints[entrypointName] = entry;
+      }
+
+
+      // // Identify the descriptor set layout bindings
+      // std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
+      // std::vector<VkDescriptorPoolSize> descriptorPoolSizes;
+      // for (int i = 0; i < reflDescriptorSet->binding_count; ++i) {
+      //   const SpvReflectDescriptorBinding *reflBinding = shaderModule.GetEntryPointDescriptorBinding(i, 0);
+      //   std::cout<<"Binding "<<reflBinding->binding<<" : "<<reflBinding->count<<" "<<reflBinding->descriptor_type<<std::endl;
+        
+      //   VkDescriptorSetLayoutBinding binding{};
+      //   binding.descriptorType = (VkDescriptorType) reflBinding->descriptor_type;
+      //   binding.descriptorCount = reflBinding->count;
+      //   binding.binding = reflBinding->binding;
+      //   binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+      //   setLayoutBindings.push_back(binding);
+
+      //   VkDescriptorPoolSize poolSize;
+      //   poolSize.type = (VkDescriptorType) reflBinding->descriptor_type;
+      //   poolSize.descriptorCount = reflBinding->count;
+      //   descriptorPoolSizes.push_back(poolSize);
+      // }
+
+      // // Create the descriptor set layout
+      // VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+      // descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      // descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+      // descriptorSetLayoutCreateInfo.bindingCount = uint32_t(setLayoutBindings.size());
+      // descriptorSetLayoutCreateInfo.pNext = nullptr;
+      // VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
+      //                                             &Scan.descriptorLayout));
+
+      // // Create the descriptor pool, assuing we only need one descriptor set
+      // VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      // descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      // descriptorPoolInfo.poolSizeCount = uint32_t(descriptorPoolSizes.size());
+      // descriptorPoolInfo.pPoolSizes = descriptorPoolSizes.data();
+      // descriptorPoolInfo.maxSets = 1 * uint32_t(descriptorPoolSizes.size());
+      // descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      // VK_CHECK_RESULT(
+      //     vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &Scan.descriptorPool));
+      
+      // // Allocate the descriptor set
+      // VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      // descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      // descriptorSetAllocateInfo.descriptorPool = Scan.descriptorPool;
+      // descriptorSetAllocateInfo.pSetLayouts = &Scan.descriptorLayout;
+      // descriptorSetAllocateInfo.descriptorSetCount = 1;
+      // descriptorSetAllocateInfo.pNext = nullptr;
+
+      // VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &Scan.descriptorSet));
+    // }
 
     // Init imgui
     if (requestedFeatures.window) {
@@ -4731,12 +5103,11 @@ struct Context {
   
     // Scanning stages
     {
-      internalComputePrograms.insert({
-        {"InitScan", gprtComputeCreate<ScanConstants>(context, scanModule, "InitScan")},
-        {"Scan_32",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_32")},
-        {"Scan_64",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_64")},
-      });
-      computePipelinesOutOfDate = true;
+      // internalComputePrograms.insert({
+      //   {"Scan_32",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_32")},
+      //   {"Scan_64",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_64")},
+      // });
+      // computePipelinesOutOfDate = true;
     }
 
     // Nearest neighbor stages
@@ -9719,7 +10090,7 @@ GPRT_API GPRTModule
 gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  Module *module = new Module(spvCode);
+  Module *module = new Module(context->logicalDevice, spvCode);
   return (GPRTModule) module;
 }
 
@@ -10783,70 +11154,150 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
   buffer->resize(size * count, preserveContents);
 }
 
-uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition, bool select, bool selectPositive) {
+uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, uint32_t offset, uint32_t count, bool partition, bool select, bool selectPositive) {
   LOG_API_CALL();
 
   Context *context = (Context *) _context;
   Buffer *input = (Buffer *) _input;
   Buffer *output = (Buffer *) _output;
   Buffer *scratch = (Buffer *) _scratch;
-
+  
   // note, input->getSize() here should always be a multiple of 16 bytes
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
-
-  uint32_t subgroupSize = context->subgroupProperties.subgroupSize;
-  auto InitScan = context->FetchCompute<ScanConstants>("InitScan");
-  auto Scan_32 = context->FetchCompute<ScanConstants>("Scan_32");
-  auto Scan_64 = context->FetchCompute<ScanConstants>("Scan_64");
-
+  
   std::array<size_t, 3> numThreadGroups = {(numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE, 1, 1};
 
   // Each group gets an aggregate/inclusive prefix and a status flag.
   // We also reserve one int for the total aggregate count, and one
-  // for group-to-partition scheduling
-  if (scratch->getSize() < (numThreadGroups[0] + 2) * sizeof(uint32_t)) {
-    // updating SBT, since we're using atomics here...
-    scratch->resize((numThreadGroups[0] + 2) * sizeof(uint32_t), false);
-    gprtBuildShaderBindingTable(_context);
+  // for group-to-partition scheduling. Because of offset alignment restrictions, 
+  // we just reserve 32 bytes for the aggregate and index atomics.
+  size_t scratchSize = 32 + (numThreadGroups[0]) * sizeof(uint32_t);
+  if (scratch->getSize() < scratchSize) {
+    scratch->resize(scratchSize, false);
+  }
+
+  VkDescriptorBufferInfo inputBufferInfo = {};
+  inputBufferInfo.buffer = input->buffer;
+  inputBufferInfo.offset = offset * sizeof(uint32_t);
+  inputBufferInfo.range = count * sizeof(uint32_t);
+
+  VkDescriptorBufferInfo outputBufferInfo = {};
+  outputBufferInfo.buffer = output->buffer;
+  outputBufferInfo.offset = 0;
+  outputBufferInfo.range = numItems * sizeof(uint32_t);
+
+  VkDescriptorBufferInfo aggregateBufferInfo = {};
+  aggregateBufferInfo.buffer = scratch->buffer;
+  aggregateBufferInfo.offset = 0;
+  aggregateBufferInfo.range = sizeof(uint32_t);
+
+  VkDescriptorBufferInfo indexBufferInfo = {};
+  indexBufferInfo.buffer = scratch->buffer;
+  indexBufferInfo.offset = sizeof(uint4); // offset needs to be a multiple of 16 bytes
+  indexBufferInfo.range = sizeof(uint32_t);
+
+  VkDescriptorBufferInfo stateBufferInfo = {};
+  stateBufferInfo.buffer = scratch->buffer;
+  stateBufferInfo.offset = 2 * sizeof(uint4);
+  stateBufferInfo.range = scratch->getSize() - 32;
+
+  uint32_t subgroupSize = context->subgroupProperties.subgroupSize;
+
+  Module::EntryPoint *initEntryPoint = context->scanModule->getEntryPoint("InitScan"); 
+  Module::EntryPoint *scanEntryPoint = context->scanModule->getEntryPoint("Scan_" + std::to_string(subgroupSize));
+
+  initEntryPoint->writeBuffer("b_aggregate", aggregateBufferInfo);
+  initEntryPoint->writeBuffer("b_index", indexBufferInfo);
+  initEntryPoint->writeBuffer("b_state", stateBufferInfo);
+  initEntryPoint->updateDescriptorSets(context->logicalDevice);
+
+  scanEntryPoint->writeBuffer("b_input", inputBufferInfo);
+  scanEntryPoint->writeBuffer("b_output", outputBufferInfo);
+  scanEntryPoint->writeBuffer("b_aggregate", aggregateBufferInfo);
+  scanEntryPoint->writeBuffer("b_index", indexBufferInfo);
+  scanEntryPoint->writeBuffer("b_state", stateBufferInfo);
+  scanEntryPoint->updateDescriptorSets(context->logicalDevice);
+
+  VkResult err;
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+  if (err) LOG_ERROR("Failed to begin command buffer\n");
+
+  if (context->queryRequested) {
+    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
   ScanConstants scanConstants;
   scanConstants.size = numItems;
-  scanConstants.output = gprtBufferGetHandle(_output);
-  scanConstants.input = gprtBufferGetHandle(_input);
-  scanConstants.state = gprtBufferGetHandle(_scratch);
   scanConstants.flags = 0;
   if (partition) scanConstants.flags |= SCAN_PARTITION;
   else if (select) scanConstants.flags |= SCAN_SELECT;
   
   if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
 
-  gprtComputeLaunch(InitScan, numThreadGroups, {1,1,1}, scanConstants);
-  if (subgroupSize == 32)
-    gprtComputeLaunch(Scan_32, numThreadGroups, {32, (SCAN_PARTITON_SIZE / (16 * 32)), 1}, scanConstants);
-  else if (subgroupSize == 64)
-    gprtComputeLaunch(Scan_64, numThreadGroups, {64, (SCAN_PARTITON_SIZE / (16 * 64)), 1}, scanConstants);
-  else
-    LOG_ERROR("Unsupported subgroup size: " + std::to_string(subgroupSize) + "\n");
-  
+  // Launch the init kernel
+  initEntryPoint->bindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE);
+  initEntryPoint->pushConstantBlock(context->graphicsCommandBuffer, scanConstants);
+  initEntryPoint->bindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE);
+  initEntryPoint->dispatch(context->graphicsCommandBuffer, numThreadGroups[0], numThreadGroups[1], numThreadGroups[2]);
+
+  // UAV barrier on the intermediates
+  scratch->uavBarrier(context->graphicsCommandBuffer);
+
+  // Launch the scan kernel
+  scanEntryPoint->bindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE);
+  scanEntryPoint->pushConstantBlock(context->graphicsCommandBuffer, scanConstants);
+  scanEntryPoint->bindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE);
+  scanEntryPoint->dispatch(context->graphicsCommandBuffer, numThreadGroups[0], numThreadGroups[1], numThreadGroups[2]);
+
+  if (context->queryRequested) {
+    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  }
+
+  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  if (err)
+    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+  VkSubmitInfo submitInfo;
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err)
+    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+  err = vkQueueWaitIdle(context->graphicsQueue);
+  if (err)
+    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+
   scratch->map(sizeof(uint32_t), 0);
   uint32_t total = *((uint32_t*)scratch->mapped);
   scratch->unmap(sizeof(uint32_t), 0);
   return total;
 }
 
-uint32_t gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
+uint32_t gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, uint32_t inputOffset, uint32_t inputCount, GPRTBuffer _output, GPRTBuffer _scratch) {
   // Redirection here, since we might eventually change the below function to support inclusive and exclusive, 
   // also to include operators other than addition.
-  return bufferScan(_context, _input, _output, _scratch, false, false, false);
+  return bufferScan(_context, _input, _output, _scratch, inputOffset, inputCount, false, false, false);
 }
 
-uint32_t gprtBufferPartition(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
-  return bufferScan(_context, _input, _output, _scratch, true, false, selectPositive);
+uint32_t gprtBufferPartition(GPRTContext _context, GPRTBuffer _input, uint32_t inputOffset, uint32_t inputCount, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, inputOffset, inputCount, true, false, selectPositive);
 }
 
-uint32_t gprtBufferSelect(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
-  return bufferScan(_context, _input, _output, _scratch, false, true, selectPositive);
+uint32_t gprtBufferSelect(GPRTContext _context, GPRTBuffer _input, uint32_t inputOffset, uint32_t inputCount, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, inputOffset, inputCount, false, true, selectPositive);
 }
 
 void
