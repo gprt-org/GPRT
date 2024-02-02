@@ -189,8 +189,16 @@ float4 over(float4 a, float4 b) {
 //   uint64_t y;
 // };
 
+T load<T>(in Buffer buffer) {
+  return buffers[buffer.index].Load<T>(0);
+}
+
 T load<T>(in Buffer buffer, uint32_t index) {
   return buffers[buffer.index].Load<T>(index * sizeof(T));
+}
+
+void store<T>(in Buffer buffer, in T value) {
+  buffers[buffer.index].Store<T>(0, value);
 }
 
 void store<T>(in Buffer buffer, uint32_t index, in T value) {

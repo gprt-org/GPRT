@@ -56,7 +56,7 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_traverse.slang
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_traverse_unified.slang
 )
 
 embed_devicecode(
@@ -75,6 +75,8 @@ target_sources(gprt PRIVATE
     gprt.cpp
     gprt.h
     gprt_knn_shared.h
+    gprt_knn_host.h
+    gprt_knn_host.cpp
     gprt_scan_shared.h
     gprt_sort.h
 )

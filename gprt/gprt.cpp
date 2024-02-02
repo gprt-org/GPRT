@@ -32,6 +32,9 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <iostream>
+#include <iomanip>
+#include <fstream>
 
 #include <regex>
 
@@ -82,6 +85,8 @@
 
 // For nearest neighbor parameter structs
 #include "gprt_knn_shared.h"
+#include "gprt_knn_host.h"
+#include "hilbert.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -101,9 +106,18 @@ static struct RequestedFeatures {
   // On AMD, might require RADV driver...
   uint32_t rayRecursionDepth = 31;
 
+  uint32_t maxRayPayloadSize = 32;
+  uint32_t maxRayHitAttributeSize = 2;
+
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
+
+  // setting to true for now, but generally only supported on latest nvidia
+  bool invocationReordering = true;
+
+
+  bool debugPrintf = false;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -1826,9 +1840,9 @@ struct Compute : public SBTEntry {
 
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
-    subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
+    // subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
     // subgroupSizeInfo.requiredSubgroupSize = 32;
-    subgroupSizeInfo.pNext = nullptr;
+    // subgroupSizeInfo.pNext = nullptr;
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -1836,7 +1850,7 @@ struct Compute : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    shaderStage.pNext = &subgroupSizeInfo;
+    // shaderStage.pNext = &subgroupSizeInfo;
 
     this->recordSize = recordSize;
     if (this->recordSize > 0)
@@ -1868,7 +1882,7 @@ struct Compute : public SBTEntry {
     VkPipelineCache cache = VK_NULL_HANDLE;
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -2551,7 +2565,7 @@ struct GeomType : public SBTEntry {
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -3092,7 +3106,6 @@ struct Context {
   GPRTModule scanModule = nullptr;
   GPRTModule nnBuildModule = nullptr;
   GPRTModule nnTraverseModule = nullptr;
-  GPRTCallable traverseCallable = nullptr;
 
   struct SortStages {
     Stage Count;
@@ -3180,12 +3193,20 @@ struct Context {
     validationFeatures.enabledValidationFeatureCount = 1;
     validationFeatures.pDisabledValidationFeatures = nullptr;
     validationFeatures.pEnabledValidationFeatures = enabled;
+    
 
     VkInstanceCreateInfo instanceCreateInfo{};
     instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceCreateInfo.pApplicationInfo = &appInfo;
     // instanceCreateInfo.pNext = VK_NULL_HANDLE;
-    instanceCreateInfo.pNext = &validationFeatures;
+
+    if (requestedFeatures.debugPrintf) {
+      instanceCreateInfo.pNext = &validationFeatures;
+    } else {
+      LOG_WARNING("Debug printf disabled");
+      instanceCreateInfo.pNext = VK_NULL_HANDLE;
+    }
+
 
     uint32_t glfwExtensionCount = 0;
     const char **glfwExtensions;
@@ -3208,8 +3229,10 @@ struct Context {
     instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    // We'll always be using this extension.. Printf's are very useful.
-    instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // Useful to disable, since some profiling tools don't support this.
+    if (requestedFeatures.debugPrintf) {
+      instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
     if (instanceExtensions.size() > 0) {
       instanceCreateInfo.enabledExtensionCount = (uint32_t) instanceExtensions.size();
@@ -3247,26 +3270,28 @@ struct Context {
     }
 
     // Setup debug printf callback
-    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-        vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+    if (requestedFeatures.debugPrintf) {
+      gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+      gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
-    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debugUtilsMessengerCI.messageSeverity = 
-        // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
-      // | VK_DEBUG_REPORT_WARNING_BIT_EXT
-      // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
-      // | VK_DEBUG_REPORT_ERROR_BIT_EXT
-      VK_DEBUG_REPORT_DEBUG_BIT_EXT
-      ;
-    debugUtilsMessengerCI.messageType =
-        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-    debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-    VkResult result =
-        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
-    assert(result == VK_SUCCESS);
+      VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+      debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+      debugUtilsMessengerCI.messageSeverity = 
+          // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+        // | VK_DEBUG_REPORT_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_ERROR_BIT_EXT
+        VK_DEBUG_REPORT_DEBUG_BIT_EXT
+        ;
+      debugUtilsMessengerCI.messageType =
+          VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+      debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+      VkResult result =
+          gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+      assert(result == VK_SUCCESS);
+    }
 
     /// 2. Select a Physical Device
     
@@ -3331,7 +3356,7 @@ struct Context {
     // This allows us to require a certain subgroup size. (NVIDIA calls these "warps")
     // For certain cooperative subgroup tasks like prefix sum, radix sorting, etc,
     // it's helpful to have a guarantee about a subgroup size. 
-    enabledDeviceExtensions.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+    // enabledDeviceExtensions.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 
     // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
     // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
@@ -3339,6 +3364,7 @@ struct Context {
     enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
 
     // Ray tracing related extensions required
+    enabledDeviceExtensions.push_back(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
 
     // Ray tracing related extensions required
     enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
@@ -3370,6 +3396,10 @@ struct Context {
       // If the device will be using ray queries for inline ray tracing,
       // we need to explicitly request this.
       enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    }
+
+    if (requestedFeatures.invocationReordering) {
+      enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
     }
 
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
@@ -3581,15 +3611,23 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    VkPhysicalDeviceSubgroupSizeControlFeatures physicalDeviceSubgroupSizeControlFeatures = {};
-    physicalDeviceSubgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
-    physicalDeviceSubgroupSizeControlFeatures.subgroupSizeControl = VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT;
-    physicalDeviceSubgroupSizeControlFeatures.computeFullSubgroups = false;
+    // VkPhysicalDeviceSubgroupSizeControlFeatures physicalDeviceSubgroupSizeControlFeatures = {};
+    // physicalDeviceSubgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    // physicalDeviceSubgroupSizeControlFeatures.subgroupSizeControl = VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT;
+    // physicalDeviceSubgroupSizeControlFeatures.computeFullSubgroups = false;
+
+    
+
+    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
+    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+    invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+    invocationReorderFeatures.pNext = nullptr;
 
     VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlocklayoutFeatures = {};
     physicalDeviceScalarBlocklayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
     physicalDeviceScalarBlocklayoutFeatures.scalarBlockLayout = true;
-    physicalDeviceScalarBlocklayoutFeatures.pNext = &physicalDeviceSubgroupSizeControlFeatures;
+    physicalDeviceScalarBlocklayoutFeatures.pNext = &invocationReorderFeatures;
+    // physicalDeviceScalarBlocklayoutFeatures.pNext = &physicalDeviceSubgroupSizeControlFeatures;
 
     VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
     memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
@@ -3780,7 +3818,7 @@ struct Context {
     scanModule = gprtModuleCreate(context, scanDeviceCode);
     nnBuildModule = gprtModuleCreate(context, nnBuildDeviceCode);
     nnTraverseModule = gprtModuleCreate(context, nnTraverseDeviceCode);
-
+    
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
       VkSemaphoreCreateInfo semaphoreInfo{};
@@ -4339,7 +4377,8 @@ struct Context {
     vkDestroyQueryPool(logicalDevice, compactedSizeQueryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
-    freeDebugCallback(instance);
+    if (requestedFeatures.debugPrintf)
+      freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
   }
 
@@ -4687,9 +4726,6 @@ struct Context {
         {"ComputeTriangleOBBBounds",       gprtComputeCreate<ComputeTriangleOBBBoundsParams>(context, nnBuildModule, "ComputeTriangleOBBBounds")},
         {"ExpandTriangles",                gprtComputeCreate<ExpandTrianglesParams>(context, nnBuildModule, "ExpandTriangles")}
       });
-
-      // Testing out using a callable for recursive traversal...
-      traverseCallable = gprtCallableCreate(context, nnTraverseModule, "TraverseRecursive", 0);
     }
 
     computePipelinesOutOfDate = true;    
@@ -4764,9 +4800,6 @@ struct Context {
       gprtComputeDestroy(program);
       internalComputePrograms.erase(progName);
     }
-
-    // also remove the recursive traversal callable
-    gprtCallableDestroy(traverseCallable);
   }
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
@@ -7594,9 +7627,12 @@ struct NNEdgeAccel : public Accel {
 };
 
 struct NNTriangleAccel : public Accel {
+  GPRTCallableOf<NodeRecord> traverseCallable;
+  
   std::vector<NNTriangleGeom *> geometries;
+  GPRTBufferOf<uint8_t> countsBuffer;
 
-  GPRTBufferOf<float3> triangleExpansionBuffer;
+  GPRTBufferOf<float4> triangleExpansionBuffer; 
 
   GPRTBufferOf<uint64_t> codesBuffer;
   GPRTBufferOf<uint64_t> idsBuffer;
@@ -7610,6 +7646,7 @@ struct NNTriangleAccel : public Accel {
   GPRTBufferOf<int> totalClaimed;
 
   GPRTBufferOf<float3> aabbBuffers[MAX_LEVELS];
+  GPRTBufferOf<float3> naabbBuffers[MAX_LEVELS];
   GPRTBufferOf<float3> centerBuffers[MAX_LEVELS];
   GPRTBufferOf<float3> oobbBuffers[MAX_LEVELS];
 
@@ -7669,13 +7706,16 @@ struct NNTriangleAccel : public Accel {
       oobbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
       centerBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
       aabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
+      naabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
     }
 
     // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
     // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL4Clusters * 2 - 1);
     // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL4Clusters * 2 - 1));
-    triangleExpansionBuffer = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numPrims * 7);
+
+    // w component holds the count of references
+    triangleExpansionBuffer = gprtDeviceBufferCreate<float4>((GPRTContext)context, nnAccelHandle.numPrims * 3);
 
     nnAccelHandle.maxSearchRange = 0.f; 
     
@@ -7697,6 +7737,54 @@ struct NNTriangleAccel : public Accel {
       nnAccelHandle.centers[i] = gprtBufferGetHandle(centerBuffers[i]);
     }
 
+    // Determine counts of references of each vertex. Vertices with a count of 1 are "open"
+    gprtBufferMap((GPRTBuffer)this->geometries[0]->index.buffer);
+    int3* triPtr = (int3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->index.buffer);
+    std::vector<int3> triangles(nnAccelHandle.numPrims);
+    std::vector<uint8_t> vertCounts = getVertexCounts(triangles, this->geometries[0]->vertex.count);
+    gprtBufferUnmap((GPRTBuffer)this->geometries[0]->index.buffer);
+
+    countsBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context, vertCounts.size());
+
+
+    {
+      gprtBufferMap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+      float3* vertPtr = (float3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+      std::vector<float3> vertices(this->geometries[0]->vertex.count);
+      memcpy(triangles.data(), triPtr, sizeof(int3) * nnAccelHandle.numPrims);
+      memcpy(vertices.data(), vertPtr, sizeof(float3) * this->geometries[0]->vertex.count);
+      
+      std::vector<float3> vertexNormalBounds = computeVertexNormalBounds(vertices, triangles);
+
+      float largestVolume = 0.f;
+      float averageVolume = 0.f;
+      for (uint32_t i = 0; i < vertexNormalBounds.size() / 2; ++i) {
+        // print out the volume of the normal bounds
+        float3 NMin = vertexNormalBounds[i * 2 + 0];
+        float3 NMax = vertexNormalBounds[i * 2 + 1];
+        float3 diagonal = NMax - NMin;
+        float volume = diagonal.x * diagonal.y * diagonal.z;
+        if (volume > 0.f) {
+          // print out the volume of the box to 3 decimal places
+          // std::cout << "Vertex " << i << " normal bounds volume: " << std::fixed << std::setprecision(3) << volume << std::endl;
+        }
+        if (volume > largestVolume) {
+          largestVolume = volume;
+        }
+        
+        
+        // Compute an updated average by using an online averaging method
+        averageVolume += (volume - averageVolume) / (i + 1);
+      }
+      std::cout << "Largest volume: " << std::fixed << std::setprecision(3) << largestVolume << std::endl;
+      std::cout << "Average volume: " << std::fixed << std::setprecision(3) << averageVolume << std::endl;
+      gprtBufferUnmap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    }
+
+
+
+
+
     // for (int i = 0; i < MAX_LEVELS; ++i) {
     //   printf("Device address for OOBB %d: %llu\n", i, nnAccelHandle.oobbs[i].x);
     // }
@@ -7708,6 +7796,22 @@ struct NNTriangleAccel : public Accel {
 
     // gprtGeomSetParameters(geom, &nnAccelHandle);
     // gprtAABBsSetPositions(geom, l4clusters, nnAccelHandle.numL5Clusters);
+
+    // Testing out using a callable for recursive traversal...
+    // note, order here is important. Node callable must be first, leaf callable must be second.
+    // traverseNodeCallable = gprtMissCreate<NodeRecord>((GPRTContext)context, context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
+    traverseCallable = gprtCallableCreate<NodeRecord>((GPRTContext)context, context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
+
+    NodeRecord *nodeRecord = gprtCallableGetParameters(traverseCallable);
+    for (uint32_t i = 0; i < MAX_LEVELS; ++i) {
+      nodeRecord->oobbs[i] = nnAccelHandle.oobbs[i];
+      nodeRecord->aabbs[i] = nnAccelHandle.aabbs[i];
+      nodeRecord->centers[i] = nnAccelHandle.centers[i];
+      nodeRecord->numClusters[i] = nnAccelHandle.numClusters[i];
+    }
+    nodeRecord->numLevels = nnAccelHandle.numLevels;
+    nodeRecord->numPrims = nnAccelHandle.numPrims;
+    nodeRecord->triangleLists = nnAccelHandle.triangleLists;
   };
 
   ~NNTriangleAccel(){};
@@ -7796,9 +7900,7 @@ struct NNTriangleAccel : public Accel {
     // gprtBufferUnmap(leaves);
   }
 
-  #include "hilbert.h"
-  #include <iostream>
-  #include <fstream>
+
   void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
     gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
@@ -7828,6 +7930,7 @@ struct NNTriangleAccel : public Accel {
     // Buffers used for construction
     gprt::Buffer triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
     gprt::Buffer vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    gprt::Buffer vertCounts = gprtBufferGetHandle(this->countsBuffer);
     gprt::Buffer trianglesExp = gprtBufferGetHandle(triangleExpansionBuffer);
     gprt::Buffer rootBounds = gprtBufferGetHandle(this->rootBoundsBuffer);
     gprt::Buffer codes = gprtBufferGetHandle(this->codesBuffer);
@@ -7902,7 +8005,7 @@ struct NNTriangleAccel : public Accel {
     for (int i = 0; i < 100; ++i) {
       gprtBeginProfile(context);
       gprtComputeLaunch(ExpandTriangles, numPrimGroups, numPrimThreads, 
-        ExpandTrianglesParams(numPrims, ids, triangles, vertices, trianglesExp));
+        ExpandTrianglesParams(numPrims, ids, triangles, vertices, vertCounts, trianglesExp));
       timeToExpandTriangles += gprtEndProfile(context);
     }
     timeToExpandTriangles /= 100.f;
@@ -9066,7 +9169,7 @@ void Context::updatePipeline() {
     LOG_INFO("Building ray tracing pipeline");
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -9233,6 +9336,11 @@ void Context::updatePipeline() {
       /*
         Create the ray tracing pipeline
       */
+      VkRayTracingPipelineInterfaceCreateInfoKHR pipelineInterfaceCreateInfo{};
+      pipelineInterfaceCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
+      pipelineInterfaceCreateInfo.maxPipelineRayPayloadSize = requestedFeatures.maxRayPayloadSize;
+      pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
+
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
       rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
       rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -9241,6 +9349,7 @@ void Context::updatePipeline() {
       rayTracingPipelineCI.pGroups = shaderGroups.data();
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
+      rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
 
       if (raytracingPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);

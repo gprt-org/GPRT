@@ -27,107 +27,6 @@
 // space filling curve routines
 #include "sfc.slang"
 
-bool getPointBounds(gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
-{
-    float3 p = gprt::load<float3>(points, primID);
-    if (isnan(p.x)) { 
-        aabbMin = float3(1e38f, 1e38f, 1e38f);
-        aabbMax = -float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    aabbMin = p;
-    aabbMax = p;
-    return true;
-}
-
-bool getEdgeBounds(gprt::Buffer edges, gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
-{
-    uint2 edge = gprt::load<uint2>(edges, primID);
-    float3 p1 = gprt::load<float3>(points, edge.x);
-    if (isnan(p1.x)) {
-        aabbMin = float3(1e38f, 1e38f, 1e38f);
-        aabbMax = -float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    float3 p2 = gprt::load<float3>(points, edge.y);
-    aabbMin = float3(min(p1.x,p2.x),min(p1.y,p2.y),min(p1.z,p2.z));
-    aabbMax = float3(max(p1.x,p2.x),max(p1.y,p2.y),max(p1.z,p2.z));
-    return true;
-}
-
-bool getTriangleBounds(gprt::Buffer triangles, gprt::Buffer points, uint primID, out float3 aabbMin, out float3 aabbMax)
-{
-    uint3 tri = gprt::load<uint3>(triangles, primID);
-    float3 p1 = gprt::load<float3>(points, tri.x);
-    if (isnan(p1.x)) {
-        aabbMin = float3(1e38f, 1e38f, 1e38f);
-        aabbMax = -float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    float3 p2 = gprt::load<float3>(points, tri.y);
-    float3 p3 = gprt::load<float3>(points, tri.z);
-    aabbMin = float3(min(p1.x,min(p2.x,p3.x)),min(p1.y,min(p2.y,p3.y)),min(p1.z,min(p2.z,p3.z)));
-    aabbMax = float3(max(p1.x,max(p2.x,p3.x)),max(p1.y,max(p2.y,p3.y)),max(p1.z,max(p2.z,p3.z)));
-    return true;
-}
-
-bool getPointCentroid(gprt::Buffer points, uint primID, out float3 c) {
-    float3 p1 = gprt::load<float3>(points, primID);
-    if (isnan(p1.x)) { 
-        c = float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    c = p1;
-    return true;
-}
-
-bool getEdgeCentroid(gprt::Buffer edges, gprt::Buffer points, uint primID, out float3 c) 
-{
-    uint2 edge = gprt::load<uint2>(edges, primID);
-    float3 p1 = gprt::load<float3>(points, edge.x);
-    if (isnan(p1.x)) {
-        c = float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    float3 p2 = gprt::load<float3>(points, edge.y);
-    c = (p1 + p2) / 2.f;
-    return true;
-}
-
-bool getTriangleCentroid(gprt::Buffer triangles, gprt::Buffer points, uint primID, out float3 c) 
-{
-    uint3 tri = gprt::load<uint3>(triangles, primID);
-    float3 p1 = gprt::load<float3>(points, tri.x);
-    if (isnan(p1.x)) {
-        c = float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    float3 p2 = gprt::load<float3>(points, tri.y);
-    float3 p3 = gprt::load<float3>(points, tri.z);
-    c = (p1 + p2 + p3) / 3.f;
-    return true; 
-}
-
-bool getTriangleCentroidAndDiagonal(gprt::Buffer triangles, gprt::Buffer points, uint primID, out float3 c, out float d) 
-{
-    d = 0.f;
-    uint3 tri = gprt::load<uint3>(triangles, primID);
-    float3 p1 = gprt::load<float3>(points, tri.x);
-    if (isnan(p1.x)) {
-        c = float3(1e38f, 1e38f, 1e38f);
-        return false;
-    }
-    float3 p2 = gprt::load<float3>(points, tri.y);
-    float3 p3 = gprt::load<float3>(points, tri.z);
-    c = (p1 + p2 + p3) / 3.f;
-
-    float3 aabbMin = min(min(p1, p2), p3);
-    float3 aabbMax = max(max(p1, p2), p3);
-    float3 diagonal = aabbMax - aabbMin;
-    d = length(diagonal);
-    return true; 
-}
-
 float dot2(float3 v) {return dot(v, v);}
 
 float3x3 outerProduct(float3 a, float3 b) {
@@ -137,38 +36,6 @@ float3x3 outerProduct(float3 a, float3 b) {
 // outer product of a vector with itself
 float3x3 outer2(float3 a) {
     return outerProduct(a, a);
-}
-
-void swap(inout float3 a, inout float3 b) { float3 tmp = a; a = b; b = tmp;}
-
-void swap(inout float a, inout float b) { float tmp = a; a = b; b = tmp;}
-
-float4 makeMinimumBoundingSphere(in float3 p1, in float3 p2, in float3 p3) {
-    float4 s;
-
-    // Calculate relative distances
-    float A = length(p1 - p2);
-    float B = length(p2 - p3);
-    float C = length(p3 - p1);
-
-    // Re-orient triangle (make A longest side)
-    float3 a = p3, b = p1, c = p2;
-    if (B < C) swap(B, C), swap(b, c); 
-    if (A < B) swap(A, B), swap(a, b); 
-
-    // If obtuse, just use longest diameter, otherwise circumscribe
-    if ((B*B) + (C*C) <= (A*A)) {
-        s.w = A / 2.f;
-        s.xyz = (b + c) / 2.f;
-    } else {
-        // http://en.wikipedia.org/wiki/Circumscribed_circle
-        float cos_a = (B*B + C*C - A*A) / (B*C*2);
-        s.w = A / (sqrt(1 - cos_a*cos_a)*2.f);
-        float3 alpha = a - c, beta = b - c;
-        s.xyz = cross((beta * dot2(alpha) - alpha * dot2(beta)), (cross(alpha, beta))) /
-            ((dot2(cross(alpha, beta))) * 2.f) + c;
-    }
-    return s;
 }
 
 int getNumNodesInLevel(int level, int numPrimitives) {
@@ -264,13 +131,12 @@ void ExpandTriangles(uint3 DispatchThreadID: SV_DispatchThreadID, uniform Expand
     if (primID >= params.numPrims) return;
     uint32_t primAddr = uint32_t(gprt::load<uint64_t>(params.primIDs, primID));
     // load unsorted address
-    int3 tri = gprt::load<int3>(params.triangles, primAddr);
-    float3 a = gprt::load<float3>(params.vertices, tri.x);
-    float3 b = gprt::load<float3>(params.vertices, tri.y);
-    float3 c = gprt::load<float3>(params.vertices, tri.z);
-    gprt::store<float3>(params.trianglesExp, primID * 3 + 0, a);
-    gprt::store<float3>(params.trianglesExp, primID * 3 + 1, b);
-    gprt::store<float3>(params.trianglesExp, primID * 3 + 2, c);
+    int3 indices = gprt::load<int3>(params.triangles, primAddr);
+    float4[3] tri;
+    tri[0] = float4(gprt::load<float3>(params.vertices, indices.x), gprt::load<uint8_t>(params.vertCounts, indices.x));
+    tri[1] = float4(gprt::load<float3>(params.vertices, indices.y), gprt::load<uint8_t>(params.vertCounts, indices.y));
+    tri[2] = float4(gprt::load<float3>(params.vertices, indices.z), gprt::load<uint8_t>(params.vertCounts, indices.z));
+    gprt::store<float4[3]>(params.trianglesExp, primID, tri);
 }
 
 [shader("compute")]
@@ -281,28 +147,47 @@ void ComputeTriangleAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID,
     int numNClusters = getNumNodesInLevel(params.level, params.numPrims);
     if (NID >= numNClusters) return;
 
-    float3 aabbMin =    float3(1e38f, 1e38f, 1e38f);
-    float3 aabbMax = -float3(1e38f, 1e38f, 1e38f);
+    float3 aabb[2] = { float3(1e38f, 1e38f, 1e38f), -float3(1e38f, 1e38f, 1e38f) };
     float3 center = float3(0, 0, 0);
     int total = 0;    
     for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
         uint32_t primID = NID * BRANCHING_FACTOR + pid;
         if (primID >= params.numPrims) continue;
-        float3 a, b, c;
-        a = gprt::load<float3>(params.trianglesExp, primID * 3 + 0);
-        if (isnan(a.x)) continue;
-        b = gprt::load<float3>(params.trianglesExp, primID * 3 + 1);
-        c = gprt::load<float3>(params.trianglesExp, primID * 3 + 2);
-        aabbMin = min(aabbMin, min(min(a, b), c));
-        aabbMax = max(aabbMax, max(max(a, b), c));
-        center += (a + b + c);
-        total += 3;
+        float3x4 tri = gprt::load<float3x4>(params.trianglesExp, primID);
+        if (any(isnan(tri))) continue;
+        for (int i = 0; i < 3; ++i) {
+            aabb[0] = min(aabb[0], tri[i].xyz);
+            aabb[1] = max(aabb[1], tri[i].xyz);
+            center += tri[i].xyz;
+            total += 1;
+        }
     }
     center /= total;
 
     // Store AABB
-    gprt::store<float3>(params.aabbs, NID * 2 + 0, aabbMin);
-    gprt::store<float3>(params.aabbs, NID * 2 + 1, aabbMax);
+    gprt::store<float3[2]>(params.aabbs, NID, aabb);
+
+    // // find the vertex closest to center
+    // float3 closest = float3(1e38f, 1e38f, 1e38f);
+    // float closestDist = 1e38f;
+    // for (uint32_t pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    //     uint32_t primID = NID * BRANCHING_FACTOR + pid;
+    //     if (primID >= params.numPrims) continue;
+    //     float3 a, b, c;
+    //     a = gprt::load<float4>(params.trianglesExp, primID * 3 + 0).xyz;
+    //     if (isnan(a.x)) continue;
+    //     b = gprt::load<float4>(params.trianglesExp, primID * 3 + 1).xyz;
+    //     c = gprt::load<float4>(params.trianglesExp, primID * 3 + 2).xyz;
+    //     float3 closestA = abs(a - center);
+    //     float3 closestB = abs(b - center);
+    //     float3 closestC = abs(c - center);
+    //     float distA = dot(closestA, closestA);
+    //     float distB = dot(closestB, closestB);
+    //     float distC = dot(closestC, closestC);
+    //     if (distA < closestDist) { closestDist = distA; closest = a; }
+    //     if (distB < closestDist) { closestDist = distB; closest = b; }
+    //     if (distC < closestDist) { closestDist = distC; closest = c; }
+    // }
 
     // Store center of vertices
     gprt::store<float3>(params.centers, NID, center);
@@ -315,19 +200,17 @@ void ComputeAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID, uniform
     int PID = DispatchThreadID.x;
     int numParents = getNumNodesInLevel(params.level, params.numPrims);
     int numChildren = getNumNodesInLevel(params.level-1, params.numPrims);
-    if (PID >= numParents) return;    
-    float3 nAabbMin = float3(1e38f, 1e38f, 1e38f); 
-    float3 nAabbMax = -float3(1e38f, 1e38f, 1e38f);
+    if (PID >= numParents) return;
+    float3 nAabb[2] = { float3(1e38f), float3(-1e38f) };
     float3 nCenter = float3(0, 0, 0);
     int total = 0;
     for (uint32_t i = 0; i < BRANCHING_FACTOR; ++i) {
         uint32_t CID = BRANCHING_FACTOR * PID + i;
         if (CID >= numChildren) continue;
-        float3 mAabbMin = gprt::load<float3>(params.childAABBs, CID * 2 + 0);
-        float3 mAabbMax = gprt::load<float3>(params.childAABBs, CID * 2 + 1);
-        if (any(mAabbMax < mAabbMin)) continue; // invalid cluster
-        nAabbMin = min(mAabbMin, nAabbMin);
-        nAabbMax = max(mAabbMax, nAabbMax);
+        float3 mAabb[2] = gprt::load<float3[2]>(params.childAABBs, CID);
+        if (any(mAabb[1] < mAabb[0])) continue; // invalid cluster
+        nAabb[0] = min(mAabb[0], nAabb[0]);
+        nAabb[1] = max(mAabb[1], nAabb[1]);
         uint32_t pplM = getPrimsInNode(params.level - 1, CID, params.numPrims);
         float3 mCenter = gprt::load<float3>(params.childCenters, CID);
         nCenter += mCenter * pplM;
@@ -336,8 +219,7 @@ void ComputeAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID, uniform
     nCenter /= total;
 
     // Store AABB
-    gprt::store<float3>(params.parentAABBs, PID * 2 + 0, float3(nAabbMin));
-    gprt::store<float3>(params.parentAABBs, PID * 2 + 1, float3(nAabbMax));
+    gprt::store<float3[2]>(params.parentAABBs, PID, nAabb);
 
     // Store center of vertices
     gprt::store<float3>(params.parentCenters, PID, nCenter);
@@ -357,10 +239,10 @@ void ComputeTriangleOBBCovariances(uint3 DispatchThreadID: SV_DispatchThreadID, 
         uint32_t primID = PID * BRANCHING_FACTOR + i;
         if (primID >= params.numPrims) continue;
         float3 a, b, c;
-        a = gprt::load<float3>(params.trianglesExp, primID * 3 + 0);
+        a = gprt::load<float4>(params.trianglesExp, primID * 3 + 0).xyz;
         if (isnan(a.x)) continue;
-        b = gprt::load<float3>(params.trianglesExp, primID * 3 + 1);
-        c = gprt::load<float3>(params.trianglesExp, primID * 3 + 2);
+        b = gprt::load<float4>(params.trianglesExp, primID * 3 + 1).xyz;
+        c = gprt::load<float4>(params.trianglesExp, primID * 3 + 2).xyz;
         covariance += outer2(a - center) + outer2(b - center) + outer2(c - center);
         total = total + 3;
     }
@@ -432,19 +314,16 @@ void ComputeTriangleOBBBounds(uint3 DispatchThreadID: SV_DispatchThreadID, unifo
     int numNClusters = getNumNodesInLevel(0, params.numPrims);
     if (N0ID >= numNClusters) return;
 
-    int numVerts = 0;
-    float3 v[BRANCHING_FACTOR * 3];
+    // load triangles into registers
+    int numTris = 0;
+    float3x4 tris[BRANCHING_FACTOR];
     for (int i = 0; i < BRANCHING_FACTOR; ++i) {
         int primID = N0ID * BRANCHING_FACTOR + i;
         if (primID >= params.numPrims) continue;
-        // load triangles into registers
-        v[i * 3 + 0] = gprt::load<float3>(params.trianglesExp, primID * 3 + 0);
-        v[i * 3 + 1] = gprt::load<float3>(params.trianglesExp, primID * 3 + 1);
-        v[i * 3 + 2] = gprt::load<float3>(params.trianglesExp, primID * 3 + 2);
-        numVerts += 3;
+        tris[i] = gprt::load<float3x4>(params.trianglesExp, primID);
+        numTris++;
     }
 
-    [unroll] // oddly, if I don't unroll, I crash when max levels is 1... Todo, test to see if this is still true with slang
     for (int level = 0; level < params.numLevels; ++level) {
         int parentID = getPrimParentNode(level, N0ID * BRANCHING_FACTOR);
         gprt::Buffer oobbs = params.OBBHierarchy[level];
@@ -453,11 +332,13 @@ void ComputeTriangleOBBBounds(uint3 DispatchThreadID: SV_DispatchThreadID, unifo
         float3x3 obbRot = eul_to_mat3(obbEul);
         float3 obbMin =    float3(1e38f, 1e38f, 1e38f);
         float3 obbMax = -float3(1e38f, 1e38f, 1e38f);
-        for (int i = 0; i < numVerts; ++i) {
+        for (int i = 0; i < numTris; ++i) {
             // Rotate leaf vertices into the leaf OBB
-            float3 V = mul(obbRot, v[i]);
-            obbMin = min(obbMin, V);
-            obbMax = max(obbMax, V);
+            for (int j = 0; j < 3; ++j) {
+                float3 V = mul(obbRot, tris[i][j].xyz);
+                obbMin = min(obbMin, V);
+                obbMax = max(obbMax, V);
+            }
         }
         if (level == 0) {
             // Store OBB bounds for current leaf node
