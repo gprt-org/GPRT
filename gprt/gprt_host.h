@@ -32,11 +32,14 @@
 
 #include <vulkan/vulkan.h>
 
-#include "linalg.h"
-using namespace linalg;
+#include "MathConstants.slangh"
+#include "Vector.h"
+#include "Matrix.h"
+// #include "linalg.h"
+// using namespace linalg;
 // using namespace linalg::detail; // causes conflicts
-using namespace linalg::aliases;
-using namespace linalg::ostream_overloads;
+// using namespace linalg::aliases;
+// using namespace linalg::ostream_overloads;
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -47,6 +50,7 @@ using namespace linalg::ostream_overloads;
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <array>
 #include <type_traits>
 #include <iostream>
 #include <cstdlib>

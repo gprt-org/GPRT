@@ -195,12 +195,12 @@ main(int ac, char **av) {
       float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
       position = (mul(rotationMatrixX, (position - pivot))) + pivot;
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------

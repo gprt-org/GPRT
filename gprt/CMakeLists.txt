@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+add_subdirectory(math)
+
 add_library(gprt)
 if (GPRT_BUILD_SHARED)
   set_property(TARGET gprt PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -36,6 +38,7 @@ embed_devicecode(
 )
 
 target_sources(gprt PRIVATE
+    ${MATH_SRC}
     gprt.cpp
     gprt.h
     gprt_sort.h
@@ -82,6 +85,7 @@ target_include_directories(gprt
     ${Vulkan_INCLUDE_DIR}
     ${PROJECT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/math
 )
 
 target_compile_features(gprt PRIVATE cxx_std_17)

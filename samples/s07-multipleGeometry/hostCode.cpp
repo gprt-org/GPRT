@@ -138,13 +138,13 @@ main(int ac, char **av) {
 #define M_PI 3.14
 #endif
   Mesh<TorusKnotMesh> torusMesh1(context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
-                                 translation_matrix(float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
+                                 math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh2(context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
-                                 translation_matrix(float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
+                                 math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
   Mesh<TorusKnotMesh> torusMesh3(context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
-                                 translation_matrix(float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
+                                 math::matrixFromTranslation(float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
   Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1, 1, 1),
-                                     translation_matrix(float3(0.0f, 0.0f, -4.0f)));
+                                 math::matrixFromTranslation(float3(0.0f, 0.0f, -4.0f)));
   std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry,
                                                       floorMesh.geometry};
   GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, geoms.size(), geoms.data());
@@ -212,12 +212,12 @@ main(int ac, char **av) {
       float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
       position = (mul(rotationMatrixX, (position - pivot))) + pivot;
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
