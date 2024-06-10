@@ -1917,11 +1917,11 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
 // Case where compute program uniforms are not known at compilation time
 template<typename... Uniforms>
-void gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
+void gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
 
   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
@@ -1941,7 +1941,7 @@ void gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std
 
 // Case where compute program has compile-time type-safe uniform arguments
 template<typename... Uniforms>
-void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
+void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
   
   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 

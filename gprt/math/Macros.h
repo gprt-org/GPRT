@@ -87,9 +87,9 @@
 #endif
 
 #ifdef GPRT_DLL
-#define GPRT_API GPRT_API_EXPORT
+#define GPRT_DLL_API GPRT_API_EXPORT
 #else // GPRT_DLL
-#define GPRT_API GPRT_API_IMPORT
+#define GPRT_DLL_API GPRT_API_IMPORT
 #endif // GPRT_DLL
 
 /**
