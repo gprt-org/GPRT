@@ -277,6 +277,7 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 }
 
 extern std::vector<uint8_t> sortDeviceCode;
+extern std::vector<uint8_t> scanDeviceCode;
 
 // forward declarations...
 struct Context;
@@ -2847,6 +2848,8 @@ struct Context {
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
   VkPhysicalDeviceProperties deviceProperties;
+  VkPhysicalDeviceProperties2 deviceProperties2;
+  VkPhysicalDeviceSubgroupProperties subgroupProperties;
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
   // Stores the features available on the selected physical device (for e.g.
@@ -2988,6 +2991,9 @@ struct Context {
   std::map<std::string, Compute*> internalComputePrograms;
 
   Module *radixSortModule = nullptr;
+  Module *scanModule = nullptr;
+
+  // TODO, we can probably refactor this...
   struct SortStages {
     Stage Count;
     Stage CountReduce;
@@ -3333,11 +3339,15 @@ struct Context {
     // properties
     vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
 
-    // VkPhysicalDeviceRayTracingPipelinePropertiesKHR
-    // rayTracingPipelineProperties{};
+    subgroupProperties = {};
+    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    subgroupProperties.pNext = NULL;
+
     rayTracingPipelineProperties = {};
     rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    VkPhysicalDeviceProperties2 deviceProperties2{};
+    rayTracingPipelineProperties.pNext = &subgroupProperties;
+
+    deviceProperties2 = {};
     deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     deviceProperties2.pNext = &rayTracingPipelineProperties;
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
@@ -3654,8 +3664,8 @@ struct Context {
 
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
-    setupSortStages(radixSortModule);
-
+    scanModule = new Module(scanDeviceCode);
+    
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
       VkSemaphoreCreateInfo semaphoreInfo{};
@@ -3943,6 +3953,11 @@ struct Context {
       // Call new frame here to initialize some internal imgui data
       ImGui_ImplGlfw_NewFrame();
     }
+
+    // Finally, setup the internal shader stages and build an initial shader binding table
+    setupInternalStages();
+    buildPipeline();
+    buildSBT(GPRT_SBT_ALL);
   };
 
   void destroy() {
@@ -3985,82 +4000,150 @@ struct Context {
       computeRecordBuffer = nullptr;
     }
 
-    if (samplerDescriptorSet)
+    if (samplerDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
-    if (texture1DDescriptorSet)
+      samplerDescriptorSet = nullptr;
+    }
+    if (texture1DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
-    if (texture2DDescriptorSet)
+      texture1DDescriptorSet = nullptr;
+    }
+    if (texture2DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
-    if (texture3DDescriptorSet)
+      texture2DDescriptorSet = nullptr;
+    }
+    if (texture3DDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
-    if (bufferDescriptorSet)
+      texture3DDescriptorSet = nullptr;
+    }
+    if (bufferDescriptorSet) {
       vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
+      bufferDescriptorSet = nullptr;
+    }
 
-    if (samplerDescriptorSetLayout)
+    if (samplerDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
-    if (texture1DDescriptorSetLayout)
+      samplerDescriptorSetLayout = nullptr; 
+    }
+    if (texture1DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
-    if (texture2DDescriptorSetLayout)
+      texture1DDescriptorSetLayout = nullptr; 
+    }
+    if (texture2DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
-    if (texture3DDescriptorSetLayout)
+      texture2DDescriptorSetLayout = nullptr; 
+    }
+    if (texture3DDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
-    if (rasterRecordDescriptorSetLayout)
+      texture3DDescriptorSetLayout = nullptr; 
+    }
+    if (rasterRecordDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
-    if (computeRecordDescriptorSetLayout)
+      rasterRecordDescriptorSetLayout = nullptr; 
+    }
+    if (computeRecordDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
-    if (bufferDescriptorSetLayout)
+      computeRecordDescriptorSetLayout = nullptr; 
+    }
+    if (bufferDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
+      bufferDescriptorSetLayout = nullptr; 
+    }
 
-    if (samplerDescriptorPool)
+    if (samplerDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
-    if (texture1DDescriptorPool)
+      samplerDescriptorPool = nullptr;
+    }
+    if (texture1DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
-    if (texture2DDescriptorPool)
+      texture1DDescriptorPool = nullptr;
+    }
+    if (texture2DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
-    if (texture3DDescriptorPool)
+      texture2DDescriptorPool = nullptr;
+    }
+    if (texture3DDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
-    if (rasterRecordDescriptorPool)
+      texture3DDescriptorPool = nullptr;
+    }
+    if (rasterRecordDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
-    if (computeRecordDescriptorPool)
+      rasterRecordDescriptorPool = nullptr;
+    }
+    if (computeRecordDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
-    if (bufferDescriptorPool)
+      computeRecordDescriptorPool = nullptr;
+    }
+    if (bufferDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
+      bufferDescriptorPool = nullptr;
+    }
     if (imguiPool) {
       vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
+      imguiPool = nullptr;
     }
     if (imgui.renderPass) {
       ImGui_ImplVulkan_Shutdown();
       vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+      imgui.renderPass = nullptr;
     }
     if (imgui.frameBuffer) {
       vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+      imgui.frameBuffer = nullptr;
     }
 
-    if (imageAvailableSemaphore)
+    if (imageAvailableSemaphore) {
       vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    if (renderFinishedSemaphore)
+      imageAvailableSemaphore = nullptr;
+    }
+    if (renderFinishedSemaphore) {
       vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+      renderFinishedSemaphore = nullptr;
+    }
 
-    if (inFlightFence)
+    if (inFlightFence) {
       vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+      inFlightFence = nullptr;
+    }
 
     if (swapchain) {
       vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+      swapchain = nullptr;
     }
     if (window) {
       glfwDestroyWindow(window);
       glfwTerminate();
+      window = nullptr;
     }
-    if (surface)
+    if (surface) {
       vkDestroySurfaceKHR(instance, surface, nullptr);
+      surface = nullptr;
+    }
 
-    if (raytracingPipelineLayout)
+    if (raytracingPipelineLayout) {
       vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
-    if (raytracingPipeline)
+      raytracingPipelineLayout = nullptr;
+    }
+    if (raytracingPipeline) {
       vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+      raytracingPipeline = nullptr;
+    }
 
-    destroySortStages();
-    
+    // if (fillInstanceDataStage.layout) {
+    //   vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
+    //   fillInstanceDataStage.layout = nullptr;
+    // }
+    // if (fillInstanceDataStage.pipeline) {
+    //   vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
+    //   fillInstanceDataStage.pipeline = nullptr;
+    // }
+    // if (fillInstanceDataStage.module) {
+    //   vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
+    //   fillInstanceDataStage.module = nullptr;
+    // }
+
+    destroyInternalStages();
+
     if (raygenTable) {
       raygenTable->destroy();
       delete raygenTable;
@@ -4071,23 +4154,76 @@ struct Context {
       delete missTable;
       missTable = nullptr;
     }
-    if (callableTable) {
-      callableTable->destroy();
-      delete callableTable;
-      callableTable = nullptr;
-    }
     if (hitgroupTable) {
       hitgroupTable->destroy();
       delete hitgroupTable;
       hitgroupTable = nullptr;
     }
 
+    previousNumSamplers = 0;
+    previousNumTexture1Ds = 0;
+    previousNumTexture2Ds = 0;
+    previousNumTexture3Ds = 0;
+    previousNumBuffers = 0;
+    previousNumRasterRecords = 0;
+    previousNumComputeRecords = 0;
+    
     vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
     vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
     vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
     vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+
+    // verify these are all cleared.
+    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
+      if (GeomType::geomTypes[i] != nullptr) {
+        GeomType::geomTypes[i]->destroy();
+      }
+    }
+    GeomType::geomTypes.resize(0);
+
+    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
+      if (Buffer::buffers[i] != nullptr) {
+        Buffer::buffers[i]->destroy();
+      }
+    }
+    Buffer::buffers.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
+      if (Texture::texture1Ds[i] != nullptr) {
+        Texture::texture1Ds[i]->destroy();
+      }
+    }
+    Texture::texture1Ds.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
+      if (Texture::texture2Ds[i] != nullptr) {
+        Texture::texture2Ds[i]->destroy();
+      }
+    }
+    Texture::texture2Ds.resize(0);
+
+    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
+      if (Texture::texture3Ds[i] != nullptr) {
+        Texture::texture3Ds[i]->destroy();
+      }
+    }
+    Texture::texture3Ds.resize(0);
+
+    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
+      if (Sampler::samplers[i] != nullptr) {
+        Sampler::samplers[i]->destroy();
+      }
+    }
+    Sampler::samplers.resize(0);
+
+    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
+      if (Compute::computes[i] != nullptr) {
+        Compute::computes[i]->destroy();
+      }
+    }
+    Compute::computes.resize(0);
 
     vmaDestroyAllocator(allocator);
 
@@ -4097,35 +4233,6 @@ struct Context {
 
     freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
-
-    // verify these are all cleared.
-    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
-      if (GeomType::geomTypes[i] != nullptr) throw std::runtime_error("Not all geom types destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
-      if (Buffer::buffers[i] != nullptr) throw std::runtime_error("Not all buffers destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
-      if (Texture::texture1Ds[i] != nullptr) throw std::runtime_error("Not all texture1Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
-      if (Texture::texture2Ds[i] != nullptr) throw std::runtime_error("Not all texture2Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
-      if (Texture::texture3Ds[i] != nullptr) throw std::runtime_error("Not all texture3Ds destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
-      if (Sampler::samplers[i] != nullptr) throw std::runtime_error("Not all samplers destroyed!");
-    }
-
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      if (Compute::computes[i] != nullptr) throw std::runtime_error("Not all compute programs destroyed!");
-    }
    
 
   }
@@ -4141,352 +4248,434 @@ struct Context {
 
   void buildPipeline();
 
-  void setupSortStages(Module *module) {
-    // currently not using cache.
-    VkPipelineCache cache = VK_NULL_HANDLE;
+  // Todo, refactor this code...
+  void setupInternalStages() {
+    
+    // // For filling out instance data
+    // {
+    //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
 
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = 16;
+    //   // todo, consider refactoring this into a more official "Compute" shader
+    //   // object
 
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 5;
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
+    //   VkResult err;
+    //   // currently not using cache.
+    //   VkPipelineCache cache = VK_NULL_HANDLE;
 
-    sortStages.Count.entryPoint = "Count";
-    sortStages.CountReduce.entryPoint = "CountReduce";
-    sortStages.Scan.entryPoint = "Scan";
-    sortStages.ScanAdd.entryPoint = "ScanAdd";
-    sortStages.Scatter.entryPoint = "Scatter";
-    sortStages.ScatterPayload.entryPoint = "ScatterPayload";
+    //   VkPushConstantRange pushConstantRange = {};
+    //   pushConstantRange.size = 128;
+    //   pushConstantRange.offset = 0;
+    //   pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    // Create binding for Radix sort passes
-    VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // SrcBuffer (sort)
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstBuffer (sort)
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScrPayload (sort only)
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstPayload (sort only)
-    };
+    //   VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+    //   pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    //   pipelineLayoutCreateInfo.setLayoutCount = 0;      // if ever we use descriptors
+    //   pipelineLayoutCreateInfo.pSetLayouts = nullptr;   // if ever we use descriptors
+    //   pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    //   pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 
-    VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanSrc
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanDst
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanScratch
-    };
+    //   err = vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
 
-    VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (sort only)
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (reduced)
-    };
+    //   std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
+    //   auto binary = internalModule->getBinary("COMPUTE");
 
-    auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
-      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = pool;
-      descriptorSetAllocateInfo.pSetLayouts = &layout;
-      descriptorSetAllocateInfo.descriptorSetCount = 1;
-      descriptorSetAllocateInfo.pNext = nullptr;
-      VkResult err = vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to allocate descriptor! \n" + errorString(err));
-      }
-    };
+    //   VkShaderModuleCreateInfo moduleCreateInfo = {};
+    //   moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    //   moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+    //   moduleCreateInfo.pCode = binary.data();
 
-    VkResult vkResult;
+    //   err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fillInstanceDataStage.module);
 
-    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    descriptor_set_layout_create_info.pNext = nullptr;
-    descriptor_set_layout_create_info.flags = 0;
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
-    descriptor_set_layout_create_info.bindingCount = 4;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutInputOutputs);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                    &sortStages.m_SortDescriptorSetInputOutput[0]);
-    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                    &sortStages.m_SortDescriptorSetInputOutput[1]);
+    //   VkPipelineShaderStageCreateInfo shaderStage = {};
+    //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    //   shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    //   shaderStage.module = fillInstanceDataStage.module;
+    //   shaderStage.pName = entryPoint.c_str();
 
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
-    descriptor_set_layout_create_info.bindingCount = 3;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutScan);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
-                    &sortStages.m_SortDescriptorSetScanSets[0]);
-    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
-                    &sortStages.m_SortDescriptorSetScanSets[1]);
+    //   VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+    //   computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    //   computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
+    //   computePipelineCreateInfo.flags = 0;
+    //   computePipelineCreateInfo.stage = shaderStage;
 
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
-    descriptor_set_layout_create_info.bindingCount = 2;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutScratch);
-    VK_CHECK_RESULT(vkResult);
-    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch,
-                    &sortStages.m_SortDescriptorSetScratch);
+    //   // At this point, create all internal compute pipelines as well.
+    //   err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+    //                                 &fillInstanceDataStage.pipeline);
+    // }
 
-    // Create constant range representing our static constant
-    VkPushConstantRange constant_range;
-    constant_range.stageFlags = VK_SHADER_STAGE_ALL;
-    constant_range.offset = 0;
-    constant_range.size = sizeof(ParallelSortCB);
-
-    // Create the pipeline layout (Root signature)
-    VkPipelineLayoutCreateInfo layout_create_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    layout_create_info.pNext = nullptr;
-    layout_create_info.flags = 0;
-    layout_create_info.setLayoutCount = 3;
-    VkDescriptorSetLayout layouts[] = {sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                                       sortStages.m_SortDescriptorSetLayoutScan,
-                                       sortStages.m_SortDescriptorSetLayoutScratch};
-    layout_create_info.pSetLayouts = layouts;
-    layout_create_info.pushConstantRangeCount = 1;
-    layout_create_info.pPushConstantRanges = &constant_range;
-
-    VkResult bCreatePipelineLayout =
-        vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
-    assert(bCreatePipelineLayout == VK_SUCCESS);
-
+    // Radix sorter stages
     {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.Count.entryPoint;
-      auto binary = module->binary;
+      // currently not using cache.
+      VkPipelineCache cache = VK_NULL_HANDLE;
 
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
+      VkDescriptorPoolSize poolSize;
+      poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      poolSize.descriptorCount = 16;
 
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Count.module);
+      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      descriptorPoolInfo.poolSizeCount = 1;
+      descriptorPoolInfo.pPoolSizes = &poolSize;
+      descriptorPoolInfo.maxSets = 5;
+      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
 
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.Count.module;
-      shaderStage.pName = entryPoint.c_str();
+      sortStages.Count.entryPoint = "Count";
+      sortStages.CountReduce.entryPoint = "CountReduce";
+      sortStages.Scan.entryPoint = "Scan";
+      sortStages.ScanAdd.entryPoint = "ScanAdd";
+      sortStages.Scatter.entryPoint = "Scatter";
+      sortStages.ScatterPayload.entryPoint = "ScatterPayload";
 
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
+      // Create binding for Radix sort passes
+      VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
+          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // SrcBuffer (sort)
+          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstBuffer (sort)
+          {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScrPayload (sort only)
+          {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstPayload (sort only)
+      };
 
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.Count.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
+          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanSrc
+          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanDst
+          {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanScratch
+      };
+
+      VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
+          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (sort only)
+          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (reduced)
+      };
+
+      auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
+        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+        descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descriptorSetAllocateInfo.descriptorPool = pool;
+        descriptorSetAllocateInfo.pSetLayouts = &layout;
+        descriptorSetAllocateInfo.descriptorSetCount = 1;
+        descriptorSetAllocateInfo.pNext = nullptr;
+        VkResult err = vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to allocate descriptor! \n" + errorString(err));
+        }
+      };
+
+      VkResult vkResult;
+
+      VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
+          VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+      descriptor_set_layout_create_info.pNext = nullptr;
+      descriptor_set_layout_create_info.flags = 0;
+      descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
+      descriptor_set_layout_create_info.bindingCount = 4;
+      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                            &sortStages.m_SortDescriptorSetLayoutInputOutputs);
+      VK_CHECK_RESULT(vkResult);
+      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                      &sortStages.m_SortDescriptorSetInputOutput[0]);
+      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                      &sortStages.m_SortDescriptorSetInputOutput[1]);
+
+      descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
+      descriptor_set_layout_create_info.bindingCount = 3;
+      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                            &sortStages.m_SortDescriptorSetLayoutScan);
+      VK_CHECK_RESULT(vkResult);
+      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
+                      &sortStages.m_SortDescriptorSetScanSets[0]);
+      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
+                      &sortStages.m_SortDescriptorSetScanSets[1]);
+
+      descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
+      descriptor_set_layout_create_info.bindingCount = 2;
+      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                            &sortStages.m_SortDescriptorSetLayoutScratch);
+      VK_CHECK_RESULT(vkResult);
+      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch,
+                      &sortStages.m_SortDescriptorSetScratch);
+
+      // Create constant range representing our static constant
+      VkPushConstantRange constant_range;
+      constant_range.stageFlags = VK_SHADER_STAGE_ALL;
+      constant_range.offset = 0;
+      constant_range.size = sizeof(ParallelSortCB);
+
+      // Create the pipeline layout (Root signature)
+      VkPipelineLayoutCreateInfo layout_create_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+      layout_create_info.pNext = nullptr;
+      layout_create_info.flags = 0;
+      layout_create_info.setLayoutCount = 3;
+      VkDescriptorSetLayout layouts[] = {sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                                        sortStages.m_SortDescriptorSetLayoutScan,
+                                        sortStages.m_SortDescriptorSetLayoutScratch};
+      layout_create_info.pSetLayouts = layouts;
+      layout_create_info.pushConstantRangeCount = 1;
+      layout_create_info.pPushConstantRanges = &constant_range;
+
+      VkResult bCreatePipelineLayout =
+          vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
+      assert(bCreatePipelineLayout == VK_SUCCESS);
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.Count.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Count.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.Count.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.Count.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
       }
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.CountReduce.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.CountReduce.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.CountReduce.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.CountReduce.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.Scan.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scan.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.Scan.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.Scan.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.ScanAdd.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScanAdd.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.ScanAdd.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.ScanAdd.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.Scatter.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scatter.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.Scatter.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.Scatter.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      {
+        VkResult err = VK_SUCCESS;
+        std::string entryPoint = sortStages.ScatterPayload.entryPoint;
+        auto binary = radixSortModule->binary;
+
+        VkShaderModuleCreateInfo moduleCreateInfo = {};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+        moduleCreateInfo.pCode = binary.data();
+
+        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScatterPayload.module);
+
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = sortStages.ScatterPayload.module;
+        shaderStage.pName = entryPoint.c_str();
+
+        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        computePipelineCreateInfo.layout = sortStages.layout;
+        computePipelineCreateInfo.flags = 0;
+        computePipelineCreateInfo.stage = shaderStage;
+
+        // At this point, create all internal compute pipelines as well.
+        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                      &sortStages.ScatterPayload.pipeline);
+        if (err != VK_SUCCESS) {
+          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+        }
+      }
+
+      // todo, destroy the above stuff
+    } 
+  
+    // Scanning stages
+    {
+      Context* context = this;      
+      internalComputePrograms.insert({"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
+      internalComputePrograms.insert({"Scan", new Compute(context, context->logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
+      computePipelinesOutOfDate = true;
     }
 
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.CountReduce.entryPoint;
-      auto binary = module->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.CountReduce.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.CountReduce.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.CountReduce.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.Scan.entryPoint;
-      auto binary = module->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scan.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.Scan.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.Scan.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.ScanAdd.entryPoint;
-      auto binary = module->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScanAdd.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.ScanAdd.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.ScanAdd.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.Scatter.entryPoint;
-      auto binary = module->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scatter.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.Scatter.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.Scatter.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    {
-      VkResult err = VK_SUCCESS;
-      std::string entryPoint = sortStages.ScatterPayload.entryPoint;
-      auto binary = module->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo = {};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScatterPayload.module);
-
-      VkPipelineShaderStageCreateInfo shaderStage = {};
-      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      shaderStage.module = sortStages.ScatterPayload.module;
-      shaderStage.pName = entryPoint.c_str();
-
-      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      computePipelineCreateInfo.layout = sortStages.layout;
-      computePipelineCreateInfo.flags = 0;
-      computePipelineCreateInfo.stage = shaderStage;
-
-      // At this point, create all internal compute pipelines as well.
-      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                     &sortStages.ScatterPayload.pipeline);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    // todo, destroy the above stuff
+    computePipelinesOutOfDate = true;   
   }
 
-  void destroySortStages() {
-    vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
-    vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
-    vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
-    vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
-    vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
-    vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
-    sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
-    sortStages.Scatter.pipeline = VK_NULL_HANDLE;
-    sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
-    sortStages.Scan.pipeline = VK_NULL_HANDLE;
-    sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
-    sortStages.Count.pipeline = VK_NULL_HANDLE;
+  void destroyInternalStages() {
+    // destroy sort stages
+    {
+      vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
+      vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
+      vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
+      vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
+      vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
+      vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
+      sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
+      sortStages.Scatter.pipeline = VK_NULL_HANDLE;
+      sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
+      sortStages.Scan.pipeline = VK_NULL_HANDLE;
+      sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
+      sortStages.Count.pipeline = VK_NULL_HANDLE;
 
-    vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
-    vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
-    vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
-    vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
-    vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
-    vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
-    sortStages.ScatterPayload.module = VK_NULL_HANDLE;
-    sortStages.Scatter.module = VK_NULL_HANDLE;
-    sortStages.ScanAdd.module = VK_NULL_HANDLE;
-    sortStages.Scan.module = VK_NULL_HANDLE;
-    sortStages.CountReduce.module = VK_NULL_HANDLE;
-    sortStages.Count.module = VK_NULL_HANDLE;
+      vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
+      vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
+      vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
+      vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
+      vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
+      vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
+      sortStages.ScatterPayload.module = VK_NULL_HANDLE;
+      sortStages.Scatter.module = VK_NULL_HANDLE;
+      sortStages.ScanAdd.module = VK_NULL_HANDLE;
+      sortStages.Scan.module = VK_NULL_HANDLE;
+      sortStages.CountReduce.module = VK_NULL_HANDLE;
+      sortStages.Count.module = VK_NULL_HANDLE;
 
-    vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
-    sortStages.layout = VK_NULL_HANDLE;
+      vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
+      sortStages.layout = VK_NULL_HANDLE;
 
-    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
-    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
-    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
+      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
+      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
+      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
 
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
+      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
+      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
+      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
 
-    vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
+      vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
+    }
+
+    std::vector<std::string> progNames;
+    for (auto &program : internalComputePrograms) {
+      progNames.push_back(program.first);
+    }
+
+    for (auto &progName : progNames) {
+      internalComputePrograms[progName]->destroy();
+      delete internalComputePrograms[progName];
+      internalComputePrograms.erase(progName);
+    }
   }
+
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
     VkCommandBufferAllocateInfo allocInfo{};
@@ -9649,8 +9838,8 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
   // note, input->getSize() here should always be a multiple of 16 bytes
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitScan"];
-  // auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["Scan"];
+  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["InitScan"];
+  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["Scan"];
   uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
 
   // Each group gets an aggregate/inclusive prefix and a status flag.
@@ -9663,19 +9852,26 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
     gprtBuildShaderBindingTable(_context);
   }
 
-  gprt::ScanConstants scanConstants;
-  scanConstants.size = numItems;
-  scanConstants.output = gprtBufferGetHandle(_output);
-  scanConstants.input = gprtBufferGetHandle(_input);
-  scanConstants.state = gprtBufferGetHandle(_scratch);
-  scanConstants.flags = 0;
-  if (partition) scanConstants.flags |= SCAN_PARTITION;
-  else if (select) scanConstants.flags |= SCAN_SELECT;
+  gprt::ScanParams scanParams;
+  scanParams.size = numItems;
+  scanParams.output = gprtBufferGetHandle(_output);
+  scanParams.input = gprtBufferGetHandle(_input);
+  scanParams.state = gprtBufferGetHandle(_scratch);
+  scanParams.flags = 0;
+  if (partition) scanParams.flags |= SCAN_PARTITION;
+  else if (select) scanParams.flags |= SCAN_SELECT;
   
-  if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
+  if (selectPositive) scanParams.flags |= SCAN_SELECT_POSITIVE;
 
-  // gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, numThreadBlocks, scanConstants);
-  // gprtComputeLaunch1D(_context, ChainedDecoupledExclusive, numThreadBlocks, scanConstants);
+  uint3 numGroups = {numThreadBlocks, 1, 1};
+  uint3 groupSize = {1,1,1};
+  gprtComputeLaunch(InitChainedDecoupledExclusive, numGroups, groupSize, scanParams);
+
+  if (context->subgroupProperties.subgroupSize == 32)
+    groupSize = {32, SCAN_PARTITON_SIZE / (16 * 32), 1};
+  else 
+    groupSize = {64, SCAN_PARTITON_SIZE / (16 * 64), 1}; // Todo, account for lane sizes other than 32/64
+  gprtComputeLaunch(ChainedDecoupledExclusive, numGroups, groupSize, scanParams);
   
   scratch->map(sizeof(uint32_t), 0);
   uint32_t total = *((uint32_t*)scratch->mapped);

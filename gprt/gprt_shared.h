@@ -91,7 +91,7 @@ namespace gprt{
     };
 
     // Parameters to the built-in scan compute kernels
-    struct ScanConstants {        
+    struct ScanParams {        
         uint32_t size;
         uint32_t flags;
         Buffer input;
