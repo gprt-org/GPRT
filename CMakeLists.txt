@@ -32,15 +32,18 @@ else()
   set(GPRT_IS_SUBPROJECT OFF)
 endif()
 
-# Check if the generator is set to generate 64-bit code
-if(NOT CMAKE_GENERATOR_PLATFORM MATCHES "x64")
-    message(FATAL_ERROR "CMake generator must be set to x64.")
-endif()
-
 set(CMAKE_BUILD_TYPE_INIT "Release")
 
 # project command is required to come after cmake_minimum_required command.
 project(GPRT VERSION 1.0.0 LANGUAGES C CXX)
+
+# Check if the generator is set to generate 64-bit code
+include(CheckTypeSize)
+check_type_size("void*" SIZEOF_VOID_P)
+
+if(NOT SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "A 64-bit compiler is required.")
+endif()
 
 if (NOT GPRT_IS_SUBPROJECT)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})

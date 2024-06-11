@@ -50,7 +50,7 @@ else ()
   else() # linux
     FetchContent_Declare(HLSLCompiler
       URL https://github.com/shader-slang/slang/releases/download/v2024.1.21/slang-2024.1.21-linux-x86_64.tar.gz
-      URL_HASH SHA256=07AB94D9E0CAE35B6B8A0DFDBCD81A442FAB0989552FCEF5305EB134B0E1178E
+      URL_HASH SHA256=309d18f00ce8c74ff2db438e68c0a4620a59cec0ae32ea40f9765adc1764e55e
       DOWNLOAD_NO_EXTRACT true
       DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
     )
