@@ -455,16 +455,16 @@ struct Buffer {
 
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
-      region.srcOffset = 0;
+      region.srcOffset = offset;
       region.dstOffset = 0;
-      region.size = size;
+      region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
       vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo{};
+      VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -488,7 +488,7 @@ struct Buffer {
     }
   }
 
-  void unmap() {
+  void unmap(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
     if (!mapped)
       return;
 
@@ -509,15 +509,15 @@ struct Buffer {
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = 0;
-      region.dstOffset = 0;
-      region.size = size;
+      region.dstOffset = offset;
+      region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
       vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
       err = vkEndCommandBuffer(commandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo{};
+      VkSubmitInfo submitInfo;
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -9639,49 +9639,48 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
 }
 
 uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition, bool select, bool selectPositive) {
-  // LOG_API_CALL();
+  LOG_API_CALL();
 
-  // Context *context = (Context *) _context;
-  // Buffer *input = (Buffer *) _input;
-  // Buffer *output = (Buffer *) _output;
-  // Buffer *scratch = (Buffer *) _scratch;
+  Context *context = (Context *) _context;
+  Buffer *input = (Buffer *) _input;
+  Buffer *output = (Buffer *) _output;
+  Buffer *scratch = (Buffer *) _scratch;
 
-  // // note, input->getSize() here should always be a multiple of 16 bytes
-  // uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
+  // note, input->getSize() here should always be a multiple of 16 bytes
+  uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
   // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitScan"];
   // auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["Scan"];
-  // uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
+  uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
 
-  // // Each group gets an aggregate/inclusive prefix and a status flag.
-  // // We also reserve one int for the total aggregate count, and one
-  // // for group-to-partition scheduling
-  // if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
-  //   // updating SBT, since we're using atomics here...
-  //   scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
-  //   gprtBuildShaderBindingTable(_context);
-  // }
+  // Each group gets an aggregate/inclusive prefix and a status flag.
+  // We also reserve one int for the total aggregate count, and one
+  // for group-to-partition scheduling
+  if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
+    // updating SBT, since we're using atomics here... 
+    // (requires updating descriptor sets when buffer allocations change)
+    scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
+    gprtBuildShaderBindingTable(_context);
+  }
 
-  // gprt::ScanConstants scanConstants;
-  // scanConstants.size = numItems;
-  // scanConstants.output = gprtBufferGetHandle(_output);
-  // scanConstants.input = gprtBufferGetHandle(_input);
-  // scanConstants.state = gprtBufferGetHandle(_scratch);
-  // scanConstants.flags = 0;
-  // if (partition) scanConstants.flags |= SCAN_PARTITION;
-  // else if (select) scanConstants.flags |= SCAN_SELECT;
+  gprt::ScanConstants scanConstants;
+  scanConstants.size = numItems;
+  scanConstants.output = gprtBufferGetHandle(_output);
+  scanConstants.input = gprtBufferGetHandle(_input);
+  scanConstants.state = gprtBufferGetHandle(_scratch);
+  scanConstants.flags = 0;
+  if (partition) scanConstants.flags |= SCAN_PARTITION;
+  else if (select) scanConstants.flags |= SCAN_SELECT;
   
-  // if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
+  if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
 
   // gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, numThreadBlocks, scanConstants);
   // gprtComputeLaunch1D(_context, ChainedDecoupledExclusive, numThreadBlocks, scanConstants);
   
-  // scratch->map(sizeof(uint32_t), 0);
-  // uint32_t total = *((uint32_t*)scratch->mapped);
-  // scratch->unmap(sizeof(uint32_t), 0);
-  // return total;
-
-  return -1;
+  scratch->map(sizeof(uint32_t), 0);
+  uint32_t total = *((uint32_t*)scratch->mapped);
+  scratch->unmap(sizeof(uint32_t), 0);
+  return total;
 }
 
 uint32_t gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
