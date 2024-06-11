@@ -363,9 +363,9 @@ main(int ac, char **av) {
     }
     m1 = adamBeta1 * m1 + (1 - adamBeta1) * grad;
     if (useVectorAdam) {
-      m2 = adamBeta2 * m2 + (1 - adamBeta2) * sqrt(dot(grad, grad));
+      m2 = adamBeta2 * m2 + (1.f - adamBeta2) * sqrtf(dot(grad, grad));
     } else {
-      m2 = adamBeta2 * m2 + (1 - adamBeta2) * (grad * grad);
+      m2 = adamBeta2 * m2 + (1.f - adamBeta2) * (grad * grad);
     }
     
     float3 m_hat = m1 / (1.f - powf(adamBeta1, float(step)));

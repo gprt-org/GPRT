@@ -1912,7 +1912,7 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 template <typename RecordType, typename PushConstantsType>
 void
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Current GPRT push constant size limited to " + PUSH_CONSTANTS_LIMIT + " bytes or less");
+  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
