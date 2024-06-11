@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_executable(t03_bufferExclusiveSum hostCode.cpp)
-target_link_libraries(t03_bufferExclusiveSum
+add_executable(t03_bufferScans hostCode.cpp)
+target_link_libraries(t03_bufferScans
   PRIVATE gprt::gprt
 )
