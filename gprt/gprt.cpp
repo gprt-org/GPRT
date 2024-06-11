@@ -9638,6 +9638,66 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
   buffer->resize(size * count, preserveContents);
 }
 
+uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition, bool select, bool selectPositive) {
+  // LOG_API_CALL();
+
+  // Context *context = (Context *) _context;
+  // Buffer *input = (Buffer *) _input;
+  // Buffer *output = (Buffer *) _output;
+  // Buffer *scratch = (Buffer *) _scratch;
+
+  // // note, input->getSize() here should always be a multiple of 16 bytes
+  // uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
+
+  // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["InitScan"];
+  // auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanConstants>) context->internalComputePrograms["Scan"];
+  // uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
+
+  // // Each group gets an aggregate/inclusive prefix and a status flag.
+  // // We also reserve one int for the total aggregate count, and one
+  // // for group-to-partition scheduling
+  // if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
+  //   // updating SBT, since we're using atomics here...
+  //   scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
+  //   gprtBuildShaderBindingTable(_context);
+  // }
+
+  // gprt::ScanConstants scanConstants;
+  // scanConstants.size = numItems;
+  // scanConstants.output = gprtBufferGetHandle(_output);
+  // scanConstants.input = gprtBufferGetHandle(_input);
+  // scanConstants.state = gprtBufferGetHandle(_scratch);
+  // scanConstants.flags = 0;
+  // if (partition) scanConstants.flags |= SCAN_PARTITION;
+  // else if (select) scanConstants.flags |= SCAN_SELECT;
+  
+  // if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
+
+  // gprtComputeLaunch1D(_context, InitChainedDecoupledExclusive, numThreadBlocks, scanConstants);
+  // gprtComputeLaunch1D(_context, ChainedDecoupledExclusive, numThreadBlocks, scanConstants);
+  
+  // scratch->map(sizeof(uint32_t), 0);
+  // uint32_t total = *((uint32_t*)scratch->mapped);
+  // scratch->unmap(sizeof(uint32_t), 0);
+  // return total;
+
+  return -1;
+}
+
+uint32_t gprtBufferExclusiveSum(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch) {
+  // Redirection here, since we might eventually change the below function to support inclusive and exclusive, 
+  // also to include operators other than addition.
+  return bufferScan(_context, _input, _output, _scratch, false, false, false);
+}
+
+uint32_t gprtBufferPartition(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, true, false, selectPositive);
+}
+
+uint32_t gprtBufferSelect(GPRTContext _context, GPRTBuffer _input, bool selectPositive, GPRTBuffer _output, GPRTBuffer _scratch) {
+  return bufferScan(_context, _input, _output, _scratch, false, true, selectPositive);
+}
+
 void
 bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffer _scratch) {
   LOG_API_CALL();
