@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2022 Nathan V. Morrical
+# Copyright (c) 2023 Nathan V. Morrical
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_executable(t03_swBVH hostCode.cpp)
-target_link_libraries(t03_swBVH
+add_executable(t03_bufferExclusiveSum hostCode.cpp)
+target_link_libraries(t03_bufferExclusiveSum
   PRIVATE gprt::gprt
 )

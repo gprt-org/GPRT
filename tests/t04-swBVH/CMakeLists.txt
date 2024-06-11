@@ -20,17 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-embed_devicecode(
-  OUTPUT_TARGET
-    t04_deviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../gprt/gprt_knn.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
-)
-
-add_executable(t04_nearestNeighbors hostCode.cpp)
-target_link_libraries(t04_nearestNeighbors
-  PRIVATE gprt::gprt generator t04_deviceCode
+add_executable(t04_swBVH hostCode.cpp)
+target_link_libraries(t04_swBVH
+  PRIVATE gprt::gprt
 )
