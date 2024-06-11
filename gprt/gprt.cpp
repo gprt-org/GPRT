@@ -464,7 +464,7 @@ struct Buffer {
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -517,7 +517,7 @@ struct Buffer {
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -640,7 +640,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -717,7 +717,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -771,7 +771,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -1165,7 +1165,7 @@ struct Texture {
       // if (err) LOG_ERROR("failed to end command buffer for texture map! :
       // \n" + errorString(err));
 
-      // VkSubmitInfo submitInfo;
+      // VkSubmitInfo submitInfo{};
       // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       // submitInfo.pNext = NULL;
       // submitInfo.waitSemaphoreCount = 0;
@@ -1241,7 +1241,7 @@ struct Texture {
       if (err)
         LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -1305,7 +1305,7 @@ struct Texture {
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -1437,7 +1437,7 @@ struct Texture {
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -1660,7 +1660,7 @@ struct Texture {
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -1914,7 +1914,7 @@ struct Compute : public SBTEntry {
     VkPipelineCache cache = VK_NULL_HANDLE;
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -2596,7 +2596,7 @@ struct GeomType : public SBTEntry {
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -2907,7 +2907,7 @@ struct Context {
   VkPipelineStageFlags submitPipelineStages =
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;   // not sure I need this one
   // Contains command buffers and semaphores to be presented to the queue
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   // Command buffers used for rendering
   // std::vector<VkCommandBuffer> drawCmdBuffers;
   // Global render pass for frame buffer writes
@@ -4679,7 +4679,7 @@ struct Context {
     ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
     VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -4750,7 +4750,7 @@ struct Context {
     if (err)
       LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5065,7 +5065,7 @@ struct TriangleAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5231,7 +5231,7 @@ struct TriangleAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5295,7 +5295,7 @@ struct TriangleAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for triangle accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -5382,7 +5382,7 @@ struct TriangleAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for triangle accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -5676,7 +5676,7 @@ struct AABBAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5828,7 +5828,7 @@ struct AABBAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5893,7 +5893,7 @@ struct AABBAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for aabb accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -5980,7 +5980,7 @@ struct AABBAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for aabb accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -6282,7 +6282,7 @@ struct InstanceAccel : public Accel {
     //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
     //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
 
-    //   VkSubmitInfo submitInfo;
+    //   VkSubmitInfo submitInfo{};
     //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     //   submitInfo.pNext = NULL;
     //   submitInfo.waitSemaphoreCount = 0;
@@ -6485,7 +6485,7 @@ struct InstanceAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -6616,7 +6616,7 @@ struct InstanceAccel : public Accel {
     //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
     //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
 
-    //   VkSubmitInfo submitInfo;
+    //   VkSubmitInfo submitInfo{};
     //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     //   submitInfo.pNext = NULL;
     //   submitInfo.waitSemaphoreCount = 0;
@@ -6755,7 +6755,7 @@ struct InstanceAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -6821,7 +6821,7 @@ struct InstanceAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for instance accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -6908,7 +6908,7 @@ struct InstanceAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for instance accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -7976,7 +7976,7 @@ void Context::buildPipeline() {
     LOG_INFO("Building ray tracing pipeline");
 
     VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = 128;
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
     pushConstantRange.offset = 0;
     pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -8742,7 +8742,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   if (pushConstantsSize > 0) {
-    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT) LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
     vkCmdPushConstants(context->graphicsCommandBuffer, geometryType->raster[rasterType].pipelineLayout,
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushConstantsSize, pushConstants);
   }
@@ -8834,7 +8834,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;
@@ -10113,7 +10113,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                     context->raytracingPipeline);
 
   if (pushConstantsSize > 0) {
-    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT) LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
     vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -10194,7 +10194,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;
@@ -10263,7 +10263,7 @@ void _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize, 
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;
