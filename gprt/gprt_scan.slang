@@ -39,10 +39,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+<<<<<<< HEAD
 #pragma once
 
 #include "gprt.h"
 #include "gprt_scan_shared.h"
+=======
+
+#include "gprt.h"
+>>>>>>> master
 
 #define PARTITION_SIZE      8192
 #define PART_VEC_SIZE       2048
@@ -55,9 +60,13 @@
 #define VECTOR_MASK         3
 #define VECTOR_LOG          2
 
+<<<<<<< HEAD
 #ifndef SCAN_PARTITON_SIZE 
 #define SCAN_PARTITON_SIZE 8192
 #endif
+=======
+#define SCAN_PARTITON_SIZE 8192
+>>>>>>> master
 
 #define FLAG_NOT_READY  0
 #define FLAG_AGGREGATE  1
@@ -91,7 +100,7 @@ uint getReverseAddr(int i, int size, int exclusiveSum) {
   return (size - 1) - (i - exclusiveSum);
 }
 
-void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanConstants pc) {
+void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, in gprt::ScanParams pc) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
 
@@ -104,7 +113,6 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
   GroupMemoryBarrierWithGroupSync();
 
   int select = ((pc.flags & SCAN_SELECT_POSITIVE) != 0) ? 0 : 1;
-
   bool partitioning = ((pc.flags & SCAN_PARTITION) > 0);
   bool selecting = ((pc.flags & SCAN_SELECT) > 0);
 
@@ -362,12 +370,12 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, ScanCon
     }
   }
 }
+
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ScanConstants pc) {
-  uint3 id = DispatchThreadID;
-  if (id.x == 0) gprt::store<uint2>(pc.state, 0, int2(0,0));
-  gprt::store<uint>(pc.state, STATE_START + id.x, FLAG_NOT_READY);
+void InitScan(uint3 id: SV_DispatchThreadID, uniform gprt::ScanParams params) {
+  if (id.x == 0) gprt::store<uint2>(params.state, 0, int2(0,0));
+  gprt::store<uint32_t>(params.state, STATE_START + id.x, FLAG_NOT_READY);
 }
 
 // Below are configued such that each y group ID is assigned to a different subgroup.
@@ -375,16 +383,18 @@ void InitScan(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ScanConstants
 // Likewise, each subgroup processes a LANE_COUNT * 16 items. 
 // Therefore, we need SCAN_PARTITION_SIZE / LANE_COUNT * 16 threads for our Y group dimension
 
+// Todo: update to latest version of this code, which is agnostic to arbitrary lane counts
+
 // for 32 lane count GPUs
 [shader("compute")]
-[numthreads(32, (SCAN_PARTITON_SIZE / (16 * 32)), 1)]
-void Scan_32(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID, uniform ScanConstants pc) {
-  Scan<32>(GroupThreadID, GroupID, pc);
+[numthreads(32, SCAN_PARTITON_SIZE / (16 * 32), 1)]
+void Scan_32(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID : SV_GroupID, uniform gprt::ScanParams params) {
+  Scan<32>(GroupThreadID, GroupID, params);
 }
 
 // For 64 lane count GPUs
 [shader("compute")]
-[numthreads(64, (SCAN_PARTITON_SIZE / (16 * 64)), 1)]
-void Scan_64(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID, uniform ScanConstants pc) {
-  Scan<64>(GroupThreadID, GroupID, pc);
+[numthreads(64, SCAN_PARTITON_SIZE / (16 * 64), 1)]
+void Scan_64(uint3 GroupThreadID: SV_GroupThreadID, uint3 GroupID: SV_GroupID, uniform gprt::ScanParams params) {
+  Scan<64>(GroupThreadID, GroupID, params);
 }

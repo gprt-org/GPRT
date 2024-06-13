@@ -32,11 +32,14 @@
 
 #include <vulkan/vulkan.h>
 
-#include "linalg.h"
-using namespace linalg;
+#include "MathConstants.slangh"
+#include "Vector.h"
+#include "Matrix.h"
+// #include "linalg.h"
+// using namespace linalg;
 // using namespace linalg::detail; // causes conflicts
-using namespace linalg::aliases;
-using namespace linalg::ostream_overloads;
+// using namespace linalg::aliases;
+// using namespace linalg::ostream_overloads;
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -47,6 +50,7 @@ using namespace linalg::ostream_overloads;
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <array>
 #include <type_traits>
 #include <iostream>
 #include <cstdlib>
@@ -153,17 +157,6 @@ template <typename... Args>
 constexpr size_t totalSizeOf() {
     return (sizeof(Args) + ... + 0);
 }
-
-template<typename T, typename... Args>
-struct are_all_same : std::bool_constant<(std::is_same_v<T, Args> && ...)> {};
-
-// Base template for is_empty, which will be false by default
-template<typename... Args>
-struct is_empty : std::false_type {};
-
-// Specialization for the empty case
-template<>
-struct is_empty<> : std::true_type {};
 
 /*! launch params (or "globals") are variables that can be put into
   device constant memory, accessible through Vulkan's push constants */
@@ -661,6 +654,10 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  * @param context The GPRT context
  */
 GPRT_API void gprtGuiRasterize(GPRTContext context);
+
+/*! Requests the given size (in bytes) to reserve for parameters 
+  of ray tracing programs. Defaults to 256 bytes */
+GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
 
 /*! set number of ray types to be used; this should be
   done before any programs, pipelines, geometries, etc get
@@ -2180,13 +2177,17 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 template <typename RecordType, typename PushConstantsType>
 void
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Current GPRT push constant size limited to " + PUSH_CONSTANTS_LIMIT + " bytes or less");
+  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
+// Case where compute program uniforms are not known at compilation time
+template<typename... Uniforms>
+void gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
 
 // // Helper trait to check if all types are the same
 
@@ -2196,16 +2197,12 @@ void _gprtComputeLaunch(GPRTCompute compute, std::array<size_t, 3> numGroups, st
 //     // Function implementation...
 // }
 
-// // Fallback version to provide a clearer error message
-// template<uint32_t numThreadsX, uint32_t numThreadsY, uint32_t numThreadsZ, typename... Uniforms,
-//          typename = void, typename... Args>
-// void gprtComputeLaunch(std::array<uint32_t, 3> numGroups, GPRTCompute<Uniforms...> compute, Args... args) {
-//     static_assert(are_all_same<Uniforms..., Args...>::value, "Uniform and argument types do not match.");
-// }
+  _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
+}
 
-// Case where compute program has specified type-safe uniform arguments
-template<typename... Uniforms, typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
-void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Uniforms... uniforms) {
+// Case where compute program has compile-time type-safe uniform arguments
+template<typename... Uniforms>
+void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
   
   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
@@ -2220,7 +2217,7 @@ void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3>
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch((GPRTCompute)compute, numGroups, pushConstants);
+  _gprtComputeLaunch((GPRTCompute)compute, numGroups, groupSize, pushConstants);
 }
 
 // // Fallback case where uniforms list mismatches

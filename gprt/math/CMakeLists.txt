@@ -1,0 +1,19 @@
+set(MATH_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/bit.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Float16.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Float16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Macros.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MathConstants.slangh
+    ${CMAKE_CURRENT_SOURCE_DIR}/Matrix.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MatrixMath.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MatrixTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Quaternion.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuaternionMath.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/QuaternionTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ScalarMath.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ScalarTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Vector.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/VectorMath.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/VectorTypes.h
+    PARENT_SCOPE
+)

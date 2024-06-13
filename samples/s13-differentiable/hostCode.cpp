@@ -319,12 +319,12 @@ main(int ac, char **av) {
       float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
       position = (mul(rotationMatrixX, (position - pivot))) + pivot;
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
@@ -363,9 +363,9 @@ main(int ac, char **av) {
     }
     m1 = adamBeta1 * m1 + (1 - adamBeta1) * grad;
     if (useVectorAdam) {
-      m2 = adamBeta2 * m2 + (1 - adamBeta2) * sqrt(dot(grad, grad));
+      m2 = adamBeta2 * m2 + (1.f - adamBeta2) * sqrtf(dot(grad, grad));
     } else {
-      m2 = adamBeta2 * m2 + (1 - adamBeta2) * (grad * grad);
+      m2 = adamBeta2 * m2 + (1.f - adamBeta2) * (grad * grad);
     }
     
     float3 m_hat = m1 / (1.f - powf(adamBeta1, float(step)));

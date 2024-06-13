@@ -10,6 +10,12 @@
 #define WORKGROUP_LIMIT 65535
 #define THREADGROUP_LIMIT 1024
 
+// Some constants for the device parallel scan implementation
+#define SCAN_PARTITON_SIZE 8192
+#define SCAN_PARTITION (1 << 0)
+#define SCAN_SELECT (1 << 1)
+#define SCAN_SELECT_POSITIVE (1 << 2)
+
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt {
     typedef uint32_t Texture;
@@ -24,5 +30,14 @@ namespace gprt {
 
     struct Accel {
         uint64_t address;
+    };
+
+    // Parameters to the built-in scan compute kernels
+    struct ScanParams {        
+        uint32_t size;
+        uint32_t flags;
+        Buffer input;
+        Buffer output;
+        Buffer state;
     };
 };

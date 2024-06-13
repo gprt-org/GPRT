@@ -333,6 +333,130 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
+<<<<<<< HEAD
+=======
+uint32_t
+atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.index].InterlockedAdd(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
+uint32_t
+atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.index].InterlockedOr(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
+}
+
+// still needs translating over
+#if 0
+template <typename T>
+T
+load(in Buffer buffer) {
+  return vk::RawBufferLoad<T>(buffer.x);
+}
+template <typename T>
+T
+load(in Buffer buffer, uint64_t index) {
+  return vk::RawBufferLoad<T>(buffer.x + index * sizeof(T));
+}
+
+template <typename T>
+T
+loadRaw(in Buffer buffer, uint64_t address) {
+  return vk::RawBufferLoad<T>(buffer.x + address);
+}
+
+template <typename T>
+void
+store(in Buffer buffer, uint64_t index, in T value) {
+  vk::RawBufferStore<T>(buffer.x + index * sizeof(T), value);
+}
+
+template <typename T>
+void
+storeRaw(in Buffer buffer, uint64_t address, in T value) {
+  vk::RawBufferStore<T>(buffer.x + address, value);
+}
+
+// note, below  atomics are translated from
+// here: https://github.com/treecode/Bonsai/blob/master/runtime/profiling/derived_atomic_functions.h
+
+float
+atomicMin32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value < asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+float3 atomicMin32f(in Buffer buffer, uint32_t index, float3 value) {
+  float3 result;
+  result.x = atomicMin32f(buffer, index * 3 + 0, value.x);
+  result.y = atomicMin32f(buffer, index * 3 + 1, value.y);
+  result.z = atomicMin32f(buffer, index * 3 + 2, value.z);
+  return result;
+}
+
+float4 atomicMin32f(in Buffer buffer, uint32_t index, float4 value) {
+  float4 result;
+  result.x = atomicMin32f(buffer, index * 4 + 0, value.x);
+  result.y = atomicMin32f(buffer, index * 4 + 1, value.y);
+  result.z = atomicMin32f(buffer, index * 4 + 2, value.z);
+  result.w = atomicMin32f(buffer, index * 4 + 3, value.w);
+  return result;
+}
+
+float
+atomicMax32f(in Buffer buffer, uint32_t index, float value) {
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  while (value > asfloat(ret_i)) {
+    uint old = ret_i;
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+    if (ret_i == old)
+      break;
+  }
+  return asfloat(ret_i);
+}
+
+float3 atomicMax32f(in Buffer buffer, uint32_t index, float3 value) {
+  float3 result;
+  result.x = atomicMax32f(buffer, index * 3 + 0, value.x);
+  result.y = atomicMax32f(buffer, index * 3 + 1, value.y);
+  result.z = atomicMax32f(buffer, index * 3 + 2, value.z);
+  return result;
+}
+
+float4 atomicMax32f(in Buffer buffer, uint32_t index, float4 value) {
+  float4 result;
+  result.x = atomicMax32f(buffer, index * 4 + 0, value.x);
+  result.y = atomicMax32f(buffer, index * 4 + 1, value.y);
+  result.z = atomicMax32f(buffer, index * 4 + 2, value.z);
+  result.w = atomicMax32f(buffer, index * 4 + 3, value.w);
+  return result;
+}
+
+float
+atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+  uint old, newint;
+  uint ret_i = asuint(buffers[buffer.y].Load<float>(index * sizeof(float)));
+  do {
+    old = ret_i;
+    newint = asuint(asfloat(old) + value);
+    buffers[buffer.y].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+  } while (ret_i != old);
+
+  return asfloat(ret_i);
+}
+
+>>>>>>> master
 float3
 atomicAdd32f(in Buffer buffer, uint32_t index, float3 value) {
   float3 result;

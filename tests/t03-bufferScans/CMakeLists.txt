@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2022 Nathan V. Morrical
+# Copyright (c) 2023 Nathan V. Morrical
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-<<<<<<<< HEAD:tests/t10-swBVH/CMakeLists.txt
-add_executable(t10_swBVH hostCode.cpp)
-target_link_libraries(t10_swBVH
-========
-add_executable(t04_swBVH hostCode.cpp)
-target_link_libraries(t04_swBVH
->>>>>>>> master:tests/t04-swBVH/CMakeLists.txt
+add_executable(t03_bufferScans hostCode.cpp)
+target_link_libraries(t03_bufferScans
   PRIVATE gprt::gprt
 )

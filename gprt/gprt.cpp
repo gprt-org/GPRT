@@ -62,6 +62,9 @@
 // library for windowing
 #include <GLFW/glfw3.h>
 
+// For SPIRV reflection
+#include "spirv_reflect.h"
+
 // library for image output
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -108,6 +111,7 @@ static struct RequestedFeatures {
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
+  uint32_t recordSize = 256;
 
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
@@ -299,6 +303,7 @@ extern std::vector<uint8_t> sortDeviceCode;
 extern std::vector<uint8_t> nnBuildDeviceCode;
 extern std::vector<uint8_t> nnTraverseDeviceCode;
 
+
 // forward declarations...
 struct Context;
 struct Geom;
@@ -352,12 +357,77 @@ struct Stage {
 };
 
 struct Module {
+  spv_reflect::ShaderModule shaderModule;
   std::vector<uint32_t> binary;
 
-  Module(GPRTProgram program) { 
+  struct DescriptorBinding {
+    uint32_t bindingNumber;
+    std::string variableName;
+    SpvReflectDescriptorType type;
+    uint32_t count;
+  };
+
+  struct DescriptorSet {
+    uint32_t setNumber;
+    uint32_t bindingCount;
+    std::map<uint32_t, DescriptorBinding> bindings;
+  };
+
+  struct EntryPoint {
+    std::string name;
+    uint32_t descriptorSetCount;
+    std::map<uint32_t, DescriptorSet> descriptorSets;
+  };
+
+  std::map<std::string, EntryPoint> EntryPoints;
+  std::vector<std::string> EntryPointNames;
+  
+  Module(GPRTProgram program) {
     size_t sizeOfProgram = program.size();
     binary.resize(sizeOfProgram / 4);
     memcpy(binary.data(), program.data(), sizeOfProgram);
+    
+    shaderModule = spv_reflect::ShaderModule(program.size(), program.data(), SPV_REFLECT_MODULE_FLAG_NONE);
+
+    // Enumerate entry points
+    uint32_t numEntryPoints = shaderModule.GetEntryPointCount();
+    for (uint32_t eid = 0; eid < numEntryPoints; ++eid) {
+      std::string entrypointName = std::string(shaderModule.GetEntryPointName(eid));        
+      EntryPoint entry = {};
+      entry.name = entrypointName;
+      
+      // Enumerate descriptor sets for the given entry point
+      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, nullptr);
+      std::vector<SpvReflectDescriptorSet*> descriptorSets(entry.descriptorSetCount);
+      shaderModule.EnumerateEntryPointDescriptorSets(entrypointName.c_str(), &entry.descriptorSetCount, descriptorSets.data());
+      for (uint32_t did = 0; did < entry.descriptorSetCount; ++did) {
+        DescriptorSet descriptorSet = {};
+        descriptorSet.setNumber = descriptorSets[did]->set;
+        
+        // Enumerate bindings for the given descriptor set and entry point
+        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, nullptr);
+        std::vector<SpvReflectDescriptorBinding*> bindings(descriptorSet.bindingCount);
+        shaderModule.EnumerateEntryPointDescriptorBindings(entrypointName.c_str(), &descriptorSet.bindingCount, bindings.data());
+
+        for (uint32_t bid = 0; bid < descriptorSet.bindingCount; ++bid) {
+          DescriptorBinding binding = {};
+          binding.bindingNumber = bindings[bid]->binding;
+          binding.type = bindings[bid]->descriptor_type;
+          binding.count = bindings[bid]->count;
+          binding.variableName = std::string(bindings[bid]->name);
+          descriptorSet.bindings[binding.bindingNumber] = binding;
+        }
+
+        entry.descriptorSets[descriptorSet.setNumber] = descriptorSet;
+      }
+
+      EntryPoints[entrypointName] = entry;
+      EntryPointNames.push_back(entrypointName);
+    }
+  }
+
+  bool checkForEntrypoint(const char* entrypoint) {
+    return EntryPoints.find(entrypoint) != EntryPoints.end();
   }
 
   ~Module() {}
@@ -596,7 +666,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -673,7 +743,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -727,7 +797,7 @@ struct Buffer {
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pNext = NULL;
         submitInfo.waitSemaphoreCount = 0;
@@ -1125,7 +1195,7 @@ struct Texture {
       // if (err) LOG_ERROR("failed to end command buffer for texture map! :
       // \n" + errorString(err));
 
-      // VkSubmitInfo submitInfo;
+      // VkSubmitInfo submitInfo{};
       // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       // submitInfo.pNext = NULL;
       // submitInfo.waitSemaphoreCount = 0;
@@ -1201,7 +1271,7 @@ struct Texture {
       if (err)
         LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -1265,7 +1335,7 @@ struct Texture {
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -1397,7 +1467,7 @@ struct Texture {
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -1620,7 +1690,7 @@ struct Texture {
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -2960,6 +3030,7 @@ struct Context {
   VkPhysicalDevice physicalDevice;
   // Stores physical device properties (for e.g. checking device limits)
   VkPhysicalDeviceProperties deviceProperties;
+  VkPhysicalDeviceProperties2 deviceProperties2;
   VkPhysicalDeviceSubgroupProperties subgroupProperties;
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
@@ -3021,7 +3092,7 @@ struct Context {
   VkPipelineStageFlags submitPipelineStages =
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;   // not sure I need this one
   // Contains command buffers and semaphores to be presented to the queue
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   // Command buffers used for rendering
   // std::vector<VkCommandBuffer> drawCmdBuffers;
   // Global render pass for frame buffer writes
@@ -3099,14 +3170,14 @@ struct Context {
   Buffer *callableTable = nullptr;
   Buffer *hitgroupTable = nullptr;
 
-  std::map<std::string, std::any> internalComputePrograms;
+  std::map<std::string, Compute*> internalComputePrograms;
   
   Module *radixSortModule = nullptr;
+  Module *scanModule = nullptr;
+  Module *nnBuildModule = nullptr;
+  Module *nnTraverseModule = nullptr;
 
-  GPRTModule scanModule = nullptr;
-  GPRTModule nnBuildModule = nullptr;
-  GPRTModule nnTraverseModule = nullptr;
-
+  // TODO, we can probably refactor this...
   struct SortStages {
     Stage Count;
     Stage CountReduce;
@@ -3478,13 +3549,11 @@ struct Context {
     subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     subgroupProperties.pNext = NULL;
 
-    // VkPhysicalDeviceRayTracingPipelinePropertiesKHR
-    // rayTracingPipelineProperties{};
     rayTracingPipelineProperties = {};
     rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
     rayTracingPipelineProperties.pNext = &subgroupProperties;
 
-    VkPhysicalDeviceProperties2 deviceProperties2{};
+    deviceProperties2 = {};
     deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     deviceProperties2.pNext = &rayTracingPipelineProperties;
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
@@ -3815,9 +3884,9 @@ struct Context {
 
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
-    scanModule = gprtModuleCreate(context, scanDeviceCode);
-    nnBuildModule = gprtModuleCreate(context, nnBuildDeviceCode);
-    nnTraverseModule = gprtModuleCreate(context, nnTraverseDeviceCode);
+    scanModule = new Module(scanDeviceCode);
+    nnBuildModule = new Module(nnBuildDeviceCode);
+    nnTraverseModule = new Module(nnTraverseDeviceCode);
     
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4108,8 +4177,8 @@ struct Context {
     }
 
     // Finally, setup the internal shader stages and build an initial shader binding table
-    setupInternalStages();
-    updatePipeline();
+    setupInternalPrograms();
+    buildPipeline();
     buildSBT(GPRT_SBT_ALL);
   };
 
@@ -4282,9 +4351,8 @@ struct Context {
       raytracingPipeline = nullptr;
     }
 
-    
     destroyInternalPrograms();
-
+    
     if (raygenTable) {
       raygenTable->destroy();
       delete raygenTable;
@@ -4294,11 +4362,6 @@ struct Context {
       missTable->destroy();
       delete missTable;
       missTable = nullptr;
-    }
-    if (callableTable) {
-      callableTable->destroy();
-      delete callableTable;
-      callableTable = nullptr;
     }
     if (hitgroupTable) {
       hitgroupTable->destroy();
@@ -4391,9 +4454,62 @@ struct Context {
   //   // At the moment, we don't actually build our programs here.
   // }
 
-  void updatePipeline();
+  void buildPipeline();
 
-  void setupInternalStages() {
+  // Todo, refactor this code...
+  void setupInternalPrograms() {
+    
+    // // For filling out instance data
+    // {
+    //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
+
+    //   // todo, consider refactoring this into a more official "Compute" shader
+    //   // object
+
+    //   VkResult err;
+    //   // currently not using cache.
+    //   VkPipelineCache cache = VK_NULL_HANDLE;
+
+    //   VkPushConstantRange pushConstantRange = {};
+    //   pushConstantRange.size = 128;
+    //   pushConstantRange.offset = 0;
+    //   pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    //   VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+    //   pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    //   pipelineLayoutCreateInfo.setLayoutCount = 0;      // if ever we use descriptors
+    //   pipelineLayoutCreateInfo.pSetLayouts = nullptr;   // if ever we use descriptors
+    //   pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    //   pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
+    //   err = vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
+
+    //   std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
+    //   auto binary = internalModule->getBinary("COMPUTE");
+
+    //   VkShaderModuleCreateInfo moduleCreateInfo = {};
+    //   moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    //   moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+    //   moduleCreateInfo.pCode = binary.data();
+
+    //   err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fillInstanceDataStage.module);
+
+    //   VkPipelineShaderStageCreateInfo shaderStage = {};
+    //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    //   shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    //   shaderStage.module = fillInstanceDataStage.module;
+    //   shaderStage.pName = entryPoint.c_str();
+
+    //   VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+    //   computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    //   computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
+    //   computePipelineCreateInfo.flags = 0;
+    //   computePipelineCreateInfo.stage = shaderStage;
+
+    //   // At this point, create all internal compute pipelines as well.
+    //   err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+    //                                 &fillInstanceDataStage.pipeline);
+    // }
 
     // Radix sorter stages
     {
@@ -4704,47 +4820,28 @@ struct Context {
   
     // Scanning stages
     {
-      internalComputePrograms.insert({
-        {"InitScan", gprtComputeCreate<ScanConstants>(context, scanModule, "InitScan")},
-        {"Scan_32",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_32")},
-        {"Scan_64",  gprtComputeCreate<ScanConstants>(context, scanModule, "Scan_64")},
-      });
-      computePipelinesOutOfDate = true;
+      Context* context = this;      
+      internalComputePrograms.insert({"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
+      internalComputePrograms.insert({"Scan", new Compute(context, context->logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
     }
 
     // Nearest neighbor stages
     {
-      // for some reason, driver is crashing when we try using any of the kernels below that are commented out...
+      Context* context = this;      
       internalComputePrograms.insert({
-        {"ComputeTriangleRootBounds",      gprtComputeCreate<ComputeTriangleRootBoundsParams>(context, nnBuildModule, "ComputeTriangleRootBounds")},
-        {"ComputeTriangleAABBsAndCenters", gprtComputeCreate<ComputeTriangleAABBsAndCentersParams>(context, nnBuildModule, "ComputeTriangleAABBsAndCenters")},
-        {"ComputeTriangleCodes",           gprtComputeCreate<ComputeTriangleCodesParams>(context, nnBuildModule, "ComputeTriangleCodes")},
-        {"ComputeAABBsAndCenters",         gprtComputeCreate<ComputeAABBsAndCentersParams>(context, nnBuildModule, "ComputeAABBsAndCenters")},  
-        {"ComputeTriangleOBBCovariances",  gprtComputeCreate<ComputeTriangleOBBCovariancesParams>(context, nnBuildModule, "ComputeTriangleOBBCovariances")},
-        {"ComputeOBBCovariances",          gprtComputeCreate<ComputeOBBCovariancesParams>(context, nnBuildModule, "ComputeOBBCovariances")},
-        {"ComputeOBBAngles",               gprtComputeCreate<ComputeOBBAnglesParams>(context, nnBuildModule, "ComputeOBBAngles")},
-        {"ComputeTriangleOBBBounds",       gprtComputeCreate<ComputeTriangleOBBBoundsParams>(context, nnBuildModule, "ComputeTriangleOBBBounds")},
-        {"ExpandTriangles",                gprtComputeCreate<ExpandTrianglesParams>(context, nnBuildModule, "ExpandTriangles")}
+        {"ComputeTriangleRootBounds",      new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleRootBounds", 0)},
+        {"ComputeTriangleAABBsAndCenters", new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleAABBsAndCenters", 0)},
+        {"ComputeTriangleCodes",           new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleCodes", 0)},
+        {"ComputeAABBsAndCenters",         new Compute(context, context->logicalDevice, nnBuildModule, "ComputeAABBsAndCenters", 0)},  
+        {"ComputeTriangleOBBCovariances",  new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleOBBCovariances", 0)},
+        {"ComputeOBBCovariances",          new Compute(context, context->logicalDevice, nnBuildModule, "ComputeOBBCovariances", 0)},
+        {"ComputeOBBAngles",               new Compute(context, context->logicalDevice, nnBuildModule, "ComputeOBBAngles", 0)},
+        {"ComputeTriangleOBBBounds",       new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleOBBBounds", 0)},
+        {"ExpandTriangles",                new Compute(context, context->logicalDevice, nnBuildModule, "ExpandTriangles", 0)}
       });
     }
 
     computePipelinesOutOfDate = true;    
-  }
-
-  // Template function for fetching kernels
-  template<typename T>
-  GPRTComputeOf<T> FetchCompute(const std::string& key) {
-      auto it = internalComputePrograms.find(key);
-      if (it != internalComputePrograms.end()) {
-          try {
-              return std::any_cast<GPRTComputeOf<T>&>(it->second);
-          } catch (const std::bad_any_cast&) {
-              // Handle error (e.g., logging, throw exception)
-          }
-      }
-      // Handle case where key is not found
-      // For example, throw an exception or return a default object
-      throw std::runtime_error("Error, could not find compute program with key: " + key);
   }
 
   void destroyInternalPrograms() {
@@ -4786,7 +4883,6 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
       vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
       vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
-
       vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
     }
 
@@ -4796,11 +4892,12 @@ struct Context {
     }
 
     for (auto &progName : progNames) {
-      auto &program = std::any_cast<GPRTCompute&>(internalComputePrograms[progName]);
-      gprtComputeDestroy(program);
+      internalComputePrograms[progName]->destroy();
+      delete internalComputePrograms[progName];
       internalComputePrograms.erase(progName);
     }
   }
+
 
   VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
     VkCommandBufferAllocateInfo allocInfo{};
@@ -4993,7 +5090,7 @@ struct Context {
     ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
     VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5049,69 +5146,6 @@ struct Context {
     // Record dear imgui primitives into command buffer
     ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
 
-    // if (imgui.pipeline == VK_NULL_HANDLE) {
-    //   geometryType->buildRasterPipeline(rasterType, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-    //                                     texture2DDescriptorSetLayout, texture3DDescriptorSetLayout,
-    //                                     rasterRecordDescriptorSetLayout);
-    // }
-
-    // // Bind the rendering pipeline
-    // // todo, if pipeline doesn't exist, create it.
-    // vkCmdBindPipeline(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                   geometryType->raster[rasterType].pipeline);
-
-    // VkViewport viewport{};
-    // viewport.x = 0.0f;
-    // viewport.y = 0.0f;
-    // viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
-    // viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
-    // viewport.minDepth = 0.0f;
-    // viewport.maxDepth = 1.0f;
-    // vkCmdSetViewport(graphicsCommandBuffer, 0, 1, &viewport);
-
-    // VkRect2D scissor{};
-    // scissor.offset = {0, 0};
-    // scissor.extent.width = geometryType->raster[rasterType].width;
-    // scissor.extent.height = geometryType->raster[rasterType].height;
-    // vkCmdSetScissor(graphicsCommandBuffer, 0, 1, &scissor);
-
-    // auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    //   return (value + alignment - 1) & ~(alignment - 1);
-    // };
-
-    // const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
-    // const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    // const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    // const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
-
-    // // for the moment, just assume the max group size
-    // const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
-
-    // for (uint32_t i = 0; i < numGeometry; ++i) {
-    //   GeomType *geomType = geometry[i]->geomType;
-
-    //   if (geomType->getKind() == GPRT_TRIANGLES) {
-    //     TriangleGeom *geom = (TriangleGeom *) geometry[i];
-    //     VkDeviceSize offsets[1] = {0};
-
-    //     uint32_t instanceCount = 1;
-    //     if (instanceCounts != nullptr) {
-    //       instanceCount = instanceCounts[i];
-    //     }
-
-    //     std::vector<VkDescriptorSet> descriptorSets = {samplerDescriptorSet, texture1DDescriptorSet,
-    //                                                    texture2DDescriptorSet, texture3DDescriptorSet,
-    //                                                    rasterRecordDescriptorSet};
-
-    //     uint32_t offset = geom->address * recordSize;
-    //     vkCmdBindDescriptorSets(graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                             geomType->raster[rasterType].pipelineLayout, 0, descriptorSets.size(),
-    //                             descriptorSets.data(), 1, &offset);
-    //     vkCmdBindIndexBuffer(graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-    //     vkCmdDrawIndexed(graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
-    //   }
-    // }
-
     vkCmdEndRenderPass(graphicsCommandBuffer);
 
     // At the end of the renderpass, we'll transition the layout back to it's previous layout
@@ -5127,7 +5161,7 @@ struct Context {
     if (err)
       LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5444,7 +5478,7 @@ struct TriangleAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5610,7 +5644,7 @@ struct TriangleAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -5674,7 +5708,7 @@ struct TriangleAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for triangle accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -5761,7 +5795,7 @@ struct TriangleAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for triangle accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -6055,7 +6089,7 @@ struct AABBAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -6207,7 +6241,7 @@ struct AABBAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -6272,7 +6306,7 @@ struct AABBAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for aabb accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -6359,7 +6393,7 @@ struct AABBAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for aabb accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -6661,7 +6695,7 @@ struct InstanceAccel : public Accel {
     //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
     //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
 
-    //   VkSubmitInfo submitInfo;
+    //   VkSubmitInfo submitInfo{};
     //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     //   submitInfo.pNext = NULL;
     //   submitInfo.waitSemaphoreCount = 0;
@@ -6864,7 +6898,7 @@ struct InstanceAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -6995,7 +7029,7 @@ struct InstanceAccel : public Accel {
     //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
     //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
 
-    //   VkSubmitInfo submitInfo;
+    //   VkSubmitInfo submitInfo{};
     //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     //   submitInfo.pNext = NULL;
     //   submitInfo.waitSemaphoreCount = 0;
@@ -7134,7 +7168,7 @@ struct InstanceAccel : public Accel {
     if (err)
       LOG_ERROR("failed to end command buffer for instance accel build! : \n" + errorString(err));
 
-    VkSubmitInfo submitInfo;
+    VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext = NULL;
     submitInfo.waitSemaphoreCount = 0;
@@ -7200,7 +7234,7 @@ struct InstanceAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for instance accel query compaction size! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -7287,7 +7321,7 @@ struct InstanceAccel : public Accel {
       if (err)
         LOG_ERROR("failed to end command buffer for instance accel compaction! : \n" + errorString(err));
 
-      VkSubmitInfo submitInfo;
+      VkSubmitInfo submitInfo{};
       submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
       submitInfo.pNext = NULL;
       submitInfo.waitSemaphoreCount = 0;
@@ -7800,7 +7834,7 @@ struct NNTriangleAccel : public Accel {
     // Testing out using a callable for recursive traversal...
     // note, order here is important. Node callable must be first, leaf callable must be second.
     // traverseNodeCallable = gprtMissCreate<NodeRecord>((GPRTContext)context, context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
-    traverseCallable = gprtCallableCreate<NodeRecord>((GPRTContext)context, context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
+    traverseCallable = gprtCallableCreate<NodeRecord>((GPRTContext)context, (GPRTModule)context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
 
     NodeRecord *nodeRecord = gprtCallableGetParameters(traverseCallable);
     for (uint32_t i = 0; i < MAX_LEVELS; ++i) {
@@ -7905,15 +7939,15 @@ struct NNTriangleAccel : public Accel {
     gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
     // Fetch kernels
-    auto ComputeTriangleRootBounds      = context->FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
-    auto ComputeTriangleAABBsAndCenters = context->FetchCompute<ComputeTriangleAABBsAndCentersParams>("ComputeTriangleAABBsAndCenters");
-    auto ComputeTriangleCodes           = context->FetchCompute<ComputeTriangleCodesParams>("ComputeTriangleCodes");
-    auto ComputeAABBsAndCenters         = context->FetchCompute<ComputeAABBsAndCentersParams>("ComputeAABBsAndCenters");
-    auto ComputeTriangleOBBCovariances  = context->FetchCompute<ComputeTriangleOBBCovariancesParams>("ComputeTriangleOBBCovariances");
-    auto ComputeOBBCovariances          = context->FetchCompute<ComputeOBBCovariancesParams>("ComputeOBBCovariances");
-    auto ComputeOBBAngles               = context->FetchCompute<ComputeOBBAnglesParams>("ComputeOBBAngles");
-    auto ComputeTriangleOBBBounds       = context->FetchCompute<ComputeTriangleOBBBoundsParams>("ComputeTriangleOBBBounds");
-    auto ExpandTriangles                = context->FetchCompute<ExpandTrianglesParams>("ExpandTriangles");
+    auto ComputeTriangleRootBounds      = (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"]; //FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
+    auto ComputeTriangleAABBsAndCenters = (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"]; //FetchCompute<ComputeTriangleAABBsAndCentersParams>("ComputeTriangleAABBsAndCenters");
+    auto ComputeTriangleCodes           = (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"]; //FetchCompute<ComputeTriangleCodesParams>("ComputeTriangleCodes");
+    auto ComputeAABBsAndCenters         = (GPRTCompute)context->internalComputePrograms["ComputeAABBsAndCenters"]; //FetchCompute<ComputeAABBsAndCentersParams>("ComputeAABBsAndCenters");
+    auto ComputeTriangleOBBCovariances  = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"]; //FetchCompute<ComputeTriangleOBBCovariancesParams>("ComputeTriangleOBBCovariances");
+    auto ComputeOBBCovariances          = (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"]; //FetchCompute<ComputeOBBCovariancesParams>("ComputeOBBCovariances");
+    auto ComputeOBBAngles               = (GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"]; //FetchCompute<ComputeOBBAnglesParams>("ComputeOBBAngles");
+    auto ComputeTriangleOBBBounds       = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"]; //FetchCompute<ComputeTriangleOBBBoundsParams>("ComputeTriangleOBBBounds");
+    auto ExpandTriangles                = (GPRTCompute)context->internalComputePrograms["ExpandTriangles"]; //FetchCompute<ExpandTrianglesParams>("ExpandTriangles");
     
     GPRTContext context = (GPRTContext)this->context;
     typedef uint32_t uint;
@@ -7924,8 +7958,8 @@ struct NNTriangleAccel : public Accel {
     std::cout<<"Building NN tree with " << numPrims << " primitives and " << numLevels << " levels" << std::endl;
     
     // For common launches over primitives in parallel
-    std::array<size_t, 3> numPrimGroups = {(numPrims + 31) / 32, 1, 1};
-    std::array<size_t, 3> numPrimThreads = {32, 1, 1};
+    uint3 numPrimGroups = {(numPrims + 31) / 32, 1, 1};
+    uint3 numPrimThreads = {32, 1, 1};
 
     // Buffers used for construction
     gprt::Buffer triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
@@ -8015,14 +8049,14 @@ struct NNTriangleAccel : public Accel {
     for (int i = 0; i < 100; ++i) {
       // Now compute cluster bounding boxes...   
       gprtBeginProfile(context);
-      std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
-      std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+      uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+      uint3 numClusterThreads = {32, 1, 1};
       gprtComputeLaunch(ComputeTriangleAABBsAndCenters, numClusterGroups, numClusterThreads, 
         ComputeTriangleAABBsAndCentersParams(numPrims, 0, trianglesExp, aabbHierarchy[0], centerHierarchy[0]));
       computeAABBsAndCentersTime += gprtEndProfile(context);
       for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
-        std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+        uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+        uint3 numClusterThreads = {32, 1, 1};
         gprtBeginProfile(context);
         gprtComputeLaunch(ComputeAABBsAndCenters, numClusterGroups, numClusterThreads, 
           ComputeAABBsAndCentersParams(numPrims, lid, 
@@ -8049,8 +8083,8 @@ struct NNTriangleAccel : public Accel {
     float computeBoundsTime = 0.f;
 
     for (int i = 0; i < 100; ++i) {
-      std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
-      std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+      uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+      uint3 numClusterThreads = {32, 1, 1};
       gprtBeginProfile(context);
       gprtComputeLaunch(ComputeTriangleOBBCovariances, numClusterGroups, numClusterThreads, 
         ComputeTriangleOBBCovariancesParams(
@@ -8059,8 +8093,8 @@ struct NNTriangleAccel : public Accel {
       );
       computeCovarianceTime += gprtEndProfile(context);
       for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        std::array<size_t, 3> numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
-        std::array<size_t, 3> numClusterThreads = {32, 1, 1};
+        uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+        uint3 numClusterThreads = {32, 1, 1};
         gprtBeginProfile(context);
         gprtComputeLaunch(ComputeOBBCovariances, numClusterGroups, numClusterThreads,
           ComputeOBBCovariancesParams(numPrims, lid, 
@@ -8082,8 +8116,8 @@ struct NNTriangleAccel : public Accel {
 
       uint32_t stride = BRANCHING_FACTOR;
       for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-        std::array<size_t, 3> numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
-        std::array<size_t, 3> numThreads = {32, 1, 1};
+        uint3 numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
+        uint3 numThreads = {32, 1, 1};
         gprtBeginProfile(context);
         gprtComputeLaunch(ComputeTriangleOBBBounds, numGroups, numThreads, 
           ComputeTriangleOBBBoundsParams(numPrims, numLevels, stride, pid, trianglesExp, oobbHierarchy)
@@ -8216,8 +8250,11 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
   const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  if (requestedFeatures.recordSize > maxGroupSize) {
+    LOG_ERROR("Requested record size is too large! Max record size for this platform is " + std::to_string(maxGroupSize) + " bytes.");
+  }
+
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
@@ -8487,7 +8524,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
   }
 }
 
-void Context::updatePipeline() {
+void Context::buildPipeline() {
   // If the number of textures has changed, we need to make a new
   // descriptor pool
   if (samplerDescriptorPool && previousNumSamplers != Sampler::samplers.size()) {
@@ -9053,7 +9090,7 @@ void Context::updatePipeline() {
     const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                           // device access
 
-    // for the moment, just assume the max group size
+
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -9062,7 +9099,7 @@ void Context::updatePipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
     rasterRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -9121,7 +9158,7 @@ void Context::updatePipeline() {
     const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
                                                                                           // device access
 
-    // for the moment, just assume the max group size
+
     auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
       return (value + alignment - 1) & ~(alignment - 1);
     };
@@ -9130,7 +9167,7 @@ void Context::updatePipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
     computeRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -9351,6 +9388,8 @@ void Context::updatePipeline() {
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
       rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
 
+      LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " + std::to_string(requestedFeatures.rayRecursionDepth) + ".");
+
       if (raytracingPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
         raytracingPipeline = VK_NULL_HANDLE;
@@ -9419,6 +9458,12 @@ GPRT_API void
 gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth) {
   LOG_API_CALL();
   requestedFeatures.rayRecursionDepth = rayRecursionDepth;
+}
+
+GPRT_API void 
+gprtRequestRecordSize(uint32_t recordSize) {
+  LOG_API_CALL();
+  requestedFeatures.recordSize = recordSize;
 }
 
 GPRT_API bool
@@ -9937,7 +9982,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   if (pushConstantsSize > 0) {
-    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT) LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
     vkCmdPushConstants(context->graphicsCommandBuffer, geometryType->raster[rasterType].pipelineLayout,
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushConstantsSize, pushConstants);
   }
@@ -9985,8 +10030,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
 
   for (uint32_t i = 0; i < numGeometry; ++i) {
     GeomType *geomType = geometry[i]->geomType;
@@ -10030,7 +10074,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;
@@ -10177,6 +10221,10 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("RayGen program " + std::string(programName) + " not found in module!");
+  }
+
   RayGen *raygen = new RayGen(context->logicalDevice, module, programName, recordSize);
 
   context->raygenPrograms.push_back(raygen);
@@ -10223,6 +10271,10 @@ GPRTCompute gprtComputeCreate(GPRTContext _context, GPRTModule _module, const ch
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Compute program " + std::string(programName) + " not found in module!");
+  }
+
   Compute *compute = new Compute(context, context->logicalDevice, module, programName, 0);
 
   // Notify context that we need to build this compute pipeline
@@ -10245,6 +10297,10 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Miss program " + std::string(programName) + " not found in module!");
+  }
 
   Miss *missProg = new Miss(context->logicalDevice, module, programName, recordSize);
 
@@ -10301,6 +10357,10 @@ gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *program
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(programName)) {
+    LOG_ERROR("Callable program " + std::string(programName) + " not found in module!");
+  }
 
   Callable *callableProg = new Callable(context->logicalDevice, module, programName, recordSize);
 
@@ -10399,6 +10459,10 @@ gprtGeomTypeSetClosestHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _m
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("ClosestHit program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setClosestHit(rayType, module, progName);
 }
 
@@ -10407,6 +10471,10 @@ gprtGeomTypeSetAnyHitProg(GPRTGeomType _geomType, int rayType, GPRTModule _modul
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("AnyHit program " + std::string(progName) + " not found in module!");
+  }
 
   geomType->setAnyHit(rayType, module, progName);
 }
@@ -10417,6 +10485,10 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Intersection program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setIntersection(rayType, module, progName);
 }
 
@@ -10426,6 +10498,10 @@ gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mo
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
 
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Vertex program " + std::string(progName) + " not found in module!");
+  }
+
   geomType->setVertex(rasterType, module, progName);
 }
 
@@ -10434,6 +10510,10 @@ gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _mod
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
   Module *module = (Module *) _module;
+
+  if (!module->checkForEntrypoint(progName)) {
+    LOG_ERROR("Pixel program " + std::string(progName) + " not found in module!");
+  }
 
   geomType->setPixel(rasterType, module, progName);
 }
@@ -10862,40 +10942,40 @@ uint32_t bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output,
   // note, input->getSize() here should always be a multiple of 16 bytes
   uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  uint32_t subgroupSize = context->subgroupProperties.subgroupSize;
-  auto InitScan = context->FetchCompute<ScanConstants>("InitScan");
-  auto Scan_32 = context->FetchCompute<ScanConstants>("Scan_32");
-  auto Scan_64 = context->FetchCompute<ScanConstants>("Scan_64");
-
-  std::array<size_t, 3> numThreadGroups = {(numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE, 1, 1};
+  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["InitScan"];
+  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["Scan"];
+  uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
 
   // Each group gets an aggregate/inclusive prefix and a status flag.
   // We also reserve one int for the total aggregate count, and one
   // for group-to-partition scheduling
-  if (scratch->getSize() < (numThreadGroups[0] + 2) * sizeof(uint32_t)) {
-    // updating SBT, since we're using atomics here...
-    scratch->resize((numThreadGroups[0] + 2) * sizeof(uint32_t), false);
+  if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
+    // updating SBT, since we're using atomics here... 
+    // (requires updating descriptor sets when buffer allocations change)
+    scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
     gprtBuildShaderBindingTable(_context);
   }
 
-  ScanConstants scanConstants;
-  scanConstants.size = numItems;
-  scanConstants.output = gprtBufferGetHandle(_output);
-  scanConstants.input = gprtBufferGetHandle(_input);
-  scanConstants.state = gprtBufferGetHandle(_scratch);
-  scanConstants.flags = 0;
-  if (partition) scanConstants.flags |= SCAN_PARTITION;
-  else if (select) scanConstants.flags |= SCAN_SELECT;
+  gprt::ScanParams scanParams;
+  scanParams.size = numItems;
+  scanParams.output = gprtBufferGetHandle(_output);
+  scanParams.input = gprtBufferGetHandle(_input);
+  scanParams.state = gprtBufferGetHandle(_scratch);
+  scanParams.flags = 0;
+  if (partition) scanParams.flags |= SCAN_PARTITION;
+  else if (select) scanParams.flags |= SCAN_SELECT;
   
-  if (selectPositive) scanConstants.flags |= SCAN_SELECT_POSITIVE;
+  if (selectPositive) scanParams.flags |= SCAN_SELECT_POSITIVE;
 
-  gprtComputeLaunch(InitScan, numThreadGroups, {1,1,1}, scanConstants);
-  if (subgroupSize == 32)
-    gprtComputeLaunch(Scan_32, numThreadGroups, {32, (SCAN_PARTITON_SIZE / (16 * 32)), 1}, scanConstants);
-  else if (subgroupSize == 64)
-    gprtComputeLaunch(Scan_64, numThreadGroups, {64, (SCAN_PARTITON_SIZE / (16 * 64)), 1}, scanConstants);
-  else
-    LOG_ERROR("Unsupported subgroup size: " + std::to_string(subgroupSize) + "\n");
+  uint3 numGroups = {numThreadBlocks, 1, 1};
+  uint3 groupSize = {1,1,1};
+  gprtComputeLaunch(InitChainedDecoupledExclusive, numGroups, groupSize, scanParams);
+
+  if (context->subgroupProperties.subgroupSize == 32)
+    groupSize = {32, SCAN_PARTITON_SIZE / (16 * 32), 1};
+  else 
+    groupSize = {64, SCAN_PARTITON_SIZE / (16 * 64), 1}; // Todo, account for lane sizes other than 32/64
+  gprtComputeLaunch(ChainedDecoupledExclusive, numGroups, groupSize, scanParams);
   
   scratch->map(sizeof(uint32_t), 0);
   uint32_t total = *((uint32_t*)scratch->mapped);
@@ -11400,7 +11480,7 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->updatePipeline();
+  context->buildPipeline();
   context->buildSBT(flags);
 }
 
@@ -11445,7 +11525,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                     context->raytracingPipeline);
 
   if (pushConstantsSize > 0) {
-    if (pushConstantsSize > 128) LOG_ERROR("Push constants size exceeds maximum 128 byte limit!");
+    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT) LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
     vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -11469,8 +11549,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
@@ -11527,7 +11606,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;
@@ -11547,7 +11626,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
-void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+void _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
   VkResult err;
@@ -11577,8 +11656,7 @@ void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, s
                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet, 
                                                 context->texture3DDescriptorSet, context->bufferDescriptorSet};
 
-  // for the moment, just assume the max group size
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, uint32_t(4096)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
   uint32_t offset = (uint32_t)compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t)descriptorSets.size(), descriptorSets.data(), 1, &offset);
@@ -11597,7 +11675,7 @@ void _gprtComputeLaunch(GPRTCompute _compute, std::array<size_t, 3> numGroups, s
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo;
+  VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.pNext = NULL;
   submitInfo.waitSemaphoreCount = 0;

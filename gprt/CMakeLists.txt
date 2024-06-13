@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+add_subdirectory(math)
+
 add_library(gprt)
 if (GPRT_BUILD_SHARED)
   set_property(TARGET gprt PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -33,6 +35,17 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.slang
+)
+
+embed_devicecode(
+  OUTPUT_TARGET
+    scanDeviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h  
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang
 )
 
 embed_devicecode(
@@ -59,19 +72,9 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_traverse_unified.slang
 )
 
-embed_devicecode(
-  OUTPUT_TARGET
-    scanDeviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan_shared.h
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang
-)
 
 target_sources(gprt PRIVATE
+    ${MATH_SRC}
     gprt.cpp
     gprt.h
     gprt_knn_shared.h
@@ -79,6 +82,8 @@ target_sources(gprt PRIVATE
     gprt_knn_host.cpp
     gprt_scan_shared.h
     gprt_sort.h
+    spirv_reflect.h
+    spirv_reflect.cpp
 )
 
 set_target_properties(gprt
@@ -123,6 +128,7 @@ target_include_directories(gprt
     ${Vulkan_INCLUDE_DIR}
     ${PROJECT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/math
 )
 
 target_compile_features(gprt PRIVATE cxx_std_17)

@@ -85,15 +85,15 @@ int3 windowIndices[NUM_WINDOW_INDICES] = {
 // those copies around using the transforms below. Note, we need to
 // transform the floor, wall, and window, so 3 transforms per "copy".
 const int NUM_INSTANCES = 15;
-float4x4 transforms[NUM_INSTANCES] = {
-    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))), transpose(translation_matrix(float3(-6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-6.0, 0.0, 0.0))), transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(-3.0, 0.0, 0.0))), transpose(translation_matrix(float3(-3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),  transpose(translation_matrix(float3(0.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(0.0, 0.0, 0.0))),  transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+3.0, 0.0, 0.0))), transpose(translation_matrix(float3(+3.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+6.0, 0.0, 0.0))), transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
-    transpose(translation_matrix(float3(+6.0, 0.0, 0.0))),
+float3x4 transforms[NUM_INSTANCES] = {
+    math::matrixFromTranslation(float3(-6.0, 0.0, 0.0)), math::matrixFromTranslation(float3(-6.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(-6.0, 0.0, 0.0)), math::matrixFromTranslation(float3(-3.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(-3.0, 0.0, 0.0)), math::matrixFromTranslation(float3(-3.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(0.0, 0.0, 0.0)),  math::matrixFromTranslation(float3(0.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(0.0, 0.0, 0.0)),  math::matrixFromTranslation(float3(+3.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(+3.0, 0.0, 0.0)), math::matrixFromTranslation(float3(+3.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(+6.0, 0.0, 0.0)), math::matrixFromTranslation(float3(+6.0, 0.0, 0.0)),
+    math::matrixFromTranslation(float3(+6.0, 0.0, 0.0)),
 };
 
 // initial image resolution
@@ -209,10 +209,10 @@ main(int ac, char **av) {
       windowAccel, floorAccel, wallAccel,   windowAccel, floorAccel, wallAccel,   windowAccel,
   };
 
-  GPRTBufferOf<float4x4> transformsBuffer = gprtDeviceBufferCreate<float4x4>(context, NUM_INSTANCES, transforms);
+  GPRTBufferOf<float3x4> transformsBuffer = gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, (uint32_t)BLAS.size(), BLAS.data());
-  gprtInstanceAccelSet4x4Transforms(world, transformsBuffer);
+  gprtInstanceAccelSet3x4Transforms(world, transformsBuffer);
 
   // This is new! We want our wall and floor instances to cast shadows,
   // but we don't want our window to cast a shadow.
@@ -283,12 +283,12 @@ main(int ac, char **av) {
       float yAngle = float(lastypos - ypos) * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
+      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
       position = (mul(rotationMatrixX, (position - pivot))) + pivot;
 
       // step 3: Rotate the camera around the pivot point on the second axis.
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = rotation_matrix(rotation_quat(lookRight, yAngle));
+      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
