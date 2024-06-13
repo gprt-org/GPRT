@@ -2189,13 +2189,17 @@ template<typename... Uniforms>
 void gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
 
-// // Helper trait to check if all types are the same
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
+    "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
+  
+  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
+    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
 
-// template<uint32_t numThreadsX, uint32_t numThreadsY, uint32_t numThreadsZ, typename... Uniforms,
-//          typename = std::enable_if_t<are_all_same<Uniforms...>::value>>
-// void gprtComputeLaunch(std::array<uint32_t, 3> numGroups, GPRTCompute<Uniforms...> compute, Uniforms... uniforms) {
-//     // Function implementation...
-// }
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
+  size_t offset = 0;
+  
+  // Serialize each argument into the buffer
+  (handleArg(pushConstants, offset, uniforms), ...);
 
   _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
 }
@@ -2219,28 +2223,6 @@ void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint
 
   _gprtComputeLaunch((GPRTCompute)compute, numGroups, groupSize, pushConstants);
 }
-
-// // Fallback case where uniforms list mismatches
-// Todo... figure out why this isn't working...
-// template<typename... Uniforms, typename = void, typename... Args>
-// void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, std::array<size_t, 3> numGroups, std::array<size_t, 3> groupSize, Args... args) {
-//   static_assert((sizeof...(Uniforms) > 0), "Error in gprtComputeLaunch: if uniforms list specified by GPRTComputeOf are not empty, then all uniform types must match launch arguments.");
-
-//   // Treat void uniforms as a non-type-safe alternative overload
-//   runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
-//     "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
-  
-//   runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
-//     "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
-
-//   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
-//   size_t offset = 0;
-  
-//   // Serialize each argument into the buffer
-//   (handleArg(pushConstants, offset, uniforms), ...);
-
-//   _gprtComputeLaunch(compute, numGroups, pushConstants);
-// }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);
 

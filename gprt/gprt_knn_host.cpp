@@ -1,18 +1,20 @@
 #include "gprt_knn_host.h"
 #include <iostream>
 
+using namespace math;
+
 float3 computeTriangleNormal(const float3& v1, const float3& v2, const float3& v3) {
     float3 edge1 = v2 - v1;
     float3 edge2 = v3 - v1;
     if (length(edge1) == 0.0f || length(edge2) == 0.0f) {
         return {0, 0, 0}; // no area
     }
-    if (all(equal(edge1, edge2))) {
+    if (all(edge1 == edge2)) {
         return {0, 0, 0}; // degenerate triangle
     }
-    float3 normal = linalg::cross(edge1, edge2);
-    normal = linalg::normalize(normal);
-    if (isnan(normal.x) || isnan(normal.y) || isnan(normal.z)) {
+    float3 normal = cross(edge1, edge2);
+    normal = normalize(normal);
+    if (math::isnan(normal.x) || math::isnan(normal.y) || math::isnan(normal.z)) {
         std::cout << "NaN normal" << std::endl;
     }
     return normal;
@@ -115,12 +117,12 @@ std::vector<float4> computeEdgeNormalArcs(const std::vector<float3>& vertices, c
             avgNormal.x /= normals.size();
             avgNormal.y /= normals.size();
             avgNormal.z /= normals.size();
-            avgNormal = linalg::normalize(avgNormal);
+            avgNormal = normalize(avgNormal);
 
             // Then compute the maximum angle between the average normal and each triangle normal
             float maxAngle = 0.0f;
             for (const auto& normal : normals) {
-                float angle = std::acos(linalg::dot(avgNormal, normal));
+                float angle = std::acos(dot(avgNormal, normal));
                 maxAngle = std::max(maxAngle, angle);
             }
 
