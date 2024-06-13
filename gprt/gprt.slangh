@@ -333,8 +333,6 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
-<<<<<<< HEAD
-=======
 uint32_t
 atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
   uint32_t old;
@@ -456,7 +454,6 @@ atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
   return asfloat(ret_i);
 }
 
->>>>>>> master
 float3
 atomicAdd32f(in Buffer buffer, uint32_t index, float3 value) {
   float3 result;
@@ -505,3 +502,4 @@ atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
 }
 
 }
+#endif

@@ -39,15 +39,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
-<<<<<<< HEAD
-#pragma once
-
 #include "gprt.h"
-#include "gprt_scan_shared.h"
-=======
-
-#include "gprt.h"
->>>>>>> master
 
 #define PARTITION_SIZE      8192
 #define PART_VEC_SIZE       2048
@@ -60,13 +52,9 @@
 #define VECTOR_MASK         3
 #define VECTOR_LOG          2
 
-<<<<<<< HEAD
 #ifndef SCAN_PARTITON_SIZE 
 #define SCAN_PARTITON_SIZE 8192
 #endif
-=======
-#define SCAN_PARTITON_SIZE 8192
->>>>>>> master
 
 #define FLAG_NOT_READY  0
 #define FLAG_AGGREGATE  1
