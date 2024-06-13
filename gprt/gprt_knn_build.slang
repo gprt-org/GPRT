@@ -154,7 +154,8 @@ void ComputeTriangleAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID,
         uint32_t primID = NID * BRANCHING_FACTOR + pid;
         if (primID >= params.numPrims) continue;
         float3x4 tri = gprt::load<float3x4>(params.trianglesExp, primID);
-        if (any(isnan(tri))) continue;
+        // if (any(isnan(tri))) continue; // slang oddly generates invalid boolean mat type here...
+        if (any(isnan(tri[0])) || any(isnan(tri[1])) || any(isnan(tri[2]))) continue;
         for (int i = 0; i < 3; ++i) {
             aabb[0] = min(aabb[0], tri[i].xyz);
             aabb[1] = max(aabb[1], tri[i].xyz);

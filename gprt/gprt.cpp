@@ -3037,6 +3037,9 @@ struct Context {
   // Stores the features available on the selected physical device (for e.g.
   // checking if a feature is available)
   VkPhysicalDeviceFeatures deviceFeatures;
+  VkPhysicalDeviceFeatures2 deviceFeatures2;
+  VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
+  VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
 
@@ -3060,9 +3063,6 @@ struct Context {
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
 
-  /** @brief Set of physical device features to be enabled (must be set in the
-   * derived constructor) */
-  VkPhysicalDeviceFeatures enabledFeatures{};
   /** @brief Set of device extensions to be enabled for this example (must be
    * set in the derived constructor) */
   std::vector<const char *> enabledDeviceExtensions;
@@ -3559,7 +3559,39 @@ struct Context {
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
 
     // Features should be checked by the end application before using them
+    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
+    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+    invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+    invocationReorderFeatures.pNext = nullptr;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelerationStructureFeatures.pNext = &invocationReorderFeatures;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
+    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipelineFeatures.pNext = &accelerationStructureFeatures;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
+    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rtQueryFeatures.pNext = &rtPipelineFeatures;
+
+    deviceVulkan12Features = {};
+    deviceVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceVulkan12Features.pNext = &rtQueryFeatures;
+
+    deviceVulkan11Features = {};
+    deviceVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    deviceVulkan11Features.pNext = &deviceVulkan12Features;    
+
+    deviceFeatures2 = {};
+    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    deviceFeatures2.pNext = &deviceVulkan11Features;
+
+    // fill in above structs
     vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+
     // Memory properties are used regularly for creating all kinds of buffers
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
@@ -3680,60 +3712,13 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    // VkPhysicalDeviceSubgroupSizeControlFeatures physicalDeviceSubgroupSizeControlFeatures = {};
-    // physicalDeviceSubgroupSizeControlFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
-    // physicalDeviceSubgroupSizeControlFeatures.subgroupSizeControl = VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT;
-    // physicalDeviceSubgroupSizeControlFeatures.computeFullSubgroups = false;
-
     
-
-    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
-    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
-    invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
-    invocationReorderFeatures.pNext = nullptr;
-
-    VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlocklayoutFeatures = {};
-    physicalDeviceScalarBlocklayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
-    physicalDeviceScalarBlocklayoutFeatures.scalarBlockLayout = true;
-    physicalDeviceScalarBlocklayoutFeatures.pNext = &invocationReorderFeatures;
-    // physicalDeviceScalarBlocklayoutFeatures.pNext = &physicalDeviceSubgroupSizeControlFeatures;
-
-    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
-    memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
-    memoryModelFeatures.pNext = &physicalDeviceScalarBlocklayoutFeatures;
-
-    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
-    descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    descriptorIndexingFeatures.pNext = &memoryModelFeatures;
-
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
-    bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferDeviceAddressFeatures.pNext = &descriptorIndexingFeatures;
-
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructureFeatures.pNext = &bufferDeviceAddressFeatures;
-
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
-    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.pNext = &accelerationStructureFeatures;
-
-    VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
-    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    rtQueryFeatures.pNext = &rtPipelineFeatures;
-
-    VkPhysicalDeviceFeatures2 deviceFeatures2{};
-    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures2.pNext = &rtQueryFeatures;
-
-    // fill in above structs
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceCreateInfo.pEnabledFeatures = nullptr;   //  &enabledFeatures; // TODO, remove or update enabledFeatures
+    deviceCreateInfo.pEnabledFeatures = nullptr;   //Must be nullptr if deviceFeatures2 is used to request features
     deviceCreateInfo.pNext = &deviceFeatures2;
 
     // If a pNext(Chain) has been passed, we need to add it to the device
