@@ -40,10 +40,6 @@ embed_devicecode(
 embed_devicecode(
   OUTPUT_TARGET
     scanDeviceCode
-  HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h  
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang
 )
@@ -52,10 +48,7 @@ embed_devicecode(
   OUTPUT_TARGET
     nnBuildDeviceCode
   HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_build.slang
 )
@@ -64,10 +57,7 @@ embed_devicecode(
   OUTPUT_TARGET
     nnTraverseDeviceCode
   HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_shared.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_traverse_unified.slang
 )

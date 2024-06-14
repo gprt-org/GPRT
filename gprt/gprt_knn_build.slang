@@ -132,11 +132,11 @@ void ExpandTriangles(uint3 DispatchThreadID: SV_DispatchThreadID, uniform Expand
     uint32_t primAddr = uint32_t(gprt::load<uint64_t>(params.primIDs, primID));
     // load unsorted address
     int3 indices = gprt::load<int3>(params.triangles, primAddr);
-    float4[3] tri;
+    float3x4 tri;
     tri[0] = float4(gprt::load<float3>(params.vertices, indices.x), gprt::load<uint8_t>(params.vertCounts, indices.x));
     tri[1] = float4(gprt::load<float3>(params.vertices, indices.y), gprt::load<uint8_t>(params.vertCounts, indices.y));
     tri[2] = float4(gprt::load<float3>(params.vertices, indices.z), gprt::load<uint8_t>(params.vertCounts, indices.z));
-    gprt::store<float4[3]>(params.trianglesExp, primID, tri);
+    gprt::store<float3x4>(params.trianglesExp, primID, tri);
 }
 
 [shader("compute")]

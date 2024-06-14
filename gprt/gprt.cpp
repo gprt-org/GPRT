@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <variant>
-#include <any>
 #include <algorithm>
 #include <assert.h>
 #include <climits>
@@ -83,9 +81,6 @@
 // For FFX radix sort
 #include "gprt_sort.h"
 
-// For Decoupled lookback scan
-#include "gprt_scan_shared.h"
-
 // For nearest neighbor parameter structs
 #include "gprt_knn_shared.h"
 #include "gprt_knn_host.h"
@@ -111,7 +106,7 @@ static struct RequestedFeatures {
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
-  uint32_t recordSize = 256;
+  uint32_t recordSize = 512;
 
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
@@ -121,7 +116,7 @@ static struct RequestedFeatures {
   bool invocationReordering = true;
 
 
-  bool debugPrintf = false;
+  bool debugPrintf = true;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -1877,8 +1872,6 @@ struct Compute : public SBTEntry {
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
 
-  VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroupSizeInfo{};
-
   Compute(Context* _context, VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
     // Hunt for an existing free address for this compute kernel
     for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
@@ -1910,17 +1903,11 @@ struct Compute : public SBTEntry {
 
     VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
-    // subgroupSizeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
-    // subgroupSizeInfo.requiredSubgroupSize = 32;
-    // subgroupSizeInfo.pNext = nullptr;
-
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.flags = 0;
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-    // shaderStage.pNext = &subgroupSizeInfo;
 
     this->recordSize = recordSize;
     if (this->recordSize > 0)
