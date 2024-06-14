@@ -53,7 +53,9 @@
 #define VECTOR_MASK         3
 #define VECTOR_LOG          2
 
+#ifndef SCAN_PARTITON_SIZE 
 #define SCAN_PARTITON_SIZE 8192
+#endif
 
 #define FLAG_NOT_READY  0
 #define FLAG_AGGREGATE  1
@@ -87,7 +89,7 @@ uint getReverseAddr(int i, int size, int exclusiveSum) {
   return (size - 1) - (i - exclusiveSum);
 }
 
-void Scan<let LANE_COUNT : uint>(uint3 GroupThreadID, uint3 GroupID, in gprt::ScanParams pc) {
+void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, in gprt::ScanParams pc) {
   uint3 gtid = GroupThreadID;
   uint3 gid = GroupID;
 
@@ -99,15 +101,14 @@ void Scan<let LANE_COUNT : uint>(uint3 GroupThreadID, uint3 GroupID, in gprt::Sc
   partitionIndex = WaveReadLaneAt(g_sharedMem[0].x, 0);
   GroupMemoryBarrierWithGroupSync();
 
-  int select = (pc.flags & SCAN_SELECT_POSITIVE) ? 0 : 1;
-
+  int select = ((pc.flags & SCAN_SELECT_POSITIVE) != 0) ? 0 : 1;
   bool partitioning = ((pc.flags & SCAN_PARTITION) > 0);
   bool selecting = ((pc.flags & SCAN_SELECT) > 0);
 
   int4 sg0Val = int4(0,0,0,0), sg1Val = int4(0,0,0,0), sg2Val = int4(0,0,0,0), sg3Val = int4(0,0,0,0);
 
   // four warp-sized-radix ranking reduce scans
-  const int partSize = partitionIndex == PARTITIONS ? (pc.size >> VECTOR_LOG) + (pc.size & VECTOR_MASK ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
+  const int partSize = (partitionIndex == PARTITIONS) ? (pc.size >> VECTOR_LOG) + (((pc.size & VECTOR_MASK) != 0) ? 1 : 0) - PARTITION_START : PART_VEC_SIZE;
   // printf("PartSize %d\n", partSize);
   int i = LANE + WAVE_PART_START;
   if (i < partSize)
@@ -246,11 +247,11 @@ void Scan<let LANE_COUNT : uint>(uint3 GroupThreadID, uint3 GroupID, in gprt::Sc
     GroupMemoryBarrierWithGroupSync();
         
     // Propogate aggregate values
-    if (WAVE_INDEX || LANE)
+    if ((WAVE_INDEX != 0) || (LANE != 0))
       aggregate = WaveReadLaneAt(g_sharedMem[PART_VEC_MASK].x, 1);
   }
 
-  const uint prev = (WAVE_INDEX ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
+  const uint prev = ((WAVE_INDEX != 0) ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
   GroupMemoryBarrierWithGroupSync();
 
   uint lastOffset = (pc.size - 1) % 4;
@@ -336,7 +337,7 @@ void Scan<let LANE_COUNT : uint>(uint3 GroupThreadID, uint3 GroupID, in gprt::Sc
   if (i < partSize)
   {
     uint i4 = i + PARTITION_START;
-    g_sharedMem[i].x = LANE ? g_sharedMem[i - 1].x : 0;
+    g_sharedMem[i].x = (LANE != 0) ? g_sharedMem[i - 1].x : 0;
     uint4 exclusiveSums = g_sharedMem[i] + prev;
     // Scatter by exclusive sum
     if (partitioning || selecting)
@@ -363,7 +364,7 @@ void Scan<let LANE_COUNT : uint>(uint3 GroupThreadID, uint3 GroupID, in gprt::Sc
 [numthreads(1, 1, 1)]
 void InitScan(uint3 id: SV_DispatchThreadID, uniform gprt::ScanParams params) {
   if (id.x == 0) gprt::store<uint2>(params.state, 0, int2(0,0));
-  gprt::store<uint>(params.state, STATE_START + id.x, FLAG_NOT_READY);
+  gprt::store<uint32_t>(params.state, STATE_START + id.x, FLAG_NOT_READY);
 }
 
 // Below are configued such that each y group ID is assigned to a different subgroup.

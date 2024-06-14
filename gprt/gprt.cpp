@@ -96,11 +96,18 @@ static struct RequestedFeatures {
   // On AMD, might require RADV driver...
   uint32_t rayRecursionDepth = 31;
 
-  uint32_t recordSize = 256;
+  uint32_t maxRayPayloadSize = 32;
+  uint32_t maxRayHitAttributeSize = 2;
+  uint32_t recordSize = 512;
 
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
+
+  bool invocationReordering = false;
+
+
+  bool debugPrintf = true;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -276,8 +283,9 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   return VK_FALSE;
 }
 
-extern std::vector<uint8_t> sortDeviceCode;
+// Contains definitions for internal entry points
 extern std::vector<uint8_t> scanDeviceCode;
+extern std::vector<uint8_t> sortDeviceCode;
 
 // forward declarations...
 struct Context;
@@ -848,6 +856,10 @@ struct Buffer {
       Buffer::buffers.push_back(this);
       virtualAddress = (uint32_t)buffers.size() - 1;
     }
+
+    // For performance reasons, round the size up for vectorized/multiword reads
+    uint32_t multiwordSize = 16;
+    _size = (_size + (multiwordSize - 1) / multiwordSize);
 
     device = logicalDevice;
     allocator = _allocator;
@@ -1939,9 +1951,10 @@ struct Compute : public SBTEntry {
     computePipelineCreateInfo.flags = 0;
     computePipelineCreateInfo.stage = shaderStage;
 
+    // If the below function is crashing, double check that all parameters to the compute kernel are tagged as "uniform".
     VkResult err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
     if (err) {
-      LOG_ERROR("failed to create compute pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      LOG_ERROR("failed to create compute pipeline! Please verify that \"" + entryPoint + "\" is an existing entrypoint name\n" + errorString(err));
     }
   }
 
@@ -2814,6 +2827,9 @@ struct AABBGeomType : public GeomType {
 struct Accel;
 
 struct Context {
+  // For convenience, an opaque handle to the context
+  GPRTContext context = (GPRTContext)this;
+
   VkApplicationInfo appInfo;
 
   // Vulkan instance, stores all per-application states
@@ -2855,6 +2871,9 @@ struct Context {
   // Stores the features available on the selected physical device (for e.g.
   // checking if a feature is available)
   VkPhysicalDeviceFeatures deviceFeatures;
+  VkPhysicalDeviceFeatures2 deviceFeatures2;
+  VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
+  VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
 
@@ -2878,9 +2897,6 @@ struct Context {
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
 
-  /** @brief Set of physical device features to be enabled (must be set in the
-   * derived constructor) */
-  VkPhysicalDeviceFeatures enabledFeatures{};
   /** @brief Set of device extensions to be enabled for this example (must be
    * set in the derived constructor) */
   std::vector<const char *> enabledDeviceExtensions;
@@ -3085,7 +3101,14 @@ struct Context {
     instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceCreateInfo.pApplicationInfo = &appInfo;
     // instanceCreateInfo.pNext = VK_NULL_HANDLE;
-    instanceCreateInfo.pNext = &validationFeatures;
+
+    if (requestedFeatures.debugPrintf) {
+      instanceCreateInfo.pNext = &validationFeatures;
+    } else {
+      LOG_WARNING("Debug printf disabled");
+      instanceCreateInfo.pNext = VK_NULL_HANDLE;
+    }
+
 
     uint32_t glfwExtensionCount = 0;
     const char **glfwExtensions;
@@ -3108,8 +3131,10 @@ struct Context {
     instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    // We'll always be using this extension.. Printf's are very useful.
-    instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // Useful to disable, since some profiling tools don't support this.
+    if (requestedFeatures.debugPrintf) {
+      instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
     if (instanceExtensions.size() > 0) {
       instanceCreateInfo.enabledExtensionCount = (uint32_t) instanceExtensions.size();
@@ -3147,26 +3172,28 @@ struct Context {
     }
 
     // Setup debug printf callback
-    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-        vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+    if (requestedFeatures.debugPrintf) {
+      gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+      gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
 
-    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debugUtilsMessengerCI.messageSeverity = 
-        // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
-      // | VK_DEBUG_REPORT_WARNING_BIT_EXT
-      // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
-      // | VK_DEBUG_REPORT_ERROR_BIT_EXT
-      VK_DEBUG_REPORT_DEBUG_BIT_EXT
-      ;
-    debugUtilsMessengerCI.messageType =
-        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-    debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-    VkResult result =
-        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
-    assert(result == VK_SUCCESS);
+      VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+      debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+      debugUtilsMessengerCI.messageSeverity = 
+          // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+        // | VK_DEBUG_REPORT_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_ERROR_BIT_EXT
+        VK_DEBUG_REPORT_DEBUG_BIT_EXT
+        ;
+      debugUtilsMessengerCI.messageType =
+          VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+      debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+      VkResult result =
+          gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+      assert(result == VK_SUCCESS);
+    }
 
     /// 2. Select a Physical Device
     
@@ -3234,6 +3261,7 @@ struct Context {
     enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
 
     // Ray tracing related extensions required
+    enabledDeviceExtensions.push_back(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
 
     // Ray tracing related extensions required
     enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
@@ -3265,6 +3293,10 @@ struct Context {
       // If the device will be using ray queries for inline ray tracing,
       // we need to explicitly request this.
       enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    }
+
+    if (requestedFeatures.invocationReordering) {
+      enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
     }
 
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
@@ -3353,7 +3385,39 @@ struct Context {
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
 
     // Features should be checked by the end application before using them
+    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
+    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+    invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+    invocationReorderFeatures.pNext = nullptr;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelerationStructureFeatures.pNext = &invocationReorderFeatures;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
+    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipelineFeatures.pNext = &accelerationStructureFeatures;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
+    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    rtQueryFeatures.pNext = &rtPipelineFeatures;
+
+    deviceVulkan12Features = {};
+    deviceVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceVulkan12Features.pNext = &rtQueryFeatures;
+
+    deviceVulkan11Features = {};
+    deviceVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    deviceVulkan11Features.pNext = &deviceVulkan12Features;    
+
+    deviceFeatures2 = {};
+    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    deviceFeatures2.pNext = &deviceVulkan11Features;
+
+    // fill in above structs
     vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+
     // Memory properties are used regularly for creating all kinds of buffers
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
@@ -3474,46 +3538,13 @@ struct Context {
     // }
 
     /// 3. Create the logical device representation
-    VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlocklayoutFeatures = {};
-    physicalDeviceScalarBlocklayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
-    physicalDeviceScalarBlocklayoutFeatures.scalarBlockLayout = true;
-
-    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelFeatures = {};
-    memoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
-    memoryModelFeatures.pNext = &physicalDeviceScalarBlocklayoutFeatures;
-
-    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures = {};
-    descriptorIndexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    descriptorIndexingFeatures.pNext = &memoryModelFeatures;
-
-    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
-    bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bufferDeviceAddressFeatures.pNext = &descriptorIndexingFeatures;
-
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
-    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructureFeatures.pNext = &bufferDeviceAddressFeatures;
-
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
-    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.pNext = &accelerationStructureFeatures;
-
-    VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
-    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    rtQueryFeatures.pNext = &rtPipelineFeatures;
-
-    VkPhysicalDeviceFeatures2 deviceFeatures2{};
-    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures2.pNext = &rtQueryFeatures;
-
-    // fill in above structs
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+    
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceCreateInfo.pEnabledFeatures = nullptr;   //  &enabledFeatures; // TODO, remove or update enabledFeatures
+    deviceCreateInfo.pEnabledFeatures = nullptr;   //Must be nullptr if deviceFeatures2 is used to request features
     deviceCreateInfo.pNext = &deviceFeatures2;
 
     // If a pNext(Chain) has been passed, we need to add it to the device
@@ -3955,7 +3986,7 @@ struct Context {
     }
 
     // Finally, setup the internal shader stages and build an initial shader binding table
-    setupInternalStages();
+    setupInternalPrograms();
     buildPipeline();
     buildSBT(GPRT_SBT_ALL);
   };
@@ -4142,7 +4173,7 @@ struct Context {
     //   fillInstanceDataStage.module = nullptr;
     // }
 
-    destroyInternalStages();
+    destroyInternalPrograms();
 
     if (raygenTable) {
       raygenTable->destroy();
@@ -4231,10 +4262,9 @@ struct Context {
     vkDestroyQueryPool(logicalDevice, compactedSizeQueryPool, nullptr);
     vkDestroyDevice(logicalDevice, nullptr);
 
-    freeDebugCallback(instance);
+    if (requestedFeatures.debugPrintf)
+      freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
-   
-
   }
 
   ~Context(){};
@@ -4249,7 +4279,7 @@ struct Context {
   void buildPipeline();
 
   // Todo, refactor this code...
-  void setupInternalStages() {
+  void setupInternalPrograms() {
     
     // // For filling out instance data
     // {
@@ -4615,13 +4645,12 @@ struct Context {
       Context* context = this;      
       internalComputePrograms.insert({"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
       internalComputePrograms.insert({"Scan", new Compute(context, context->logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
-      computePipelinesOutOfDate = true;
     }
 
     computePipelinesOutOfDate = true;   
   }
 
-  void destroyInternalStages() {
+  void destroyInternalPrograms() {
     // destroy sort stages
     {
       vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
@@ -8332,6 +8361,11 @@ void Context::buildPipeline() {
       /*
         Create the ray tracing pipeline
       */
+      VkRayTracingPipelineInterfaceCreateInfoKHR pipelineInterfaceCreateInfo{};
+      pipelineInterfaceCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
+      pipelineInterfaceCreateInfo.maxPipelineRayPayloadSize = requestedFeatures.maxRayPayloadSize;
+      pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
+
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
       rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
       rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -8340,6 +8374,7 @@ void Context::buildPipeline() {
       rayTracingPipelineCI.pGroups = shaderGroups.data();
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
+      rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " + std::to_string(requestedFeatures.rayRecursionDepth) + ".");
 
@@ -8857,6 +8892,8 @@ GPRT_API void *
 gprtGeomGetParameters(GPRTGeom _geometry, int deviceID) {
   LOG_API_CALL();
   Geom *geometry = (Geom *) _geometry;
+  if (geometry->SBTRecord == nullptr) 
+    LOG_ERROR("Associated hit record for geometry type does not have any uniform parameters.");
   return geometry->SBTRecord;
 }
 
@@ -8864,6 +8901,8 @@ GPRT_API void
 gprtGeomSetParameters(GPRTGeom _geometry, void *parameters, int deviceID) {
   LOG_API_CALL();
   Geom *geometry = (Geom *) _geometry;
+  if (geometry->SBTRecord == nullptr) 
+    LOG_ERROR("Associated hit record for geometry type does not have any uniform parameters.");
   memcpy(geometry->SBTRecord, parameters, geometry->recordSize);
 }
 
@@ -9247,6 +9286,8 @@ GPRT_API void *
 gprtMissGetParameters(GPRTMiss _miss, int deviceID) {
   LOG_API_CALL();
   Miss *miss = (Miss *) _miss;
+  if (miss->SBTRecord == nullptr) 
+    LOG_ERROR("Miss entry point \"" + miss->entryPoint + "\" does not have any uniform parameters.");
   return miss->SBTRecord;
 }
 
@@ -9254,6 +9295,8 @@ GPRT_API void
 gprtMissSetParameters(GPRTMiss _miss, void *parameters, int deviceID) {
   LOG_API_CALL();
   Miss *miss = (Miss *) _miss;
+  if (miss->SBTRecord == nullptr) 
+    LOG_ERROR("Miss entry point \"" + miss->entryPoint + "\" does not have any uniform parameters.");
   memcpy(miss->SBTRecord, parameters, miss->recordSize);
 }
 
