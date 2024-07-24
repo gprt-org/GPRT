@@ -7667,11 +7667,22 @@ struct NNTriangleAccel : public Accel {
   // GPRTBufferOf<int4> lbvhNodes;
   // GPRTBufferOf<float3> lbvhAabbs;
 
+  float splitFactor;
+  float primSAHCost;
+  uint32_t numGivenGeometries;
+  uint32_t numGivenTriangles;
+  GPRTBufferOf<float>    prioritiesBuffer;
+  GPRTBufferOf<int>      splitBuffer;
+  GPRTBufferOf<int>      splitSlotBuffer;
+  GPRTBufferOf<uint8_t>  prefixSumTempBuffer;
+
   NNTriangleAccel(Context* context, size_t numGeometries, NNTriangleGeom *geometries)
       : Accel(context) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
     if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
+    numGivenGeometries = numGeometries;
+    numGivenTriangles = this->geometries[0]->index.count;
     
     // geom = gprtGeomCreate<gprt::NNAccel>((GPRTContext)context, context->nnTrianglesType);
     // geomAccel = gprtAABBAccelCreate((GPRTContext)context, 1, &geom);
@@ -7906,9 +7917,7 @@ struct NNTriangleAccel : public Accel {
     // gprtBufferUnmap(leaves);
   }
 
-
-  void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
-    gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+  void naiveBuild(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
 
     // Fetch kernels
     auto ComputeTriangleRootBounds      = (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"]; //FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
@@ -8155,6 +8164,104 @@ struct NNTriangleAccel : public Accel {
 
     // debugging...
     // printOverlapStatistics();    
+  }
+
+
+  void bvh8Build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+    // Fetch kernels
+    auto ComputeTriangleRootBounds      = (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"];
+    auto MortonTriangleSplitter         = (GPRTCompute)context->internalComputePrograms["MortonTriangleSplitter"];
+
+
+    if ((mode & GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE) != 0) {
+      splitFactor = 0.5f; // for faster queries, split triangles more
+    }
+    else {
+      // For refit and fast build modes, don't split triangles.
+      splitFactor = 0.0f;
+    }
+
+    // If conserving memory, increase splitting tolerance. 
+    if (minimizeMemory) {
+      primSAHCost = 0.5f;
+    } 
+    // Otherwise, be more strict about surface area
+    else {
+      primSAHCost = 2.0f;
+    }
+
+    numGivenGeometries = 1;
+
+    uint64_t numSplittableTriangles = numGivenGeometries;  // set to 0 to disable triangle splitting 
+    uint64_t maxSplitPrims = numGivenTriangles + (uint64_t)std::max((float)numSplittableTriangles * splitFactor, 0.0f);
+
+    // Setup Morton Triangle Splitter
+    MortonTriangleSplitterParams splitterParams;
+
+    if (numSplittableTriangles > 0) {
+      splitterParams.maxInputTris = numGivenTriangles;
+      splitterParams.maxOutputPrims = maxSplitPrims;
+      splitterParams.splitFactor = splitFactor;
+      splitterParams.numRounds = 4;
+      splitterParams.splitPriorityX = 2.0f;
+      splitterParams.splitPriorityY = 1.0f / 3.f;
+      splitterParams.maxAABBsPerTri = 32;
+      splitterParams.splitEps = 1e-2f;
+      
+      // Allocate / resize temporary buffers 
+      if (!prioritiesBuffer) prioritiesBuffer = gprtDeviceBufferCreate<float>((GPRTContext)context, splitterParams.maxInputTris);
+      if (gprtBufferGetSize(prioritiesBuffer) < splitterParams.maxInputTris * sizeof(float)) gprtBufferResize((GPRTContext)context, prioritiesBuffer, splitterParams.maxInputTris, false);
+      if (!splitBuffer) splitBuffer = gprtDeviceBufferCreate<int>((GPRTContext)context, splitterParams.maxInputTris);
+      if (gprtBufferGetSize(splitBuffer) < splitterParams.maxInputTris * sizeof(int)) gprtBufferResize((GPRTContext)context, splitBuffer, splitterParams.maxInputTris, false);      
+      if (!splitSlotBuffer) splitSlotBuffer = gprtDeviceBufferCreate<int>((GPRTContext)context, splitterParams.maxInputTris);
+      if (gprtBufferGetSize(splitSlotBuffer) < splitterParams.maxInputTris * sizeof(int)) gprtBufferResize((GPRTContext)context, splitSlotBuffer, splitterParams.maxInputTris, false);
+      
+      // We'll let the prefix sum routine allocate this
+      if (!prefixSumTempBuffer) prefixSumTempBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
+      
+    }
+
+
+    // Execute kernels
+
+    // Execute Morton Triangle Splitter
+    {
+
+      // Initialize device-side buffers
+      {
+
+      }
+
+      // Find D by doing iterative launches 
+      {
+
+      }
+
+      // Count the number of splits
+      {
+
+      } 
+
+      // Do exclusive prefix sum over split count buffer
+      {
+
+      }
+    
+      // Now launch the actual morton splitter
+      {
+
+      }
+      
+    }
+
+  }
+  
+  void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+    gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+    
+    bvh8Build(mode, allowCompaction, minimizeMemory);
+    
+    naiveBuild(mode, allowCompaction, minimizeMemory);
   }
 
   void update() {

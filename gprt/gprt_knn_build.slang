@@ -194,6 +194,212 @@ void ComputeTriangleAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID,
     gprt::store<float3>(params.centers, NID, center);
 }
 
+bool isInvalid(float3 v0, float3 v1, float3 v2) {
+    return any(isnan(v0)) || any(isnan(v1)) || any(isnan(v2));
+}
+
+bool isDegenerate(float3 v0, float3 v1, float3 v2) {
+    float3 v0v1 = v1 - v0;
+    float3 v0v2 = v2 - v0;
+    float3 crossProd = cross(v0v1, v0v2);
+    return length(crossProd) < 1e-9f;
+}
+
+// index of highest bit or -1 if none set
+int findLeadingOne(uint v) {
+    return (v == 0) ? -1 : firstbithigh(v);
+}
+
+uint64_t WaveMaskBitXor64(uint64_t val, int laneMask) {
+    int lo = int(val);
+    int hi = int(val >> 32ull);
+    hi = WaveMaskBitXor(hi, laneMask);
+    lo = WaveMaskBitXor(lo, laneMask);
+    
+    uint64_t result = (uint64_t(hi) << 32ull) | uint64_t(lo);
+    return result;
+}
+
+float ud2float_rd(uint32_t value) {
+    // taking an unsigned integer and rounding the converted float down
+    return float(value);
+}
+
+float ull2float_ru(uint64_t value) {
+    float result = float(value & 0xFFFFFFFF);     // Convert the lower 32 bits
+    result += float(value >> 32) * 4294967296.0f; // Convert the upper 32 bits and scale back up
+
+    // Since we want to ensure that the float is not less than the original uint64, we check and adjust
+    if (uint64_t(result) < value) {
+        result = nextafter(result, FLT_MAX);
+    }
+
+    return result;
+}
+
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void MortonTriangleSplitterInit(uint3 DispatchThreadID: SV_DispatchThreadID, uniform MortonTriangleSplitterParams p)
+{
+    uint64_t priority = 0;
+
+    uint32_t primIdx = DispatchThreadID.x;
+
+    // If out of bounds, initiate split primitive indices as invalid and then terminate
+    if (primIdx >= p.maxInputTris) {
+        if (primIdx < p.maxOutputPrims) {
+            gprt::store<int>(p.outPrimIndices, -1);
+        }
+        return;
+    }
+
+    // Init outPrimIndices buffer to hold the indices of the primitives that will be split
+    gprt::store<int>(p.outPrimIndices, primIdx, primIdx);
+    if (p.splitFactor == 0.f) return; // done here if not splitting
+
+    // Fetch triangle
+    uint3 tri = gprt::load<uint3>(p.triangles, primIdx);
+    float3 v0, v1, v2;
+    v0 = gprt::load<float3>(p.vertices, tri.x);
+    v1 = gprt::load<float3>(p.vertices, tri.y);
+    v2 = gprt::load<float3>(p.vertices, tri.z);
+    
+    // Dont split degenerate tris or tris with NaN vertex values
+    if (!isDegenerate(v0, v1, v2) && !isInvalid(v0, v1, v2)) {
+        float3 lo = min(min(v0, v1), v2);
+        float3 hi = max(max(v0, v1), v2);
+        float3 di = hi - lo;
+
+        // Compute transform from world space model AABB to 20 bit signed unorm.
+        float3 rlo = gprt::load<float3>(p.rootBounds, 0);
+        float3 rhi = gprt::load<float3>(p.rootBounds, 1);
+        float3 rdiag = rhi - rlo;
+        float longestAxis = max(rdiag.x, max(rdiag.y, rdiag.z));
+        float scale = float(1 << 20) / longestAxis;
+        float3 origin = float3(1 << 19) - (rlo + rhi) * (scale * 0.5f);
+
+        // Find most important median split plane and its importance
+        float epsA = 1.0 - p.splitEps;
+        float epsB = p.splitEps;
+        int3 ilo = int3((lo * epsA + hi * epsB) * scale + origin);
+        int3 ihi = max(int3((lo * epsB + hi * epsA) * scale + origin) - 1, ilo);
+        int importance = findLeadingOne((ilo.x ^ ihi.x) | (ilo.y ^ ihi.y) | (ilo.z ^ ihi.z));
+
+        // Calculate ideal surface area assuming infinite splits
+        // (equation 5 from the paper)
+        float3 d1 = v1 - v0, d2 = v2 - v0;
+        float3 n = abs(cross(d1, d2));
+        float idealArea = n.x + n.y + n.z;
+
+        // Calculate the actual surface area of the aabb
+        float actualArea = 2.f * (di.x * di.y + di.x * di.z + di.y * di.z);
+
+        // Evaluate split priority (equation 6 from the paper)
+        float areaPriority = log2((actualArea - idealArea) / (6.0 * longestAxis * longestAxis));
+        float splitPriority = p.Log2X * float(importance) - p.Log2X;
+        float fpriority = exp2((splitPriority + areaPriority) * p.Y);
+
+        priority = uint64_t(float(0xFFFFFFFFu) * saturate(fpriority));
+    }
+    
+    // Store priority
+    gprt::store<uint64_t>(p.outPriorities, primIdx, priority);
+
+    // Accumulate total priority
+    priority = WaveActiveSum(priority);
+
+    if (WaveGetLaneIndex() == 0)
+        gprt::atomicAdd(p.totalPriority, 0, priority);
+}
+
+// Just run this with one thread
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void MortonTriangleSplitterUpdateState(uint3 DispatchThreadID: SV_DispatchThreadID, uniform MortonTriangleSplitterParams p)
+{
+    // Current iterator state
+    MortonTriangleSplitterConstants c = gprt::load<MortonTriangleSplitterConstants>(p.globalConstants, 0);
+
+    // Before first iteration we'll set curScaleInterval to a lower bound that's calculated by the totalPriority.
+    int maxPrimsAfterSplit = p.maxInputTris + int(p.maxInputTris * p.splitFactor);
+    maxPrimsAfterSplit = min(maxPrimsAfterSplit, p.maxOutputPrims);
+    int maxSplits = maxPrimsAfterSplit - p.maxInputTris;
+
+    if (c.curScaleFactor == 0.0) {
+        float lowerBound = (c.totalPriority == 0ull) ? 0 : floor(max(nextafter(float(maxSplits), -FLT_MAX), 0.0f) / nextafter(float(c.totalPriority), FLT_MAX));
+        c.curScaleFactor = lowerBound;
+
+        // Update iterator state
+        gprt::store<MortonTriangleSplitterConstants>(p.globalConstants, 0, c);
+        return;
+    }
+    
+        
+    // After first round, get tight lower and upper bounds
+    if (c.curScaleFactor == 0.0) {
+        float lowerBound = c.curScaleInterval;
+        int lowerSplits = c.totalSplits1;
+        if (c.totalSplits3 <= maxSplits) {
+            lowerBound = c.curScaleInterval * 3.0;
+            lowerSplits = c.totalSplits3;
+        }
+        else if (c.totalSplits2 <= maxSplits) {
+            lowerBound = c.curScaleInterval * 2.0;
+            lowerSplits = c.totalSplits2;
+        }
+
+        float upperBound = lowerBound * max(1.0, float(maxSplits) / float(lowerSplits));
+        if (c.totalSplits2 > maxSplits) {
+            upperBound = min(upperBound, c.curScaleInterval * 2.0);
+        }
+        else if (c.totalSplits3 > maxSplits) {
+            upperBound = min(upperBound, c.curScaleInterval * 3.0);
+        }
+
+        c.curScaleFactor = lowerBound;
+        c.curScaleInterval = (upperBound - lowerBound) * .25;
+
+        // clear total splits for next round
+        c.totalSplits1 = 0;
+        c.totalSplits2 = 0;
+        c.totalSplits3 = 0;
+
+        // Update iterator state
+        gprt::store<MortonTriangleSplitterConstants>(p.globalConstants, 0, c);
+        return;
+    }
+    
+    // After remaining rounds we chose the correct subinterval and keep iterating
+    if (c.totalSplits3 <= maxSplits)
+        c.curScaleFactor = c.curScaleFactor + c.curScaleInterval * 3.0;
+    else if (c.totalSplits2 <= maxSplits)
+        c.curScaleFactor = c.curScaleFactor + c.curScaleInterval * 2.0;
+    else
+        c.curScaleFactor = c.curScaleFactor + c.curScaleInterval * 1.0;
+    c.curScaleInterval = c.curScaleInterval * 0.25;
+
+    // clear total splits for next round
+    c.totalSplits1 = 0;
+    c.totalSplits2 = 0;
+    c.totalSplits3 = 0;
+
+    // Update iterator state
+    gprt::store<MortonTriangleSplitterConstants>(p.globalConstants, 0, c);
+}
+
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void MortonTriangleSplitterIter(uint3 DispatchThreadID: SV_DispatchThreadID, uniform MortonTriangleSplitterParams params)
+{
+}
+
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void MortonTriangleSplitter(uint3 DispatchThreadID: SV_DispatchThreadID, uniform MortonTriangleSplitterParams params)
+{    
+
+}
+
 [shader("compute")]
 [numthreads(32, 1, 1)]
 void ComputeAABBsAndCenters(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeAABBsAndCentersParams params)

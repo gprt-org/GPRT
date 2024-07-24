@@ -340,6 +340,13 @@ atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
   return old;
 }
 
+uint64_t
+atomicAdd(in Buffer buffer, uint32_t index, uint64_t value) {
+  uint64_t old;
+  buffers[buffer.index].InterlockedAddI64(index * sizeof(uint32_t), value, old);
+  return old;
+}
+
 uint32_t
 atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
   uint32_t old;

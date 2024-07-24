@@ -221,6 +221,66 @@ struct ComputeTriangleRootBoundsParams {
 #endif
 };
 
+struct MortonTriangleSplitterConstants {
+  uint64_t totalPriority; // Initialize to 0
+  float curScaleFactor;   // Initialize to 0
+  float curScaleInterval; // Initialize to 0
+  int totalSplits1;       // with curScaleFactor + curScaleInterval * 1.0f
+  int totalSplits2;       // with curScaleFactor + curScaleInterval * 2.0f
+  int totalSplits3;       // with curScaleFactor + curScaleInterval * 3.0f
+
+  int execWorkCounter;    // Initialize to 0
+  int freshAABBCounter;   // Initialize to 0
+};
+
+// Roughly following the splitter from "Fast Parallel Construction of High-Quality Bounding Volume Hierarchies"
+// Given N triangles, produces N or more output "primitives" and corresponding bounding boxes.
+struct MortonTriangleSplitterParams {
+  int maxInputTris;     // Max range of the input triangles
+  int maxOutputPrims;   // Max range out output triangle references
+  float splitFactor;    // Will generate numTris * (1 + splitFactor) triangles
+  int numRounds;        // Number of iterations to find "D" in the paper. More runs fill more of the allocated buffer
+  int maxAABBsPerTri;   // Max number of AABBs per triangle
+  float splitEps;       // Split epsilon
+  float Log2X; // From Eq 6 of the paper
+  float Y;     // From Eq 6 of the paper
+
+  // The AABB containing the entire model
+  gprt::Buffer rootBounds;
+
+  gprt::Buffer triangles; // user given buffer of int3s
+  gprt::Buffer vertices;  // user given buffer of float3s
+  gprt::Buffer outPrimIndices; // ints of maxOututPrims long
+  gprt::Buffer outPriorities;  // floats of max input tris long
+
+  gprt::Buffer globalConstants; // A buffer containing a single "MortonTriangleSplitterConstants"
+
+  #ifndef __SLANG_COMPILER__
+    MortonTriangleSplitterParams() {}
+  #endif
+};
+
+struct MortonTriangleSplitterInitParams {
+
+
+  gprt::Buffer triangles; // user given buffer of int3s
+  gprt::Buffer vertices;  // user given buffer of float3s
+
+  gprt::Buffer totalPriority; // a 64 bit integer. Initialize to 0
+
+  // The AABB containing the entire model
+  float3 lo, hi;
+  float epsilon;
+  float Log2X; // From Eq 6 of the paper
+  float Y;     // From Eq 6 of the paper
+
+  uint32_t maxInputTris;
+  uint32_t maxOutputPrims;
+
+  float splitFactor;
+
+};
+
 struct ComputeTriangleCodesParams {
     int numPrims;
     gprt::Buffer centers;
