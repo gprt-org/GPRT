@@ -46,30 +46,28 @@ embed_devicecode(
 
 embed_devicecode(
   OUTPUT_TARGET
-    nnBuildDeviceCode
+    hplocBuildDeviceCode
   HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_shared.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_hploc_shared.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_build.slang
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_hploc_build.slang
 )
 
 embed_devicecode(
   OUTPUT_TARGET
-    nnTraverseDeviceCode
+    hplocTraverseDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_shared.h
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_knn_traverse_unified.slang
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_hploc_traverse.slang
 )
-
 
 target_sources(gprt PRIVATE
     ${MATH_SRC}
     gprt.cpp
     gprt.h
-    gprt_knn_shared.h
-    gprt_knn_host.h
-    gprt_knn_host.cpp
+    gprt_nnq.h
+    gprt_hploc_shared.h
     gprt_scan_shared.h
     gprt_sort.h
     spirv_reflect.h
@@ -101,8 +99,8 @@ target_link_libraries(gprt
     ${Vulkan_LIBRARY}
     scanDeviceCode
     sortDeviceCode
-    nnBuildDeviceCode
-    nnTraverseDeviceCode
+    hplocTraverseDeviceCode
+    hplocBuildDeviceCode
     glfw
     stb_image
     vma

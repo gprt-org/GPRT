@@ -20,7 +20,7 @@ float3 computeTriangleNormal(const float3& v1, const float3& v2, const float3& v
     return normal;
 }
 
-std::vector<std::vector<int>> buildVertexToTriangleMap(const std::vector<int3>& triangles, int numVertices) {
+std::vector<std::vector<int>> buildVertexToTriangleMap(const std::vector<int3>& triangles, size_t numVertices) {
     std::vector<std::vector<int>> vertexToTriangleMap(numVertices);
 
     for (int i = 0; i < triangles.size(); ++i) {

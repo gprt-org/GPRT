@@ -25,7 +25,7 @@ namespace gprt {
     struct Buffer {
         // eventually will become address as features progress
         uint32_t index;
-        uint32_t temp; 
+        uint32_t size; 
     };
 
     struct Accel {

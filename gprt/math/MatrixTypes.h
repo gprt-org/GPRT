@@ -199,6 +199,7 @@ private:
 };
 
 using float2x2 = matrix<float, 2, 2>;
+using float2x3 = matrix<float, 2, 3>;
 
 using float3x3 = matrix<float, 3, 3>;
 
@@ -210,6 +211,7 @@ using float4x4 = matrix<float, 4, 4>;
 } // namespace math
 
 using float2x2 = math::float2x2;
+using float2x3 = math::float2x3;
 
 using float3x3 = math::float3x3;
 

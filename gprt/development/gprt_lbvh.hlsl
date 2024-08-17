@@ -42,6 +42,18 @@ uint clz(uint x) {
   return 31 - firstbithigh(x);
 }
 
+// https://github.com/microsoft/DirectXShaderCompiler/issues/4702
+uint clz64(uint64_t v) {
+    uint2 workaround = uint2(v, v >> 32);
+
+    uint high = firstbithigh(workaround.y);
+    if (high != -1) {
+        return 31 - high;
+    } else {
+        return 63 - firstbithigh(workaround.x);
+    }
+}
+
 int delta(gprt::Buffer morton_codes, uint num_codes, uint i, uint j) {
   // Karras' delta(i,j) function
   // Denotes the length of the longest common

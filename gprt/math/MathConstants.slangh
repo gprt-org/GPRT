@@ -38,6 +38,10 @@
 #define INT32_MIN           -2147483648
 #define INT32_MAX           2147483647
 
+#define UINT64_MAX          18446744073709551615ULL
+#define INT64_MIN           -9223372036854775808LL
+#define INT64_MAX           9223372036854775807LL
+
 // Numeric limits from <cfloat>
 #define DBL_DECIMAL_DIG     17                      // # of decimal digits of rounding precision
 #define DBL_DIG             15                      // # of decimal digits of precision

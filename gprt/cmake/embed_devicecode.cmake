@@ -33,20 +33,20 @@ else ()
   message("Downloading Slang Compiler...")
   if (WIN32)
     FetchContent_Declare(SlangCompiler
-      URL https://github.com/shader-slang/slang/releases/download/v2024.1.21/slang-2024.1.21-win64.zip
-      URL_HASH SHA256=CA1C8E6E85C2BC5B9180A2160DDF2F348201CE581AE6826D70D9B87CDF361E83
+      URL https://github.com/shader-slang/slang/releases/download/v2024.9.1/slang-2024.9.1-windows-x86_64.zip
+      URL_HASH SHA256=1B903FA92C8F7D832AC1607BE865543CA2BB352342099DE81E31D8B1D90D0F75
       DOWNLOAD_NO_EXTRACT true
       DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
     )
     FetchContent_Populate(SlangCompiler)
     message("Extracting...")
-    execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64.zip" -DestinationPath "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64" RESULT_VARIABLE EXTRACT_RESULT)
+    execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/slang-2024.9.1-windows-x86_64.zip" -DestinationPath "${CMAKE_BINARY_DIR}/slang-2024.9.1-windows-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
     if(NOT EXTRACT_RESULT EQUAL 0)
         message(FATAL_ERROR "Extraction failed with error code: ${EXTRACT_RESULT}")
     else()
         message("Done.")
     endif()
-    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64/bin/windows-x64/release/slangc.exe" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
+    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2024.9.1-windows-x86_64/bin/slangc.exe" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
   else() # linux
     FetchContent_Declare(HLSLCompiler
       URL https://github.com/shader-slang/slang/releases/download/v2024.1.21/slang-2024.1.21-linux-x86_64.tar.gz
@@ -95,12 +95,15 @@ function(embed_devicecode)
     ${EMBED_DEVICECODE_SOURCES}
     -profile sm_6_7
     -target spirv 
-    -emit-spirv-directly
-    # -g2 # disabling temporarily. Hitting stack overflow when embedding some code...
+    # -emit-spirv-directly
+    -g2 # disabling temporarily. Hitting stack overflow when embedding some code...
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
     -ignore-capabilities
+    -no-mangle # avoid mangling names as much as possible
+    -zero-initialize # zero-initialize all variables
+    -O3
     -I ${GPRT_INCLUDE_DIR}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slangh ${GPRT_INCLUDE_DIR}/gprt.h ${GPRT_INCLUDE_DIR}/gprt_shared.h

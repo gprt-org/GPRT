@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <algorithm>
+#include <numeric>
 #include <assert.h>
 #include <climits>
 #include <fstream>
@@ -82,9 +83,10 @@
 #include "gprt_sort.h"
 
 // For nearest neighbor parameter structs
-#include "gprt_knn_shared.h"
-#include "gprt_knn_host.h"
+#include "gprt_nnq.h"
+#include "gprt_hploc_shared.h"
 #include "hilbert.h"
+#include <random>
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -295,8 +297,8 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 // Contains definitions for internal entry points
 extern std::vector<uint8_t> scanDeviceCode;
 extern std::vector<uint8_t> sortDeviceCode;
-extern std::vector<uint8_t> nnBuildDeviceCode;
-extern std::vector<uint8_t> nnTraverseDeviceCode;
+extern std::vector<uint8_t> hplocBuildDeviceCode;
+extern std::vector<uint8_t> hplocTraverseDeviceCode;
 
 
 // forward declarations...
@@ -455,7 +457,8 @@ struct Buffer {
     VmaAllocation allocation;
   } stagingBuffer;
 
-  VkDeviceSize size = 0;
+  VkDeviceSize size = 0; // total size in bytes
+  VkDeviceSize typeSize = 1; // effects the size reported in the device handle
   VkDeviceSize alignment = 16;
   void *mapped = nullptr;
 
@@ -843,6 +846,7 @@ struct Buffer {
   }
 
   size_t getSize() { return (size_t) size; }
+  size_t getTypeSize() { return (size_t) typeSize; }
 
   /* Default Constructor */
   Buffer(){};
@@ -852,6 +856,7 @@ struct Buffer {
   Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator,
          VkCommandBuffer _commandBuffer, VkQueue _queue, VkBufferUsageFlags _usageFlags,
          VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
+         VkDeviceSize _typeSize,
          void *data = nullptr) {
 
     // Hunt for an existing free virtual address for this buffer
@@ -878,6 +883,7 @@ struct Buffer {
     usageFlags = _usageFlags;
     size = _size;
     alignment = _alignment;
+    typeSize = _typeSize;
     commandBuffer = _commandBuffer;
     queue = _queue;
 
@@ -2117,7 +2123,7 @@ std::vector<Miss *> Miss::misses;
 
 struct Callable : public SBTEntry {
   // Our own virtual "callable address space".
-  uint32_t address = -1;
+  uint32_t address = -1; // (also the address into the SBT)
   static std::vector<Callable *> callables;
 
   VkShaderModule shaderModule;
@@ -3097,10 +3103,6 @@ struct Context {
   VkPipeline raytracingPipeline = VK_NULL_HANDLE;
   VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
 
-  std::vector<RayGen *> raygenPrograms;
-  std::vector<Miss *> missPrograms;
-  std::vector<Callable *> callablePrograms;
-
   bool computePipelinesOutOfDate = true;
   bool rasterPipelinesOutOfDate = true;
 
@@ -3161,8 +3163,8 @@ struct Context {
   
   Module *radixSortModule = nullptr;
   Module *scanModule = nullptr;
-  Module *nnBuildModule = nullptr;
-  Module *nnTraverseModule = nullptr;
+  Module *hplocBuildModule = nullptr;
+  Module *hplocTraverseModule = nullptr;
 
   // TODO, we can probably refactor this...
   struct SortStages {
@@ -3857,8 +3859,8 @@ struct Context {
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
     scanModule = new Module(scanDeviceCode);
-    nnBuildModule = new Module(nnBuildDeviceCode);
-    nnTraverseModule = new Module(nnTraverseDeviceCode);
+    hplocBuildModule = new Module(hplocBuildDeviceCode);
+    hplocTraverseModule = new Module(hplocTraverseDeviceCode);
     
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4027,7 +4029,7 @@ struct Context {
           // means we can use this buffer as a storage buffer resource
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       defaultBuffer = new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue,
-                                 bufferUsageFlags, memoryUsageFlags, 1, 16);
+                                 bufferUsageFlags, memoryUsageFlags, 1, 16, 1);
     }
 
     // For the SBT record descriptor for raster shaders
@@ -4797,19 +4799,14 @@ struct Context {
       internalComputePrograms.insert({"Scan", new Compute(context, context->logicalDevice, scanModule, ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
     }
 
-    // Nearest neighbor stages
+    // HPLOC stages
     {
       Context* context = this;      
       internalComputePrograms.insert({
-        {"ComputeTriangleRootBounds",      new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleRootBounds", 0)},
-        {"ComputeTriangleAABBsAndCenters", new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleAABBsAndCenters", 0)},
-        {"ComputeTriangleCodes",           new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleCodes", 0)},
-        {"ComputeAABBsAndCenters",         new Compute(context, context->logicalDevice, nnBuildModule, "ComputeAABBsAndCenters", 0)},  
-        {"ComputeTriangleOBBCovariances",  new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleOBBCovariances", 0)},
-        {"ComputeOBBCovariances",          new Compute(context, context->logicalDevice, nnBuildModule, "ComputeOBBCovariances", 0)},
-        {"ComputeOBBAngles",               new Compute(context, context->logicalDevice, nnBuildModule, "ComputeOBBAngles", 0)},
-        {"ComputeTriangleOBBBounds",       new Compute(context, context->logicalDevice, nnBuildModule, "ComputeTriangleOBBBounds", 0)},
-        {"ExpandTriangles",                new Compute(context, context->logicalDevice, nnBuildModule, "ExpandTriangles", 0)}
+        {"HPLOC_Bounds",   new Compute(context, context->logicalDevice, hplocBuildModule, "HPLOC_Bounds", 0)},
+        {"HPLOC_SFC",      new Compute(context, context->logicalDevice, hplocBuildModule, "HPLOC_SFC", 0)},
+        {"HPLOC_Build",    new Compute(context, context->logicalDevice, hplocBuildModule, "HPLOC_Build", 0)},
+        {"HPLOC_ToBVH8",   new Compute(context, context->logicalDevice, hplocBuildModule, "HPLOC_ToBVH8", 0)},
       });
     }
 
@@ -5361,7 +5358,7 @@ struct TriangleAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -5396,7 +5393,7 @@ struct TriangleAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -5569,7 +5566,7 @@ struct TriangleAccel : public Accel {
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
       }
     }
 
@@ -5731,7 +5728,7 @@ struct TriangleAccel : public Accel {
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
-                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -5972,7 +5969,7 @@ struct AABBAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -6007,7 +6004,7 @@ struct AABBAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment,1 );
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -6166,7 +6163,7 @@ struct AABBAccel : public Accel {
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
       }
     }
 
@@ -6329,7 +6326,7 @@ struct AABBAccel : public Accel {
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
-                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -6502,7 +6499,7 @@ struct InstanceAccel : public Accel {
                                  // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                                  // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 sizeof(VkAccelerationStructureInstanceKHR) * numInstances, 16);
+                                 sizeof(VkAccelerationStructureInstanceKHR) * numInstances, 16, 1);
   };
 
   ~InstanceAccel(){};
@@ -6773,7 +6770,7 @@ struct InstanceAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.accelerationStructureSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -6808,7 +6805,7 @@ struct InstanceAccel : public Accel {
                      // means that this memory is stored directly on the device
                      //  (rather than the host, or in a special host/device section)
                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                     accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -7085,7 +7082,7 @@ struct InstanceAccel : public Accel {
                        // means that this memory is stored directly on the device
                        //  (rather than the host, or in a special host/device section)
                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, accelerationStructureBuildSizesInfo.buildScratchSize,
-                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                       accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
       }
     }
 
@@ -7257,7 +7254,7 @@ struct InstanceAccel : public Accel {
                                  // means that this memory is stored directly on the device
                                  //  (rather than the host, or in a special host/device section)
                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, compactedSize,
-                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+                                 accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment, 1);
 
       VkAccelerationStructureCreateInfoKHR accelerationStructureCreateInfo{};
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
@@ -7375,288 +7372,66 @@ struct InstanceAccel : public Accel {
   };
 };
 
-struct NNPointAccel : public Accel {
-  std::vector<NNPointGeom *> geometries;
-
-  GPRTBufferOf<uint64_t> codes;
-  GPRTBufferOf<float3> aabb;
-  GPRTBufferOf<float3> l0clusters;
-  GPRTBufferOf<float3> l1clusters;
-
-  GPRTBufferOf<uint8_t> scratch;
-
-  GPRTGeomOf<gprt::NNAccel> geom;
-  GPRTAccel geomAccel;
-  GPRTAccel instanceAccel;
-
-  NNPointAccel(Context* context, size_t numGeometries, NNPointGeom *geometries)
-      : Accel(context) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
-    if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
-    
-    // geom = gprtGeomCreate<gprt::NNAccel>((GPRTContext)context, context->nnPointsType);
-    // geomAccel = gprtAABBAccelCreate((GPRTContext)context, 1, &geom);
-    // instanceAccel = gprtInstanceAccelCreate((GPRTContext)context, 1, &geomAccel);
-    
-    // // some logic here for rounding up
-    // nnAccelHandle.numPrims = this->geometries[0]->vertex.count;
-    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    // nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-
-    // // create these
-    // codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    // aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
-    // l0clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
-    // l1clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
-
-    // nnAccelHandle.maxSearchRange = 0.f; 
-    
-    // // to be resized as needed
-    // scratch = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
-
-    // nnAccelHandle.points = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    
-    // nnAccelHandle.codes = gprtBufferGetHandle(codes);
-    // nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
-    // nnAccelHandle.l0clusters = gprtBufferGetHandle(l0clusters);
-    // nnAccelHandle.l1clusters = gprtBufferGetHandle(l1clusters);
-    
-    // gprtGeomSetParameters(geom, &nnAccelHandle);
-    // gprtAABBsSetPositions(geom, l1clusters, nnAccelHandle.numL2Clusters);
-  };
-
-  ~NNPointAccel(){};
-
-  AccelType getType() { return GPRT_NN_POINT_ACCEL; }
-
-  size_t getSize() {
-    throw std::runtime_error("Not Implemented!");
-    return -1;
-  };
-
-  void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
-    
-    // typedef uint32_t uint;
-
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputePointBounds"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputePointClusters"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputePointHilbertCodes"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
-
-    // gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_COMPUTE);
-
-    // // initialize root AABB
-    // gprtBufferMap(aabb);
-    // float3* aabbPtr = gprtBufferGetPointer(aabb);
-    // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
-    // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
-    // gprtBufferUnmap(aabb);
-
-    // // Compute the global bounds
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputePointBounds"], nnAccelHandle.numPrims);
-
-    // // Use global bounds to compute hilbert codes
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputePointHilbertCodes"], nnAccelHandle.numPrims);
-    
-    // // Sort the primitive references by hilbert codes
-    // gprtBufferSort((GPRTContext)context, codes, scratch);
-
-    // // Now compute cluster bounding boxes...
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputePointClusters"], nnAccelHandle.numL1Clusters);
-
-    // // ... and then compute super cluster bounding boxes
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL2Clusters);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
-    
-    // // Now we can build our underlying RT core tree
-    // gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-    // gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-
-    // // Handle might have changed, so update here
-    // nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
-  }
-
-  void update() {
-    throw std::runtime_error("Not Implemented!");
-  }
-
-  void compact() {
-    throw std::runtime_error("Not Implemented!");
-  }
-
-  void destroy() {
-    gprtBufferDestroy(codes);
-    gprtBufferDestroy(aabb);
-    gprtBufferDestroy(l0clusters);
-    gprtBufferDestroy(l1clusters);
-    gprtBufferDestroy(scratch);
-    gprtAccelDestroy(instanceAccel);
-    gprtAccelDestroy(geomAccel);
-    gprtGeomDestroy(geom);
-  };
-
-  void setSearchRange(float range) {  
-    nnAccelHandle.maxSearchRange = range;
-    gprtGeomSetParameters(geom, &nnAccelHandle);
-  }
-};
-
-struct NNEdgeAccel : public Accel {
-  std::vector<NNEdgeGeom *> geometries;
-
-  GPRTBufferOf<uint64_t> codes;
-  GPRTBufferOf<float3> aabb;
-  GPRTBufferOf<float3> clusters;
-  GPRTBufferOf<float3> superClusters;
-
-  GPRTBufferOf<uint8_t> scratch;
-
-  GPRTGeomOf<gprt::NNAccel> geom;
-  GPRTAccel geomAccel;
-  GPRTAccel instanceAccel;
-
-  NNEdgeAccel(Context* context, size_t numGeometries, NNEdgeGeom *geometries)
-      : Accel(context) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
-    if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
-    
-    // geom = gprtGeomCreate<gprt::NNAccel>((GPRTContext)context, context->nnEdgesType);
-    // geomAccel = gprtAABBAccelCreate((GPRTContext)context, 1, &geom);
-    // instanceAccel = gprtInstanceAccelCreate((GPRTContext)context, 1, &geomAccel);
-    
-    // // some logic here for rounding up
-    // nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    // nnAccelHandle.numL1Clusters = (nnAccelHandle.numPrims + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    // nnAccelHandle.numL2Clusters = (nnAccelHandle.numL1Clusters + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-
-    // // create these
-    // codes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    // aabb = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
-    // clusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL1Clusters);
-    // superClusters = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numL2Clusters);
-
-    // nnAccelHandle.maxSearchRange = 0.f; 
-    
-    // // to be resized as needed
-    // scratch = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
-
-    // nnAccelHandle.points = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    // nnAccelHandle.edges = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
-    
-    // nnAccelHandle.codes = gprtBufferGetHandle(codes);
-    // nnAccelHandle.aabb = gprtBufferGetHandle(aabb);
-    // nnAccelHandle.l0clusters = gprtBufferGetHandle(clusters);
-    // nnAccelHandle.l1clusters = gprtBufferGetHandle(superClusters);
-    
-    // gprtGeomSetParameters(geom, &nnAccelHandle);
-    // gprtAABBsSetPositions(geom, superClusters, nnAccelHandle.numL2Clusters);
-  };
-
-  ~NNEdgeAccel(){};
-
-  AccelType getType() { return GPRT_NN_EDGE_ACCEL; }
-
-  size_t getSize() {
-    throw std::runtime_error("Not Implemented!");
-    return -1;
-  };
-
-  void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
-    
-    // typedef uint32_t uint;
-
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeEdgeBounds"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeEdgeClusters"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeEdgeHilbertCodes"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], &nnAccelHandle);
-    // gprtComputeSetParameters((GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], &nnAccelHandle);
-
-    // gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_COMPUTE);
-
-    // // initialize root AABB
-    // gprtBufferMap(aabb);
-    // float3* aabbPtr = gprtBufferGetPointer(aabb);
-    // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
-    // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
-    // gprtBufferUnmap(aabb);
-
-    // // Compute the global bounds
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeEdgeBounds"], nnAccelHandle.numPrims);
-
-    // // Use global bounds to compute hilbert codes
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeEdgeHilbertCodes"], nnAccelHandle.numPrims);
-    
-    // // Sort the primitive references by hilbert codes
-    // gprtBufferSort((GPRTContext)context, codes, scratch);
-
-    // // Now compute cluster bounding boxes...
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeEdgeClusters"], nnAccelHandle.numL1Clusters);
-
-    // // ... and then compute super cluster bounding boxes
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL1Clusters"], nnAccelHandle.numL2Clusters);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeL2Clusters"], nnAccelHandle.numL2Clusters);
-    
-    // // Now we can build our underlying RT core tree
-    // gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-    // gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-
-    // // Handle might have changed, so update here
-    // nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
-  }
-
-  void update() {
-    throw std::runtime_error("Not Implemented!");
-  }
-
-  void compact() {
-    throw std::runtime_error("Not Implemented!");
-  }
-
-  void destroy() {
-    gprtBufferDestroy(codes);
-    gprtBufferDestroy(aabb);
-    gprtBufferDestroy(clusters);
-    gprtBufferDestroy(superClusters);
-    gprtBufferDestroy(scratch);
-    gprtAccelDestroy(instanceAccel);
-    gprtAccelDestroy(geomAccel);
-    gprtGeomDestroy(geom);
-  };
-
-  void setSearchRange(float range) {  
-    nnAccelHandle.maxSearchRange = range;
-    gprtGeomSetParameters(geom, &nnAccelHandle);
-  }
-};
-
 struct NNTriangleAccel : public Accel {
-  GPRTCallableOf<NodeRecord> traverseCallable;
-  
   std::vector<NNTriangleGeom *> geometries;
-  GPRTBufferOf<uint8_t> countsBuffer;
 
-  GPRTBufferOf<float4> triangleExpansionBuffer; 
+  GPRTCallableOf<TraverseRecord> traverseBVH8Callable;
+  GPRTCallableOf<TraverseRecord> traverseBVH2Callable;
+  GPRTCallableOf<TraverseRecord> traverseLinearCallable;
 
-  GPRTBufferOf<uint64_t> codesBuffer;
-  GPRTBufferOf<uint64_t> idsBuffer;
-  GPRTBufferOf<float3> rootBoundsBuffer;
-  
-  GPRTBufferOf<int> neighbors;
-  GPRTBufferOf<int> distances;
-  GPRTBufferOf<int> connections;
-  GPRTBufferOf<int> flags;
-  GPRTBufferOf<int> claimCounts;
-  GPRTBufferOf<int> totalClaimed;
+  // One of these per geometry, one per "ray type"
+  std::vector<GPRTCallableOf<TriangleRecord>> intersectTriangleCallable;
+  GPRTBufferOf<uint32_t> SBTIndices;
 
-  GPRTBufferOf<float3> aabbBuffers[MAX_LEVELS];
-  GPRTBufferOf<float3> naabbBuffers[MAX_LEVELS];
-  GPRTBufferOf<float3> centerBuffers[MAX_LEVELS];
-  GPRTBufferOf<float3> oobbBuffers[MAX_LEVELS];
 
   GPRTBufferOf<uint8_t> scratchBuffer;
+
+  struct HPLOC {
+    // Kernels
+    GPRTCompute Bounds;
+    GPRTCompute SFC;
+    GPRTCompute Build;
+    GPRTCompute ToBVH8;
+
+    HPLOCParams params;
+
+    GPRTBufferOf<uint32_t> primPrefixBuffer;
+    GPRTBufferOf<gprt::Buffer> trianglesBuffers;
+    GPRTBufferOf<gprt::Buffer> verticesBuffers;
+
+    GPRTBufferOf<BVH2Node> bvh2Nodes;
+    GPRTBufferOf<BVH8Node> bvh8Nodes;
+    GPRTBufferOf<BVH8Leaf> bvh8Leaves;
+    GPRTBufferOf<int> atomicCounters;
+    GPRTBufferOf<float3> rootBoundsBuffer; 
+    GPRTBufferOf<uint64_t> codes;
+    GPRTBufferOf<uint64_t> clusterIDs;
+    GPRTBufferOf<int32_t> parentIDs;
+    GPRTBufferOf<uint64_t> indexPairs;
+  } hploc;
+  
+  
+  // GPRTBufferOf<uint8_t> countsBuffer;
+
+  // GPRTBufferOf<float4> triangleExpansionBuffer; 
+
+  // GPRTBufferOf<uint64_t> codesBuffer;
+  // GPRTBufferOf<uint64_t> idsBuffer;
+  // GPRTBufferOf<float3> rootBoundsBuffer;
+  
+  // GPRTBufferOf<int> neighbors;
+  // GPRTBufferOf<int> distances;
+  // GPRTBufferOf<int> connections;
+  // GPRTBufferOf<int> flags;
+  // GPRTBufferOf<int> claimCounts;
+  // GPRTBufferOf<int> totalClaimed;
+
+  // GPRTBufferOf<float3> aabbBuffers[MAX_LEVELS];
+  // GPRTBufferOf<float3> naabbBuffers[MAX_LEVELS];
+  // GPRTBufferOf<float3> centerBuffers[MAX_LEVELS];
+  // GPRTBufferOf<float3> oobbBuffers[MAX_LEVELS];
+
+  
 
   // GPRTGeomOf<gprt::NNAccel> geom;
   // GPRTAccel geomAccel;
@@ -7668,124 +7443,254 @@ struct NNTriangleAccel : public Accel {
   // GPRTBufferOf<float3> lbvhAabbs;
 
   NNTriangleAccel(Context* context, size_t numGeometries, NNTriangleGeom *geometries)
-      : Accel(context) {
+      : Accel(context) 
+  {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
-    if (numGeometries != 1) throw std::runtime_error("Not yet implemented");
     
-    // geom = gprtGeomCreate<gprt::NNAccel>((GPRTContext)context, context->nnTrianglesType);
-    // geomAccel = gprtAABBAccelCreate((GPRTContext)context, 1, &geom);
-    // instanceAccel = gprtInstanceAccelCreate((GPRTContext)context, 1, &geomAccel);
-    
-    // some logic here for rounding up
-    nnAccelHandle.numPrims = this->geometries[0]->index.count;
-    nnAccelHandle.numClusters[0] = (nnAccelHandle.numPrims      + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    
-    for (int i = 1; i < MAX_LEVELS; ++i) {
-      nnAccelHandle.numClusters[i] = (nnAccelHandle.numClusters[i-1] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
-    }
+    // HPLOC initialization
+    GPRTContext opaqueContext = (GPRTContext)this->context;
 
-    for (int i = 1; i < MAX_LEVELS; ++i) {
-      if (nnAccelHandle.numClusters[i] == 1) {
-        nnAccelHandle.numLevels = i;
-        break;
+    // Fetch kernel handles
+    hploc.Bounds = (GPRTCompute)this->context->internalComputePrograms["HPLOC_Bounds"];
+    hploc.SFC    = (GPRTCompute)this->context->internalComputePrograms["HPLOC_SFC"];
+    hploc.Build  = (GPRTCompute)this->context->internalComputePrograms["HPLOC_Build"];
+    hploc.ToBVH8 = (GPRTCompute)this->context->internalComputePrograms["HPLOC_ToBVH8"];
+
+    // Collect vertex / index buffer references
+    if (numGeometries > 128) throw std::runtime_error("Currently only 2^7 geometries supported in one BLAS");
+
+    // Callable handles for traversal
+    traverseBVH8Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH8");
+    traverseBVH2Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH2");
+    traverseLinearCallable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseLinear");
+
+    nnAccelHandle.TraverseBVH2Callable = ((Callable*)traverseBVH2Callable)->address;
+    nnAccelHandle.TraverseBVH8Callable = ((Callable*)traverseBVH8Callable)->address;
+    nnAccelHandle.TraverseLinearCallable = ((Callable*)traverseLinearCallable)->address;
+
+    SBTIndices = gprtDeviceBufferCreate<uint32_t>(opaqueContext, numGeometries * requestedFeatures.numRayTypes);
+    intersectTriangleCallable.resize(numGeometries * requestedFeatures.numRayTypes);
+    uint32_t instanceSBTOffset = Callable::callables.size(); // the offset into the callable SBT is the number of callables already in the SBT
+
+    hploc.params.N = 0;
+    std::vector<uint32_t> primPrefix(numGeometries);
+    std::vector<uint32_t> SBTIndicesData(numGeometries);
+    for (int i = 0; i < numGeometries; ++i) {
+      int numPrims = this->geometries[i]->index.count;
+      if (numPrims > 16777216) throw std::runtime_error("Currently only 2^24 primitives supported in one geometry");
+      std::cout<< "Geometry ID " << i << " has " << numPrims << " primitives" << std::endl;
+
+      // For now, assuming all indices are valid
+      primPrefix[i] = hploc.params.N;
+      hploc.params.N += this->geometries[i]->index.count;
+
+      // For now, create callable programs for each geometry
+      // (eventually, I want to allow users to set these)
+      for (int j = 0; j < requestedFeatures.numRayTypes; ++j) {
+        TriangleRecord triangleRecord;
+        triangleRecord.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
+        triangleRecord.vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
+
+        intersectTriangleCallable[i * requestedFeatures.numRayTypes + j] = gprtCallableCreate<TriangleRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "IntersectTriangle");
+        gprtCallableSetParameters(intersectTriangleCallable[i], &triangleRecord);
       }
     }
 
-    if (nnAccelHandle.numClusters[MAX_LEVELS - 1] > 1)
-      throw std::runtime_error("Too many prims in tree! Max is 2^29 primitives");
+    hploc.primPrefixBuffer = gprtDeviceBufferCreate<uint32_t>(opaqueContext, primPrefix.size(), primPrefix.data());
+    hploc.trianglesBuffers = gprtDeviceBufferCreate<gprt::Buffer>(opaqueContext, numGeometries);
+    hploc.verticesBuffers = gprtDeviceBufferCreate<gprt::Buffer>(opaqueContext, numGeometries);
 
-    // create these
-    codesBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    idsBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
-    rootBoundsBuffer = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
-    
-    neighbors = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
-    distances = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
-    connections = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
-    flags = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
-    claimCounts = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
-    totalClaimed = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+    size_t requiredSize = 0;
+    int expectedBvh2Nodes = hploc.params.N-1;
+    int expectedBvh8Nodes = int(ceilf(((hploc.params.N * 2 - 1) + 7.f) / 8.f));
 
-    // #ifdef ENABLE_OBBS
-    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      oobbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
-      centerBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
-      aabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
-      naabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
+    hploc.rootBoundsBuffer = gprtDeviceBufferCreate<float3>(opaqueContext, 2);
+    hploc.clusterIDs = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
+    hploc.codes = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
+    hploc.bvh2Nodes = gprtDeviceBufferCreate<BVH2Node>(opaqueContext, expectedBvh2Nodes);
+    hploc.bvh8Nodes = gprtDeviceBufferCreate<BVH8Node>(opaqueContext, expectedBvh8Nodes);
+    hploc.bvh8Leaves = gprtDeviceBufferCreate<BVH8Leaf>(opaqueContext, hploc.params.N);
+    hploc.parentIDs = gprtDeviceBufferCreate<int32_t>(opaqueContext, hploc.params.N);
+    hploc.atomicCounters = gprtSharedBufferCreate<int>(opaqueContext, 6);
+    // hploc.atomicCounters = gprtDeviceBufferCreate<int>(opaqueContext, 6);
+    hploc.indexPairs = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
+    gprtBuildShaderBindingTable(opaqueContext, GPRT_SBT_ALL); // do I still need this?
+
+    hploc.params.BVH2 = gprtBufferGetHandle(hploc.bvh2Nodes);
+    hploc.params.BVH8 = gprtBufferGetHandle(hploc.bvh8Nodes);
+    hploc.params.BVH8L = gprtBufferGetHandle(hploc.bvh8Leaves);
+    hploc.params.AC = gprtBufferGetHandle(hploc.atomicCounters);
+    hploc.params.C = gprtBufferGetHandle(hploc.codes);
+    hploc.params.I = gprtBufferGetHandle(hploc.clusterIDs);
+    hploc.params.pID = gprtBufferGetHandle(hploc.parentIDs);
+    hploc.params.rootBounds = gprtBufferGetHandle(hploc.rootBoundsBuffer);
+    hploc.params.indexPairs = gprtBufferGetHandle(hploc.indexPairs);
+    hploc.params.primPrefix = gprtBufferGetHandle(hploc.primPrefixBuffer);
+
+    // Setup traversal callable records
+    TraverseRecord record;
+    record.N = hploc.params.N;
+    record.BVH8N = hploc.params.BVH8;
+    record.BVH8L = hploc.params.BVH8L;
+    record.BVH2 = hploc.params.BVH2;
+    record.primBuffers = gprtBufferGetHandle(hploc.trianglesBuffers);
+    record.vertBuffers = gprtBufferGetHandle(hploc.verticesBuffers);
+    record.InstanceContributionToHitGroupIndex = instanceSBTOffset;
+    gprtCallableSetParameters(traverseBVH8Callable, &record);
+    gprtCallableSetParameters(traverseBVH2Callable, &record);
+    gprtCallableSetParameters(traverseLinearCallable, &record);
+
+
+    gprtBufferMap(hploc.trianglesBuffers);
+    gprtBufferMap(hploc.verticesBuffers);
+    gprt::Buffer* trianglesBuffers = gprtBufferGetPointer(hploc.trianglesBuffers);
+    gprt::Buffer* verticesBuffers = gprtBufferGetPointer(hploc.verticesBuffers);
+    for (int i = 0; i < numGeometries; ++i) {
+      trianglesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
+      verticesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
     }
-
-    // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
-    // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
-    // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL4Clusters * 2 - 1);
-    // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL4Clusters * 2 - 1));
-
-    // w component holds the count of references
-    triangleExpansionBuffer = gprtDeviceBufferCreate<float4>((GPRTContext)context, nnAccelHandle.numPrims * 3);
-
-    nnAccelHandle.maxSearchRange = 0.f; 
+    gprtBufferUnmap(hploc.trianglesBuffers);
+    gprtBufferUnmap(hploc.verticesBuffers);
+    hploc.params.triangles = gprtBufferGetHandle(hploc.trianglesBuffers);
+    hploc.params.vertices = gprtBufferGetHandle(hploc.verticesBuffers);
     
+
     // to be resized as needed
     scratchBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
 
-    nnAccelHandle.points = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    nnAccelHandle.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
-
-    nnAccelHandle.triangleLists = gprtBufferGetHandle(triangleExpansionBuffer);
     
-    nnAccelHandle.codes = gprtBufferGetHandle(codesBuffer);
-    nnAccelHandle.ids = gprtBufferGetHandle(idsBuffer);
-    nnAccelHandle.aabb = gprtBufferGetHandle(rootBoundsBuffer);
     
-    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      nnAccelHandle.oobbs[i] = gprtBufferGetHandle(oobbBuffers[i]);
-      nnAccelHandle.aabbs[i] = gprtBufferGetHandle(aabbBuffers[i]);
-      nnAccelHandle.centers[i] = gprtBufferGetHandle(centerBuffers[i]);
-    }
-
-    // Determine counts of references of each vertex. Vertices with a count of 1 are "open"
-    gprtBufferMap((GPRTBuffer)this->geometries[0]->index.buffer);
-    int3* triPtr = (int3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->index.buffer);
-    std::vector<int3> triangles(nnAccelHandle.numPrims);
-    std::vector<uint8_t> vertCounts = getVertexCounts(triangles, this->geometries[0]->vertex.count);
-    gprtBufferUnmap((GPRTBuffer)this->geometries[0]->index.buffer);
-
-    countsBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context, vertCounts.size());
 
 
-    {
-      gprtBufferMap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-      float3* vertPtr = (float3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-      std::vector<float3> vertices(this->geometries[0]->vertex.count);
-      memcpy(triangles.data(), triPtr, sizeof(int3) * nnAccelHandle.numPrims);
-      memcpy(vertices.data(), vertPtr, sizeof(float3) * this->geometries[0]->vertex.count);
+    
+
+    // for (uint32_t i = 0; i < MAX_LEVELS; ++i) {
+    //   nodeRecord->oobbs[i] = nnAccelHandle.oobbs[i];
+    //   nodeRecord->aabbs[i] = nnAccelHandle.aabbs[i];
+    //   nodeRecord->centers[i] = nnAccelHandle.centers[i];
+    //   nodeRecord->numClusters[i] = nnAccelHandle.numClusters[i];
+    // }
+    // nodeRecord->numLevels = nnAccelHandle.numLevels;
+    // nodeRecord->numPrims = nnAccelHandle.numPrims;
+    // nodeRecord->triangleLists = nnAccelHandle.triangleLists;
+
+
+    // // Older clustering code below... 
+
+
+    // // geom = gprtGeomCreate<gprt::NNAccel>((GPRTContext)context, context->nnTrianglesType);
+    // // geomAccel = gprtAABBAccelCreate((GPRTContext)context, 1, &geom);
+    // // instanceAccel = gprtInstanceAccelCreate((GPRTContext)context, 1, &geomAccel);
+    
+    // // some logic here for rounding up
+    // nnAccelHandle.numPrims = this->geometries[0]->index.count;
+    // nnAccelHandle.numClusters[0] = (nnAccelHandle.numPrims      + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    
+    // for (int i = 1; i < MAX_LEVELS; ++i) {
+    //   nnAccelHandle.numClusters[i] = (nnAccelHandle.numClusters[i-1] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR;
+    // }
+
+    // for (int i = 1; i < MAX_LEVELS; ++i) {
+    //   if (nnAccelHandle.numClusters[i] == 1) {
+    //     nnAccelHandle.numLevels = i;
+    //     break;
+    //   }
+    // }
+
+    // if (nnAccelHandle.numClusters[MAX_LEVELS - 1] > 1)
+    //   throw std::runtime_error("Too many prims in tree! Max is 2^29 primitives");
+
+    // // create these
+    // codesBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
+    // idsBuffer = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numPrims);
+    // rootBoundsBuffer = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2);
+    
+    // neighbors = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    // distances = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    // connections = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+    // flags = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+    // claimCounts = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+    // totalClaimed = gprtDeviceBufferCreate<int>((GPRTContext)context, nnAccelHandle.numPrims);
+
+    // // #ifdef ENABLE_OBBS
+    // for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
+    //   oobbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 3 * nnAccelHandle.numClusters[i]);
+    //   centerBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, nnAccelHandle.numClusters[i]);
+    //   aabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
+    //   naabbBuffers[i] = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * nnAccelHandle.numClusters[i]);
+    // }
+
+    // // lbvhMortonCodes = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
+    // // lbvhIds = gprtDeviceBufferCreate<uint64_t>((GPRTContext)context, nnAccelHandle.numL4Clusters);
+    // // lbvhNodes = gprtDeviceBufferCreate<int4>((GPRTContext)context, nnAccelHandle.numL4Clusters * 2 - 1);
+    // // lbvhAabbs = gprtDeviceBufferCreate<float3>((GPRTContext)context, 2 * (nnAccelHandle.numL4Clusters * 2 - 1));
+
+    // // w component holds the count of references
+    // triangleExpansionBuffer = gprtDeviceBufferCreate<float4>((GPRTContext)context, nnAccelHandle.numPrims * 3);
+
+    // nnAccelHandle.maxSearchRange = 0.f; 
+    
+    
+
+    // nnAccelHandle.points = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    // nnAccelHandle.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
+
+    // nnAccelHandle.triangleLists = gprtBufferGetHandle(triangleExpansionBuffer);
+    
+    // nnAccelHandle.codes = gprtBufferGetHandle(codesBuffer);
+    // nnAccelHandle.ids = gprtBufferGetHandle(idsBuffer);
+    // nnAccelHandle.aabb = gprtBufferGetHandle(rootBoundsBuffer);
+    
+    // for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
+    //   nnAccelHandle.oobbs[i] = gprtBufferGetHandle(oobbBuffers[i]);
+    //   nnAccelHandle.aabbs[i] = gprtBufferGetHandle(aabbBuffers[i]);
+    //   nnAccelHandle.centers[i] = gprtBufferGetHandle(centerBuffers[i]);
+    // }
+
+    // // Determine counts of references of each vertex. Vertices with a count of 1 are "open"
+    // gprtBufferMap((GPRTBuffer)this->geometries[0]->index.buffer);
+    // int3* triPtr = (int3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->index.buffer);
+    // std::vector<int3> triangles(nnAccelHandle.numPrims);
+    // std::vector<uint8_t> vertCounts = getVertexCounts(triangles, this->geometries[0]->vertex.count);
+    // gprtBufferUnmap((GPRTBuffer)this->geometries[0]->index.buffer);
+
+    // countsBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context, vertCounts.size());
+
+
+    // {
+    //   gprtBufferMap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    //   float3* vertPtr = (float3*)gprtBufferGetPointer((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    //   std::vector<float3> vertices(this->geometries[0]->vertex.count);
+    //   memcpy(triangles.data(), triPtr, sizeof(int3) * nnAccelHandle.numPrims);
+    //   memcpy(vertices.data(), vertPtr, sizeof(float3) * this->geometries[0]->vertex.count);
       
-      std::vector<float3> vertexNormalBounds = computeVertexNormalBounds(vertices, triangles);
+    //   std::vector<float3> vertexNormalBounds = computeVertexNormalBounds(vertices, triangles);
 
-      float largestVolume = 0.f;
-      float averageVolume = 0.f;
-      for (uint32_t i = 0; i < vertexNormalBounds.size() / 2; ++i) {
-        // print out the volume of the normal bounds
-        float3 NMin = vertexNormalBounds[i * 2 + 0];
-        float3 NMax = vertexNormalBounds[i * 2 + 1];
-        float3 diagonal = NMax - NMin;
-        float volume = diagonal.x * diagonal.y * diagonal.z;
-        if (volume > 0.f) {
-          // print out the volume of the box to 3 decimal places
-          // std::cout << "Vertex " << i << " normal bounds volume: " << std::fixed << std::setprecision(3) << volume << std::endl;
-        }
-        if (volume > largestVolume) {
-          largestVolume = volume;
-        }
+    //   float largestVolume = 0.f;
+    //   float averageVolume = 0.f;
+    //   for (uint32_t i = 0; i < vertexNormalBounds.size() / 2; ++i) {
+    //     // print out the volume of the normal bounds
+    //     float3 NMin = vertexNormalBounds[i * 2 + 0];
+    //     float3 NMax = vertexNormalBounds[i * 2 + 1];
+    //     float3 diagonal = NMax - NMin;
+    //     float volume = diagonal.x * diagonal.y * diagonal.z;
+    //     if (volume > 0.f) {
+    //       // print out the volume of the box to 3 decimal places
+    //       // std::cout << "Vertex " << i << " normal bounds volume: " << std::fixed << std::setprecision(3) << volume << std::endl;
+    //     }
+    //     if (volume > largestVolume) {
+    //       largestVolume = volume;
+    //     }
         
         
-        // Compute an updated average by using an online averaging method
-        averageVolume += (volume - averageVolume) / (i + 1);
-      }
-      std::cout << "Largest volume: " << std::fixed << std::setprecision(3) << largestVolume << std::endl;
-      std::cout << "Average volume: " << std::fixed << std::setprecision(3) << averageVolume << std::endl;
-      gprtBufferUnmap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    }
+    //     // Compute an updated average by using an online averaging method
+    //     averageVolume += (volume - averageVolume) / (i + 1);
+    //   }
+    //   std::cout << "Largest volume: " << std::fixed << std::setprecision(3) << largestVolume << std::endl;
+    //   std::cout << "Average volume: " << std::fixed << std::setprecision(3) << averageVolume << std::endl;
+    //   gprtBufferUnmap((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    // }
 
 
 
@@ -7806,18 +7711,18 @@ struct NNTriangleAccel : public Accel {
     // Testing out using a callable for recursive traversal...
     // note, order here is important. Node callable must be first, leaf callable must be second.
     // traverseNodeCallable = gprtMissCreate<NodeRecord>((GPRTContext)context, context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
-    traverseCallable = gprtCallableCreate<NodeRecord>((GPRTContext)context, (GPRTModule)context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
+    // traverseCallable = gprtCallableCreate<NodeRecord>((GPRTContext)context, (GPRTModule)context->nnTraverseModule, ("TraverseNode" + std::to_string(nnAccelHandle.numLevels)).c_str());
 
-    NodeRecord *nodeRecord = gprtCallableGetParameters(traverseCallable);
-    for (uint32_t i = 0; i < MAX_LEVELS; ++i) {
-      nodeRecord->oobbs[i] = nnAccelHandle.oobbs[i];
-      nodeRecord->aabbs[i] = nnAccelHandle.aabbs[i];
-      nodeRecord->centers[i] = nnAccelHandle.centers[i];
-      nodeRecord->numClusters[i] = nnAccelHandle.numClusters[i];
-    }
-    nodeRecord->numLevels = nnAccelHandle.numLevels;
-    nodeRecord->numPrims = nnAccelHandle.numPrims;
-    nodeRecord->triangleLists = nnAccelHandle.triangleLists;
+    // NodeRecord *nodeRecord = gprtCallableGetParameters(traverseCallable);
+    // for (uint32_t i = 0; i < MAX_LEVELS; ++i) {
+    //   nodeRecord->oobbs[i] = nnAccelHandle.oobbs[i];
+    //   nodeRecord->aabbs[i] = nnAccelHandle.aabbs[i];
+    //   nodeRecord->centers[i] = nnAccelHandle.centers[i];
+    //   nodeRecord->numClusters[i] = nnAccelHandle.numClusters[i];
+    // }
+    // nodeRecord->numLevels = nnAccelHandle.numLevels;
+    // nodeRecord->numPrims = nnAccelHandle.numPrims;
+    // nodeRecord->triangleLists = nnAccelHandle.triangleLists;
   };
 
   ~NNTriangleAccel(){};
@@ -7906,98 +7811,496 @@ struct NNTriangleAccel : public Accel {
     // gprtBufferUnmap(leaves);
   }
 
+  void testBVH2Traversal(std::vector<BVH2Node> &nodes, std::vector<uint3> tris, std::vector<float3> verts, int numLeaves) {
+    using namespace math;
+    std::vector<int> stack(0);
+    stack.push_back(0);
+
+    std::vector<int> leafHitCount(numLeaves, 0);
+    while (stack.size() > 0) {
+      int current = stack.back();
+      stack.pop_back();
+      BVH2Node node = nodes[current];
+
+      uint32_t leftIndex = node.getChildPrimID(0);
+      uint32_t rightIndex = node.getChildPrimID(1);
+      bool leftIsLeaf = node.isChildLeaf(0);
+      bool rightIsLeaf = node.isChildLeaf(1);
+
+      if (leftIsLeaf) {
+        uint3 tri = tris[leftIndex];
+        float3 v0 = verts[tri.x];
+        float3 v1 = verts[tri.y];
+        float3 v2 = verts[tri.z];
+
+        float3 aabbMin = min(min(v0, v1), v2);
+        float3 aabbMax = max(max(v0, v1), v2);
+
+        if (any(aabbMin < node.aabbMinAndL.xyz()) || any(aabbMax > node.aabbMaxAndR.xyz())) {
+          std::cout<<"Error: Left AABB is not inside parent AABB" << std::endl;
+        }
+
+        leafHitCount[leftIndex]++;
+      }
+      else {
+        // test if left AABB is inside parent AABB
+        BVH2Node leftNode = nodes[leftIndex];
+        if (any(leftNode.aabbMinAndL.xyz() < node.aabbMinAndL.xyz()) || any(leftNode.aabbMaxAndR.xyz() > node.aabbMaxAndR.xyz())) {
+          std::cout<<"Error: Left AABB is not inside parent AABB" << std::endl;
+        }
+        stack.push_back(leftIndex);
+      }
+
+      if (rightIsLeaf) {
+        uint3 tri = tris[rightIndex];
+        float3 v0 = verts[tri.x];
+        float3 v1 = verts[tri.y];
+        float3 v2 = verts[tri.z];
+
+        float3 aabbMin = min(min(v0, v1), v2);
+        float3 aabbMax = max(max(v0, v1), v2);
+
+        if (any(aabbMin < node.aabbMinAndL.xyz()) || any(aabbMax > node.aabbMaxAndR.xyz())) {
+          std::cout<<"Error: Right AABB is not inside parent AABB" << std::endl;
+        }
+
+        leafHitCount[rightIndex]++;
+      }
+      else {
+        // test if right AABB is inside parent AABB
+        BVH2Node rightNode = nodes[rightIndex];
+        if (any(rightNode.aabbMinAndL.xyz() < node.aabbMinAndL.xyz()) || any(rightNode.aabbMaxAndR.xyz() > node.aabbMaxAndR.xyz())) {
+          std::cout<<"Error: Right AABB is not inside parent AABB" << std::endl;
+        }
+        stack.push_back(rightIndex);
+      }
+    }
+
+    for (int i = 0; i < numLeaves; ++i) {
+      if (leafHitCount[i] != 1) {
+        std::cout<<"Error: Leaf " << i << " hit " << leafHitCount[i] << " times" << std::endl;
+      }
+    }
+  }
+
+  struct TravBVH8Data {
+    std::vector<BVH8Node> parentStack;
+    bool isLeaf;
+    int index;
+    int childSlot;
+  };
+
+  void testBVH8Traversal(std::vector<BVH8Node> &nodes, std::vector<BVH8Leaf> &leaves) 
+  {
+    // Todo, update to account for changes to slot indexing
+    return; 
+    using namespace math;
+    // "isInner", "nodeIndex", "parentIndex", "childSlot in parent"
+    std::vector<TravBVH8Data> stack;
+    stack.push_back({{}, false, 0, -1});
+
+    // none of these should exceed 1.
+    std::vector<int> childBaseAddrRefs(nodes.size(), 0);
+
+    // tests to see if all leaves can be reached by the inner nodes
+    std::vector<int> leafHitCount(leaves.size(), 0);
+    while (stack.size() > 0) {
+      auto current = stack.back();
+      stack.pop_back();
+
+      // if the item is a leaf...
+      if (current.isLeaf) {
+        // Verify that the leaf is contained in all parent AABBs
+        BVH8Leaf leaf = leaves[current.index];
+        BVH8Triangle tri = leaf.tri;
+        float3 aabbMin = min(tri.v[0], min(tri.v[1], tri.v[2]));
+        float3 aabbMax = max(tri.v[0], max(tri.v[1], tri.v[2]));
+        for (int pid = 0; pid < current.parentStack.size(); ++pid) {
+          BVH8Node parentNode = current.parentStack[pid];
+          float3 parentAABBMin = parentNode.origin;
+          float3 parentAABBMax = parentNode.origin + parentNode.getScale();
+          if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
+            std::cout<<"Error: Leaf AABB is not inside parent AABB" << std::endl;
+          }
+        }
+
+        // Also verify primitive is within it's assigned child slot
+        if (current.parentStack.size() > 0) {
+          BVH8Node parentNode = current.parentStack.back();
+          float2x3 slotAABB = parentNode.getChildBounds(current.childSlot);
+          float3 slotAABBMin = slotAABB[0];
+          float3 slotAABBMax = slotAABB[1];
+          if (any(aabbMin < slotAABBMin) || any(aabbMax > slotAABBMax)) {
+            std::cout<<"Error: Node AABB is not inside assigned child slot" << std::endl;
+
+            // test to see if the triangle is inside any of the slots...
+            bool inside = false;
+            for (int j = 0; j < 8; ++j) {
+              float2x3 slotAABB = parentNode.getChildBounds(j);
+              float3 slotAABBMin = slotAABB[0];
+              float3 slotAABBMax = slotAABB[1];
+              if (all(aabbMin >= slotAABBMin) && all(aabbMax <= slotAABBMax)) {
+                inside = true;
+                break;
+              }
+            }
+
+            if (!inside) {
+              std::cout<<"Error: Node AABB is not inside any child slot" << std::endl;
+            }
+          }
+        }
+        
+        // Mark the leaf as hit
+        leafHitCount[current.index]++;
+      }
+
+      // if the item is a node
+      else {
+        BVH8Node node = nodes[current.index];
+
+        if (current.index == 0) {
+          std::cout<<"Root Node" << std::endl;
+          uint8_t xLo[8];
+          uint8_t xHi[8];
+          for (int i = 0; i < 8; ++i) {
+            xLo[i] = node.qlox8 >> (i * 8) & 0xFF;
+            xHi[i] = node.qhix8 >> (i * 8) & 0xFF;
+            // xLo 215 215 215 215 xHi bits 154 173 188 173
+          }
+          std::cout<<"xLo ";
+          for (int i = 0; i < 8; ++i) {
+            std::cout<<int(xLo[i]) << " ";
+          }
+          std::cout<<std::endl;
+          std::cout<<"xHi ";
+          for (int i = 0; i < 8; ++i) {
+            std::cout<<int(xHi[i]) << " ";
+          }
+          std::cout<<std::endl;
+        }
+
+        if (current.index == 8 || current.index == 7 || current.index == 12) {
+          std::cout<<std::endl;
+        }
+
+        // If node isnt root...
+        if (current.parentStack.size() > 0) {
+          // Get our quantized bounds
+          BVH8Node parentNode = current.parentStack.back();
+          int childSlot = current.childSlot;
+          float2x3 slotAABB = parentNode.getChildBounds(childSlot);
+          float3 aabbMin = slotAABB[0];
+          float3 aabbMax = slotAABB[1];
+         
+          // Verify that the node is contained in all parent nodes conservative bounds
+          for (int pid = 0; pid < current.parentStack.size(); ++pid) {
+            BVH8Node parentNode = current.parentStack[pid];
+            float3 parentAABBMin = parentNode.origin;
+            float3 parentAABBMax = parentNode.origin + parentNode.getScale();          
+            if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
+              std::cout<<"Error: Node AABB is not inside parent AABB" << std::endl;
+            }
+          }          
+        }
+
+        float3 parentAabbMin = node.origin;
+        float3 parentAabbMax = node.origin + node.getScale();
+
+        // push every child of the node onto the stack
+        for (int i = 0; i < 8; ++i) {
+          uint8_t meta = node.getMeta(i);
+
+          // empty child slot
+          if (meta == 0) continue;
+
+          // Test to see if quantized child bounds is inside parent
+          float2x3 aabb = node.getChildBounds(i);
+          if (any(aabb[0] < parentAabbMin) || any(aabb[1] > parentAabbMax)) {
+            std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
+          }
+
+          // if child is an inner node...
+          if (node.getIMask(i)) {
+            int relativeIndex = (meta & 0x1F) - 24;
+            
+            // Verify that the relative index is valid
+            if (relativeIndex < 0 || relativeIndex >= 8) {
+              std::cout<<"Error: Inner node has invalid relative index" << std::endl;
+            }
+            
+            // Verify that "hasInnerNode" test works
+            if (node.hasInnerNode() == false) {
+              std::cout<<"Error: Inner node has no inner node flag set" << std::endl;
+            }
+
+            // Push inner node onto the stack.
+            uint32_t childAddr = relativeIndex + node.childNodeBaseIndex;
+            
+            // Verify child address is valid
+            if (childAddr < 0 || childAddr >= nodes.size()) {
+              std::cout<<"Error: Inner node has invalid absolute address" << std::endl;
+            }
+
+            // Create stack entry for inner node
+            TravBVH8Data data = {current.parentStack, false, childAddr, i};
+            data.parentStack.push_back(node);
+            stack.push_back(data);
+          }
+        
+          // if child is a leaf
+          else {
+            int relativeIndex = (meta & 0x1F); // 0-24
+            
+            // Verify relative Index is valid
+            if (relativeIndex < 0 || relativeIndex >= 24) {
+              std::cout<<"Error: Leaf has invalid relative index" << std::endl;
+            }
+            
+            uint32_t leafAddr = relativeIndex + node.primitiveBaseIndex;
+            // Verify absolute address is valid
+            if (leafAddr < 0 || leafAddr >= leaves.size()) {
+              std::cout<<"Error: Leaf has invalid absolute address" << std::endl;
+            }
+
+            // Create stack entry for leaf
+            TravBVH8Data data = {current.parentStack, true, leafAddr, i};
+            data.parentStack.push_back(node);
+            stack.push_back(data);
+          }
+        }
+      }
+    }
+
+
+    for (int i = 0; i < leaves.size(); ++i) {
+      if (leafHitCount[i] != 1) {
+        std::cout<<"Error: Leaf " << i << " hit " << leafHitCount[i] << " times" << std::endl;
+      }
+    }
+  }
+
+  void printBVH2OverlapStatistics(std::vector<BVH2Node> &nodes, int numLeaves, double &overlap, double &avg) {
+    using namespace math;
+
+    avg = 0.f;
+    uint64_t N = 0;
+    overlap = 0.f;
+    
+    BVH2Node root = nodes[nodes.size() - 1];
+    float3 sceneDiagonal = root.aabbMaxAndR.xyz() - root.aabbMinAndL.xyz();
+    double sceneVolume = sceneDiagonal.x * sceneDiagonal.y * sceneDiagonal.z;
+
+    // std::cout<<"Computing overlap..." << std::endl;
+
+    
+    // For each cluster    
+    for (int i = 0; i < nodes.size(); ++i) {
+
+      if ((i % 1000 )== 0) {
+        std::cout<< '\r' << i << "/" << nodes.size() << " nodes, avg overlap: " << avg << " projected overall overlap: " << (overlap / float(i)) * nodes.size();
+      }
+
+      BVH2Node node = nodes[i];
+
+      // Compute our volume
+      float3 diagonal = node.aabbMaxAndR.xyz() - node.aabbMinAndL.xyz();
+      double AVolume = diagonal.x * diagonal.y * diagonal.z;
+      if (AVolume <= 0.f) {
+        continue;
+      }
+      float relativeBBoxOverlap = 0.f;
+
+      // Check to see what other clusters overlap this one...
+      for (uint32_t j = i+1; j < nodes.size(); j += 1) {
+        // if (i == j) continue; // skip testing self...
+        BVH2Node otherNode = nodes[j];
+
+        if (all(node.aabbMaxAndR >= otherNode.aabbMinAndL) && all(otherNode.aabbMaxAndR >= node.aabbMinAndL)) {
+          // Clip B to A
+          float3 clippedAABBMin = max(node.aabbMinAndL.xyz(), otherNode.aabbMinAndL.xyz());
+          float3 clippedAABBMax = min(node.aabbMaxAndR.xyz(), otherNode.aabbMaxAndR.xyz());
+          // Compute it's volume...
+          float3 diagonal = clippedAABBMax - clippedAABBMin;
+          if (any(diagonal <= 0.f)) continue;
+
+          double BVolume = diagonal.x * diagonal.y * diagonal.z;
+          
+
+          // Add the amount of normalized overlap to score.
+          relativeBBoxOverlap += (BVolume / AVolume);
+
+          overlap += (BVolume / sceneVolume);
+
+          // // Without double counting, add intersected volume
+          // if (j > i) {
+
+          // }
+        }
+      }
+
+      N=N+1;
+      double a = 1.f / N;
+      double b = 1.f - a;
+      avg = a * relativeBBoxOverlap + b * avg; 
+    }
+    std::cout<<" - done " << std::endl;
+
+    // std::cout<<"Average number of boxes overlapping boxes: " << avg << std::endl;
+    // std::cout<<"Total relative overlapping volume of boxes: " << (overlap / numSamples) * nodes.size() << std::endl;
+  }
+
+// int printBVH2(std::vector<BVH2Node> &nodes, int numLeaves, const std::string& prefix, int current, bool isLeft)
+// {
+//   std::cout << prefix;
+//   std::cout<< (isLeft? "|--" : "L--" );
+  
+//   std::cout << current << std::endl;
+
+//   if (current < numLeaves) return 1;
+
+//   // enter the next tree level - left and right branch
+//   BVH2Node node = nodes[current - numLeaves];
+//   int subnodes1 = printBVH2( nodes, numLeaves, prefix + (isLeft ? "|   " : "    "), node.leftIndex, true);
+//   int subnodes2 = printBVH2( nodes, numLeaves, prefix + (isLeft ? "|   " : "    "), node.rightIndex, false);
+//   return subnodes1 + subnodes2;
+// }
+
+  #include <fstream>
+
+  int computeBVH2MaxDepth( std::vector<BVH2Node>& nodes, int numLeaves, int currentNode, int parentDepth) {
+    if (currentNode  < numLeaves) return parentDepth;
+    BVH2Node node = nodes[currentNode - numLeaves];
+    uint32_t L = *(uint32_t*)(&node.aabbMinAndL.w);
+    uint32_t R = *(uint32_t*)(&node.aabbMaxAndR.w);
+
+    int LGeomID = L >> 24;
+    int RGeomID = R >> 24;
+
+    int LPrimID = L & 0x00FFFFFF;
+    int RPrimID = R & 0x00FFFFFF;
+
+    int leftDepth = computeBVH2MaxDepth(nodes, numLeaves, LPrimID, parentDepth + 1);
+    int rightDepth = computeBVH2MaxDepth(nodes, numLeaves, RPrimID, parentDepth + 1);
+
+    return std::max(leftDepth, rightDepth);
+  }
+
+  int writeBVH2ToCSV(std::ofstream& outputFile, std::vector<BVH2Node>& nodes, int numLeaves, int current) {
+    for (int i = 0; i < nodes.size(); ++i) {
+      if (i == nodes.size() - 1) {
+        std::cout<<std::endl;
+      }
+      BVH2Node node = nodes[i];
+      uint32_t L = *(uint32_t*)(&node.aabbMinAndL.w);
+      uint32_t R = *(uint32_t*)(&node.aabbMaxAndR.w);
+
+      int LGeomID = L >> 24;
+      int RGeomID = R >> 24;
+
+      int LPrimID = L & 0x00FFFFFF;
+      int RPrimID = R & 0x00FFFFFF;
+      
+      // If left or right are leaves, flip the sign and just store the geometry ID
+      if (LGeomID == 255) 
+        LPrimID -= numLeaves;
+      else 
+        LPrimID = -LGeomID-1;
+      
+      if (RGeomID == 255)
+        RPrimID -= numLeaves;
+      else 
+        RPrimID = -RGeomID-1;
+      
+      
+      outputFile << LPrimID << " " << RPrimID << " " << i + numLeaves << " "; // Using 0 for primitiveIdx
+
+      // Output AABB information
+      outputFile << node.aabbMinAndL.x << " " << node.aabbMinAndL.y << " " << node.aabbMinAndL.z << " ";
+      outputFile << node.aabbMaxAndR.x << " " << node.aabbMaxAndR.y << " " << node.aabbMaxAndR.z << std::endl;
+
+      // // if (current >= nodes.size()) return 0;
+
+
+
+      // // If current node is a leaf, it might not have valid child indices
+      // if (current < numLeaves) {
+      //     // outputFile << current << " " << -1 << " " << -1 << " "; // -1 to denote no children
+      // } else {
+      //   const BVH2Node& node = nodes[current - numLeaves];
+        
+      //   int leftChild = node.leftIndex;
+      //   int rightChild = node.rightIndex;
+
+      //   outputFile << leftChild - numLeaves << " " << rightChild - numLeaves << " " << current << " "; // Using 0 for primitiveIdx
+
+
+
+      //   // Recursively write left and right children
+      //   if (current >= numLeaves) {
+      //       writeBVHToCSV(outputFile, nodes, numLeaves, leftChild);
+      //       writeBVHToCSV(outputFile, nodes, numLeaves, rightChild);
+      //   }
+
+      }
+
+      return 1;
+  }
+
+  // void HPLOC(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {    
+    
+  // }
 
   void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
-    gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
 
-    // Fetch kernels
-    auto ComputeTriangleRootBounds      = (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"]; //FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
-    auto ComputeTriangleAABBsAndCenters = (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"]; //FetchCompute<ComputeTriangleAABBsAndCentersParams>("ComputeTriangleAABBsAndCenters");
-    auto ComputeTriangleCodes           = (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"]; //FetchCompute<ComputeTriangleCodesParams>("ComputeTriangleCodes");
-    auto ComputeAABBsAndCenters         = (GPRTCompute)context->internalComputePrograms["ComputeAABBsAndCenters"]; //FetchCompute<ComputeAABBsAndCentersParams>("ComputeAABBsAndCenters");
-    auto ComputeTriangleOBBCovariances  = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"]; //FetchCompute<ComputeTriangleOBBCovariancesParams>("ComputeTriangleOBBCovariances");
-    auto ComputeOBBCovariances          = (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"]; //FetchCompute<ComputeOBBCovariancesParams>("ComputeOBBCovariances");
-    auto ComputeOBBAngles               = (GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"]; //FetchCompute<ComputeOBBAnglesParams>("ComputeOBBAngles");
-    auto ComputeTriangleOBBBounds       = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"]; //FetchCompute<ComputeTriangleOBBBoundsParams>("ComputeTriangleOBBBounds");
-    auto ExpandTriangles                = (GPRTCompute)context->internalComputePrograms["ExpandTriangles"]; //FetchCompute<ExpandTrianglesParams>("ExpandTriangles");
-    
     GPRTContext context = (GPRTContext)this->context;
-    typedef uint32_t uint;
-
-    uint32_t numPrims = nnAccelHandle.numPrims;
-    uint32_t numLevels = nnAccelHandle.numLevels;
-
-    std::cout<<"Building NN tree with " << numPrims << " primitives and " << numLevels << " levels" << std::endl;
     
-    // For common launches over primitives in parallel
-    uint3 numPrimGroups = {(numPrims + 31) / 32, 1, 1};
+    std::cout<<"Building HPLOC tree with " << hploc.params.N << " primitives" << std::endl;
+
+    int N = hploc.params.N;
+    uint3 numPrimGroups = {(hploc.params.N + 31) / 32, 1, 1};
     uint3 numPrimThreads = {32, 1, 1};
 
-    // Buffers used for construction
-    gprt::Buffer triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
-    gprt::Buffer vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
-    gprt::Buffer vertCounts = gprtBufferGetHandle(this->countsBuffer);
-    gprt::Buffer trianglesExp = gprtBufferGetHandle(triangleExpansionBuffer);
-    gprt::Buffer rootBounds = gprtBufferGetHandle(this->rootBoundsBuffer);
-    gprt::Buffer codes = gprtBufferGetHandle(this->codesBuffer);
-    gprt::Buffer ids = gprtBufferGetHandle(this->idsBuffer);
+    // float duration;
 
-    gprt::Buffer aabbHierarchy[MAX_LEVELS];
-    gprt::Buffer centerHierarchy[MAX_LEVELS];
-    gprt::Buffer oobbHierarchy[MAX_LEVELS];
-    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      aabbHierarchy[i] = gprtBufferGetHandle(aabbBuffers[i]);
-      centerHierarchy[i] = gprtBufferGetHandle(centerBuffers[i]);
-      oobbHierarchy[i] = gprtBufferGetHandle(oobbBuffers[i]);
-    }
-    
+    int* counters = gprtBufferGetPointer(hploc.atomicCounters);
+    int &numValidLeaves = counters[0];
+    int &bvh2NodesAllocated = counters[1];
+    int &bvh2ToBVH8WorkerAlloc = counters[2];
+    int &bvh8NodeAlloc = counters[3];
+    int &bvh8LeafAlloc = counters[4];
+    int &errorCode = counters[5];    
+
+    // initialize atomic counters
+    numValidLeaves = 0; // number of valid leaves
+    bvh2NodesAllocated = 0; // allocation of bvh2 nodes to pull from
+    bvh2ToBVH8WorkerAlloc = 0; // bvh2 -> bvh8 worker allocation
+    bvh8NodeAlloc = 0; // bvh8 node allocation (with root pre-allocated)
+    bvh8LeafAlloc = 0; // bvh8 leaf allocation
+    errorCode = 0; // error flag
+
     // initialize root AABB
-    gprtBufferMap(rootBoundsBuffer);
-    float3* aabbPtr = gprtBufferGetPointer(rootBoundsBuffer);
+    gprtBufferMap(hploc.rootBoundsBuffer);
+    float3* aabbPtr = gprtBufferGetPointer(hploc.rootBoundsBuffer);
     aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
     aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
-    gprtBufferUnmap(rootBoundsBuffer);
+    gprtBufferUnmap(hploc.rootBoundsBuffer);
 
-    // warmup... 
-    for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile(context);
-      gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
-        ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
-      gprtEndProfile(context);
+    // Compute root bounds through atomic reduction. (also counts the number of valid primitives)
+    gprtComputeLaunch(hploc.Bounds, int3((N + 127) / 128, 1, 1), int3(128, 1, 1), hploc.params);
+
+    // Check if all primitives are valid
+    if (numValidLeaves != N) {
+      LOG_ERROR("HPLOC build failed: " + std::to_string(N - numValidLeaves) + " primitives are invalid");
+      return;
     }
 
-    // Compute the global bounds
-    float timeToComputeRootBounds = 0.f;
-    for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile(context);
-      gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
-        ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
-      timeToComputeRootBounds += gprtEndProfile(context);
-    }
-    timeToComputeRootBounds /= 100.f;
-    std::cout<<"Time to compute root bounds in ms: " << timeToComputeRootBounds << std::endl;
-
-    // Use global bounds to compute codes
-    float timeToComputeCodes = 0.f;
-    for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile(context);
-      gprtComputeLaunch(ComputeTriangleCodes, numPrimGroups, numPrimThreads, 
-        ComputeTriangleCodesParams(numPrims, /*reading back centers*/trianglesExp, rootBounds, codes, ids));
-      timeToComputeCodes += gprtEndProfile(context);
-    }
-    timeToComputeCodes /= 100.f;
-    std::cout<<"Time to compute codes in ms: " << timeToComputeCodes << std::endl;
+    // Compute space filling curve codes (also initializes parent IDs to -1 and BVH2->BVH8 index pairs array)
+    gprtComputeLaunch(hploc.SFC, int3((N + 127) / 128, 1, 1), int3(128, 1, 1), hploc.params);
 
     // Sort the primitive codes
-    float timeToSortCodeIDPairs = 0.f;
     int lastScratchSize = gprtBufferGetSize(scratchBuffer);
-    for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile(context);
-      gprtBufferSortPayload((GPRTContext)context, this->codesBuffer, this->idsBuffer, scratchBuffer);
-      timeToSortCodeIDPairs += gprtEndProfile(context);
-    }
-    timeToSortCodeIDPairs /= 100.f;
-    std::cout<<"Time to sort code-id pairs in ms: " << timeToSortCodeIDPairs << std::endl;
+    gprtBufferSortPayload((GPRTContext)context, hploc.codes, hploc.clusterIDs, scratchBuffer);
     int currentScratchSize = gprtBufferGetSize(scratchBuffer);
 
     if (lastScratchSize != currentScratchSize) {
@@ -8006,155 +8309,311 @@ struct NNTriangleAccel : public Accel {
       gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
     }
 
-    // Use sorted primitive codes to optimize triangle indices
-    float timeToExpandTriangles = 0.f;
-    for (int i = 0; i < 100; ++i) {
-      gprtBeginProfile(context);
-      gprtComputeLaunch(ExpandTriangles, numPrimGroups, numPrimThreads, 
-        ExpandTrianglesParams(numPrims, ids, triangles, vertices, vertCounts, trianglesExp));
-      timeToExpandTriangles += gprtEndProfile(context);
-    }
-    timeToExpandTriangles /= 100.f;
-    std::cout<<"Time to expand triangles in ms: " << timeToExpandTriangles << std::endl;
+    // Main bottom up BVH2 build routine
+    gprtComputeLaunch(hploc.Build, numPrimGroups, numPrimThreads, hploc.params);
 
-    float computeAABBsAndCentersTime = 0.f;
-    for (int i = 0; i < 100; ++i) {
-      // Now compute cluster bounding boxes...   
-      gprtBeginProfile(context);
-      uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
-      uint3 numClusterThreads = {32, 1, 1};
-      gprtComputeLaunch(ComputeTriangleAABBsAndCenters, numClusterGroups, numClusterThreads, 
-        ComputeTriangleAABBsAndCentersParams(numPrims, 0, trianglesExp, aabbHierarchy[0], centerHierarchy[0]));
-      computeAABBsAndCentersTime += gprtEndProfile(context);
-      for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
-        uint3 numClusterThreads = {32, 1, 1};
-        gprtBeginProfile(context);
-        gprtComputeLaunch(ComputeAABBsAndCenters, numClusterGroups, numClusterThreads, 
-          ComputeAABBsAndCentersParams(numPrims, lid, 
-            aabbHierarchy[lid-1], centerHierarchy[lid-1], // children nodes
-            aabbHierarchy[lid], centerHierarchy[lid]      // parent nodes
-          )
-        );
-        computeAABBsAndCentersTime += gprtEndProfile(context);
-      }
-    }
-    computeAABBsAndCentersTime /= 100.f;
-    std::cout<<"Time to build AABBs and Centers in ms: " << computeAABBsAndCentersTime << std::endl;
-
-    // #ifdef ENABLE_OBBS
-    uint32_t totalClusters = 0;
-    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      totalClusters += nnAccelHandle.numClusters[i];
+    if (errorCode != 0) {
+      LOG_ERROR("HPLOC build failed with error code :\n " + std::to_string(errorCode));
+      return;
     }
 
-    float totalTime = 0.f;
-    float computeCovarianceTime = 0.f;
-    float computeAnglesTime = 0.f;
-    float computeInitialBoundsTime = 0.f;
-    float computeBoundsTime = 0.f;
-
-    for (int i = 0; i < 100; ++i) {
-      uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
-      uint3 numClusterThreads = {32, 1, 1};
-      gprtBeginProfile(context);
-      gprtComputeLaunch(ComputeTriangleOBBCovariances, numClusterGroups, numClusterThreads, 
-        ComputeTriangleOBBCovariancesParams(
-          numPrims, 0, trianglesExp, centerHierarchy[0], oobbHierarchy[0]
-        )
-      );
-      computeCovarianceTime += gprtEndProfile(context);
-      for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
-        uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
-        uint3 numClusterThreads = {32, 1, 1};
-        gprtBeginProfile(context);
-        gprtComputeLaunch(ComputeOBBCovariances, numClusterGroups, numClusterThreads,
-          ComputeOBBCovariancesParams(numPrims, lid, 
-            oobbHierarchy[lid-1], centerHierarchy[lid-1], // Child obbs
-            oobbHierarchy[lid], centerHierarchy[lid]     // Parent obbs
-          )
-        );
-        computeCovarianceTime += gprtEndProfile(context);
-      }
-      for (int lid = 0; lid < nnAccelHandle.numLevels; ++lid) {
-        gprtBeginProfile(context);
-        gprtComputeLaunch(ComputeOBBAngles, numClusterGroups, numClusterThreads, 
-          ComputeOBBAnglesParams(numPrims, lid, oobbHierarchy[lid])
-        );
-        computeAnglesTime += gprtEndProfile(context);
-      }
-      
-      gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
-
-      uint32_t stride = BRANCHING_FACTOR;
-      for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
-        uint3 numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
-        uint3 numThreads = {32, 1, 1};
-        gprtBeginProfile(context);
-        gprtComputeLaunch(ComputeTriangleOBBBounds, numGroups, numThreads, 
-          ComputeTriangleOBBBoundsParams(numPrims, numLevels, stride, pid, trianglesExp, oobbHierarchy)
-        );
-        computeBoundsTime += gprtEndProfile(context);
-      }
+    if (bvh2NodesAllocated != (N - 1)) {
+      LOG_ERROR("HPLOC build failed: " + std::to_string(N - 1 - bvh2NodesAllocated) + " BVH2 nodes were not allocated");
+      return;
     }
-    computeCovarianceTime /= 100.f;
-    computeAnglesTime /= 100.f;
-    computeInitialBoundsTime /= 100.f;
-    computeBoundsTime /= 100.f;
 
-    totalTime = computeCovarianceTime +
-                computeAnglesTime +
-                computeInitialBoundsTime +
-                computeBoundsTime;
+    // debug code
+    // gprtBufferMap(hploc.bvh2Nodes); 
+    // std::vector<BVH2Node> nodes(N-1);
+    // std::vector<uint3> tris(geometries[0]->index.count);
+    // std::vector<float3> verts(geometries[0]->vertex.count);
+    // gprtBufferMap((GPRTBuffer)geometries[0]->index.buffer);
+    // gprtBufferMap((GPRTBuffer)geometries[0]->vertex.buffers[0]);
+    // uint3* trisPtr = (uint3*)gprtBufferGetPointer((GPRTBuffer)geometries[0]->index.buffer);
+    // float3* vertsPtr = (float3*)gprtBufferGetPointer((GPRTBuffer)geometries[0]->vertex.buffers[0]);
+    // memcpy(tris.data(), trisPtr, sizeof(uint3) * geometries[0]->index.count);
+    // memcpy(verts.data(), vertsPtr, sizeof(float3) * geometries[0]->vertex.count);
+    // gprtBufferUnmap((GPRTBuffer)geometries[0]->index.buffer);
+    // gprtBufferUnmap((GPRTBuffer)geometries[0]->vertex.buffers[0]);
+    // BVH2Node* bvh2NodesPtr = gprtBufferGetPointer(hploc.bvh2Nodes);
+    // memcpy(nodes.data(), bvh2NodesPtr, sizeof(BVH2Node) * (N-1));
+    // gprtBufferUnmap(hploc.bvh2Nodes);
+    // testBVH2Traversal(nodes, tris, verts, N);
 
-    std::cout<<"Total time to build OBBs in ms: " << totalTime << std::endl;
-    std::cout<<"\t Time to compute covariances: " << computeCovarianceTime << std::endl;
-    std::cout<<"\t Time to compute angles (SVD): " << computeAnglesTime << std::endl;
-    std::cout<<"\t Time to compute initial bounds: " << computeInitialBoundsTime << std::endl;
-    std::cout<<"\t Time to compute bounds: " << computeBoundsTime << std::endl;
-    std::cout<<"done "<< std::endl;
+    // BVH2 -> BVH8
+    gprtComputeLaunch(hploc.ToBVH8, numPrimGroups, numPrimThreads, hploc.params);
 
-    float totalOverallTime = 
-      timeToComputeRootBounds +
-      timeToComputeCodes +
-      timeToSortCodeIDPairs +
-      timeToExpandTriangles +
-      computeAABBsAndCentersTime +
-      totalTime;
+    if (errorCode != 0) {
+      LOG_ERROR("HPLOC build failed to convert BVH2 to BVH8 with error code :\n " + std::to_string(errorCode));
+    }
 
-    std::cout<<"total build time " << totalOverallTime << std::endl;
-
-    // #else
-
-    // #endif
+    std::cout<<"Number of BVH8 nodes: " << bvh8NodeAlloc << std::endl;
     
-    // Now we can build our underlying RT core tree
-    // This needs some updating, so commenting out for now...
-    // gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-    // gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
-    // Handle might have changed, so update here
-    // nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
+    std::vector<BVH8Node> bvh8Nodes(bvh8NodeAlloc);
+    gprtBufferMap(hploc.bvh8Nodes);
+    BVH8Node* bvh8NodesPtr = gprtBufferGetPointer(hploc.bvh8Nodes);
+    memcpy(bvh8Nodes.data(), bvh8NodesPtr, sizeof(BVH8Node) * bvh8NodeAlloc);
+    gprtBufferUnmap(hploc.bvh8Nodes);
 
-    // LBVH reference stuff
+    std::vector<BVH8Leaf> bvh8Leaves(hploc.params.N);
+    gprtBufferMap(hploc.bvh8Leaves);
+    BVH8Leaf* bvh8LeavesPtr = gprtBufferGetPointer(hploc.bvh8Leaves);
+    memcpy(bvh8Leaves.data(), bvh8LeavesPtr, sizeof(BVH8Leaf) * hploc.params.N);
+    gprtBufferUnmap(hploc.bvh8Leaves);
 
-    // gprtBufferMap(lbvhMortonCodes);
-    // uint64_t* gpuCodes = gprtBufferGetPointer(lbvhMortonCodes);
-    // for (uint32_t i = 0; i < nnAccelHandle.numL4Clusters; i++) {
-    //   std::cout<<gpuCodes[i]<<std::endl;
-    //   if (i > 0) {
-    //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
+    testBVH8Traversal(bvh8Nodes, bvh8Leaves);
+
+
+    // HPLOC(mode, allowCompaction, minimizeMemory);
+    //return;
+
+    // gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+
+    // // Fetch kernels
+    // auto ComputeTriangleRootBounds      = (GPRTCompute)context->internalComputePrograms["ComputeTriangleRootBounds"]; //FetchCompute<ComputeTriangleRootBoundsParams>("ComputeTriangleRootBounds");
+    // auto ComputeTriangleAABBsAndCenters = (GPRTCompute)context->internalComputePrograms["ComputeTriangleAABBsAndCenters"]; //FetchCompute<ComputeTriangleAABBsAndCentersParams>("ComputeTriangleAABBsAndCenters");
+    // auto ComputeTriangleCodes           = (GPRTCompute)context->internalComputePrograms["ComputeTriangleCodes"]; //FetchCompute<ComputeTriangleCodesParams>("ComputeTriangleCodes");
+    // auto ComputeAABBsAndCenters         = (GPRTCompute)context->internalComputePrograms["ComputeAABBsAndCenters"]; //FetchCompute<ComputeAABBsAndCentersParams>("ComputeAABBsAndCenters");
+    // auto ComputeTriangleOBBCovariances  = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBCovariances"]; //FetchCompute<ComputeTriangleOBBCovariancesParams>("ComputeTriangleOBBCovariances");
+    // auto ComputeOBBCovariances          = (GPRTCompute)context->internalComputePrograms["ComputeOBBCovariances"]; //FetchCompute<ComputeOBBCovariancesParams>("ComputeOBBCovariances");
+    // auto ComputeOBBAngles               = (GPRTCompute)context->internalComputePrograms["ComputeOBBAngles"]; //FetchCompute<ComputeOBBAnglesParams>("ComputeOBBAngles");
+    // auto ComputeTriangleOBBBounds       = (GPRTCompute)context->internalComputePrograms["ComputeTriangleOBBBounds"]; //FetchCompute<ComputeTriangleOBBBoundsParams>("ComputeTriangleOBBBounds");
+    // auto ExpandTriangles                = (GPRTCompute)context->internalComputePrograms["ExpandTriangles"]; //FetchCompute<ExpandTrianglesParams>("ExpandTriangles");
+    
+    // GPRTContext context = (GPRTContext)this->context;
+    // typedef uint32_t uint;
+
+    // uint32_t numPrims = nnAccelHandle.numPrims;
+    // uint32_t numLevels = nnAccelHandle.numLevels;
+
+    // std::cout<<"Building NN tree with " << numPrims << " primitives and " << numLevels << " levels" << std::endl;
+    
+    // // For common launches over primitives in parallel
+    // uint3 numPrimGroups = {(numPrims + 31) / 32, 1, 1};
+    // uint3 numPrimThreads = {32, 1, 1};
+
+    // // Buffers used for construction
+    // gprt::Buffer triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->index.buffer);
+    // gprt::Buffer vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[0]->vertex.buffers[0]);
+    // gprt::Buffer vertCounts = gprtBufferGetHandle(this->countsBuffer);
+    // gprt::Buffer trianglesExp = gprtBufferGetHandle(triangleExpansionBuffer);
+    // gprt::Buffer rootBounds = gprtBufferGetHandle(this->rootBoundsBuffer);
+    // gprt::Buffer codes = gprtBufferGetHandle(this->codesBuffer);
+    // gprt::Buffer ids = gprtBufferGetHandle(this->idsBuffer);
+
+    // gprt::Buffer aabbHierarchy[MAX_LEVELS];
+    // gprt::Buffer centerHierarchy[MAX_LEVELS];
+    // gprt::Buffer oobbHierarchy[MAX_LEVELS];
+    // for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
+    //   aabbHierarchy[i] = gprtBufferGetHandle(aabbBuffers[i]);
+    //   centerHierarchy[i] = gprtBufferGetHandle(centerBuffers[i]);
+    //   oobbHierarchy[i] = gprtBufferGetHandle(oobbBuffers[i]);
+    // }
+    
+    // // initialize root AABB
+    // gprtBufferMap(rootBoundsBuffer);
+    // float3* aabbPtr = gprtBufferGetPointer(rootBoundsBuffer);
+    // aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
+    // aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
+    // gprtBufferUnmap(rootBoundsBuffer);
+
+    // // warmup... 
+    // for (int i = 0; i < 100; ++i) {
+    //   gprtBeginProfile(context);
+    //   gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
+    //     ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
+    //   gprtEndProfile(context);
+    // }
+
+    // // Compute the global bounds
+    // float timeToComputeRootBounds = 0.f;
+    // for (int i = 0; i < 100; ++i) {
+    //   gprtBeginProfile(context);
+    //   gprtComputeLaunch(ComputeTriangleRootBounds, numPrimGroups, numPrimThreads,
+    //     ComputeTriangleRootBoundsParams(numPrims, triangles, vertices, /*temporarily using to store centers*/trianglesExp, rootBounds));
+    //   timeToComputeRootBounds += gprtEndProfile(context);
+    // }
+    // timeToComputeRootBounds /= 100.f;
+    // std::cout<<"Time to compute root bounds in ms: " << timeToComputeRootBounds << std::endl;
+
+    // // Use global bounds to compute codes
+    // float timeToComputeCodes = 0.f;
+    // for (int i = 0; i < 100; ++i) {
+    //   gprtBeginProfile(context);
+    //   gprtComputeLaunch(ComputeTriangleCodes, numPrimGroups, numPrimThreads, 
+    //     ComputeTriangleCodesParams(numPrims, /*reading back centers*/trianglesExp, rootBounds, codes, ids));
+    //   timeToComputeCodes += gprtEndProfile(context);
+    // }
+    // timeToComputeCodes /= 100.f;
+    // std::cout<<"Time to compute codes in ms: " << timeToComputeCodes << std::endl;
+
+    // // Sort the primitive codes
+    // float timeToSortCodeIDPairs = 0.f;
+    // int lastScratchSize = gprtBufferGetSize(scratchBuffer);
+    // for (int i = 0; i < 100; ++i) {
+    //   gprtBeginProfile(context);
+    //   gprtBufferSortPayload((GPRTContext)context, this->codesBuffer, this->idsBuffer, scratchBuffer);
+    //   timeToSortCodeIDPairs += gprtEndProfile(context);
+    // }
+    // timeToSortCodeIDPairs /= 100.f;
+    // std::cout<<"Time to sort code-id pairs in ms: " << timeToSortCodeIDPairs << std::endl;
+    // int currentScratchSize = gprtBufferGetSize(scratchBuffer);
+
+    // if (lastScratchSize != currentScratchSize) {
+    //   // when scratch buffer changes, some descriptor sets keeping track of all 
+    //   // buffers go out of date. Updating descriptors through this call
+    //   gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+    // }
+
+    // // Use sorted primitive codes to optimize triangle indices
+    // float timeToExpandTriangles = 0.f;
+    // for (int i = 0; i < 100; ++i) {
+    //   gprtBeginProfile(context);
+    //   gprtComputeLaunch(ExpandTriangles, numPrimGroups, numPrimThreads, 
+    //     ExpandTrianglesParams(numPrims, ids, triangles, vertices, vertCounts, trianglesExp));
+    //   timeToExpandTriangles += gprtEndProfile(context);
+    // }
+    // timeToExpandTriangles /= 100.f;
+    // std::cout<<"Time to expand triangles in ms: " << timeToExpandTriangles << std::endl;
+
+    // float computeAABBsAndCentersTime = 0.f;
+    // for (int i = 0; i < 100; ++i) {
+    //   // Now compute cluster bounding boxes...   
+    //   gprtBeginProfile(context);
+    //   uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+    //   uint3 numClusterThreads = {32, 1, 1};
+    //   gprtComputeLaunch(ComputeTriangleAABBsAndCenters, numClusterGroups, numClusterThreads, 
+    //     ComputeTriangleAABBsAndCentersParams(numPrims, 0, trianglesExp, aabbHierarchy[0], centerHierarchy[0]));
+    //   computeAABBsAndCentersTime += gprtEndProfile(context);
+    //   for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
+    //     uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+    //     uint3 numClusterThreads = {32, 1, 1};
+    //     gprtBeginProfile(context);
+    //     gprtComputeLaunch(ComputeAABBsAndCenters, numClusterGroups, numClusterThreads, 
+    //       ComputeAABBsAndCentersParams(numPrims, lid, 
+    //         aabbHierarchy[lid-1], centerHierarchy[lid-1], // children nodes
+    //         aabbHierarchy[lid], centerHierarchy[lid]      // parent nodes
+    //       )
+    //     );
+    //     computeAABBsAndCentersTime += gprtEndProfile(context);
     //   }
     // }
-    // gprtBufferUnmap(lbvhMortonCodes);
+    // computeAABBsAndCentersTime /= 100.f;
+    // std::cout<<"Time to build AABBs and Centers in ms: " << computeAABBsAndCentersTime << std::endl;
 
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL4Clusters);
-    // gprtBufferSortPayload((GPRTContext)context, lbvhMortonCodes, lbvhIds, scratch);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numL4Clusters * 2 - 1);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numL4Clusters - 1);
-    // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL4Clusters);
+    // // #ifdef ENABLE_OBBS
+    // uint32_t totalClusters = 0;
+    // for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
+    //   totalClusters += nnAccelHandle.numClusters[i];
+    // }
 
-    // debugging...
-    // printOverlapStatistics();    
+    // float totalTime = 0.f;
+    // float computeCovarianceTime = 0.f;
+    // float computeAnglesTime = 0.f;
+    // float computeInitialBoundsTime = 0.f;
+    // float computeBoundsTime = 0.f;
+
+    // for (int i = 0; i < 100; ++i) {
+    //   uint3 numClusterGroups = {(nnAccelHandle.numClusters[0] + 31) / 32, 1, 1};
+    //   uint3 numClusterThreads = {32, 1, 1};
+    //   gprtBeginProfile(context);
+    //   gprtComputeLaunch(ComputeTriangleOBBCovariances, numClusterGroups, numClusterThreads, 
+    //     ComputeTriangleOBBCovariancesParams(
+    //       numPrims, 0, trianglesExp, centerHierarchy[0], oobbHierarchy[0]
+    //     )
+    //   );
+    //   computeCovarianceTime += gprtEndProfile(context);
+    //   for (int lid = 1; lid < nnAccelHandle.numLevels; ++lid) {
+    //     uint3 numClusterGroups = {(nnAccelHandle.numClusters[lid] + 31) / 32, 1, 1};
+    //     uint3 numClusterThreads = {32, 1, 1};
+    //     gprtBeginProfile(context);
+    //     gprtComputeLaunch(ComputeOBBCovariances, numClusterGroups, numClusterThreads,
+    //       ComputeOBBCovariancesParams(numPrims, lid, 
+    //         oobbHierarchy[lid-1], centerHierarchy[lid-1], // Child obbs
+    //         oobbHierarchy[lid], centerHierarchy[lid]     // Parent obbs
+    //       )
+    //     );
+    //     computeCovarianceTime += gprtEndProfile(context);
+    //   }
+    //   for (int lid = 0; lid < nnAccelHandle.numLevels; ++lid) {
+    //     gprtBeginProfile(context);
+    //     gprtComputeLaunch(ComputeOBBAngles, numClusterGroups, numClusterThreads, 
+    //       ComputeOBBAnglesParams(numPrims, lid, oobbHierarchy[lid])
+    //     );
+    //     computeAnglesTime += gprtEndProfile(context);
+    //   }
+      
+    //   gprtBuildShaderBindingTable((GPRTContext)context, GPRT_SBT_ALL);
+
+    //   uint32_t stride = BRANCHING_FACTOR;
+    //   for (int pid = 0; pid < BRANCHING_FACTOR; ++pid) {
+    //     uint3 numGroups = {((nnAccelHandle.numClusters[0] + (BRANCHING_FACTOR - 1)) / BRANCHING_FACTOR + 31) / 32, 1, 1};
+    //     uint3 numThreads = {32, 1, 1};
+    //     gprtBeginProfile(context);
+    //     gprtComputeLaunch(ComputeTriangleOBBBounds, numGroups, numThreads, 
+    //       ComputeTriangleOBBBoundsParams(numPrims, numLevels, stride, pid, trianglesExp, oobbHierarchy)
+    //     );
+    //     computeBoundsTime += gprtEndProfile(context);
+    //   }
+    // }
+    // computeCovarianceTime /= 100.f;
+    // computeAnglesTime /= 100.f;
+    // computeInitialBoundsTime /= 100.f;
+    // computeBoundsTime /= 100.f;
+
+    // totalTime = computeCovarianceTime +
+    //             computeAnglesTime +
+    //             computeInitialBoundsTime +
+    //             computeBoundsTime;
+
+    // std::cout<<"Total time to build OBBs in ms: " << totalTime << std::endl;
+    // std::cout<<"\t Time to compute covariances: " << computeCovarianceTime << std::endl;
+    // std::cout<<"\t Time to compute angles (SVD): " << computeAnglesTime << std::endl;
+    // std::cout<<"\t Time to compute initial bounds: " << computeInitialBoundsTime << std::endl;
+    // std::cout<<"\t Time to compute bounds: " << computeBoundsTime << std::endl;
+    // std::cout<<"done "<< std::endl;
+
+    // float totalOverallTime = 
+    //   timeToComputeRootBounds +
+    //   timeToComputeCodes +
+    //   timeToSortCodeIDPairs +
+    //   timeToExpandTriangles +
+    //   computeAABBsAndCentersTime +
+    //   totalTime;
+
+    // std::cout<<"total build time " << totalOverallTime << std::endl;
+
+    // // #else
+
+    // // #endif
+    
+    // // Now we can build our underlying RT core tree
+    // // This needs some updating, so commenting out for now...
+    // // gprtAccelBuild((GPRTContext)context, geomAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+    // // gprtAccelBuild((GPRTContext)context, instanceAccel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE, false, false);
+    // // Handle might have changed, so update here
+    // // nnAccelHandle.accel = gprtAccelGetHandle(instanceAccel);
+
+    // // LBVH reference stuff
+
+    // // gprtBufferMap(lbvhMortonCodes);
+    // // uint64_t* gpuCodes = gprtBufferGetPointer(lbvhMortonCodes);
+    // // for (uint32_t i = 0; i < nnAccelHandle.numL4Clusters; i++) {
+    // //   std::cout<<gpuCodes[i]<<std::endl;
+    // //   if (i > 0) {
+    // //     if (gpuCodes[i-1] > gpuCodes[i]) throw std::runtime_error("Sort not working!");
+    // //   }
+    // // }
+    // // gprtBufferUnmap(lbvhMortonCodes);
+
+    // // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["ComputeAABBCodes"], nnAccelHandle.numL4Clusters);
+    // // gprtBufferSortPayload((GPRTContext)context, lbvhMortonCodes, lbvhIds, scratch);
+    // // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["MakeNodes"], nnAccelHandle.numL4Clusters * 2 - 1);
+    // // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["SplitNodes"], nnAccelHandle.numL4Clusters - 1);
+    // // gprtComputeLaunch1D((GPRTContext)context, (GPRTCompute)context->internalComputePrograms["BuildHierarchy"], nnAccelHandle.numL4Clusters);
+
+    // // debugging...
+    // // printOverlapStatistics();    
   }
 
   void update() {
@@ -8166,30 +8625,8 @@ struct NNTriangleAccel : public Accel {
   }
 
   void destroy() {
-    gprtBufferDestroy(codesBuffer);
-    gprtBufferDestroy(idsBuffer);
-    gprtBufferDestroy(rootBoundsBuffer);
-    for (int i = 0; i < nnAccelHandle.numLevels; ++i) {
-      gprtBufferDestroy(centerBuffers[i]);
-      gprtBufferDestroy(oobbBuffers[i]);
-      gprtBufferDestroy(aabbBuffers[i]);
-    }
-    gprtBufferDestroy(scratchBuffer);
-
-    // gprtBufferDestroy(lbvhMortonCodes);
-    // gprtBufferDestroy(lbvhIds);
-    // gprtBufferDestroy(lbvhNodes);
-    // gprtBufferDestroy(lbvhAabbs);
-
-    // gprtAccelDestroy(instanceAccel);
-    // gprtAccelDestroy(geomAccel);
-    // gprtGeomDestroy(geom);
+    // todo...
   };
-
-  void setSearchRange(float range) {  
-    nnAccelHandle.maxSearchRange = range;
-    // gprtGeomSetParameters(geom, &nnAccelHandle);
-  }
 };
 
 size_t Context::getNumHitRecords() {
@@ -8256,42 +8693,42 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
     // <<std::endl;
 
     // allocate / resize ray generation table
-    size_t numRayGens = raygenPrograms.size();
+    size_t numRayGens = RayGen::raygens.size();
     if (raygenTable && raygenTable->size != recordSize * numRayGens) {
       raygenTable->destroy();
       delete raygenTable;
       raygenTable = nullptr;
     }
-    if (!raygenTable && raygenPrograms.size() > 0) {
+    if (!raygenTable && RayGen::raygens.size() > 0) {
       raygenTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                 bufferUsageFlags, memoryUsageFlags, recordSize * numRayGens,
-                                rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                                rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
     }
 
     // allocate / resize miss table
-    size_t numMissProgs = missPrograms.size();
+    size_t numMissProgs = Miss::misses.size();
     if (missTable && missTable->size != recordSize * numMissProgs) {
       missTable->destroy();
       delete missTable;
       missTable = nullptr;
     }
-    if (!missTable && missPrograms.size() > 0) {
+    if (!missTable && Miss::misses.size() > 0) {
       missTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               bufferUsageFlags, memoryUsageFlags, recordSize * numMissProgs,
-                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                              rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
     }
 
     // allocate / resize callable table
-    size_t numCallableProgs = callablePrograms.size();
+    size_t numCallableProgs = Callable::callables.size();
     if (callableTable && callableTable->size != recordSize * numCallableProgs) {
       callableTable->destroy();
       delete callableTable;
       callableTable = nullptr;
     }
-    if (!callableTable && callablePrograms.size() > 0) {
+    if (!callableTable && Callable::callables.size() > 0) {
       callableTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                               bufferUsageFlags, memoryUsageFlags, recordSize * numCallableProgs,
-                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                              rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
     }
 
     // allocate / resize hit group table
@@ -8304,15 +8741,15 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
     if (!hitgroupTable && numHitRecords > 0) {
       hitgroupTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                   bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords,
-                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                                  rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
     }
 
     // Raygen records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygenPrograms.size() > 0) {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && RayGen::raygens.size() > 0) {
       raygenTable->map();
       uint8_t *mapped = ((uint8_t *) (raygenTable->mapped));
 
-      for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
+      for (uint32_t idx = 0; idx < RayGen::raygens.size(); ++idx) {
         size_t recordStride = recordSize;
         size_t handleStride = handleSize;
 
@@ -8324,18 +8761,18 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
         // Then, copy params following handle
         recordOffset = recordOffset + handleSize;
         uint8_t *params = mapped + recordOffset;
-        RayGen *raygen = raygenPrograms[idx];
+        RayGen *raygen = RayGen::raygens[idx];
         memcpy(params, raygen->SBTRecord, raygen->recordSize);
       }
       raygenTable->unmap();
     }
 
     // Miss records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && missPrograms.size() > 0) {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && Miss::misses.size() > 0) {
       missTable->map();
       uint8_t *mapped = ((uint8_t *) (missTable->mapped));
 
-      for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
+      for (uint32_t idx = 0; idx < Miss::misses.size(); ++idx) {
         size_t recordStride = recordSize;
         size_t handleStride = handleSize;
 
@@ -8347,7 +8784,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
         // Then, copy params following handle
         recordOffset = recordOffset + handleSize;
         uint8_t *params = mapped + recordOffset;
-        Miss *miss = missPrograms[idx];
+        Miss *miss = Miss::misses[idx];
         memcpy(params, miss->SBTRecord, miss->recordSize);
       }
 
@@ -8355,11 +8792,11 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
     }
 
     // Callable records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_CALLABLE) != 0 && callablePrograms.size() > 0) {
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_CALLABLE) != 0 && Callable::callables.size() > 0) {
       callableTable->map();
       uint8_t *mapped = ((uint8_t *) (callableTable->mapped));
 
-      for (uint32_t idx = 0; idx < callablePrograms.size(); ++idx) {
+      for (uint32_t idx = 0; idx < Callable::callables.size(); ++idx) {
         size_t recordStride = recordSize;
         size_t handleStride = handleSize;
 
@@ -8371,7 +8808,7 @@ void Context::buildSBT(GPRTBuildSBTFlags flags) {
         // Then, copy params following handle
         recordOffset = recordOffset + handleSize;
         uint8_t *params = mapped + recordOffset;
-        Callable *callable = callablePrograms[idx];
+        Callable *callable = Callable::callables[idx];
         memcpy(params, callable->SBTRecord, callable->recordSize);
       }
 
@@ -9076,7 +9513,7 @@ void Context::buildPipeline() {
     rasterRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                     memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()),
-                    rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                    rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
 
     // Uniform buffer descriptors for each geometry's record
     VkDescriptorBufferInfo uniformBufferDescriptor;
@@ -9144,7 +9581,7 @@ void Context::buildPipeline() {
     computeRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
                     memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()),
-                    rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                    rayTracingPipelineProperties.shaderGroupBaseAlignment, 1);
 
     // Uniform buffer descriptors for each geometry's record
     VkDescriptorBufferInfo uniformBufferDescriptor;
@@ -9210,7 +9647,7 @@ void Context::buildPipeline() {
 
     // Ray generation groups
     {
-      for (auto raygen : raygenPrograms) {
+      for (auto raygen : RayGen::raygens) {
         shaderStages.push_back(raygen->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -9225,7 +9662,7 @@ void Context::buildPipeline() {
 
     // Miss groups
     {
-      for (auto miss : missPrograms) {
+      for (auto miss : Miss::misses) {
         shaderStages.push_back(miss->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -9240,7 +9677,7 @@ void Context::buildPipeline() {
 
     // Callable groups
     {
-      for (auto callable : callablePrograms) {
+      for (auto callable : Callable::callables) {
         shaderStages.push_back(callable->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -10112,6 +10549,7 @@ gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t cou
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *vertices = (Buffer *) _vertices;
+  if (vertices->typeSize != sizeof(float3)) LOG_ERROR("Vertices buffer must be of type float3!");
   triangles->setVertices(vertices, count, stride, offset);
 }
 // GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
@@ -10136,6 +10574,7 @@ gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
+  if (indices->typeSize != sizeof(int3)) LOG_ERROR("Indices buffer must be of type int3!");
   triangles->setIndices(indices, count, stride, offset);
 }
 
@@ -10152,6 +10591,7 @@ gprtNNPointsSetVertices(GPRTGeom _points, GPRTBuffer _vertices, uint32_t count, 
   LOG_API_CALL();
   NNPointGeom *points = (NNPointGeom *) _points;
   Buffer *vertices = (Buffer *) _vertices;
+  if (vertices->typeSize != sizeof(float3)) LOG_ERROR("Vertices buffer must be of type float3!");
   points->setVertices(vertices, count, stride, offset);
 }
 
@@ -10160,6 +10600,7 @@ gprtNNEdgesSetVertices(GPRTGeom _edges, GPRTBuffer _vertices, uint32_t count, ui
   LOG_API_CALL();
   NNEdgeGeom *edges = (NNEdgeGeom *) _edges;
   Buffer *vertices = (Buffer *) _vertices;
+  if (vertices->typeSize != sizeof(float3)) LOG_ERROR("Vertices buffer must be of type float3!");
   edges->setVertices(vertices, count, stride, offset);
 }
 
@@ -10168,6 +10609,7 @@ gprtNNEdgesSetIndices(GPRTGeom _edges, GPRTBuffer _indices, uint32_t count, uint
   LOG_API_CALL();
   NNEdgeGeom *edges = (NNEdgeGeom *) _edges;
   Buffer *indices = (Buffer *) _indices;
+  if (indices->typeSize != sizeof(int2)) LOG_ERROR("Indices buffer must be of type int2!");
   edges->setIndices(indices, count, stride, offset);
 }
 
@@ -10176,6 +10618,7 @@ gprtNNTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t c
   LOG_API_CALL();
   NNTriangleGeom *triangles = (NNTriangleGeom *) _triangles;
   Buffer *vertices = (Buffer *) _vertices;
+  if (vertices->typeSize != sizeof(float3)) LOG_ERROR("Vertices buffer must be of type float3!");
   triangles->setVertices(vertices, count, stride, offset);
 }
 
@@ -10184,6 +10627,7 @@ gprtNNTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t cou
   LOG_API_CALL();
   NNTriangleGeom *triangles = (NNTriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
+  if (indices->typeSize != sizeof(int3)) LOG_ERROR("Indices buffer must be of type int3!");
   triangles->setIndices(indices, count, stride, offset);
 }
 
@@ -10198,8 +10642,6 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
   }
 
   RayGen *raygen = new RayGen(context->logicalDevice, module, programName, recordSize);
-
-  context->raygenPrograms.push_back(raygen);
 
   // Creating a raygen program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -10219,8 +10661,6 @@ gprtRayGenDestroy(GPRTRayGen _rayGen) {
   rayGen->destroy();
   delete rayGen;
   rayGen = nullptr;
-
-  // todo, remove from context->raygenPrograms, rebuild pipelines
 }
 
 GPRT_API void *
@@ -10275,8 +10715,6 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
   }
 
   Miss *missProg = new Miss(context->logicalDevice, module, programName, recordSize);
-
-  context->missPrograms.push_back(missProg);
 
   // Creating a miss program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -10335,8 +10773,6 @@ gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *program
   }
 
   Callable *callableProg = new Callable(context->logicalDevice, module, programName, recordSize);
-
-  context->callablePrograms.push_back(callableProg);
 
   // Creating a callable program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -10681,7 +11117,7 @@ gprtTextureDestroy(GPRTTexture _texture) {
 }
 
 GPRT_API GPRTBuffer
-gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
+gprtHostBufferCreate(GPRTContext _context, size_t typeSize, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -10704,20 +11140,20 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, typeSize * count, alignment, typeSize);
 
   // Pin the buffer to the host
   buffer->map();
 
   if (init) {
     void *mapped = buffer->mapped;
-    memcpy(mapped, init, size * count);
+    memcpy(mapped, init, typeSize * count);
   }
   return (GPRTBuffer) buffer;
 }
 
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
+gprtDeviceBufferCreate(GPRTContext _context, size_t typeSize, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -10738,19 +11174,19 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, typeSize * count, alignment, typeSize);
 
   if (init) {
     buffer->map();
     void *mapped = buffer->mapped;
-    memcpy(mapped, init, size * count);
+    memcpy(mapped, init, typeSize * count);
     buffer->unmap();
   }
   return (GPRTBuffer) buffer;
 }
 
 GPRT_API GPRTBuffer
-gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
+gprtSharedBufferCreate(GPRTContext _context, size_t typeSize, size_t count, const void *init, size_t alignment) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -10775,14 +11211,14 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
   Context *context = (Context *) _context;
   Buffer *buffer =
       new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, typeSize * count, alignment, typeSize);
 
   // Pin the buffer to the host
   buffer->map();
 
   if (init) {
     void *mapped = buffer->mapped;
-    memcpy(mapped, init, size * count);
+    memcpy(mapped, init, typeSize * count);
     buffer->flush();
   }
   return (GPRTBuffer) buffer;
@@ -11228,7 +11664,7 @@ GPRT_API gprt::Buffer
 gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
-  return gprt::Buffer{buffer->virtualAddress, 0};
+  return gprt::Buffer{buffer->virtualAddress, uint32_t(buffer->getSize() / buffer->getTypeSize())};
 }
 
 GPRT_API void
@@ -11312,24 +11748,6 @@ gprtCurveAccelCreate(GPRTContext context, uint32_t numCurveGeometries, GPRTGeom 
 }
 
 GPRT_API GPRTAccel
-gprtNNPointAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
-  LOG_API_CALL();
-  Context *context = (Context *) _context;
-  NNPointAccel *accel = new NNPointAccel(context, numGeometries, (NNPointGeom *) arrayOfChildGeoms);
-  // context->accels.push_back(accel); // I think this is a bug
-  return (GPRTAccel) accel;
-}
-
-GPRT_API GPRTAccel
-gprtNNEdgeAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
-  LOG_API_CALL();
-  Context *context = (Context *) _context;
-  NNEdgeAccel *accel = new NNEdgeAccel(context, numGeometries, (NNEdgeGeom *) arrayOfChildGeoms);
-  // context->accels.push_back(accel); // I think this is a bug
-  return (GPRTAccel) accel;
-}
-
-GPRT_API GPRTAccel
 gprtNNTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
@@ -11378,26 +11796,6 @@ gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBuffer _masks) 
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
   Buffer *masks = (Buffer *) _masks;
   accel->setVisibilityMasks(masks);
-}
-
-GPRT_API void
-gprtNNAccelSetSearchRange(GPRTAccel nnAccel, float searchRange) {
-  LOG_API_CALL();
-  Accel *accel = (Accel *) nnAccel;
-  AccelType type = accel->getType();
-  switch(type) {
-    case GPRT_NN_POINT_ACCEL:
-    ((NNPointAccel*) accel)->setSearchRange(searchRange);
-    break;
-    case GPRT_NN_EDGE_ACCEL:
-    ((NNEdgeAccel*) accel)->setSearchRange(searchRange);
-    break;
-    case GPRT_NN_TRIANGLE_ACCEL:
-    ((NNTriangleAccel*) accel)->setSearchRange(searchRange);
-    break;
-    default:
-    LOG_ERROR("Unsupported tree type");
-  };
 }
 
 GPRT_API void
@@ -11502,7 +11900,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR,
-                      0, pushConstantsSize, pushConstants);
+                      0, uint32_t(pushConstantsSize), pushConstants);
   }
 
   auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t {
@@ -11532,8 +11930,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   // find raygen in current list of raygens
   int raygenOffset = 0;
-  for (int i = 0; i < context->raygenPrograms.size(); ++i) {
-    if (context->raygenPrograms[i] == raygen) {
+  for (int i = 0; i < RayGen::raygens.size(); ++i) {
+    if (RayGen::raygens[i] == raygen) {
       raygenOffset = i * recordSize;
       break;
     }
@@ -11547,17 +11945,17 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   // * context->raygenPrograms.size();
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
-  if (context->missPrograms.size() > 0) {
+  if (Miss::misses.size() > 0) {
     missShaderSbtEntry.deviceAddress = missBaseAddr;
     missShaderSbtEntry.stride = recordSize;
-    missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
+    missShaderSbtEntry.size = missShaderSbtEntry.stride * Miss::misses.size();
   }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
-  if (context->callablePrograms.size() > 0) {
+  if (Callable::callables.size() > 0) {
     callableShaderSbtEntry.deviceAddress = callableBaseAddr;
     callableShaderSbtEntry.stride = recordSize;
-    callableShaderSbtEntry.size = callableShaderSbtEntry.stride * context->callablePrograms.size();
+    callableShaderSbtEntry.size = callableShaderSbtEntry.stride * Callable::callables.size();
   }
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};

@@ -56,7 +56,7 @@
 #include <cstdlib>
 
 // Needed for gprt::NNAccel handle
-#include "gprt_knn_shared.h"
+#include "gprt_nnq.h"
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -1029,52 +1029,6 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 
   \param arrayOfChildGeoms A array of 'numGeometries' child
   geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_NN_POINTS
-  type.
-
-  \param flags reserved for future use
-*/
-GPRT_API GPRTAccel gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                            unsigned int flags GPRT_IF_CPP(= 0));
-
-template <typename T>
-GPRTAccel
-gprtNNPointAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                         unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtNNPointAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
-}
-
-// ------------------------------------------------------------------
-/*! create a new acceleration structure for triangle geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms A array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_NN_EDGES
-  type.
-
-  \param flags reserved for future use
-*/
-GPRT_API GPRTAccel gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                            unsigned int flags GPRT_IF_CPP(= 0));
-
-template <typename T>
-GPRTAccel
-gprtNNEdgeAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                         unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtNNEdgeAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
-}
-
-// ------------------------------------------------------------------
-/*! create a new acceleration structure for triangle geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms A array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
   created with gprtGeomCreate, and must be of a GPRT_NN_TRIANGLES
   type.
 
@@ -1089,8 +1043,6 @@ gprtNNTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<
                          unsigned int flags GPRT_IF_CPP(= 0)) {
   return gprtNNTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
-
-GPRT_API void gprtNNAccelSetSearchRange(GPRTAccel nnAccel, float searchRange);
 
 // ------------------------------------------------------------------
 /*! create a new instance acceleration structure with given number of
@@ -1574,15 +1526,15 @@ gprtTextureDestroy(GPRTTextureOf<T> texture) {
  * into RAM before the GPU can access it. Reads and writes from the GPU are done using the system's
  * Direct Memory Access (DMA) controller. 
  * 
- * @param context   The GPRTContext in which the buffer is to be created.
- * @param size      The size of each element in the buffer.
- * @param count     The number of elements in the buffer. Defaults to 1 (single element).
- * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
- * @param alignment Byte alignment for the buffer, must be a power of two.
- *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @param context      The GPRTContext in which the buffer is to be created.
+ * @param elementSize  The size of each element in the buffer.
+ * @param count        The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init         Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment    Byte alignment for the buffer, must be a power of two.
+ *                     Larger alignment optimizes access but increase memory usage. Defaults to 16.
  * @return GPRTBuffer Returns a handle to the created buffer that resides in host memory.
  */
-GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count = 1, const void *init = nullptr, size_t alignment = 16);
+GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t elementSize, size_t count = 1, const void *init = nullptr, size_t alignment = 16);
 
 /**
  * @brief Creates a typed buffer using host memory.
@@ -1620,15 +1572,15 @@ gprtHostBufferCreate(GPRTContext context, size_t count = 1, const T *init = null
  * the GPU. Reading from and writing to the buffer from the host requires mapping, which triggers 
  * an underlying buffer copy to and from the host system.
  * 
- * @param context   The GPRTContext in which the buffer is to be created.
- * @param size      The size of each element in the buffer.
- * @param count     The number of elements in the buffer. Defaults to 1 (single element).
- * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
- * @param alignment Byte alignment for the buffer, must be a power of two.
- *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @param context      The GPRTContext in which the buffer is to be created.
+ * @param elementSize  The size of each element in the buffer.
+ * @param count        The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init         Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment    Byte alignment for the buffer, must be a power of two.
+ *                     Larger alignment optimizes access but increase memory usage. Defaults to 16.
  * @return GPRTBuffer Returns a handle to the created buffer that resides in device memory.
  */
-GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count = 1,
+GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t elementSize, size_t count = 1,
                                            const void *init = nullptr, size_t alignment = 16);
 
 /**
@@ -1656,7 +1608,8 @@ gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nu
 }
 
 /**
- * @brief Creates a shared buffer using device memory accessible to all devices.
+ * @brief Creates a shared buffer using device memory accessible to all devices. 
+ * Mapping and unmapping this buffer is not required.
  * 
  * This function creates a buffer in the device memory, accessible by both the host and other 
  * devices. Access from the host might be slower compared to direct device access. The buffer's 
@@ -1669,15 +1622,15 @@ gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nu
  * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to 
  * access more of the device's memory directly.
  * 
- * @param context   The GPRTContext in which the buffer is to be created.
- * @param size      The size of each element in the buffer.
- * @param count     The number of elements in the buffer. Defaults to 1 (single element).
- * @param init      Optional pointer to initial data for buffer initialization. Defaults to nullptr.
- * @param alignment Byte alignment for the buffer, must be a power of two.
- *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
+ * @param context      The GPRTContext in which the buffer is to be created.
+ * @param elementSize  The size of each element in the buffer.
+ * @param count        The number of elements in the buffer. Defaults to 1 (single element).
+ * @param init         Optional pointer to initial data for buffer initialization. Defaults to nullptr.
+ * @param alignment    Byte alignment for the buffer, must be a power of two.
+ *                     Larger alignment optimizes access but increase memory usage. Defaults to 16.
  * @return GPRTBuffer Returns a handle to the created buffer that uses shared device memory.
  */
-GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, size_t count = 1,
+GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t elementSize, size_t count = 1,
                                            const void *init = nullptr, size_t alignment = 16);
 
 /**

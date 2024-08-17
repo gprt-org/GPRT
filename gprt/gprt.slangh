@@ -29,6 +29,9 @@
  */
 #pragma once
 
+#include "./math/MathConstants.slangh"
+
+
 // #ifndef FLT_MAX 
 // #define FLT_MAX 3.402823466e+38
 // #endif
@@ -36,94 +39,94 @@
 // #define FLT_MIN 1.175494351e-38
 // #endif
 
-#define DBL_DECIMAL_DIG  17                      // # of decimal digits of rounding precision
-#define DBL_DIG          15                      // # of decimal digits of precision
-#define DBL_EPSILON      2.2204460492503131e-016 // smallest such that 1.0+DBL_EPSILON != 1.0
-#define DBL_HAS_SUBNORM  1                       // type does support subnormal numbers
-#define DBL_MANT_DIG     53                      // # of bits in mantissa
-#define DBL_MAX          1.7976931348623158e+308 // max value
-#define DBL_MAX_10_EXP   308                     // max decimal exponent
-#define DBL_MAX_EXP      1024                    // max binary exponent
-#define DBL_MIN          2.2250738585072014e-308 // min positive value
-#define DBL_MIN_10_EXP   (-307)                  // min decimal exponent
-#define DBL_MIN_EXP      (-1021)                 // min binary exponent
-#define _DBL_RADIX       2                       // exponent radix
-#define DBL_TRUE_MIN     4.9406564584124654e-324 // min positive value
+// #define DBL_DECIMAL_DIG  17                      // # of decimal digits of rounding precision
+// #define DBL_DIG          15                      // # of decimal digits of precision
+// #define DBL_EPSILON      2.2204460492503131e-016 // smallest such that 1.0+DBL_EPSILON != 1.0
+// #define DBL_HAS_SUBNORM  1                       // type does support subnormal numbers
+// #define DBL_MANT_DIG     53                      // # of bits in mantissa
+// #define DBL_MAX          1.7976931348623158e+308 // max value
+// #define DBL_MAX_10_EXP   308                     // max decimal exponent
+// #define DBL_MAX_EXP      1024                    // max binary exponent
+// #define DBL_MIN          2.2250738585072014e-308 // min positive value
+// #define DBL_MIN_10_EXP   (-307)                  // min decimal exponent
+// #define DBL_MIN_EXP      (-1021)                 // min binary exponent
+// #define _DBL_RADIX       2                       // exponent radix
+// #define DBL_TRUE_MIN     4.9406564584124654e-324 // min positive value
 
-#define FLT_DECIMAL_DIG  9                       // # of decimal digits of rounding precision
-#define FLT_DIG          6                       // # of decimal digits of precision
-#define FLT_EPSILON      1.192092896e-07F        // smallest such that 1.0+FLT_EPSILON != 1.0
-#define FLT_HAS_SUBNORM  1                       // type does support subnormal numbers
-#define FLT_GUARD        0
-#define FLT_MANT_DIG     24                      // # of bits in mantissa
-#define FLT_MAX          3.402823466e+38F        // max value
-#define FLT_MAX_10_EXP   38                      // max decimal exponent
-#define FLT_MAX_EXP      128                     // max binary exponent
-#define FLT_MIN          1.175494351e-38F        // min normalized positive value
-#define FLT_MIN_10_EXP   (-37)                   // min decimal exponent
-#define FLT_MIN_EXP      (-125)                  // min binary exponent
-#define FLT_NORMALIZE    0
-#define FLT_RADIX        2                       // exponent radix
-#define FLT_TRUE_MIN     1.401298464e-45F        // min positive value
+// #define FLT_DECIMAL_DIG  9                       // # of decimal digits of rounding precision
+// #define FLT_DIG          6                       // # of decimal digits of precision
+// #define FLT_EPSILON      1.192092896e-07F        // smallest such that 1.0+FLT_EPSILON != 1.0
+// #define FLT_HAS_SUBNORM  1                       // type does support subnormal numbers
+// #define FLT_GUARD        0
+// #define FLT_MANT_DIG     24                      // # of bits in mantissa
+// #define FLT_MAX          3.402823466e+38F        // max value
+// #define FLT_MAX_10_EXP   38                      // max decimal exponent
+// #define FLT_MAX_EXP      128                     // max binary exponent
+// #define FLT_MIN          1.175494351e-38F        // min normalized positive value
+// #define FLT_MIN_10_EXP   (-37)                   // min decimal exponent
+// #define FLT_MIN_EXP      (-125)                  // min binary exponent
+// #define FLT_NORMALIZE    0
+// #define FLT_RADIX        2                       // exponent radix
+// #define FLT_TRUE_MIN     1.401298464e-45F        // min positive value
 
-#define LDBL_DIG         DBL_DIG                 // # of decimal digits of precision
-#define LDBL_EPSILON     DBL_EPSILON             // smallest such that 1.0+LDBL_EPSILON != 1.0
-#define LDBL_HAS_SUBNORM DBL_HAS_SUBNORM         // type does support subnormal numbers
-#define LDBL_MANT_DIG    DBL_MANT_DIG            // # of bits in mantissa
-#define LDBL_MAX         DBL_MAX                 // max value
-#define LDBL_MAX_10_EXP  DBL_MAX_10_EXP          // max decimal exponent
-#define LDBL_MAX_EXP     DBL_MAX_EXP             // max binary exponent
-#define LDBL_MIN         DBL_MIN                 // min normalized positive value
-#define LDBL_MIN_10_EXP  DBL_MIN_10_EXP          // min decimal exponent
-#define LDBL_MIN_EXP     DBL_MIN_EXP             // min binary exponent
-#define _LDBL_RADIX      _DBL_RADIX              // exponent radix
-#define LDBL_TRUE_MIN    DBL_TRUE_MIN            // min positive value
+// #define LDBL_DIG         DBL_DIG                 // # of decimal digits of precision
+// #define LDBL_EPSILON     DBL_EPSILON             // smallest such that 1.0+LDBL_EPSILON != 1.0
+// #define LDBL_HAS_SUBNORM DBL_HAS_SUBNORM         // type does support subnormal numbers
+// #define LDBL_MANT_DIG    DBL_MANT_DIG            // # of bits in mantissa
+// #define LDBL_MAX         DBL_MAX                 // max value
+// #define LDBL_MAX_10_EXP  DBL_MAX_10_EXP          // max decimal exponent
+// #define LDBL_MAX_EXP     DBL_MAX_EXP             // max binary exponent
+// #define LDBL_MIN         DBL_MIN                 // min normalized positive value
+// #define LDBL_MIN_10_EXP  DBL_MIN_10_EXP          // min decimal exponent
+// #define LDBL_MIN_EXP     DBL_MIN_EXP             // min binary exponent
+// #define _LDBL_RADIX      _DBL_RADIX              // exponent radix
+// #define LDBL_TRUE_MIN    DBL_TRUE_MIN            // min positive value
 
-#define HLF_EPSILON      9.77e-04h               // smallest such that 1.0h+HLF_EPSILON != 1.0h
-#define HLF_MAX          65504.h                 // max value
+// #define HLF_EPSILON      9.77e-04h               // smallest such that 1.0h+HLF_EPSILON != 1.0h
+// #define HLF_MAX          65504.h                 // max value
 
-#define DECIMAL_DIG      DBL_DECIMAL_DIG
+// #define DECIMAL_DIG      DBL_DECIMAL_DIG
 
 // A bunch of mathematical constants
 
-// The base of natural logarithms (e)
-#define M_E 2.71828182845904523536028747135266250
+// // The base of natural logarithms (e)
+// #define M_E 2.71828182845904523536028747135266250
 
-// The logarithm to base 2 of M_E (log2(e))
-#define M_LOG2E 1.44269504088896340735992468100189214
+// // The logarithm to base 2 of M_E (log2(e))
+// #define M_LOG2E 1.44269504088896340735992468100189214
 
-// The logarithm to base 10 of M_E (log10(e))
-#define M_LOG10E 0.434294481903251827651128918916605082
+// // The logarithm to base 10 of M_E (log10(e))
+// #define M_LOG10E 0.434294481903251827651128918916605082
 
-// The natural logarithm of 2 (loge(2))
-#define M_LN2 0.693147180559945309417232121458176568
+// // The natural logarithm of 2 (loge(2))
+// #define M_LN2 0.693147180559945309417232121458176568
 
-// The natural logarithm of 10 (loge(10))
-#define M_LN10 2.30258509299404568401799145468436421
+// // The natural logarithm of 10 (loge(10))
+// #define M_LN10 2.30258509299404568401799145468436421
 
-// Pi, the ratio of a circle's circumference to its diameter.
-#define M_PI 3.14159265358979323846264338327950288
+// // Pi, the ratio of a circle's circumference to its diameter.
+// #define M_PI 3.14159265358979323846264338327950288
 
-// Pi divided by two (pi/2)
-#define M_PI_2 1.57079632679489661923132169163975144
+// // Pi divided by two (pi/2)
+// #define M_PI_2 1.57079632679489661923132169163975144
 
-// Pi divided by four  (pi/4)
-#define M_PI_4 0.785398163397448309615660845819875721
+// // Pi divided by four  (pi/4)
+// #define M_PI_4 0.785398163397448309615660845819875721
 
-// The reciprocal of pi (1/pi)
-#define M_1_PI 0.318309886183790671537767526745028724
+// // The reciprocal of pi (1/pi)
+// #define M_1_PI 0.318309886183790671537767526745028724
 
-// Two times the reciprocal of pi (2/pi)
-#define M_2_PI 0.636619772367581343075535053490057448
+// // Two times the reciprocal of pi (2/pi)
+// #define M_2_PI 0.636619772367581343075535053490057448
 
-// Two times the reciprocal of the square root of pi (2/sqrt(pi))
-#define M_2_SQRTPI 1.12837916709551257389615890312154517
+// // Two times the reciprocal of the square root of pi (2/sqrt(pi))
+// #define M_2_SQRTPI 1.12837916709551257389615890312154517
 
-// The square root of two (sqrt(2))
-#define M_SQRT2 1.41421356237309504880168872420969808
+// // The square root of two (sqrt(2))
+// #define M_SQRT2 1.41421356237309504880168872420969808
 
-// The reciprocal of the square root of two (1/sqrt(2))
-#define M_SQRT1_2 0.707106781186547524400844362104849039
+// // The reciprocal of the square root of two (1/sqrt(2))
+// #define M_SQRT1_2 0.707106781186547524400844362104849039
 
 // 1 degree in radians
 #define degree (180.0/M_PI)
@@ -197,6 +200,10 @@ T load<T>(in Buffer buffer, uint32_t index) {
   return buffers[buffer.index].Load<T>(index * sizeof(T));
 }
 
+T load<T>(in Buffer buffer, uint32_t index, uint alignment) {
+    return buffers[buffer.index].Load<T>(index * sizeof(T), alignment);
+}
+
 void store<T>(in Buffer buffer, in T value) {
   buffers[buffer.index].Store<T>(0, value);
 }
@@ -245,6 +252,12 @@ SamplerState
 getDefaultSampler() {
   // We assume that there is a default sampler at address 0 here
   return samplers[0];
+}
+
+uint32_t atomicMin(in Buffer buffer, uint32_t index, uint32_t value) {
+  uint32_t old;
+  buffers[buffer.index].InterlockedMin(index * sizeof(uint32_t), value, old);
+  return old;
 }
 
 no_diff float
@@ -347,6 +360,10 @@ atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
   return old;
 }
 
+int atomicExchange(in Buffer buffer, int index, int value) {
+  int original_value = -1;
+  buffers[buffer.index].InterlockedExchange(index * sizeof(uint32_t), value, original_value);
+  return original_value;
 }
 
 // still needs translating over
@@ -501,5 +518,6 @@ atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
   return old;
 }
 
-}
 #endif
+
+}
