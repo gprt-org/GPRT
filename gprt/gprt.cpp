@@ -327,6 +327,7 @@ PFN_vkCmdCopyAccelerationStructureKHR vkCmdCopyAccelerationStructure;
 PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructures;
 PFN_vkCopyAccelerationStructureKHR vkCopyAccelerationStructure;
 PFN_vkCmdTraceRaysKHR vkCmdTraceRays;
+PFN_vkCmdSetRayTracingPipelineStackSizeKHR vkCmdSetRayTracingPipelineStackSize;
 PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandles;
 PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelines;
 PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresProperties;
@@ -3779,6 +3780,8 @@ struct Context {
         vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureDeviceAddressKHR"));
     gprt::vkCmdTraceRays =
         reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdTraceRaysKHR"));
+    gprt::vkCmdSetRayTracingPipelineStackSize =
+        reinterpret_cast<PFN_vkCmdSetRayTracingPipelineStackSizeKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdSetRayTracingPipelineStackSizeKHR"));
     gprt::vkGetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
         vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
     gprt::vkCreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
@@ -7382,7 +7385,8 @@ struct NNTriangleAccel : public Accel {
   // One of these per geometry, one per "ray type"
   std::vector<GPRTCallableOf<TriangleRecord>> intersectTriangleCallable;
   GPRTBufferOf<uint32_t> SBTIndices;
-
+  uint32_t instanceSBTOffset;
+  uint numGeometries;
 
   GPRTBufferOf<uint8_t> scratchBuffer;
 
@@ -7401,7 +7405,7 @@ struct NNTriangleAccel : public Accel {
 
     GPRTBufferOf<BVH2Node> bvh2Nodes;
     GPRTBufferOf<BVH8Node> bvh8Nodes;
-    GPRTBufferOf<BVH8Leaf> bvh8Leaves;
+    GPRTBufferOf<BVH8Triangle> bvh8Triangles;
     GPRTBufferOf<int> atomicCounters;
     GPRTBufferOf<float3> rootBoundsBuffer; 
     GPRTBufferOf<uint64_t> codes;
@@ -7442,10 +7446,53 @@ struct NNTriangleAccel : public Accel {
   // GPRTBufferOf<int4> lbvhNodes;
   // GPRTBufferOf<float3> lbvhAabbs;
 
+  void updateHandles(GPRTContext opaqueContext) {
+    gprtBuildShaderBindingTable(opaqueContext, GPRT_SBT_ALL); // do I still need this?
+
+    hploc.params.BVH2 = gprtBufferGetHandle(hploc.bvh2Nodes);
+    hploc.params.BVH8 = gprtBufferGetHandle(hploc.bvh8Nodes);
+    hploc.params.BVH8L = gprtBufferGetHandle(hploc.bvh8Triangles);
+    hploc.params.AC = gprtBufferGetHandle(hploc.atomicCounters);
+    hploc.params.C = gprtBufferGetHandle(hploc.codes);
+    hploc.params.I = gprtBufferGetHandle(hploc.clusterIDs);
+    hploc.params.pID = gprtBufferGetHandle(hploc.parentIDs);
+    hploc.params.rootBounds = gprtBufferGetHandle(hploc.rootBoundsBuffer);
+    hploc.params.indexPairs = gprtBufferGetHandle(hploc.indexPairs);
+    hploc.params.primPrefix = gprtBufferGetHandle(hploc.primPrefixBuffer);
+
+    // Setup traversal callable records
+    TraverseRecord record;
+    record.N = hploc.params.N;
+    record.BVH8N = hploc.params.BVH8;
+    record.BVH8L = hploc.params.BVH8L;
+    record.BVH2 = hploc.params.BVH2;
+    record.primBuffers = gprtBufferGetHandle(hploc.trianglesBuffers);
+    record.vertBuffers = gprtBufferGetHandle(hploc.verticesBuffers);
+    record.InstanceContributionToHitGroupIndex = instanceSBTOffset;
+    gprtCallableSetParameters(traverseBVH8Callable, &record);
+    gprtCallableSetParameters(traverseBVH2Callable, &record);
+    gprtCallableSetParameters(traverseLinearCallable, &record);
+
+
+    gprtBufferMap(hploc.trianglesBuffers);
+    gprtBufferMap(hploc.verticesBuffers);
+    gprt::Buffer* trianglesBuffers = gprtBufferGetPointer(hploc.trianglesBuffers);
+    gprt::Buffer* verticesBuffers = gprtBufferGetPointer(hploc.verticesBuffers);
+    for (int i = 0; i < numGeometries; ++i) {
+      trianglesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
+      verticesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
+    }
+    gprtBufferUnmap(hploc.trianglesBuffers);
+    gprtBufferUnmap(hploc.verticesBuffers);
+    hploc.params.triangles = gprtBufferGetHandle(hploc.trianglesBuffers);
+    hploc.params.vertices = gprtBufferGetHandle(hploc.verticesBuffers);
+  }
+
   NNTriangleAccel(Context* context, size_t numGeometries, NNTriangleGeom *geometries)
       : Accel(context) 
   {
     this->geometries.resize(numGeometries);
+    this->numGeometries = numGeometries;
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
     
     // HPLOC initialization
@@ -7471,7 +7518,7 @@ struct NNTriangleAccel : public Accel {
 
     SBTIndices = gprtDeviceBufferCreate<uint32_t>(opaqueContext, numGeometries * requestedFeatures.numRayTypes);
     intersectTriangleCallable.resize(numGeometries * requestedFeatures.numRayTypes);
-    uint32_t instanceSBTOffset = Callable::callables.size(); // the offset into the callable SBT is the number of callables already in the SBT
+    instanceSBTOffset = Callable::callables.size(); // the offset into the callable SBT is the number of callables already in the SBT
 
     hploc.params.N = 0;
     std::vector<uint32_t> primPrefix(numGeometries);
@@ -7510,58 +7557,14 @@ struct NNTriangleAccel : public Accel {
     hploc.codes = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
     hploc.bvh2Nodes = gprtDeviceBufferCreate<BVH2Node>(opaqueContext, expectedBvh2Nodes);
     hploc.bvh8Nodes = gprtDeviceBufferCreate<BVH8Node>(opaqueContext, expectedBvh8Nodes);
-    hploc.bvh8Leaves = gprtDeviceBufferCreate<BVH8Leaf>(opaqueContext, hploc.params.N);
+    hploc.bvh8Triangles = gprtDeviceBufferCreate<BVH8Triangle>(opaqueContext, hploc.params.N);
     hploc.parentIDs = gprtDeviceBufferCreate<int32_t>(opaqueContext, hploc.params.N);
     hploc.atomicCounters = gprtSharedBufferCreate<int>(opaqueContext, 6);
     // hploc.atomicCounters = gprtDeviceBufferCreate<int>(opaqueContext, 6);
     hploc.indexPairs = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
-    gprtBuildShaderBindingTable(opaqueContext, GPRT_SBT_ALL); // do I still need this?
-
-    hploc.params.BVH2 = gprtBufferGetHandle(hploc.bvh2Nodes);
-    hploc.params.BVH8 = gprtBufferGetHandle(hploc.bvh8Nodes);
-    hploc.params.BVH8L = gprtBufferGetHandle(hploc.bvh8Leaves);
-    hploc.params.AC = gprtBufferGetHandle(hploc.atomicCounters);
-    hploc.params.C = gprtBufferGetHandle(hploc.codes);
-    hploc.params.I = gprtBufferGetHandle(hploc.clusterIDs);
-    hploc.params.pID = gprtBufferGetHandle(hploc.parentIDs);
-    hploc.params.rootBounds = gprtBufferGetHandle(hploc.rootBoundsBuffer);
-    hploc.params.indexPairs = gprtBufferGetHandle(hploc.indexPairs);
-    hploc.params.primPrefix = gprtBufferGetHandle(hploc.primPrefixBuffer);
-
-    // Setup traversal callable records
-    TraverseRecord record;
-    record.N = hploc.params.N;
-    record.BVH8N = hploc.params.BVH8;
-    record.BVH8L = hploc.params.BVH8L;
-    record.BVH2 = hploc.params.BVH2;
-    record.primBuffers = gprtBufferGetHandle(hploc.trianglesBuffers);
-    record.vertBuffers = gprtBufferGetHandle(hploc.verticesBuffers);
-    record.InstanceContributionToHitGroupIndex = instanceSBTOffset;
-    gprtCallableSetParameters(traverseBVH8Callable, &record);
-    gprtCallableSetParameters(traverseBVH2Callable, &record);
-    gprtCallableSetParameters(traverseLinearCallable, &record);
-
-
-    gprtBufferMap(hploc.trianglesBuffers);
-    gprtBufferMap(hploc.verticesBuffers);
-    gprt::Buffer* trianglesBuffers = gprtBufferGetPointer(hploc.trianglesBuffers);
-    gprt::Buffer* verticesBuffers = gprtBufferGetPointer(hploc.verticesBuffers);
-    for (int i = 0; i < numGeometries; ++i) {
-      trianglesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
-      verticesBuffers[i] = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
-    }
-    gprtBufferUnmap(hploc.trianglesBuffers);
-    gprtBufferUnmap(hploc.verticesBuffers);
-    hploc.params.triangles = gprtBufferGetHandle(hploc.trianglesBuffers);
-    hploc.params.vertices = gprtBufferGetHandle(hploc.verticesBuffers);
     
-
     // to be resized as needed
     scratchBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context);
-
-    
-    
-
 
     
 
@@ -7885,40 +7888,88 @@ struct NNTriangleAccel : public Accel {
 
   struct TravBVH8Data {
     std::vector<BVH8Node> parentStack;
+    std::vector<int> parentIndices;
     bool isLeaf;
     int index;
     int childSlot;
   };
 
-  void testBVH8Traversal(std::vector<BVH8Node> &nodes, std::vector<BVH8Leaf> &leaves) 
+  void testBVH8Traversal(std::vector<BVH8Node> &nodes, std::vector<BVH8Triangle> &tris) 
   {
-    // Todo, update to account for changes to slot indexing
-    return; 
     using namespace math;
     // "isInner", "nodeIndex", "parentIndex", "childSlot in parent"
     std::vector<TravBVH8Data> stack;
-    stack.push_back({{}, false, 0, -1});
+    stack.push_back({{}, {}, false, 0, -1});
 
     // none of these should exceed 1.
     std::vector<int> childBaseAddrRefs(nodes.size(), 0);
 
     // tests to see if all leaves can be reached by the inner nodes
-    std::vector<int> leafHitCount(leaves.size(), 0);
+    std::vector<int> leafHitCount(tris.size(), 0);
     while (stack.size() > 0) {
       auto current = stack.back();
       stack.pop_back();
 
+      // if (!current.isLeaf && current.index == 13) {
+      //   BVH8Node node = nodes[current.index];
+      //   uint qxscl = node.header.getScaleX() << 23;
+      //   uint qyscl = node.header.getScaleY() << 23;
+      //   uint qzscl = node.header.getScaleZ() << 23;
+      //   float xscale = *((float*)(&qxscl));
+      //   float yscale = *((float*)(&qyscl));
+      //   float zscale = *((float*)(&qzscl));
+      //   float3 scale = float3(xscale, yscale, zscale);
+      //   float3 parentAABBMin = node.header.pos;
+      //   float3 parentAABBMax = node.header.pos + scale * 255.f;
+
+      //   printf("Parent AABB (%f, %f, %f). (%f, %f, %f)\n", 
+      //     parentAABBMin.x, parentAABBMin.y, parentAABBMin.z,
+      //     parentAABBMax.x, parentAABBMax.y, parentAABBMax.z);
+
+      //   // push every child of the node onto the stack
+      //   for (int i = 0; i < 8; ++i) {
+      //     // empty child slot
+      //     if (node.header.isEmpty(i)) continue;
+
+      //     // Test to see if quantized child bounds is inside parent
+      //     uint lox = node.getLoX(i);
+      //     uint loy = node.getLoY(i);
+      //     uint loz = node.getLoZ(i);
+      //     uint hix = node.getHiX(i);
+      //     uint hiy = node.getHiY(i);
+      //     uint hiz = node.getHiZ(i);
+      //     uint3 lo = uint3(lox, loy, loz);
+      //     uint3 hi = uint3(hix, hiy, hiz);
+      //     float3 aabbMin = node.header.pos + scale * float3(lo);
+      //     float3 aabbMax = node.header.pos + scale * float3(hi);
+
+      //     printf("Child %d AABB (%f, %f, %f). (%f, %f, %f)\n", i,
+      //       aabbMin.x, aabbMin.y, aabbMin.z,
+      //       aabbMax.x, aabbMax.y, aabbMax.z);
+      //   }
+      // }
+
       // if the item is a leaf...
       if (current.isLeaf) {
         // Verify that the leaf is contained in all parent AABBs
-        BVH8Leaf leaf = leaves[current.index];
-        BVH8Triangle tri = leaf.tri;
-        float3 aabbMin = min(tri.v[0], min(tri.v[1], tri.v[2]));
-        float3 aabbMax = max(tri.v[0], max(tri.v[1], tri.v[2]));
+        BVH8Triangle &tri = tris[current.index];
+
+        // Write out the parent for debugging on the GPU
+        tri.debug = current.parentIndices[current.parentIndices.size() - 1];
+        
+        float3 aabbMin = min(tri.v0, min(tri.v1, tri.v2));
+        float3 aabbMax = max(tri.v0, max(tri.v1, tri.v2));
         for (int pid = 0; pid < current.parentStack.size(); ++pid) {
           BVH8Node parentNode = current.parentStack[pid];
-          float3 parentAABBMin = parentNode.origin;
-          float3 parentAABBMax = parentNode.origin + parentNode.getScale();
+          uint qxscl = parentNode.header.getScaleX() << 23;
+          uint qyscl = parentNode.header.getScaleY() << 23;
+          uint qzscl = parentNode.header.getScaleZ() << 23;
+          float xscale = *((float*)(&qxscl));
+          float yscale = *((float*)(&qyscl));
+          float zscale = *((float*)(&qzscl));
+          float3 scale = float3(xscale, yscale, zscale);
+          float3 parentAABBMin = parentNode.header.pos;
+          float3 parentAABBMax = parentNode.header.pos + scale * 255.f;
           if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
             std::cout<<"Error: Leaf AABB is not inside parent AABB" << std::endl;
           }
@@ -7927,18 +7978,47 @@ struct NNTriangleAccel : public Accel {
         // Also verify primitive is within it's assigned child slot
         if (current.parentStack.size() > 0) {
           BVH8Node parentNode = current.parentStack.back();
-          float2x3 slotAABB = parentNode.getChildBounds(current.childSlot);
-          float3 slotAABBMin = slotAABB[0];
-          float3 slotAABBMax = slotAABB[1];
+          uint lox = parentNode.getLoX(current.childSlot);
+          uint loy = parentNode.getLoY(current.childSlot);
+          uint loz = parentNode.getLoZ(current.childSlot);
+          uint hix = parentNode.getHiX(current.childSlot);
+          uint hiy = parentNode.getHiY(current.childSlot);
+          uint hiz = parentNode.getHiZ(current.childSlot);
+          uint qxscl = parentNode.header.getScaleX() << 23;
+          uint qyscl = parentNode.header.getScaleY() << 23;
+          uint qzscl = parentNode.header.getScaleZ() << 23;
+          float xscale = *((float*)(&qxscl));
+          float yscale = *((float*)(&qyscl));
+          float zscale = *((float*)(&qzscl));
+          float3 scale = float3(xscale, yscale, zscale);
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+          float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
+          
           if (any(aabbMin < slotAABBMin) || any(aabbMax > slotAABBMax)) {
             std::cout<<"Error: Node AABB is not inside assigned child slot" << std::endl;
 
             // test to see if the triangle is inside any of the slots...
             bool inside = false;
             for (int j = 0; j < 8; ++j) {
-              float2x3 slotAABB = parentNode.getChildBounds(j);
-              float3 slotAABBMin = slotAABB[0];
-              float3 slotAABBMax = slotAABB[1];
+              uint lox = parentNode.getLoX(j);
+              uint loy = parentNode.getLoY(j);
+              uint loz = parentNode.getLoZ(j);
+              uint hix = parentNode.getHiX(j);
+              uint hiy = parentNode.getHiY(j);
+              uint hiz = parentNode.getHiZ(j);
+              uint qxscl = parentNode.header.getScaleX() << 23;
+              uint qyscl = parentNode.header.getScaleY() << 23;
+              uint qzscl = parentNode.header.getScaleZ() << 23;
+              float xscale = *((float*)(&qxscl));
+              float yscale = *((float*)(&qyscl));
+              float zscale = *((float*)(&qzscl));
+              float3 scale = float3(xscale, yscale, zscale);
+              uint3 lo = uint3(lox, loy, loz);
+              uint3 hi = uint3(hix, hiy, hiz);
+              float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+              float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
               if (all(aabbMin >= slotAABBMin) && all(aabbMax <= slotAABBMax)) {
                 inside = true;
                 break;
@@ -7959,83 +8039,98 @@ struct NNTriangleAccel : public Accel {
       else {
         BVH8Node node = nodes[current.index];
 
-        if (current.index == 0) {
-          std::cout<<"Root Node" << std::endl;
-          uint8_t xLo[8];
-          uint8_t xHi[8];
-          for (int i = 0; i < 8; ++i) {
-            xLo[i] = node.qlox8 >> (i * 8) & 0xFF;
-            xHi[i] = node.qhix8 >> (i * 8) & 0xFF;
-            // xLo 215 215 215 215 xHi bits 154 173 188 173
-          }
-          std::cout<<"xLo ";
-          for (int i = 0; i < 8; ++i) {
-            std::cout<<int(xLo[i]) << " ";
-          }
-          std::cout<<std::endl;
-          std::cout<<"xHi ";
-          for (int i = 0; i < 8; ++i) {
-            std::cout<<int(xHi[i]) << " ";
-          }
-          std::cout<<std::endl;
-        }
-
-        if (current.index == 8 || current.index == 7 || current.index == 12) {
-          std::cout<<std::endl;
-        }
-
         // If node isnt root...
         if (current.parentStack.size() > 0) {
           // Get our quantized bounds
           BVH8Node parentNode = current.parentStack.back();
           int childSlot = current.childSlot;
-          float2x3 slotAABB = parentNode.getChildBounds(childSlot);
-          float3 aabbMin = slotAABB[0];
-          float3 aabbMax = slotAABB[1];
+          uint lox = parentNode.getLoX(childSlot);
+          uint loy = parentNode.getLoY(childSlot);
+          uint loz = parentNode.getLoZ(childSlot);
+          uint hix = parentNode.getHiX(childSlot);
+          uint hiy = parentNode.getHiY(childSlot);
+          uint hiz = parentNode.getHiZ(childSlot);
+          uint qxscl = parentNode.header.getScaleX() << 23;
+          uint qyscl = parentNode.header.getScaleY() << 23;
+          uint qzscl = parentNode.header.getScaleZ() << 23;
+          float xscale = *((float*)(&qxscl));
+          float yscale = *((float*)(&qyscl));
+          float zscale = *((float*)(&qzscl));
+          float3 scale = float3(xscale, yscale, zscale);
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 aabbMin = parentNode.header.pos + scale * float3(lo);
+          float3 aabbMax = parentNode.header.pos + scale * float3(hi);
          
           // Verify that the node is contained in all parent nodes conservative bounds
           for (int pid = 0; pid < current.parentStack.size(); ++pid) {
             BVH8Node parentNode = current.parentStack[pid];
-            float3 parentAABBMin = parentNode.origin;
-            float3 parentAABBMax = parentNode.origin + parentNode.getScale();          
+            uint qxscl = parentNode.header.getScaleX() << 23;
+            uint qyscl = parentNode.header.getScaleY() << 23;
+            uint qzscl = parentNode.header.getScaleZ() << 23;
+            float xscale = *((float*)(&qxscl));
+            float yscale = *((float*)(&qyscl));
+            float zscale = *((float*)(&qzscl));
+            float3 scale = float3(xscale, yscale, zscale);
+
+            float3 parentAABBMin = parentNode.header.pos;
+            float3 parentAABBMax = parentNode.header.pos + scale * 255.f;     
+                
             if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
               std::cout<<"Error: Node AABB is not inside parent AABB" << std::endl;
             }
           }          
         }
 
-        float3 parentAabbMin = node.origin;
-        float3 parentAabbMax = node.origin + node.getScale();
+        uint qxscl = node.header.getScaleX() << 23;
+        uint qyscl = node.header.getScaleY() << 23;
+        uint qzscl = node.header.getScaleZ() << 23;
+        float xscale = *((float*)(&qxscl));
+        float yscale = *((float*)(&qyscl));
+        float zscale = *((float*)(&qzscl));
+        float3 parentScale = float3(xscale, yscale, zscale);
+        float3 parentAabbMin = node.header.pos;
+        float3 parentAabbMax = node.header.pos + parentScale * 255.f;
 
         // push every child of the node onto the stack
         for (int i = 0; i < 8; ++i) {
-          uint8_t meta = node.getMeta(i);
-
           // empty child slot
-          if (meta == 0) continue;
+          if (node.header.isEmpty(i)) continue;
 
           // Test to see if quantized child bounds is inside parent
-          float2x3 aabb = node.getChildBounds(i);
-          if (any(aabb[0] < parentAabbMin) || any(aabb[1] > parentAabbMax)) {
+          uint lox = node.getLoX(i);
+          uint loy = node.getLoY(i);
+          uint loz = node.getLoZ(i);
+          uint hix = node.getHiX(i);
+          uint hiy = node.getHiY(i);
+          uint hiz = node.getHiZ(i);
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 aabbMin = node.header.pos + parentScale * float3(lo);
+          float3 aabbMax = node.header.pos + parentScale * float3(hi);
+
+          if (any(aabbMin < parentAabbMin) || any(aabbMax > parentAabbMax)) {
             std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
           }
 
           // if child is an inner node...
-          if (node.getIMask(i)) {
-            int relativeIndex = (meta & 0x1F) - 24;
+          if (node.header.isInner(i)) {
+            uint8_t imask = node.header.getIMask();
+            // count how many inner nodes were before this one
+            uint numPrevInner = 0;
+            for (int j = 0; j < i; ++j) {
+              if (imask & (1 << j)) numPrevInner++;
+            }
+
+            int relativeIndex = numPrevInner;
             
             // Verify that the relative index is valid
             if (relativeIndex < 0 || relativeIndex >= 8) {
               std::cout<<"Error: Inner node has invalid relative index" << std::endl;
             }
-            
-            // Verify that "hasInnerNode" test works
-            if (node.hasInnerNode() == false) {
-              std::cout<<"Error: Inner node has no inner node flag set" << std::endl;
-            }
-
+           
             // Push inner node onto the stack.
-            uint32_t childAddr = relativeIndex + node.childNodeBaseIndex;
+            uint32_t childAddr = relativeIndex + node.header.firstNodeIdx;
             
             // Verify child address is valid
             if (childAddr < 0 || childAddr >= nodes.size()) {
@@ -8043,37 +8138,37 @@ struct NNTriangleAccel : public Accel {
             }
 
             // Create stack entry for inner node
-            TravBVH8Data data = {current.parentStack, false, childAddr, i};
+            TravBVH8Data data = {current.parentStack, current.parentIndices, false, childAddr, i};
             data.parentStack.push_back(node);
+            data.parentIndices.push_back(current.index);
             stack.push_back(data);
           }
         
           // if child is a leaf
           else {
-            int relativeIndex = (meta & 0x1F); // 0-24
+            int relativeIndex = node.header.getLeafRemapOfs(i); // 0-24
             
             // Verify relative Index is valid
             if (relativeIndex < 0 || relativeIndex >= 24) {
               std::cout<<"Error: Leaf has invalid relative index" << std::endl;
             }
             
-            uint32_t leafAddr = relativeIndex + node.primitiveBaseIndex;
+            uint32_t leafAddr = relativeIndex + node.header.firstPrimIdx;
             // Verify absolute address is valid
-            if (leafAddr < 0 || leafAddr >= leaves.size()) {
+            if (leafAddr < 0 || leafAddr >= tris.size()) {
               std::cout<<"Error: Leaf has invalid absolute address" << std::endl;
             }
 
             // Create stack entry for leaf
-            TravBVH8Data data = {current.parentStack, true, leafAddr, i};
+            TravBVH8Data data = {current.parentStack, current.parentIndices, true, leafAddr, i};
             data.parentStack.push_back(node);
+            data.parentIndices.push_back(current.index);
             stack.push_back(data);
           }
         }
       }
     }
-
-
-    for (int i = 0; i < leaves.size(); ++i) {
+    for (int i = 0; i < tris.size(); ++i) {
       if (leafHitCount[i] != 1) {
         std::cout<<"Error: Leaf " << i << " hit " << leafHitCount[i] << " times" << std::endl;
       }
@@ -8257,6 +8352,8 @@ struct NNTriangleAccel : public Accel {
     
     std::cout<<"Building HPLOC tree with " << hploc.params.N << " primitives" << std::endl;
 
+    updateHandles(context);
+
     int N = hploc.params.N;
     uint3 numPrimGroups = {(hploc.params.N + 31) / 32, 1, 1};
     uint3 numPrimThreads = {32, 1, 1};
@@ -8355,13 +8452,16 @@ struct NNTriangleAccel : public Accel {
     memcpy(bvh8Nodes.data(), bvh8NodesPtr, sizeof(BVH8Node) * bvh8NodeAlloc);
     gprtBufferUnmap(hploc.bvh8Nodes);
 
-    std::vector<BVH8Leaf> bvh8Leaves(hploc.params.N);
-    gprtBufferMap(hploc.bvh8Leaves);
-    BVH8Leaf* bvh8LeavesPtr = gprtBufferGetPointer(hploc.bvh8Leaves);
-    memcpy(bvh8Leaves.data(), bvh8LeavesPtr, sizeof(BVH8Leaf) * hploc.params.N);
-    gprtBufferUnmap(hploc.bvh8Leaves);
+    // std::vector<BVH8Triangle> bvh8Triangles(hploc.params.N);
+    // gprtBufferMap(hploc.bvh8Triangles);
+    // BVH8Triangle* bvh8TrianglesPtr = gprtBufferGetPointer(hploc.bvh8Triangles);
+    // memcpy(bvh8Triangles.data(), bvh8TrianglesPtr, sizeof(BVH8Triangle) * hploc.params.N);
 
-    testBVH8Traversal(bvh8Nodes, bvh8Leaves);
+    // testBVH8Traversal(bvh8Nodes, bvh8Triangles);
+
+    // memcpy(bvh8TrianglesPtr, bvh8Triangles.data(), sizeof(BVH8Triangle) * hploc.params.N);
+
+    // gprtBufferUnmap(hploc.bvh8Triangles);
 
 
     // HPLOC(mode, allowCompaction, minimizeMemory);
@@ -9796,6 +9896,14 @@ void Context::buildPipeline() {
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
       rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
+
+      std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_RAY_TRACING_PIPELINE_STACK_SIZE_KHR};
+      VkPipelineDynamicStateCreateInfo dynamicState{};
+      dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+      dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+      dynamicState.pDynamicStates = dynamicStates.data();
+
+      rayTracingPipelineCI.pDynamicState = &dynamicState;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " + std::to_string(requestedFeatures.rayRecursionDepth) + ".");
 
@@ -11966,6 +12074,12 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
 
+  // uint32_t rayGenStackMax = RayGen::raygens.size();
+  // uint32_t maxRecursionDepth = requestedFeatures.rayRecursionDepth;
+  // uint32_t cmiaMax = std::max(numHitRecords, Miss::misses.size());
+  // uint32_t cmMax = std::max(requestedFeatures.rayRecursionDepth - 1) * 
+
+  // gprt::vkCmdSetRayTracingPipelineStackSize(context->graphicsCommandBuffer, 1024);
   gprt::vkCmdTraceRays(context->graphicsCommandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);
 

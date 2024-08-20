@@ -620,7 +620,7 @@ struct ChildStack <let WIDTH : uint> {
 
     [mutating]
     bool pushCluster(uint32_t clusterID) {
-        if (clusterID >> 24 == GEOM_ID_BVH2) return pushNode(clusterID);
+        if ((clusterID >> 24) == GEOM_ID_BVH2) return pushNode(clusterID);
         else return pushLeaf(clusterID);
     }
 
@@ -698,10 +698,14 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         // Keep worker thread going until assigned a *leaf* node.
         if ((bvh2ClusterID >> 24) != GEOM_ID_BVH2) {
             // Once we have a leaf, store it and return.
-            BVH8Leaf leaf;
-            leaf.tri.clusterID = bvh2ClusterID;
-            LoadTriangle(params, bvh2ClusterID, leaf.tri.v);
-            store<BVH8Leaf>(params.BVH8L, bvh8ClusterID, leaf);
+            // (todo, store up to 3 triangles per leaf)
+            float3 v[3];
+            LoadTriangle(params, bvh2ClusterID, v);
+            BVH8Triangle triblock;
+            triblock.v0 = v[0]; triblock.v1 = v[1]; triblock.v2 = v[2];
+            triblock.userTriangleID = bvh2ClusterID & 0x00FFFFFF;
+            triblock.primBits = bvh2ClusterID >> 24;
+            store<BVH8Triangle>(params.BVH8L, bvh8ClusterID, triblock);
             break;
         }
 
@@ -772,13 +776,13 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
 
         // At this point, we're ready to generate the actual BVH8 node. 
         // First, determine the bounds of the children, and a common bound containing them all.
-        float2x3 parentBounds = float2x3(float3(FLT_MAX), -float3(FLT_MAX));
+        float2x3 parentAABB = float2x3(float3(FLT_MAX), -float3(FLT_MAX));
         float2x3 childBounds[8];
         for (int i = 0; i < children.size(); ++i) {
             uint32_t clusterID = (i < children.numLeaves) ? children.leaves[i] : children.nodes[i - children.numLeaves];
             LoadAABB(params, clusterID, childBounds[i]);
-            parentBounds[0] = min(parentBounds[0], childBounds[i][0]);
-            parentBounds[1] = max(parentBounds[1], childBounds[i][1]);
+            parentAABB[0] = min(parentAABB[0], childBounds[i][0]);
+            parentAABB[1] = max(parentAABB[1], childBounds[i][1]);
         }
 
         // Now, we "auction off" the children to the octants of the parent node.
@@ -792,14 +796,11 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
 
         // Table costs(c,s) where each cell indicates the cost of placing a
         // particular child node "c" in a particular child slot "s" (0-7).
-        float3 parentCentroid = (parentBounds[0] + parentBounds[1]) * 0.5f;
+        float3 parentCentroid = (parentAABB[0] + parentAABB[1]) * 0.5f;
         for (int c = 0; c < children.size(); ++c) {
             float3 childCentroid = (childBounds[c][0] + childBounds[c][1]) * 0.5f;
             for (int s = 0; s < 8; ++s) {
-                float3 DS = float3(
-                    (((s >> 2) & 1) == 1) ? -1.0f : 1.0f,
-					(((s >> 1) & 1) == 1) ? -1.0f : 1.0f,
-					(((s >> 0) & 1) == 1) ? -1.0f : 1.0f);
+                float3 DS = getOctantDir(s);
                 payoffs[c][s] = dot(childCentroid - parentCentroid, DS);
             }
         }
@@ -844,76 +845,101 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         }
 
         // Now that the auction is complete, we can assign the children to the BVH8 node.
-        float3 nodeLo = parentBounds[0];
-        float3 nodeHi = parentBounds[1];
-        
-        // Calculate quantization parameters for each axis respectively
-		const float Nq = 8;
-		uint8_t3 e; // implicit quantization
-		e.x = (uint8_t)ceil(log2((nodeHi.x - nodeLo.x) / (pow(2, Nq) - 1)));
-		e.y = (uint8_t)ceil(log2((nodeHi.y - nodeLo.y) / (pow(2, Nq) - 1)));
-		e.z = (uint8_t)ceil(log2((nodeHi.z - nodeLo.z) / (pow(2, Nq) - 1)));
 
+        // Determine node scale, rounding up to next power of two.
+        int magic = 0x0000FFFF - (7 << 23);
+        uint xscale = uint(clamp((asint(__fsub_ru(parentAABB[1].x, parentAABB[0].x)) + magic) >> 23, 1, 248));
+        uint yscale = uint(clamp((asint(__fsub_ru(parentAABB[1].y, parentAABB[0].y)) + magic) >> 23, 1, 248));
+        uint zscale = uint(clamp((asint(__fsub_ru(parentAABB[1].z, parentAABB[0].z)) + magic) >> 23, 1, 248));
 
+        // Pack quantization position and exponent for each axis into the node header.
         BVH8Node node;
-        node.origin = nodeLo;
-        node.extx = e.x;
-        node.exty = e.y;
-        node.extz = e.z;
-        node.childNodeBaseIndex = -1; ///childNodeBaseIndex;
-        node.primitiveBaseIndex = -1; ///primitiveBaseIndex;
-                
-        // initialize child fields
-        node.meta8 = 0;
-        node.qlox8 = node.qloy8 = node.qloz8 = 255;
-        node.qhix8 = node.qhiy8 = node.qhiz8 = 0;
-        node.imask = 0;
+        node.header.pos[0] = parentAABB[0].x;
+        node.header.pos[1] = parentAABB[0].y;
+        node.header.pos[2] = parentAABB[0].z;
+        node.header.scaleAndIMask = 0;
+        node.header.setScale(uint8_t(xscale), uint8_t(yscale), uint8_t(zscale));
+        node.header.firstNodeIdx = -1;
+        node.header.firstPrimIdx = -1;
+
+        // 1.0f / exp2(scale)
+        float xmul = asfloat((254 - xscale) << 23);
+        float ymul = asfloat((254 - yscale) << 23);
+        float zmul = asfloat((254 - zscale) << 23);
+        if (bvh8ClusterID == 0)
+        {
+            printf("xyzmul: %f %f %f\n", xmul, ymul, zmul);
+        }
+        
+        
+        if (bvh8ClusterID == 0) 
+        {
+            printf("Set scale: %d %d %d\n", xscale, yscale, zscale);
+            printf("Scale in node: %d %d %d\n", node.header.getScaleX(), node.header.getScaleY(), node.header.getScaleZ());
+        }
 
         // Assign imeta and meta fields by octant.
-        for (int octant = 0; octant < 8; ++octant) {
-            uint child = assignments[octant];
+        // for (int octant = 0; octant < 8; ++octant) {
+            // uint child = assignments[octant];
+        for (int child = 0; child < 8; ++child) {
             uint clusterID;
-            if (child == INVALID_ID) continue; // empty slot
-            // leaf node
-            //  high 3 bits unary encode num prims
-            //  low 5 bits store child slot index (ranging in 0...23)
-            else if (child < children.numLeaves) {
-                // (todo... store up to 24 triangles, 3 per child slot...)
-                clusterID = children.leaves[child];
-                node.setMeta(octant, uint8_t((1 << 5) | (child)));
-                node.primitiveBaseIndex = primitiveBaseIndex;
+
+            bool isInner = false;
+            
+            // empty slot
+            if (child == INVALID_ID) {
+                node.header.setEmpty(child);
+                continue;
             }
+
+            // leaf node
+            else if (child < children.numLeaves) {
+                // (todo... store up to 3 triangles...)
+                clusterID = children.leaves[child];
+                node.header.setLeaf(child, /*prim offset*/ child, /*num prims*/ 1);
+                node.header.firstPrimIdx = primitiveBaseIndex;
+            }
+            
             // inner node
-            //   high 3 bits of meta are 001.
-            //   low 5 bits store child slot index + 24.
-            else {
-                // node.setMeta(octant, uint8_t((1 << 5) | ((child - children.numLeaves) + 24)));
+            else if (child < (children.numLeaves + children.numNodes)) {
                 clusterID = children.nodes[child - children.numLeaves];
-                node.setMeta(octant, uint8_t((1 << 5) | (octant + 24)));
-                node.setIMask(octant, true);
-                node.childNodeBaseIndex = childNodeBaseIndex;
+                node.header.setInner(child); 
+                node.header.setIMaskBit(child, true);
+                node.header.firstNodeIdx = childNodeBaseIndex;
+                isInner = true;
             }
 
             // Quantize child AABBs
-            float2x3 bounds;
-            LoadAABB(params, clusterID, bounds);
+            float2x3 childAABB;
+            LoadAABB(params, clusterID, childAABB);
 
-            int3 qlo, qhi;
-            qlo.x = (int)floor((bounds[0].x - parentBounds[0].x) / pow(2, e.x));
-			qlo.y = (int)floor((bounds[0].y - parentBounds[0].y) / pow(2, e.y));
-			qlo.z = (int)floor((bounds[0].z - parentBounds[0].z) / pow(2, e.z));
-			qhi.x =  (int)ceil((bounds[1].x - parentBounds[0].x) / pow(2, e.x));
-			qhi.y =  (int)ceil((bounds[1].y - parentBounds[0].y) / pow(2, e.y));
-			qhi.z =  (int)ceil((bounds[1].z - parentBounds[0].z) / pow(2, e.z));
-            
-            // Store the quantized child fields
-            uint shift = octant * 8;
-            node.qlox8 = (node.qlox8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qlo.x) << shift);
-            node.qloy8 = (node.qloy8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qlo.y) << shift);
-            node.qloz8 = (node.qloz8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qlo.z) << shift);
-            node.qhix8 = (node.qhix8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qhi.x) << shift);
-            node.qhiy8 = (node.qhiy8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qhi.y) << shift);
-            node.qhiz8 = (node.qhiz8 & ~uint64_t(0xFFull << shift)) | (uint64_t(qhi.z) << shift);
+            // node.setLoX(child, uint8_t(clamp(floor(((childAABB[0].x - parentAABB[0].x) * xmul)), 0, 255)));
+            // node.setLoY(child, uint8_t(clamp(floor(((childAABB[0].y - parentAABB[0].y) * ymul)), 0, 255)));
+            // node.setLoZ(child, uint8_t(clamp(floor(((childAABB[0].z - parentAABB[0].z) * zmul)), 0, 255)));
+            // node.setHiX(child, uint8_t(clamp(ceil(((childAABB[1].x - parentAABB[0].x) * xmul)), 0, 255)));
+            // node.setHiY(child, uint8_t(clamp(ceil(((childAABB[1].y - parentAABB[0].y) * ymul)), 0, 255)));
+            // node.setHiZ(child, uint8_t(clamp(ceil(((childAABB[1].z - parentAABB[0].z) * zmul)), 0, 255)));
+
+            node.setLoX(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].x, parentAABB[0].x), xmul)), 0b00000000, 0b11111111)));
+            node.setLoY(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].y, parentAABB[0].y), ymul)), 0b00000000, 0b11111111)));
+            node.setLoZ(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].z, parentAABB[0].z), zmul)), 0b00000000, 0b11111111)));
+            node.setHiX(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].x, parentAABB[0].x), xmul)), 0b00000000, 0b11111111)));
+            node.setHiY(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].y, parentAABB[0].y), ymul)), 0b00000000, 0b11111111)));
+            node.setHiZ(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].z, parentAABB[0].z), zmul)), 0b00000000, 0b11111111)));
+
+            if (bvh8ClusterID == 0)
+            {
+                if (node.header.isInner(child)) {
+                    printf("child %d Inner? %d innerChildSlot %d\n", child, int(node.header.isInner(child)), node.header.getInnerChildSlot(child));
+                }
+                else if (node.header.isLeaf(child)) {
+                    printf("child %d, Leaf? %d numPrims %d leafRemapOfs %d\n", child, int(node.header.isLeaf(child)), node.header.getLeafNumPrims(child), node.header.getLeafRemapOfs(child));
+                }
+            }
+        }
+
+        if (bvh8ClusterID == 0) {
+            printf("IMask: %d\n", node.header.getIMask());
         }
 
         // Finally, store the BVH8 node
