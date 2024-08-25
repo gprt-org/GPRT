@@ -989,9 +989,10 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
 
         // Pack quantization position and exponent for each axis into the node header.
         BVH8Node node;
-        node.header.pos[0] = parentAABB[0].x;
-        node.header.pos[1] = parentAABB[0].y;
-        node.header.pos[2] = parentAABB[0].z;
+        float3 parentLo = parentAABB[0];
+        node.header.pos[0] = parentLo.x;
+        node.header.pos[1] = parentLo.y;
+        node.header.pos[2] = parentLo.z;
         node.header.scale[0] = uint8_t(xscale);
         node.header.scale[1] = uint8_t(yscale);
         node.header.scale[2] = uint8_t(zscale);
@@ -1021,30 +1022,32 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
             // empty slot
             else {
                 node.header.meta[i].setEmpty();
-                node.lo[i] = float3(FLT_MAX);
-                node.hi[i] = float3(-FLT_MAX);
+                node.lox[i] = node.loy[i] = node.loz[i] = 255;
+                node.hix[i] = node.hiy[i] = node.hiz[i] = 0;
                 continue;
             }
 
-            node.lo[i] = childBounds[i][0];
-            node.hi[i] = childBounds[i][1];
+            float3 lo = childBounds[i][0];
+            float3 hi = childBounds[i][1];
 
+            // node.lo[i] = childBounds[i][0];
+            // node.hi[i] = childBounds[i][1];
 
-            // // Quantize child AABBs
+            // Quantize child AABBs
             // float2x3 childAABB;
             // LoadAABB(params, clusterID, childAABB);
-            // node.setLoX(child, uint8_t(clamp(floor(((childAABB[0].x - parentAABB[0].x) * xmul)), 0, 255)));
-            // node.setLoY(child, uint8_t(clamp(floor(((childAABB[0].y - parentAABB[0].y) * ymul)), 0, 255)));
-            // node.setLoZ(child, uint8_t(clamp(floor(((childAABB[0].z - parentAABB[0].z) * zmul)), 0, 255)));
-            // node.setHiX(child, uint8_t(clamp(ceil(((childAABB[1].x - parentAABB[0].x) * xmul)), 0, 255)));
-            // node.setHiY(child, uint8_t(clamp(ceil(((childAABB[1].y - parentAABB[0].y) * ymul)), 0, 255)));
-            // node.setHiZ(child, uint8_t(clamp(ceil(((childAABB[1].z - parentAABB[0].z) * zmul)), 0, 255)));
-            // node.setLoX(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].x, parentAABB[0].x), xmul)), 0b00000000, 0b11111111)));
-            // node.setLoY(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].y, parentAABB[0].y), ymul)), 0b00000000, 0b11111111)));
-            // node.setLoZ(child, uint8_t(clamp(floor(__fmul_rd(__fsub_rd(childAABB[0].z, parentAABB[0].z), zmul)), 0b00000000, 0b11111111)));
-            // node.setHiX(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].x, parentAABB[0].x), xmul)), 0b00000000, 0b11111111)));
-            // node.setHiY(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].y, parentAABB[0].y), ymul)), 0b00000000, 0b11111111)));
-            // node.setHiZ(child, uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(childAABB[1].z, parentAABB[0].z), zmul)), 0b00000000, 0b11111111)));
+            // node.lox[i](child, uint8_t(clamp(floor(((childAABB[0].x - parentLo.x) * xmul)), 0, 255)));
+            // node.loy[i](child, uint8_t(clamp(floor(((childAABB[0].y - parentLo.y) * ymul)), 0, 255)));
+            // node.loz[i](child, uint8_t(clamp(floor(((childAABB[0].z - parentLo.z) * zmul)), 0, 255)));
+            // node.hix[i](child, uint8_t(clamp(ceil(((childAABB[1].x - parentLo.x) * xmul)), 0, 255)));
+            // node.xiy[i](child, uint8_t(clamp(ceil(((childAABB[1].y - parentLo.y) * ymul)), 0, 255)));
+            // node.hiz[i](child, uint8_t(clamp(ceil(((childAABB[1].z - parentLo.z) * zmul)), 0, 255)));
+            node.lox[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
+            node.loy[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
+            node.loz[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
+            node.hix[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
+            node.hiy[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
+            node.hiz[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
         }
 
         // Store the BVH8 node

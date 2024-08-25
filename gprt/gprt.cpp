@@ -7946,26 +7946,26 @@ struct NNTriangleAccel : public Accel {
         // Also verify primitive is within it's assigned child slot
         if (current.parentStack.size() > 0) {
           BVH8Node parentNode = current.parentStack.back();
-          float3 slotAABBMin = parentNode.lo[current.childSlot];
-          float3 slotAABBMax = parentNode.hi[current.childSlot];
+          // float3 slotAABBMin = parentNode.lo[current.childSlot];
+          // float3 slotAABBMax = parentNode.hi[current.childSlot];
 
-          // uint lox = parentNode.getLoX(current.childSlot);
-          // uint loy = parentNode.getLoY(current.childSlot);
-          // uint loz = parentNode.getLoZ(current.childSlot);
-          // uint hix = parentNode.getHiX(current.childSlot);
-          // uint hiy = parentNode.getHiY(current.childSlot);
-          // uint hiz = parentNode.getHiZ(current.childSlot);
-          // uint qxscl = parentNode.header.getScaleX() << 23;
-          // uint qyscl = parentNode.header.getScaleY() << 23;
-          // uint qzscl = parentNode.header.getScaleZ() << 23;
-          // float xscale = *((float*)(&qxscl));
-          // float yscale = *((float*)(&qyscl));
-          // float zscale = *((float*)(&qzscl));
-          // float3 scale = float3(xscale, yscale, zscale);
-          // uint3 lo = uint3(lox, loy, loz);
-          // uint3 hi = uint3(hix, hiy, hiz);
-          // float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
-          // float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
+          uint lox = parentNode.lox[current.childSlot];
+          uint loy = parentNode.loy[current.childSlot];
+          uint loz = parentNode.loz[current.childSlot];
+          uint hix = parentNode.hix[current.childSlot];
+          uint hiy = parentNode.hiy[current.childSlot];
+          uint hiz = parentNode.hiz[current.childSlot];
+          uint qxscl = uint(parentNode.header.scale[0]) << 23;
+          uint qyscl = uint(parentNode.header.scale[1]) << 23;
+          uint qzscl = uint(parentNode.header.scale[2]) << 23;
+          float xscale = *((float*)(&qxscl));
+          float yscale = *((float*)(&qyscl));
+          float zscale = *((float*)(&qzscl));
+          float3 scale = float3(xscale, yscale, zscale);
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+          float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
           
           if (any(aabbMin < slotAABBMin) || any(aabbMax > slotAABBMax)) {
             std::cout<<"Error: Node AABB is not inside assigned child slot" << std::endl;
@@ -7973,25 +7973,25 @@ struct NNTriangleAccel : public Accel {
             // test to see if the triangle is inside any of the slots...
             bool inside = false;
             for (int j = 0; j < 8; ++j) {
-              float3 slotAABBMin = parentNode.lo[j];
-              float3 slotAABBMax = parentNode.hi[j];
-              // uint lox = parentNode.getLoX(j);
-              // uint loy = parentNode.getLoY(j);
-              // uint loz = parentNode.getLoZ(j);
-              // uint hix = parentNode.getHiX(j);
-              // uint hiy = parentNode.getHiY(j);
-              // uint hiz = parentNode.getHiZ(j);
-              // uint qxscl = parentNode.header.getScaleX() << 23;
-              // uint qyscl = parentNode.header.getScaleY() << 23;
-              // uint qzscl = parentNode.header.getScaleZ() << 23;
-              // float xscale = *((float*)(&qxscl));
-              // float yscale = *((float*)(&qyscl));
-              // float zscale = *((float*)(&qzscl));
-              // float3 scale = float3(xscale, yscale, zscale);
-              // uint3 lo = uint3(lox, loy, loz);
-              // uint3 hi = uint3(hix, hiy, hiz);
-              // float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
-              // float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
+              // float3 slotAABBMin = parentNode.lo[j];
+              // float3 slotAABBMax = parentNode.hi[j];
+              uint lox = parentNode.lox[j];
+              uint loy = parentNode.loy[j];
+              uint loz = parentNode.loz[j];
+              uint hix = parentNode.hix[j];
+              uint hiy = parentNode.hiy[j];
+              uint hiz = parentNode.hiz[j];
+              uint qxscl = parentNode.header.scale[0] << 23;
+              uint qyscl = parentNode.header.scale[1] << 23;
+              uint qzscl = parentNode.header.scale[2] << 23;
+              float xscale = *((float*)(&qxscl));
+              float yscale = *((float*)(&qyscl));
+              float zscale = *((float*)(&qzscl));
+              float3 scale = float3(xscale, yscale, zscale);
+              uint3 lo = uint3(lox, loy, loz);
+              uint3 hi = uint3(hix, hiy, hiz);
+              float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+              float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
               if (all(aabbMin >= slotAABBMin) && all(aabbMax <= slotAABBMax)) {
                 inside = true;
                 break;
@@ -8018,25 +8018,25 @@ struct NNTriangleAccel : public Accel {
           BVH8Node parentNode = current.parentStack.back();
           BVH8NodeHeader header = parentNode.header;
           int childSlot = current.childSlot;
-          float3 aabbMin = parentNode.lo[childSlot];
-          float3 aabbMax = parentNode.hi[childSlot];
-          // uint lox = parentNode.getLoX(childSlot);
-          // uint loy = parentNode.getLoY(childSlot);
-          // uint loz = parentNode.getLoZ(childSlot);
-          // uint hix = parentNode.getHiX(childSlot);
-          // uint hiy = parentNode.getHiY(childSlot);
-          // uint hiz = parentNode.getHiZ(childSlot);
-          // uint qxscl = parentNode.header.getScaleX() << 23;
-          // uint qyscl = parentNode.header.getScaleY() << 23;
-          // uint qzscl = parentNode.header.getScaleZ() << 23;
-          // float xscale = *((float*)(&qxscl));
-          // float yscale = *((float*)(&qyscl));
-          // float zscale = *((float*)(&qzscl));
-          // float3 scale = float3(xscale, yscale, zscale);
-          // uint3 lo = uint3(lox, loy, loz);
-          // uint3 hi = uint3(hix, hiy, hiz);
-          // float3 aabbMin = parentNode.header.pos + scale * float3(lo);
-          // float3 aabbMax = parentNode.header.pos + scale * float3(hi);
+          // float3 aabbMin = parentNode.lo[childSlot];
+          // float3 aabbMax = parentNode.hi[childSlot];
+          uint lox = parentNode.lox[childSlot];
+          uint loy = parentNode.loy[childSlot];
+          uint loz = parentNode.loz[childSlot];
+          uint hix = parentNode.hix[childSlot];
+          uint hiy = parentNode.hiy[childSlot];
+          uint hiz = parentNode.hiz[childSlot];
+          uint qxscl = uint(parentNode.header.scale[0]) << 23;
+          uint qyscl = uint(parentNode.header.scale[1]) << 23;
+          uint qzscl = uint(parentNode.header.scale[2]) << 23;
+          float xscale = *((float*)(&qxscl));
+          float yscale = *((float*)(&qyscl));
+          float zscale = *((float*)(&qzscl));
+          float3 scale = float3(xscale, yscale, zscale);
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 aabbMin = parentNode.header.pos + scale * float3(lo);
+          float3 aabbMax = parentNode.header.pos + scale * float3(hi);
          
           // // Verify that the node is contained in all parent nodes conservative bounds
           // for (int pid = 0; pid < current.parentStack.size(); ++pid) {
@@ -8059,43 +8059,43 @@ struct NNTriangleAccel : public Accel {
         }
 
         BVH8NodeHeader header = node.header;
-        // uint qxscl = node.header.getScaleX() << 23;
-        // uint qyscl = node.header.getScaleY() << 23;
-        // uint qzscl = node.header.getScaleZ() << 23;
-        // float xscale = *((float*)(&qxscl));
-        // float yscale = *((float*)(&qyscl));
-        // float zscale = *((float*)(&qzscl));
-        // float3 parentScale = float3(xscale, yscale, zscale);
-        // float3 parentAabbMin = node.header.pos;
-        // float3 parentAabbMax = node.header.pos + parentScale * 255.f;
+        uint qxscl = uint(node.header.scale[0]) << 23;
+        uint qyscl = uint(node.header.scale[1]) << 23;
+        uint qzscl = uint(node.header.scale[2]) << 23;
+        float xscale = *((float*)(&qxscl));
+        float yscale = *((float*)(&qyscl));
+        float zscale = *((float*)(&qzscl));
+        float3 parentScale = float3(xscale, yscale, zscale);
+        float3 parentAabbMin = node.header.pos;
+        float3 parentAabbMax = node.header.pos + parentScale * 255.f;
         uint8_t innerMask = header.innerMask;
 
         // push every child of the node onto the stack
         for (int i = 0; i < 8; ++i) {
           uint childSlot = i;
           BVH8Meta meta = header.meta[childSlot];
-          float3 aabbMin = node.lo[childSlot];
-          float3 aabbMax = node.hi[childSlot];
+          // float3 aabbMin = node.lo[childSlot];
+          // float3 aabbMax = node.hi[childSlot];
           
           // empty child slot
           if (meta.isEmpty()) continue;
 
 
           // Test to see if quantized child bounds is inside parent
-          // uint lox = node.getLoX(i);
-          // uint loy = node.getLoY(i);
-          // uint loz = node.getLoZ(i);
-          // uint hix = node.getHiX(i);
-          // uint hiy = node.getHiY(i);
-          // uint hiz = node.getHiZ(i);
-          // uint3 lo = uint3(lox, loy, loz);
-          // uint3 hi = uint3(hix, hiy, hiz);
-          // float3 aabbMin = node.header.pos + parentScale * float3(lo);
-          // float3 aabbMax = node.header.pos + parentScale * float3(hi);
+          uint lox = node.lox[i];
+          uint loy = node.loy[i];
+          uint loz = node.loz[i];
+          uint hix = node.hix[i];
+          uint hiy = node.hiy[i];
+          uint hiz = node.hiz[i];
+          uint3 lo = uint3(lox, loy, loz);
+          uint3 hi = uint3(hix, hiy, hiz);
+          float3 aabbMin = node.header.pos + parentScale * float3(lo);
+          float3 aabbMax = node.header.pos + parentScale * float3(hi);
 
-          // if (any(aabbMin < parentAabbMin) || any(aabbMax > parentAabbMax)) {
-          //   std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
-          // }
+          if (any(aabbMin < parentAabbMin) || any(aabbMax > parentAabbMax)) {
+            std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
+          }
 
             
           // if child is an inner node...

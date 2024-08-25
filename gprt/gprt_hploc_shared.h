@@ -496,16 +496,13 @@ struct BVH8Node // 80 bytes
 {
     BVH8NodeHeader      header;
 
-    float3 lo[8];
-    float3 hi[8];
-
     // Quantized child bounding boxes for each child slot.
-    // uint8_t       lox[8];
-    // uint8_t       loy[8];
-    // uint8_t       loz[8];
-    // uint8_t       hix[8];
-    // uint8_t       hiy[8];
-    // uint8_t       hiz[8];
+    uint8_t lox[8];
+    uint8_t loy[8];
+    uint8_t loz[8];
+    uint8_t hix[8];
+    uint8_t hiy[8];
+    uint8_t hiz[8];
 };
 
 

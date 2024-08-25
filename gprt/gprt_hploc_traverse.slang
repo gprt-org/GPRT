@@ -389,11 +389,10 @@ bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out fl
 //------------------------------------------------------------------------
 struct TraversalState {
     uint sp; // stack pointer
-    uint nodegrp_parent;
     uint nodegrp_idx;
     uint nodegrp_hits;
     uint nodegrp_ord;
-    uint primgrp_parent;
+
     uint primgrp_idx;
     uint primgrp_hits;
 
@@ -439,10 +438,9 @@ struct StackEntry {
     // From there we can use the inner node mask to recover the relative child index. 
     // (or I suppose we could just directly encode it... depends on what's faster...)
     uint32_t order;
-    uint32_t parentIdx; // debugging
 };
 
-static const int LOCAL_STACK_SIZE = 64;
+static const int LOCAL_STACK_SIZE = 32;
 
 [ForceInline] void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
@@ -450,7 +448,6 @@ static const int LOCAL_STACK_SIZE = 64;
     entry.firstIdx = tstate.nodegrp_idx;
     entry.hits = tstate.nodegrp_hits;
     entry.order = tstate.nodegrp_ord;
-    entry.parentIdx = tstate.nodegrp_parent;
     localStack[tstate.sp] = entry;
     tstate.sp = tstate.sp + 1;
 }
@@ -461,7 +458,6 @@ static const int LOCAL_STACK_SIZE = 64;
     entry.firstIdx = tstate.primgrp_idx;
     entry.hits = tstate.primgrp_hits;
     entry.order = tstate.nodegrp_ord;
-    entry.parentIdx = tstate.primgrp_parent;
     localStack[tstate.sp] = entry;
     tstate.sp = tstate.sp + 1;
 }
@@ -476,26 +472,28 @@ static const int LOCAL_STACK_SIZE = 64;
 [ForceInline]
 void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool reorder)
 {
-    float3 pos = float3(node.header.pos[0], node.header.pos[1], node.header.pos[2]);
-    uint8_t innerMask = node.header.innerMask;
     tstate.nodegrp_idx = node.header.firstChildIdx;
     tstate.primgrp_idx = node.header.firstRemapIdx;
-    tstate.nodegrp_parent = nodeIdx;
-    tstate.primgrp_parent = nodeIdx;
+
+    uint8_t innerMask = node.header.innerMask;
+
+    float3 pos = float3(node.header.pos[0], node.header.pos[1], node.header.pos[2]);
+    uint3 packedScale = uint3(node.header.scale[0], node.header.scale[1], node.header.scale[2]);
+    float3 scale = asfloat(packedScale << 23); // Shift 8-bit scale to floating-point exponent bits.
 
     float3 orig = tstate.origin;
     float3 dir = tstate.direction;
 
-    int nodeaddr[8]; 
-    int nodesHit[8]; 
-    int slotTypes[8]; 
-    for (int i = 0; i < 8; ++i) {
-        nodeaddr[i] = -1;
-        nodesHit[i] = 0;
-        slotTypes[i] = -1;
-    }
-    float3 parentlo = float3(+FLT_MAX);
-    float3 parenthi = float3(-FLT_MAX);
+    // int nodeaddr[8]; 
+    // int nodesHit[8]; 
+    // int slotTypes[8]; 
+    // for (int i = 0; i < 8; ++i) {
+    //     nodeaddr[i] = -1;
+    //     nodesHit[i] = 0;
+    //     slotTypes[i] = -1;
+    // }
+    // float3 parentlo = float3(+FLT_MAX);
+    // float3 parenthi = float3(-FLT_MAX);
 
     uint32_t leafHits = 0;
     float dists[8];
@@ -504,41 +502,49 @@ void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool
         dists[i] = FLT_MAX;
         hitSlots[i] = 0b1111;
         BVH8Meta meta = node.header.meta[i];
-        if (meta.isEmpty()) {
-            slotTypes[i] = 0;
-            continue;
-        }
-
-        if (meta.isInner()) {
-            slotTypes[i] = 1;
-        }
-        if (meta.isLeaf()) {
-            slotTypes[i] = 2;
-        }
-
-        float3 lo = node.lo[i];
-        float3 hi = node.hi[i];
-
-        parentlo = min(parentlo, lo);
-        parenthi = max(parenthi, hi);
-
+        // if (meta.isInner()) {
+        //     slotTypes[i] = 1;
+        // }
+        // if (meta.isLeaf()) {
+        //     slotTypes[i] = 2;
+        // }
+        // if (meta.isEmpty()) {
+            // slotTypes[i] = 0;
+        // }
         
-        if (meta.isInner()) {
-            uint childSlot = meta.getInnerChildSlot();
-            int childOffset = __popc(innerMask & ~(-1 << childSlot));            
-            nodeaddr[i] = node.header.firstChildIdx + childOffset;
-        }
-        else {
-            nodeaddr[i] = node.header.firstRemapIdx + meta.getLeafRemapOfs();
-        }
+        if (meta.isEmpty()) continue;
+
+        uint8_t qlox = node.lox[i];
+        uint8_t qloy = node.loy[i];
+        uint8_t qloz = node.loz[i];
+        uint8_t qhix = node.hix[i];
+        uint8_t qhiy = node.hiy[i];
+        uint8_t qhiz = node.hiz[i];
+
+        float3 lo = pos + scale * float3(qlox, qloy, qloz);
+        float3 hi = pos + scale * float3(qhix, qhiy, qhiz);
+
+        // float3 lo = node.lo[i];
+        // float3 hi = node.hi[i];
+
+        // parentlo = min(parentlo, lo);
+        // parenthi = max(parenthi, hi);
         
-        // float dist = sdBox(tstate.origin, lo, hi);
-        float dist = sqAABB(tstate.origin, lo, hi) - 1e-6;
+        // if (meta.isInner()) {
+        //     uint childSlot = meta.getInnerChildSlot();
+        //     int childOffset = __popc(innerMask & ~(-1 << childSlot));            
+        //     nodeaddr[i] = node.header.firstChildIdx + childOffset;
+        // }
+        // else {
+        //     nodeaddr[i] = node.header.firstRemapIdx + meta.getLeafRemapOfs();
+        // }
+        
+        float dist = sqAABB(tstate.origin, lo, hi);
         if (dist > tstate.tmax) {
             continue;
         }
 
-        nodesHit[i] = 1;
+        //nodesHit[i] = 1;
 
         if (meta.isLeaf()) {
             leafHits |= (1 << meta.getLeafRemapOfs()); // 0-23
@@ -590,7 +596,6 @@ void traverseBVH8(inout TraversalState tstate) {
     tstate.nodegrp_idx = 0;
     tstate.nodegrp_hits = 0;
     tstate.nodegrp_ord = 0;
-    tstate.nodegrp_parent = INVALID_ID;
 
     int finalTri = 0;
 
@@ -619,27 +624,33 @@ void traverseBVH8(inout TraversalState tstate) {
                 int index = idx + tstate.primgrp_idx;
                 BVH8Triangle tri = tstate.BVH8L.Load<BVH8Triangle>(index * sizeof(BVH8Triangle));
                 float dist = udTriangle(tri.v0, tri.v1, tri.v2, tstate.origin);
-                float3 trilo = min(min(tri.v0, tri.v1), tri.v2);
-                float3 trihi = max(max(tri.v0, tri.v1), tri.v2);
+                
+                if (dist < tstate.tmax) {
+                    finalTri = index;
+                    tstate.tmax = dist;
+                }
+                
+                // float3 trilo = min(min(tri.v0, tri.v1), tri.v2);
+                // float3 trihi = max(max(tri.v0, tri.v1), tri.v2);
                 
 
-                int parents[8]; 
-                for (int i = 0; i < 8; ++i) parents[i] = -1;
-                parents[0] = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
+                // int parents[8]; 
+                // for (int i = 0; i < 8; ++i) parents[i] = -1;
+                // parents[0] = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
 
-                int count = 1;
-                while (parents[count-1] != 0) {
-                    parents[count] = tstate.BVH8NP.Load<uint>(parents[count-1] * sizeof(uint));
-                    count++;
-                    if (count >= 8) break;
-                }
+                // int count = 1;
+                // while (parents[count-1] != 0) {
+                //     parents[count] = tstate.BVH8NP.Load<uint>(parents[count-1] * sizeof(uint));
+                //     count++;
+                //     if (count >= 8) break;
+                // }
 
-                // uint parent = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
+                // // uint parent = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
 
-                if (tstate.debug) {
-                    printf("tri %2d, dist %f, lo %f %f %f, hi %f %f %f\n", index, dist, trilo.x, trilo.y, trilo.z, trihi.x, trihi.y, trihi.z);
-                    printf("\t expected parent stack %d %d %d %d %d %d %d %d\n", parents[0], parents[1], parents[2], parents[3], parents[4], parents[5], parents[6], parents[7]);
-                }
+                // if (tstate.debug) {
+                //     printf("tri %2d, dist %f, lo %f %f %f, hi %f %f %f\n", index, dist, trilo.x, trilo.y, trilo.z, trihi.x, trihi.y, trihi.z);
+                //     printf("\t expected parent stack %d %d %d %d %d %d %d %d\n", parents[0], parents[1], parents[2], parents[3], parents[4], parents[5], parents[6], parents[7]);
+                // }
 
                 
 
@@ -684,10 +695,7 @@ void traverseBVH8(inout TraversalState tstate) {
 
 
                 
-                if (dist < tstate.tmax) {
-                    finalTri = index;
-                    tstate.tmax = dist;
-                }
+                
 
             } while (tstate.primgrp_hits > 0);
         }
@@ -702,22 +710,17 @@ void traverseBVH8(inout TraversalState tstate) {
             tstate.nodegrp_idx = nodeGroup.firstIdx;
             tstate.nodegrp_hits = nodeGroup.hits;
             tstate.nodegrp_ord = nodeGroup.order;
-            tstate.nodegrp_parent = nodeGroup.parentIdx;
-            // enableReordering = false;
         }
 
         if ( tstate.nodegrp_hits > 0x00FFFFFF )  // if what we popped has inner node hits
         {
             uint8_t innerMask = uint8_t(tstate.nodegrp_hits & 0xFF);
             int bitIdx = firstbithigh(tstate.nodegrp_hits);
-            int bitIdxBefore = bitIdx;
-
-            int hitsBefore = tstate.nodegrp_hits;
-
             let hits = tstate.nodegrp_hits & ~(1 << bitIdx); // Clear it from list
             tstate.nodegrp_hits = hits;
 
-            bitIdx &= 0x7; // remove 24 bias
+            // remove 24 bias
+            bitIdx &= 0x7; 
 
             // Reverse traversal priority
             int slotIdx = int(tstate.nodegrp_ord >> (bitIdx * 4)) & 0b111;
@@ -726,12 +729,12 @@ void traverseBVH8(inout TraversalState tstate) {
 
             uint nodeIdx = tstate.nodegrp_idx + relativeIdx;
 
-            if (tstate.debug && nodeIdx == 7) {
-                printf("----------------------debugging how we got to 7----------------------\n");
-                printf("bitIdxBefore %d, hitsBefore %d, hitsAfter %d, bitIdxAfter %d, tstate.nodegrp_ord %d, slotIdx %d, relativeIdx %d, tstate.nodegrp_idx %d\n",
-                        bitIdxBefore   , hitsBefore   , hits        , bitIdx        , tstate.nodegrp_ord   , slotIdx   , relativeIdx,    tstate.nodegrp_idx);
+            // if (tstate.debug && nodeIdx == 7) {
+            //     printf("----------------------debugging how we got to 7----------------------\n");
+            //     printf("bitIdxBefore %d, hitsBefore %d, hitsAfter %d, bitIdxAfter %d, tstate.nodegrp_ord %d, slotIdx %d, relativeIdx %d, tstate.nodegrp_idx %d\n",
+            //             bitIdxBefore   , hitsBefore   , hits        , bitIdx        , tstate.nodegrp_ord   , slotIdx   , relativeIdx,    tstate.nodegrp_idx);
 
-            }
+            // }
 
             BVH8Node node = fetchNode(tstate.BVH8N, nodeIdx);
 
@@ -753,7 +756,6 @@ void traverseBVH8(inout TraversalState tstate) {
     }
 
     if (tstate.debug) {
-
         uint parent = tstate.BVH8LP.Load<uint>(finalTri * sizeof(uint));
         printf("final tri: %d parent %d\n", finalTri, parent);
     }
