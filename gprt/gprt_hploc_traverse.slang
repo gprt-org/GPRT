@@ -30,6 +30,34 @@ using namespace gprt;
 
 float dot2(float3 v ) { return dot(v,v); }
 
+float max3(float3 v) {
+    return max(max(v.x, v.y), v.z);
+}
+
+float min3(float3 v) {
+    return min(min(v.x, v.y), v.z);
+}
+
+// note, returns squared distance
+float udTriangle(in float3 v1, in float3 v2, in float3 v3, in float3 p)
+{
+    float3 v21 = v2 - v1; float3 p1 = p - v1;
+    float3 v32 = v3 - v2; float3 p2 = p - v2;
+    float3 v13 = v1 - v3; float3 p3 = p - v3;
+    float3 nor = cross(v21, v13);
+
+    return ((sign(dot(cross(v21, nor), p1)) +
+                     sign(dot(cross(v32, nor), p2)) +
+                     sign(dot(cross(v13, nor), p3)) < 2.0)
+                    ?
+                  min(min(
+                              dot2(v21 * clamp(dot(v21, p1) / dot2(v21), 0.0, 1.0) - p1),
+                              dot2(v32 * clamp(dot(v32, p2) / dot2(v32), 0.0, 1.0) - p2)),
+                          dot2(v13 * clamp(dot(v13, p3) / dot2(v13), 0.0, 1.0) - p3))
+                    :
+                  dot(nor, p1) * dot(nor, p1) / dot2(nor));
+}
+
 /**
  * Computes the square of the distance from a point to an AABB.
  * If the point is contained in the rectangle then the distance is zero.
@@ -276,6 +304,27 @@ float findClosestPointTriangleSquared(float3 pa, float3 pb, float3 pc, float3 x,
     return dot2(x - p);
 }
 
+// Calcs signed distance to a box of semi-size "rad" centered at
+// the origin. It works in 2D, 3D, 4D any number of dimensions by
+// replacing the vec data types.
+float boxDistance(in float3 p, in float3 aabbmin, float3 aabbmax)
+{
+    float3 cen = .5 * (aabbmin + aabbmax);
+    float3 rad = .5 * (aabbmax - aabbmin);
+    p = p - cen;
+
+    float3 d = abs(p) - rad;
+    return dot2(max(d, 0.0));// + min(max(d.x, max(d.y, d.z)), 0.0);
+}
+
+float sqAABB( in float3 p, in float3 minCorner, in float3 maxCorner ) 
+{
+    float3 size = (maxCorner - minCorner) * 0.5;
+    float3 center = minCorner + size;
+    float3 d = max(abs(p - center) - size, 0.0);
+    return dot(d, d);
+}
+
 inline float sdBox(float3 origin, float3 aabbMin, float3 aabbMax) {
     // For each dimension...
     // Determine which side that "p" is on.
@@ -283,7 +332,7 @@ inline float sdBox(float3 origin, float3 aabbMin, float3 aabbMax) {
     float3 d = select((origin < aabbMin), origin - aabbMin,
                       select((origin > aabbMax), origin - aabbMax,
                              float3(0.f, 0.f, 0.f)));
-    return sqrt(dot(d, d));
+    return dot2(d);
 }
 
 inline float sdBox(float3 origin, float2x3 bounds) {
@@ -294,6 +343,442 @@ inline float sdBox(float3 origin, float2x3 bounds) {
                       select((origin > bounds[1]), origin - bounds[1],
                              float3(0.f, 0.f, 0.f)));
     return sqrt(dot(d, d));
+}
+
+bool rayBox(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc, out float tf) {
+    float3 tlo = (lo - o) / d;
+    float3 thi = (hi - o) / d;
+    float3 tc3 = min(tlo, thi);
+    float3 tf3 = max(tlo, thi);
+    tc = max3(tc3);
+    tf = min3(tf3);
+    return (max(tc, trange.x) < min(tf, trange.y));
+}
+
+bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
+    float3 tlo = (lo - o) / d;
+    float3 thi = (hi - o) / d;
+    float3 tc3 = min(tlo, thi);
+    float3 tf3 = max(tlo, thi);
+    tc = min3(tc3);
+    return trange.x < tc && tc < trange.y;
+}
+
+// tf = min3(tf3);
+// bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
+//     float3 tlo = (lo - o) / d;
+//     float3 thi = (hi - o) / d;
+//     float3 tc3 = min(tlo, thi);
+//     float3 tf3 = max(tlo, thi);
+//     float tc = max3(tf3);
+//     return trange.x < tc && tc < trange.y;
+// }
+
+bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
+    float3 tlo = (lo - o) / d;
+    float3 thi = (hi - o) / d;
+    float3 tc3 = min(tlo, thi);
+    float3 tf3 = max(tlo, thi);
+    float3 d3 = select(0.0 < tc3, tc3,
+                       select(0.0 > tf3, tf3,
+                              float3(0.f, 0.f, 0.f)));
+    tc = d3.x * d3.x + d3.y * d3.y + d3.z * d3.z;
+    return trange.x < tc && tc < trange.y;
+}
+
+//------------------------------------------------------------------------
+struct TraversalState {
+    uint sp; // stack pointer
+    uint nodegrp_parent;
+    uint nodegrp_idx;
+    uint nodegrp_hits;
+    uint nodegrp_ord;
+    uint primgrp_parent;
+    uint primgrp_idx;
+    uint primgrp_hits;
+
+    RWByteAddressBuffer BVH8N;
+    RWByteAddressBuffer BVH8L;
+
+    RWByteAddressBuffer BVH8NP;
+    RWByteAddressBuffer BVH8LP;
+
+    uint8_t oct;
+    uint dupoct;
+
+    Stack<StackEntry, 8> primGroup;
+    Stack<StackEntry, 8> nodeGroup;
+
+    // note, repurposing tmax for search radius, and ignoring tmin.
+    float3 origin; float tmin;
+    float3 direction; float tmax;
+
+    float2 triUV;
+
+    int enablePostponing;
+
+    // debug data...
+    uint debug;
+    uint debugHits;
+    float debugTime;
+    uint showBox;
+
+    __init() {
+    }
+};
+
+//------------------------------------------------------------------------
+struct StackEntry {
+    uint32_t firstIdx;
+    uint32_t hits;
+
+    // order bits here are a hexadecimal encoding of the slots to visit. 
+    // Using "findLeadingBit" on hits, we can determine the next slot to visit.
+    // so, 00000011 (followed by 24 potential leaf hits) says to first visit hex 1, then hex 0.
+    // if we order bits 0x00000021, then we would visit slot "2", then slot "1".
+    // From there we can use the inner node mask to recover the relative child index. 
+    // (or I suppose we could just directly encode it... depends on what's faster...)
+    uint32_t order;
+    uint32_t parentIdx; // debugging
+};
+
+static const int LOCAL_STACK_SIZE = 64;
+
+[ForceInline] void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+{
+    StackEntry entry;
+    entry.firstIdx = tstate.nodegrp_idx;
+    entry.hits = tstate.nodegrp_hits;
+    entry.order = tstate.nodegrp_ord;
+    entry.parentIdx = tstate.nodegrp_parent;
+    localStack[tstate.sp] = entry;
+    tstate.sp = tstate.sp + 1;
+}
+
+[ForceInline] void pushPrimGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+{
+    StackEntry entry;
+    entry.firstIdx = tstate.primgrp_idx;
+    entry.hits = tstate.primgrp_hits;
+    entry.order = tstate.nodegrp_ord;
+    entry.parentIdx = tstate.primgrp_parent;
+    localStack[tstate.sp] = entry;
+    tstate.sp = tstate.sp + 1;
+}
+
+[ForceInline] StackEntry stackPop(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+{
+    tstate.sp--;
+    StackEntry entry = localStack[tstate.sp];
+    return entry;
+}
+//------------------------------------------------------------------------
+[ForceInline]
+void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool reorder)
+{
+    float3 pos = float3(node.header.pos[0], node.header.pos[1], node.header.pos[2]);
+    uint8_t innerMask = node.header.innerMask;
+    tstate.nodegrp_idx = node.header.firstChildIdx;
+    tstate.primgrp_idx = node.header.firstRemapIdx;
+    tstate.nodegrp_parent = nodeIdx;
+    tstate.primgrp_parent = nodeIdx;
+
+    float3 orig = tstate.origin;
+    float3 dir = tstate.direction;
+
+    int nodeaddr[8]; 
+    int nodesHit[8]; 
+    int slotTypes[8]; 
+    for (int i = 0; i < 8; ++i) {
+        nodeaddr[i] = -1;
+        nodesHit[i] = 0;
+        slotTypes[i] = -1;
+    }
+    float3 parentlo = float3(+FLT_MAX);
+    float3 parenthi = float3(-FLT_MAX);
+
+    uint32_t leafHits = 0;
+    float dists[8];
+    int hitSlots[8];
+    for (int i = 0; i < 8; ++i) {
+        dists[i] = FLT_MAX;
+        hitSlots[i] = 0b1111;
+        BVH8Meta meta = node.header.meta[i];
+        if (meta.isEmpty()) {
+            slotTypes[i] = 0;
+            continue;
+        }
+
+        if (meta.isInner()) {
+            slotTypes[i] = 1;
+        }
+        if (meta.isLeaf()) {
+            slotTypes[i] = 2;
+        }
+
+        float3 lo = node.lo[i];
+        float3 hi = node.hi[i];
+
+        parentlo = min(parentlo, lo);
+        parenthi = max(parenthi, hi);
+
+        
+        if (meta.isInner()) {
+            uint childSlot = meta.getInnerChildSlot();
+            int childOffset = __popc(innerMask & ~(-1 << childSlot));            
+            nodeaddr[i] = node.header.firstChildIdx + childOffset;
+        }
+        else {
+            nodeaddr[i] = node.header.firstRemapIdx + meta.getLeafRemapOfs();
+        }
+        
+        // float dist = sdBox(tstate.origin, lo, hi);
+        float dist = sqAABB(tstate.origin, lo, hi) - 1e-6;
+        if (dist > tstate.tmax) {
+            continue;
+        }
+
+        nodesHit[i] = 1;
+
+        if (meta.isLeaf()) {
+            leafHits |= (1 << meta.getLeafRemapOfs()); // 0-23
+        }
+        else {
+            dists[i] = dist;
+            hitSlots[i] = i;
+        }
+    }
+
+    // Useful information for debugging traversal code. Keeping around for the time being...
+    // if (tstate.debug) {
+    //     printf("Stack ptr %d\n", tstate.sp);
+    //     printf("Parent Node %d dist %f\n", nodeIdx, sdBox(tstate.origin, parentlo, parenthi));
+    //     printf("Slot type: %2d %2d %2d %2d %2d %2d %2d %2d\n", slotTypes[0], slotTypes[1], slotTypes[2], slotTypes[3], slotTypes[4], slotTypes[5], slotTypes[6], slotTypes[7]);
+    //     printf("Slot ofs : %2d %2d %2d %2d %2d %2d %2d %2d\n", nodeaddr[0], nodeaddr[1], nodeaddr[2], nodeaddr[3], nodeaddr[4], nodeaddr[5], nodeaddr[6], nodeaddr[7]);
+    //     printf("Slot hits: %2d %2d %2d %2d %2d %2d %2d %2d\n", nodesHit[0], nodesHit[1], nodesHit[2], nodesHit[3], nodesHit[4], nodesHit[5], nodesHit[6], nodesHit[7]);
+    // }
+
+    if (reorder) BubbleSort(hitSlots, dists);
+
+    uint32_t orderBits = 0;
+    uint32_t orderHits = 0;
+    for (int i = 0; i < 8; ++i) {
+        if (hitSlots[i] != 0b1111) {
+            orderHits |= (1 << i);
+            orderBits |= (uint32_t(hitSlots[i]) << (i * 4));
+        }
+    }
+
+    // if (tstate.debug) {
+    //     printf("orderBits 0x%x\n", orderBits);
+    // }
+    
+    // Extract inner, leaf node hits
+    let innerHits = (orderHits << 24) | innerMask; // Move valid inner node mask to low byte.
+    tstate.nodegrp_hits = innerHits;
+    tstate.nodegrp_ord = orderBits; 
+    tstate.primgrp_hits = leafHits;
+}
+
+//------------------------------------------------------------------------
+[ForceInline]
+void traverseBVH8(inout TraversalState tstate) {
+    StackEntry localStack[LOCAL_STACK_SIZE];
+    tstate.sp = 0;
+
+    // Root
+    tstate.nodegrp_idx = 0;
+    tstate.nodegrp_hits = 0;
+    tstate.nodegrp_ord = 0;
+    tstate.nodegrp_parent = INVALID_ID;
+
+    int finalTri = 0;
+
+    bool enableReordering = true;
+    int count = 0;
+
+    // Intersect root node
+    {
+        BVH8Node node = fetchNode(tstate.BVH8N, 0);
+        intersectNode(0, node, tstate, enableReordering);
+    }
+
+    while (true)
+    {
+        // handle leaves
+        if (tstate.primgrp_hits > 0) // inner node hits? -> traverse
+        {
+            do
+            {
+                tstate.debugHits++;
+
+                int idx  = firstbithigh( tstate.primgrp_hits );
+                let hits = tstate.primgrp_hits & ~(1 << idx); // Clear it from list
+                tstate.primgrp_hits = hits;
+                
+                int index = idx + tstate.primgrp_idx;
+                BVH8Triangle tri = tstate.BVH8L.Load<BVH8Triangle>(index * sizeof(BVH8Triangle));
+                float dist = udTriangle(tri.v0, tri.v1, tri.v2, tstate.origin);
+                float3 trilo = min(min(tri.v0, tri.v1), tri.v2);
+                float3 trihi = max(max(tri.v0, tri.v1), tri.v2);
+                
+
+                int parents[8]; 
+                for (int i = 0; i < 8; ++i) parents[i] = -1;
+                parents[0] = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
+
+                int count = 1;
+                while (parents[count-1] != 0) {
+                    parents[count] = tstate.BVH8NP.Load<uint>(parents[count-1] * sizeof(uint));
+                    count++;
+                    if (count >= 8) break;
+                }
+
+                // uint parent = tstate.BVH8LP.Load<uint>(index * sizeof(uint));
+
+                if (tstate.debug) {
+                    printf("tri %2d, dist %f, lo %f %f %f, hi %f %f %f\n", index, dist, trilo.x, trilo.y, trilo.z, trihi.x, trihi.y, trihi.z);
+                    printf("\t expected parent stack %d %d %d %d %d %d %d %d\n", parents[0], parents[1], parents[2], parents[3], parents[4], parents[5], parents[6], parents[7]);
+                }
+
+                
+
+                    
+                        // if (parent != tstate.primgrp_parent) {
+                        //     printf("error: Tri %d, parent %d vs primgroup parent %d \n", index, parent, tstate.primgrp_parent);
+                        // }
+                        // BVH8Node node = fetchNode(tstate.BVH8N, parent);E
+                        // int slotIdx = 0;
+                        // for (int i = 0; i < 8; ++i) {
+                        //     if (node.header.meta[i].getLeafRemapOfs() == idx) {
+                        //         slotIdx = i;
+                        //         break;
+                        //     }
+                        // }
+                        // float3 lo = node.lo[slotIdx];
+                        // float3 hi = node.hi[slotIdx];
+                        // if (any(lo != trilo) || any(hi != trihi)) {
+                        //     printf("error: Tri %d, parent %d, slot %d, lo %f %f %f, hi %f %f %f\n", index, parent, slotIdx, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
+                        //     printf("error: Tri %d, lo %f %f %f, hi %f %f %f\n", index, trilo.x, trilo.y, trilo.z, trihi.x, trihi.y, trihi.z);
+                        // }
+                        
+                        // int count = 0;
+                        // while (parent != 0) {
+                        //     parent = tstate.BVH8NP.Load<uint>(parent * sizeof(uint));
+                        //     count++;
+
+                        //     // make sure parent is on the stack...
+                        //     bool found = false;
+                        //     for (int i = 0; i < tstate.sp; ++i) {
+                        //         if (localStack[i].firstIdx == parent) {
+                        //             found = true;
+                        //             break;
+                        //         }
+                        //     }
+
+                        //     if (!found && parent != 0) {
+                        //         printf("error: Tri %d, parent %d not on stack\n", index, parent);
+                        //     }
+                        // }
+                    // }
+
+
+                
+                if (dist < tstate.tmax) {
+                    finalTri = index;
+                    tstate.tmax = dist;
+                }
+
+            } while (tstate.primgrp_hits > 0);
+        }
+
+        // stack pop?
+        if ( tstate.nodegrp_hits <= 0x00FFFFFF )
+        {
+            if( tstate.sp == 0 )  // empty stack ==> done
+                break;
+            
+            var nodeGroup = stackPop( localStack, tstate );
+            tstate.nodegrp_idx = nodeGroup.firstIdx;
+            tstate.nodegrp_hits = nodeGroup.hits;
+            tstate.nodegrp_ord = nodeGroup.order;
+            tstate.nodegrp_parent = nodeGroup.parentIdx;
+            // enableReordering = false;
+        }
+
+        if ( tstate.nodegrp_hits > 0x00FFFFFF )  // if what we popped has inner node hits
+        {
+            uint8_t innerMask = uint8_t(tstate.nodegrp_hits & 0xFF);
+            int bitIdx = firstbithigh(tstate.nodegrp_hits);
+            int bitIdxBefore = bitIdx;
+
+            int hitsBefore = tstate.nodegrp_hits;
+
+            let hits = tstate.nodegrp_hits & ~(1 << bitIdx); // Clear it from list
+            tstate.nodegrp_hits = hits;
+
+            bitIdx &= 0x7; // remove 24 bias
+
+            // Reverse traversal priority
+            int slotIdx = int(tstate.nodegrp_ord >> (bitIdx * 4)) & 0b111;
+            uint32_t relativeIdx = __popc(innerMask & ~(-1 << slotIdx));
+            
+
+            uint nodeIdx = tstate.nodegrp_idx + relativeIdx;
+
+            if (tstate.debug && nodeIdx == 7) {
+                printf("----------------------debugging how we got to 7----------------------\n");
+                printf("bitIdxBefore %d, hitsBefore %d, hitsAfter %d, bitIdxAfter %d, tstate.nodegrp_ord %d, slotIdx %d, relativeIdx %d, tstate.nodegrp_idx %d\n",
+                        bitIdxBefore   , hitsBefore   , hits        , bitIdx        , tstate.nodegrp_ord   , slotIdx   , relativeIdx,    tstate.nodegrp_idx);
+
+            }
+
+            BVH8Node node = fetchNode(tstate.BVH8N, nodeIdx);
+
+            // If nodeGroup still contains hits to test, push it to stack.
+            if( tstate.nodegrp_hits > 0x00FFFFFF ) {                
+                pushNodeGroup( localStack, tstate );
+            }
+            
+            intersectNode(nodeIdx, node, tstate, enableReordering );
+        }
+
+        // else  // what we popped is actually a prim group
+        // {
+        //     printf("prim group\n");
+        //     tstate.primgrp_hits = tstate.nodegrp_hits;
+        //     tstate.primgrp_idx = tstate.nodegrp_idx;
+        //     tstate.nodegrp_hits = 0;
+        // }
+    }
+
+    if (tstate.debug) {
+
+        uint parent = tstate.BVH8LP.Load<uint>(finalTri * sizeof(uint));
+        printf("final tri: %d parent %d\n", finalTri, parent);
+    }
+}
+
+//------------------------------------------------------------------------
+[shader("callable")]
+void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParams) {
+    var tstate = TraversalState();
+    tstate.BVH8N = buffers[record.BVH8N.index];
+    tstate.BVH8L = buffers[record.BVH8L.index];
+    tstate.BVH8NP = buffers[record.BVH8NP.index];
+    tstate.BVH8LP = buffers[record.BVH8LP.index];
+    tstate.origin = travParams.OriginAndTMax.xyz;
+    tstate.direction = float3(1.0, 1.0, 1.0);
+    tstate.tmax = travParams.OriginAndTMax.w;
+    tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
+    if (tstate.debug) {
+        printf("----------------------\n");
+    }
+    tstate.debugHits = 0;
+    tstate.debugTime = travParams.time;
+    traverseBVH8(tstate);
+    travParams.hitPrims = tstate.debugHits;
+    travParams.OriginAndTMax.w = sqrt(tstate.tmax);
 }
 
 /**
@@ -313,32 +798,21 @@ struct Stack<T, let N : int>
 
     __init() {
         stackptr = 0;
+        for (int i = 0; i < N; ++i) {
+            items[i] = T();
+        }
     }
 
     // Conditionally pushes an item onto the stack (by value).
     // If the stack is full, the function returns false.
     [mutating]
     bool push(T item) {
-        items[stackptr] = item;
-        stackptr++;
+        items[stackptr++] = item;
         return true;
     }
 
     [mutating]
-    T pop() {
-        --stackptr;
-        return items[stackptr];
-    }
-
-    // // Pops an item off the stack (by value)
-    // // If the stack is empty, the function returns false.
-    // [mutating]
-    // bool pop(inout T item) {
-    //     if (stackptr == 0) return false;
-    //     --stackptr;
-    //     item = items[stackptr];        
-    //     return true;
-    // }
+    T pop() { return items[--stackptr]; }
 }
 
 struct BVH2Stack {
@@ -370,70 +844,65 @@ struct BVH2Stack {
     uint size() { return stack.size(); }
 };
 
-// Function to swap elements based on condition
-__inline__ void Swap(inout StackEntry ia, inout StackEntry ib) {
-    if (ia.dist > ib.dist) {
-        StackEntry tmp = ia;
-        ia = ib;
-        ib = tmp;
-    }
-}
+// // Function to swap elements based on condition
+// __inline__ void Swap(inout StackEntry ia, inout StackEntry ib) {
+//     if (ia.dist < ib.dist) {
+//         StackEntry tmp = ia;
+//         ia = ib;
+//         ib = tmp;
+//     }
+// }
 
-// Sorting network for an array of 8 elements
-__inline__ void SortWithNetwork(inout StackEntry arr[8]) {
-    // Level 1
-    Swap(arr[0], arr[1]);
-    Swap(arr[2], arr[3]);
-    Swap(arr[4], arr[5]);
-    Swap(arr[6], arr[7]);
+// // Sorting network for an array of 8 elements
+// __inline__ void SortWithNetwork(inout StackEntry arr[8]) {
+//     // Level 1
+//     Swap(arr[0], arr[1]);
+//     Swap(arr[2], arr[3]);
+//     Swap(arr[4], arr[5]);
+//     Swap(arr[6], arr[7]);
 
-    // Level 2
-    Swap(arr[0], arr[2]);
-    Swap(arr[1], arr[3]);
-    Swap(arr[4], arr[6]);
-    Swap(arr[5], arr[7]);
+//     // Level 2
+//     Swap(arr[0], arr[2]);
+//     Swap(arr[1], arr[3]);
+//     Swap(arr[4], arr[6]);
+//     Swap(arr[5], arr[7]);
 
-    // Level 3
-    Swap(arr[1], arr[2]);
-    Swap(arr[5], arr[6]);
+//     // Level 3
+//     Swap(arr[1], arr[2]);
+//     Swap(arr[5], arr[6]);
 
-    // Level 4
-    Swap(arr[0], arr[4]);
-    Swap(arr[1], arr[5]);
-    Swap(arr[2], arr[6]);
-    Swap(arr[3], arr[7]);
+//     // Level 4
+//     Swap(arr[0], arr[4]);
+//     Swap(arr[1], arr[5]);
+//     Swap(arr[2], arr[6]);
+//     Swap(arr[3], arr[7]);
 
-    // Level 5
-    Swap(arr[1], arr[4]);
-    Swap(arr[3], arr[6]);
+//     // Level 5
+//     Swap(arr[1], arr[4]);
+//     Swap(arr[3], arr[6]);
 
-    // Level 6
-    Swap(arr[2], arr[4]);
-    Swap(arr[3], arr[5]);
+//     // Level 6
+//     Swap(arr[2], arr[4]);
+//     Swap(arr[3], arr[5]);
 
-    // Level 7
-    Swap(arr[3], arr[4]);
-}
+//     // Level 7
+//     Swap(arr[3], arr[4]);
+// }
 
-struct StackEntry {
-    uint index;
-    float dist;
-
-    __init(uint _index, float _dist) {
-        index = _index;
-        dist = _dist;
-    }
-}
-
-void BubbleSort<let ARRAY_SIZE : int>(inout StackEntry arr[ARRAY_SIZE]) {
-    for (int i = 0; i < ARRAY_SIZE - 1; ++i)
+void BubbleSort<let N : uint>(inout int keys[N], inout float vals[N]) {
+    for (uint i = 0; i < N; i++)
     {
-        for (int j = 0; j < ARRAY_SIZE - i - 1; j++)
+        for (uint j = i; j < N; j++)
         {
-            if (arr[j].dist > arr[j + 1].dist) {
-                StackEntry tmp = arr[j];
-                arr[j] = arr[j + 1];
-                arr[j + 1] = tmp;
+            if (vals[j] >= vals[i])
+            {
+                int tmpKey = keys[j];
+                keys[j] = keys[i];
+                keys[i] = tmpKey;
+
+                float tmpVal = vals[j];
+                vals[j] = vals[i];
+                vals[i] = tmpVal;
             }
         }
     }
@@ -460,7 +929,7 @@ void IntersectTriangle(uniform TriangleRecord record, inout IntersectTrianglePar
     float3 x = params.ObjectOriginAndTMax.xyz;
 
     float3 p; float2 bc;
-    float dist = findClosestPointTriangle(pa, pb, pc, x, p, bc);
+    float dist = findClosestPointTriangleSquared(pa, pb, pc, x, p, bc);
     
     // Report the "hit".
     if (dist < params.ObjectOriginAndTMax.w) {
@@ -472,83 +941,79 @@ void IntersectTriangle(uniform TriangleRecord record, inout IntersectTrianglePar
 // Active threads per warp is ~6 out of 32. 
 [shader("callable")]
 void TraverseBVH2(uniform TraverseRecord record, inout TraversePayload travParams) {
-    bool debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
-    RWByteAddressBuffer BVH2 = buffers[record.BVH2.index];
-    uint NearestNeighbor = UINT32_MAX;
-    var stack = Stack<uint2, 64>();
-    stack.push(uint2((255 << 24) | 0, UINT32_MAX)); // pushing root node
-    travParams.hitNodes = 0;
-    travParams.hitPrims = 0;
-    do {
-        uint2 group = stack.pop();
-        if (group.x == UINT32_MAX) continue; // done traversing this group
+    // RWByteAddressBuffer BVH2 = buffers[record.BVH2.index];
+    // travParams.hitNodes = 0;
+    // travParams.hitPrims = 0;
 
-        // pop item from group
-        uint index = group.x;
-        group = uint2(group.y, UINT32_MAX);
-        stack.push(group);
+    // TraversalState tstate;
+    // tstate.origin = travParams.OriginAndTMax.xyz;
+    // tstate.tmax = travParams.OriginAndTMax.w * travParams.OriginAndTMax.w;
+    // tstate.direction = float3(1.0, 1.0, 1.0);
+    // tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
 
-        // If we're traversing an inner node
-        if ((index >> 24) == 255) {
-            travParams.hitNodes++;
+    // var stack = Stack<StackEntry, 64>();
+    // for (int i = 0; i < 64; ++i) {
+    //     stack.items[i].index = -1;
+    //     stack.items[i].dist = FLT_MAX;
+    // }
 
-            // Bottleneck by ~70%, long scoreboard stall here 
-            BVH2Node node = BVH2.LoadAligned<BVH2Node>((index & 0x00FFFFFF) * sizeof(BVH2Node)); 
-            float dParent = sdBox(travParams.OriginAndTMax.xyz, node.getBounds()[0], node.getBounds()[1]);
-            if (dParent > travParams.OriginAndTMax.w) continue; // cull away subtree
+    // stack.push(StackEntry((255 << 24) | 0, 0.0)); // pushing root node
+    
+    // do {
+    //     StackEntry item = stack.pop();
+    //     if (item.dist > tstate.tmax) continue; // Cull
 
-            uint2 LR = uint2(node.getChildCluster(0), node.getChildCluster(1));
-            bool2 LRIsLeaf = (LR >> 24) != 255;
+    //     // Handle inner nodes
+    //     if ((item.index >> 24) == 255) {
+    //         travParams.hitNodes++;
 
-            if (all(LRIsLeaf)) { stack.push(LR); }
-            else if (LRIsLeaf.x) { stack.push(LR.xy); }
-            else if (LRIsLeaf.y) { stack.push(LR.yx); }
-            else {
-                // Prioritize by AABB distance
-                uint2 LRAddr = LR & 0x00FFFFFF;
-                BVH2Node LNode = BVH2.LoadAligned<BVH2Node>(LRAddr.x * sizeof(BVH2Node));
-                BVH2Node RNode = BVH2.LoadAligned<BVH2Node>(LRAddr.y * sizeof(BVH2Node));
-                float2 dLR = float2(
-                    sdBox(travParams.OriginAndTMax.xyz, LNode.getBounds()[0], LNode.getBounds()[1]),
-                    sdBox(travParams.OriginAndTMax.xyz, RNode.getBounds()[0], RNode.getBounds()[1])
-                );
-                LR = select(dLR > float2(travParams.OriginAndTMax.w), uint2(UINT32_MAX), LR);
-                if (all(LR == uint2(UINT32_MAX))) continue;
-                stack.push((dLR.x < dLR.y) ? LR.xy : LR.yx);
-            }
-        }
-        // else we're traversing a leaf
-        else {
-            travParams.hitPrims++;
+    //         // Bottleneck by ~70%, long scoreboard stall here 
+    //         BVH2Node node = BVH2.LoadAligned<BVH2Node>((item.index & 0x00FFFFFF) * sizeof(BVH2Node));
+    //         uint2 LR = uint2(node.getChildCluster(0), node.getChildCluster(1));
+    //         bool2 LRIsLeaf = (LR >> 24) != 255;
+    //         float2 dists;
+    //         for (int i = 0; i < 2; ++i) {
+    //             if (LRIsLeaf[i]) { dists[i] = 0.0;} // if leaf, trivially accept
+    //             else { // if node, compute distance
+    //                 BVH2Node child = BVH2.LoadAligned<BVH2Node>((LR[i] & 0x00FFFFFF) * sizeof(BVH2Node));
+    //                 // dists[i] = sdBox(tstate.origin, child.getBounds()[0], child.getBounds()[1]);
+    //                 maxDistTest(tstate.origin, tstate.direction, float2(0.0, tstate.tmax), child.getBounds()[0], child.getBounds()[1], dists[i]);
+    //             }
+    //         }
+    //         // Farthest first, then closest. (We want to pop closest first)
+    //         uint2 order = dists[0] <= dists[1] ? uint2(1, 0) : uint2(0, 1);
+    //         stack.push(StackEntry(LR[order[0]], dists[order[0]]));
+    //         stack.push(StackEntry(LR[order[1]], dists[order[1]]));
+    //     }
+    //     // Handle leaves
+    //     else {
+    //         travParams.hitPrims++;
 
-            // System generated index of geometry in BLAS
-            uint GeometryContributionToHitGroupIndex = (index >> 24);
+    //         // System generated index of geometry in BLAS
+    //         uint GeometryContributionToHitGroupIndex = (item.index >> 24);
 
-            IntersectTriangleParams params;
-            params.GeometryIndex = GeometryContributionToHitGroupIndex;
-            params.PrimitiveIndex = index & 0x00FFFFFF;
-            params.InstanceIndex = 0; // todo...
-            params.QueryFlags = travParams.QueryFlags;
-            params.ObjectOriginAndTMax = travParams.OriginAndTMax;
+    //         IntersectTriangleParams params;
+    //         params.GeometryIndex = GeometryContributionToHitGroupIndex;
+    //         params.PrimitiveIndex = item.index & 0x00FFFFFF;
+    //         params.InstanceIndex = 0; // todo...
+    //         params.QueryFlags = travParams.QueryFlags;
+    //         params.ObjectOriginAndTMax = travParams.OriginAndTMax;
 
-            // (already accounts for StartAddress and StrideInBytes from DispatchRays())
-            uint CallableIndex = (travParams.QueryContributionToHitGroupIndex +
-                                  travParams.MultiplierForGeometryContributionToShaderIndex * GeometryContributionToHitGroupIndex)
-                                  + record.InstanceContributionToHitGroupIndex; // Slightly different, every tree adds "2" here to account for traversal callables.
+    //         // (already accounts for StartAddress and StrideInBytes from DispatchRays())
+    //         uint CallableIndex = (travParams.QueryContributionToHitGroupIndex +
+    //                               travParams.MultiplierForGeometryContributionToShaderIndex * GeometryContributionToHitGroupIndex)
+    //                               + record.InstanceContributionToHitGroupIndex; // Slightly different, every tree adds "2" here to account for traversal callables.
 
-            CallShader(CallableIndex, params);
+    //         CallShader(CallableIndex, params);
 
-            // If we found a hit, update the traversal parameters
-            if (params.ObjectOriginAndTMax.w < travParams.OriginAndTMax.w) {
-                NearestNeighbor = params.PrimitiveIndex;
-                travParams.OriginAndTMax = params.ObjectOriginAndTMax;
-            }
-        }
-    } while (stack.size() > 0);
+    //         // If we found a hit, update the traversal parameters
+    //         if (params.ObjectOriginAndTMax.w < tstate.tmax) {
+    //             tstate.tmax = params.ObjectOriginAndTMax.w;
+    //         }
+    //     }
+    // } while (stack.size() > 0);
 
-    if (debug) {
-        printf("Nearest is %d with distance %f\n", NearestNeighbor, travParams.OriginAndTMax.w);
-    }
+    // travParams.OriginAndTMax.w = sqrt(tstate.tmax);
 }
 
 BVH8Node fetchNode(RWByteAddressBuffer BVH8N, int node_index) {
@@ -578,31 +1043,6 @@ struct StackEntryYlitie
 
 
 
-struct TraversalState {
-    uint8_t oct;
-    uint dupoct;
-
-    Stack<StackEntry, 8> primGroup;
-    Stack<StackEntry, 8> nodeGroup;
-
-    // note, repurposing tmax for search radius, and ignoring tmin.
-    float3 origin; float tmin;
-    float3 direction; float tmax;
-
-    float2 triUV;
-
-    int enablePostponing;
-
-    // debug data...
-    uint debug;
-    uint debugHits;
-    float debugTime;
-    uint showBox;
-
-    __init() {
-    }
-};
-
 struct TraversalStateYlitie {
     uint8_t oct;
     uint dupoct;
@@ -630,8 +1070,8 @@ struct TraversalStateYlitie {
 };
 
 float3[2] getNodeBounds(BVH8Node node) {
-    float3 pos = node.header.pos;
-    uint3 packedScale = node.header.getScale();
+    float3 pos = float3(node.header.pos[0], node.header.pos[1], node.header.pos[2]);
+    uint3 packedScale = uint3(node.header.scale[0], node.header.scale[1], node.header.scale[2]);
     float3 scale = asfloat(packedScale << 23);
     
     float3[2] bounds;
@@ -668,666 +1108,457 @@ float3[2] getNodeBounds(BVH8Node node) {
 
 
 
-void intersectNode(BVH8Node node, uint nodeIdx, inout TraversalState tstate)
-{
-    tstate.nodeGroup = Stack<StackEntry, 8>();
-    tstate.primGroup = Stack<StackEntry, 8>();
 
-    [ForceUnroll]
-    for (int i = 0; i < 8; ++i) {
-        tstate.nodeGroup.items[i].index = -1;
-        tstate.nodeGroup.items[i].dist = FLT_MAX;
-    }
 
-    float3 pos = node.header.pos;
-    uint3 packedScale = node.header.getScale();
-    uint32_t hits = 0;
 
-    // Shift 8-bit scale to floating-point exponent bits.
-    float3 scale = asfloat(packedScale << 23);
-    float3 orig = tstate.origin;
-    float3 dir = tstate.direction;
 
-    float3 invDir = rcp(dir);
 
-    // Max. relative error in triangle test. Compensate in node test by increasing bbox size.
-    float watertightNodeEps = (5.0f * exp2(-24.0f));
 
-    // Min. absolute error introduced by the triangle test.
-    float watertightNodeEpsMin = exp2(-75.f);
 
-    // Compute nudged bbox corners
-    float3 relMin = pos - orig;
-    float3 relMax = relMin + scale * 255.0f;
-    float coordBound = max(fmaxof3f(abs(relMin)), fmaxof3f(abs(relMax)));
-    float Xerr = __fmaf_rn(watertightNodeEps, coordBound, watertightNodeEpsMin); // (should be fmaf_ru...)
 
-    float3 Xerr3;
-    Xerr3.x = asfloat(asint(Xerr) | (asint(invDir.x) & 0x80000000u)); // Pick up sign from invDir
-    Xerr3.y = asfloat(asint(Xerr) | (asint(invDir.y) & 0x80000000u));
-    Xerr3.z = asfloat(asint(Xerr) | (asint(invDir.z) & 0x80000000u));
-    float3 anear = relMin - Xerr3;
-    float3 afar = relMin + Xerr3;
 
-    uint numPrevInner = 0;
+// void intersectNodeYlitie(BVH8Node node, uint nodeIdx, inout TraversalStateYlitie tstate)
+// {
+//     float3 pos = node.header.pos;
+//     uint3 packedScale = node.header.getScale();
+//     tstate.nodeGroup.firstIdx = node.header.firstNodeIdx;
+//     tstate.primGroup.firstIdx = node.header.firstPrimIdx;
+//     uint32_t hits = 0;
 
-    [unroll]
-    for (int j = 0; j < 2; j++)
-    {
-        uint8_t4 lox = extract_bytes32(node.lox[j]);
-        uint8_t4 loy = extract_bytes32(node.loy[j]);
-        uint8_t4 loz = extract_bytes32(node.loz[j]);
-        uint8_t4 hix = extract_bytes32(node.hix[j]);
-        uint8_t4 hiy = extract_bytes32(node.hiy[j]);
-        uint8_t4 hiz = extract_bytes32(node.hiz[j]);
+//     // Shift 8-bit scale to floating-point exponent bits.
+//     float3 scale = asfloat(packedScale << 23);
+//     float3 orig = tstate.origin;
+//     float3 dir = tstate.direction;
 
-        // Select tnear, tfar by ray sign for x and y. These replace 2 vmnmx per box.
-        uint8_t4 nearx = select(dir.x >= 0.f, lox, hix);
-        uint8_t4 farx = select(dir.x >= 0.f, hix, lox);
-        uint8_t4 neary = select(dir.y >= 0.f, loy, hiy);
-        uint8_t4 fary = select(dir.y >= 0.f, hiy, loy);
-        uint8_t4 nearz = select(dir.z >= 0.f, loz, hiz);
-        uint8_t4 farz = select(dir.z >= 0.f, hiz, loz);
+//     float3 invDir = rcp(dir);
 
-        [unroll]
-        for (int i = 0; i < 4; i++) {
-            if (node.header.isEmpty(j * 4 + i)) continue;
+//     // Max. relative error in triangle test. Compensate in node test by increasing bbox size.
+//     float watertightNodeEps = (5.0f * exp2(-24.0f));
 
-            float3 tnear, tfar;
-            tnear.x = anear.x + scale.x * float(nearx[i]); 
-            tnear.y = anear.y + scale.y * float(neary[i]); 
-            tnear.z = anear.z + scale.z * float(nearz[i]); 
-            tfar.x = afar.x + scale.x * float(farx[i]);    
-            tfar.y = afar.y + scale.y * float(fary[i]);    
-            tfar.z = afar.z + scale.z * float(farz[i]);    
+//     // Min. absolute error introduced by the triangle test.
+//     float watertightNodeEpsMin = exp2(-75.f);
 
-            float3 tlo, thi;
-            tlo.x = __fmul_rd(tnear.x, invDir.x);
-            tlo.y = __fmul_rd(tnear.y, invDir.y);
-            tlo.z = __fmul_rd(tnear.z, invDir.z);
-            thi.x = __fmul_ru(tfar.x, invDir.x);
-            thi.y = __fmul_ru(tfar.y, invDir.y);
-            thi.z = __fmul_ru(tfar.z, invDir.z);
+//     // Compute nudged bbox corners
+//     float3 relMin = pos - orig;
+//     float3 relMax = relMin + scale * 255.0f;
+//     float coordBound = max(fmaxof3f(abs(relMin)), fmaxof3f(abs(relMax)));
+//     float Xerr = __fmaf_rn(watertightNodeEps, coordBound, watertightNodeEpsMin); // (should be fmaf_ru...)
 
-            // Normally we would intersect t-ranges here...
-            // float tmin = max(max(tlo.x, tstate.tmin), max(tlo.y, tlo.z));
-            // float tmax = min(min(thi.x, tstate.tmax), min(thi.y, thi.z));
-            // bool intersects = (tmin <= tmax);
+//     float3 Xerr3;
+//     Xerr3.x = asfloat(asint(Xerr) | (asint(invDir.x) & 0x80000000u)); // Pick up sign from invDir
+//     Xerr3.y = asfloat(asint(Xerr) | (asint(invDir.y) & 0x80000000u));
+//     Xerr3.z = asfloat(asint(Xerr) | (asint(invDir.z) & 0x80000000u));
+//     float3 anear = relMin - Xerr3;
+//     float3 afar = relMin + Xerr3;
 
-            // Changes from RT max of mins / min of maxes test explanated below:
-            {
-                // For a distance query, we want the closest distance from the slabs to the origin.
-                // So we no longer take the max of the mins and the min of the maxes.
-                // (Previous logic for rays commented out below.)
+//     // Todo, run some tests in this loop to verify that the AABBs are entirely inside the parent, and that none are degenerate...
+//     int debugNodeHits[8];
+//     int debugPrimHits[8];
+//     int numNodes = 0;
+//     int numLeaves = 0;
+//     int numEmpty = 0;
+//     //[ForceUnroll]
+//     for (int i = 0; i < 8; i++) {
+//         debugNodeHits[i] = -1;
+//         debugPrimHits[i] = -1;
 
-                // Rather, we want to solve this equation: minDist(P, R) = \sum_{1}^{3} (r_i + (-p_i))^2.
-                //    where r_i = clamp(p_i, min_i, max_i)
+//         if (node.header.isLeaf(i)) numLeaves++;
+//     }
 
-                // We can repurpose tmin_i and tmax_i from the ray-slab test with some simple math:
+//     //[ForceUnroll]
+//     for (int j = 0; j < 2; j++)
+//     {
+//         uint8_t4 lox = extract_bytes32(node.lox[j]);
+//         uint8_t4 loy = extract_bytes32(node.loy[j]);
+//         uint8_t4 loz = extract_bytes32(node.loz[j]);
+//         uint8_t4 hix = extract_bytes32(node.hix[j]);
+//         uint8_t4 hiy = extract_bytes32(node.hiy[j]);
+//         uint8_t4 hiz = extract_bytes32(node.hiz[j]);
 
-                // At the moment, tmin_i = min_i * 1.f + (-p_i) and tmax_i = max_i * 1.f + (-p_i).
-                //
-                //       { min_i if p_i < min_i
-                // r_i = { max_i if p_i > max_i
-                //       { p_i otherwise
-                //
-                // and so...
-                //
-                //                { min_i + (-p_i) if p_i + (-p_i) < min_i + (-p_i)
-                // r_i + (-p_i) = { max_i + (-p_i) if p_i + (-p_i) > max_i + (-p_i)
-                //                { p_i + (-p_i) otherwise
-                //
-                // Which simplifies to...
-                //
-                //                { tmin_i if 0.0 < tmin_i
-                // r_i + (-p_i) = { tmax_i if 0.0 > tmax_i
-                //                { 0.0 otherwise
-            }
+//         // Select tnear, tfar by ray sign for x and y. These replace 2 vmnmx per box.
+//         uint8_t4 nearx = select(dir.x >= 0.f, lox, hix);
+//         uint8_t4 farx  = select(dir.x >= 0.f, hix, lox);
+//         uint8_t4 neary = select(dir.y >= 0.f, loy, hiy);
+//         uint8_t4 fary  = select(dir.y >= 0.f, hiy, loy);
+//         uint8_t4 nearz = select(dir.z >= 0.f, loz, hiz);
+//         uint8_t4 farz  = select(dir.z >= 0.f, hiz, loz);
 
-            // For a closest point query we instead want to solve the following...
-            float3 ldist = min(tlo, thi);
-            float3 rdist = max(tlo, thi);
-
-            float3 excess = 0.0;
-            excess += select(float3(0.0) < ldist, ldist * ldist, float3(0.f));
-            excess += select(float3(0.0) > rdist, rdist * rdist, float3(0.f));
-            float dist = excess.x + excess.y + excess.z;
-            float centerDist = dot2((ldist + rdist) * .5);
-
-            bool intersects = (dist <= tstate.tmax);
-            if (intersects) {
-                if (node.header.isLeaf(j * 4 + i)) {
-                    tstate.primGroup.push(
-                        StackEntry(node.header.firstPrimIdx + node.header.getLeafRemapOfs(j * 4 + i), dist));
-                }
-                else {
-                    int relativeIndex = numPrevInner;
-                    tstate.nodeGroup.push(StackEntry(node.header.firstNodeIdx + relativeIndex, dist));
-                }
-            }
-            if (node.header.isInner(j * 4 + i)) numPrevInner++;
-        }
-    }
-
-    // sort node stack
-    SortWithNetwork(tstate.nodeGroup.items);
-}
-
-[shader("callable")]
-void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParams) {
-    RWByteAddressBuffer BVH8N = buffers[record.BVH8N.index];
-    RWByteAddressBuffer BVH8L = buffers[record.BVH8L.index];
-
-    var traversalStack = Stack<Stack<StackEntry, 8>, 32>(); // clear trav stack
-    var tstate = TraversalState();
-
-    tstate.primGroup = Stack<StackEntry, 8>();
-    tstate.nodeGroup = Stack<StackEntry, 8>();
-    tstate.nodeGroup.push(StackEntry(0, FLT_MAX));
-    traversalStack.push(tstate.nodeGroup);
-
-    tstate.origin = travParams.OriginAndTMax.xyz;
-    tstate.direction = float3(1.0, 1.0, 1.0);
-
-    // Note, tmax is squared to avoid square root operations for computing closest distances
-    tstate.tmax = travParams.OriginAndTMax.w * travParams.OriginAndTMax.w;
-
-    // Debug data...
-    tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
-    tstate.debugHits = 0;
-    tstate.debugTime = travParams.time;
-    tstate.showBox = bool(int(tstate.debugTime * 2.f) % 2);
-
-    do {
-        // Handle leaves
-        while (tstate.primGroup.size() > 0) {
-            uint idx = tstate.primGroup.pop().index;
-
-            tstate.debugHits++;
-
-            BVH8Triangle tri = BVH8L.Load<BVH8Triangle>(idx * sizeof(BVH8Triangle));
-
-            float3 p; float2 bc;
-            float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, p, bc);
-
-            if (dist < tstate.tmax) {
-                tstate.tmax = dist;
-                // Update the nearest neighbor here
-            }
-        }
-
-        // if we have inner node hits
-        if (tstate.nodeGroup.size() > 0)
-        {
-            StackEntry item = tstate.nodeGroup.pop();
-            uint idx = item.index;
-            float dist = item.dist;
-            if (tstate.nodeGroup.size() > 0)
-                traversalStack.push(tstate.nodeGroup);
-
-            BVH8Node node = fetchNode(BVH8N, idx);
-            intersectNode(node, idx, tstate);
-        }
-
-        // Stack pop?
-        if (tstate.nodeGroup.size() == 0)
-        {
-            // Empty stack -> done
-            if (traversalStack.stackptr <= 0) break;
-
-            // Pop the stack
-            tstate.nodeGroup = traversalStack.pop();
-        }
-    } while (traversalStack.stackptr > 0);
-
-    // if (tstate.debug) printf("num prim hits %d\n", tstate.debugHits);
-
-    travParams.hitPrims = tstate.debugHits;
-    travParams.OriginAndTMax.w = sqrt(tstate.tmax);
-}
-
-void intersectNodeYlitie(BVH8Node node, uint nodeIdx, inout TraversalStateYlitie tstate)
-{
-    float3 pos = node.header.pos;
-    uint3 packedScale = node.header.getScale();
-    tstate.nodeGroup.firstIdx = node.header.firstNodeIdx;
-    tstate.primGroup.firstIdx = node.header.firstPrimIdx;
-    uint32_t hits = 0;
-
-    // Shift 8-bit scale to floating-point exponent bits.
-    float3 scale = asfloat(packedScale << 23);
-    float3 orig = tstate.origin;
-    float3 dir = tstate.direction;
-
-    float3 invDir = rcp(dir);
-
-    // Max. relative error in triangle test. Compensate in node test by increasing bbox size.
-    float watertightNodeEps = (5.0f * exp2(-24.0f));
-
-    // Min. absolute error introduced by the triangle test.
-    float watertightNodeEpsMin = exp2(-75.f);
-
-    // Compute nudged bbox corners
-    float3 relMin = pos - orig;
-    float3 relMax = relMin + scale * 255.0f;
-    float coordBound = max(fmaxof3f(abs(relMin)), fmaxof3f(abs(relMax)));
-    float Xerr = __fmaf_rn(watertightNodeEps, coordBound, watertightNodeEpsMin); // (should be fmaf_ru...)
-
-    float3 Xerr3;
-    Xerr3.x = asfloat(asint(Xerr) | (asint(invDir.x) & 0x80000000u)); // Pick up sign from invDir
-    Xerr3.y = asfloat(asint(Xerr) | (asint(invDir.y) & 0x80000000u));
-    Xerr3.z = asfloat(asint(Xerr) | (asint(invDir.z) & 0x80000000u));
-    float3 anear = relMin - Xerr3;
-    float3 afar = relMin + Xerr3;
-
-    // Todo, run some tests in this loop to verify that the AABBs are entirely inside the parent, and that none are degenerate...
-    int debugNodeHits[8];
-    int debugPrimHits[8];
-    int numNodes = 0;
-    int numLeaves = 0;
-    int numEmpty = 0;
-    //[ForceUnroll]
-    for (int i = 0; i < 8; i++) {
-        debugNodeHits[i] = -1;
-        debugPrimHits[i] = -1;
-
-        if (node.header.isLeaf(i)) numLeaves++;
-    }
-
-    //[ForceUnroll]
-    for (int j = 0; j < 2; j++)
-    {
-        uint8_t4 lox = extract_bytes32(node.lox[j]);
-        uint8_t4 loy = extract_bytes32(node.loy[j]);
-        uint8_t4 loz = extract_bytes32(node.loz[j]);
-        uint8_t4 hix = extract_bytes32(node.hix[j]);
-        uint8_t4 hiy = extract_bytes32(node.hiy[j]);
-        uint8_t4 hiz = extract_bytes32(node.hiz[j]);
-
-        // Select tnear, tfar by ray sign for x and y. These replace 2 vmnmx per box.
-        uint8_t4 nearx = select(dir.x >= 0.f, lox, hix);
-        uint8_t4 farx  = select(dir.x >= 0.f, hix, lox);
-        uint8_t4 neary = select(dir.y >= 0.f, loy, hiy);
-        uint8_t4 fary  = select(dir.y >= 0.f, hiy, loy);
-        uint8_t4 nearz = select(dir.z >= 0.f, loz, hiz);
-        uint8_t4 farz  = select(dir.z >= 0.f, hiz, loz);
-
-        // Leaves insert numtris bits to dynamic hitmask; inner nodes insert 1 and empty nodes 0.
-        uint32_t ofs = node.header.meta[j];
-        uint32_t countsMask = (ofs >> 5) & 0x07070707; // top 3 bits counting items in each slot. For inner its 1, for tri leaves its 1-3 (unary). empty nodes is 0.
-        uint32_t innermask = (ofs & (ofs << 1));    // all inner nodes have bit 5,4 (16,8). Leaves may have one set but not both.
-        innermask = vsignExtend4(innermask << 3);   // sbyte sign marks inner nodes, extend sign to all bits.
-        ofs ^= (tstate.dupoct & innermask); // compute traversal priority for inner node children only.
+//         // Leaves insert numtris bits to dynamic hitmask; inner nodes insert 1 and empty nodes 0.
+//         uint32_t ofs = node.header.meta[j];
+//         uint32_t countsMask = (ofs >> 5) & 0x07070707; // top 3 bits counting items in each slot. For inner its 1, for tri leaves its 1-3 (unary). empty nodes is 0.
+//         uint32_t innermask = (ofs & (ofs << 1));    // all inner nodes have bit 5,4 (16,8). Leaves may have one set but not both.
+//         innermask = vsignExtend4(innermask << 3);   // sbyte sign marks inner nodes, extend sign to all bits.
+//         ofs ^= (tstate.dupoct & innermask); // compute traversal priority for inner node children only.
 
         
 
-        // const uint octinv4 = (7 - tstate.oct) * 0x01010101u;
-        // const uint meta4 = node.header.meta[j];
-        // const uint is_inner4 = (meta4 & (meta4 << 1)) & 0x10101010;
-        // const uint inner_mask4 = sign_extend_s8x4(is_inner4 << 3);
-        // const uint bit_index4 = (meta4 ^ (octinv4 & inner_mask4)) & 0x1F1F1F1F;
-        // const uint child_bits4 = (meta4 >> 5) & 0x07070707;
+//         // const uint octinv4 = (7 - tstate.oct) * 0x01010101u;
+//         // const uint meta4 = node.header.meta[j];
+//         // const uint is_inner4 = (meta4 & (meta4 << 1)) & 0x10101010;
+//         // const uint inner_mask4 = sign_extend_s8x4(is_inner4 << 3);
+//         // const uint bit_index4 = (meta4 ^ (octinv4 & inner_mask4)) & 0x1F1F1F1F;
+//         // const uint child_bits4 = (meta4 >> 5) & 0x07070707;
 
-        //[ForceUnroll]
-        for (int i = 0; i < 4; i++) {
-            if (node.header.isEmpty(j * 4 + i)) continue;
+//         //[ForceUnroll]
+//         for (int i = 0; i < 4; i++) {
+//             if (node.header.isEmpty(j * 4 + i)) continue;
 
-            float3 tnear, tfar;
-            tnear.x = anear.x + scale.x * float(nearx[i]); //bfe(nearx, (i % 4) * 8, 8);
-            tnear.y = anear.y + scale.y * float(neary[i]); //bfe(neary, (i % 4) * 8, 8);
-            tnear.z = anear.z + scale.z * float(nearz[i]); //bfe(nearz, (i % 4) * 8, 8);
-            tfar.x  = afar.x  + scale.x * float(farx[i]);  //bfe(farx, (i % 4) * 8, 8);
-            tfar.y  = afar.y  + scale.y * float(fary[i]);  //bfe(fary, (i % 4) * 8, 8);
-            tfar.z  = afar.z  + scale.z * float(farz[i]);  //bfe(farz, (i % 4) * 8, 8);
+//             float3 tnear, tfar;
+//             tnear.x = anear.x + scale.x * float(nearx[i]); //bfe(nearx, (i % 4) * 8, 8);
+//             tnear.y = anear.y + scale.y * float(neary[i]); //bfe(neary, (i % 4) * 8, 8);
+//             tnear.z = anear.z + scale.z * float(nearz[i]); //bfe(nearz, (i % 4) * 8, 8);
+//             tfar.x  = afar.x  + scale.x * float(farx[i]);  //bfe(farx, (i % 4) * 8, 8);
+//             tfar.y  = afar.y  + scale.y * float(fary[i]);  //bfe(fary, (i % 4) * 8, 8);
+//             tfar.z  = afar.z  + scale.z * float(farz[i]);  //bfe(farz, (i % 4) * 8, 8);
 
-            float3 tlo, thi;
-            tlo.x = __fmul_rd(tnear.x, invDir.x);
-            tlo.y = __fmul_rd(tnear.y, invDir.y);
-            tlo.z = __fmul_rd(tnear.z, invDir.z);
-            thi.x = __fmul_ru(tfar.x, invDir.x);
-            thi.y = __fmul_ru(tfar.y, invDir.y);
-            thi.z = __fmul_ru(tfar.z, invDir.z);
+//             float3 tlo, thi;
+//             tlo.x = __fmul_rd(tnear.x, invDir.x);
+//             tlo.y = __fmul_rd(tnear.y, invDir.y);
+//             tlo.z = __fmul_rd(tnear.z, invDir.z);
+//             thi.x = __fmul_ru(tfar.x, invDir.x);
+//             thi.y = __fmul_ru(tfar.y, invDir.y);
+//             thi.z = __fmul_ru(tfar.z, invDir.z);
 
-            // Normally we would intersect t-ranges here...
-            // float tmin = max(max(tlo.x, tstate.tmin), max(tlo.y, tlo.z));
-            // float tmax = min(min(thi.x, tstate.tmax), min(thi.y, thi.z));
-            // bool intersects = (tmin <= tmax);
+//             // Normally we would intersect t-ranges here...
+//             // float tmin = max(max(tlo.x, tstate.tmin), max(tlo.y, tlo.z));
+//             // float tmax = min(min(thi.x, tstate.tmax), min(thi.y, thi.z));
+//             // bool intersects = (tmin <= tmax);
 
-            // Changes from RT max of mins / min of maxes test explanated below:
-            {
-                // For a distance query, we want the closest distance from the slabs to the origin.
-                // So we no longer take the max of the mins and the min of the maxes.
-                // (Previous logic for rays commented out below.)
+//             // Changes from RT max of mins / min of maxes test explanated below:
+//             {
+//                 // For a distance query, we want the closest distance from the slabs to the origin.
+//                 // So we no longer take the max of the mins and the min of the maxes.
+//                 // (Previous logic for rays commented out below.)
 
-                // Rather, we want to solve this equation: minDist(P, R) = \sum_{1}^{3} (r_i + (-p_i))^2.
-                //    where r_i = clamp(p_i, min_i, max_i)
+//                 // Rather, we want to solve this equation: minDist(P, R) = \sum_{1}^{3} (r_i + (-p_i))^2.
+//                 //    where r_i = clamp(p_i, min_i, max_i)
 
-                // We can repurpose tmin_i and tmax_i from the ray-slab test with some simple math:
+//                 // We can repurpose tmin_i and tmax_i from the ray-slab test with some simple math:
 
-                // At the moment, tmin_i = min_i * 1.f + (-p_i) and tmax_i = max_i * 1.f + (-p_i).
-                //
-                //       { min_i if p_i < min_i
-                // r_i = { max_i if p_i > max_i
-                //       { p_i otherwise
-                //
-                // and so...
-                //
-                //                { min_i + (-p_i) if p_i + (-p_i) < min_i + (-p_i)
-                // r_i + (-p_i) = { max_i + (-p_i) if p_i + (-p_i) > max_i + (-p_i)
-                //                { p_i + (-p_i) otherwise
-                //
-                // Which simplifies to...
-                //
-                //                { tmin_i if 0.0 < tmin_i
-                // r_i + (-p_i) = { tmax_i if 0.0 > tmax_i
-                //                { 0.0 otherwise
-            }
+//                 // At the moment, tmin_i = min_i * 1.f + (-p_i) and tmax_i = max_i * 1.f + (-p_i).
+//                 //
+//                 //       { min_i if p_i < min_i
+//                 // r_i = { max_i if p_i > max_i
+//                 //       { p_i otherwise
+//                 //
+//                 // and so...
+//                 //
+//                 //                { min_i + (-p_i) if p_i + (-p_i) < min_i + (-p_i)
+//                 // r_i + (-p_i) = { max_i + (-p_i) if p_i + (-p_i) > max_i + (-p_i)
+//                 //                { p_i + (-p_i) otherwise
+//                 //
+//                 // Which simplifies to...
+//                 //
+//                 //                { tmin_i if 0.0 < tmin_i
+//                 // r_i + (-p_i) = { tmax_i if 0.0 > tmax_i
+//                 //                { 0.0 otherwise
+//             }
 
-            // For a closest point query we instead want to solve the following...
-            float3 ldist = min(tlo, thi);
-            float3 rdist = max(tlo, thi);
+//             // For a closest point query we instead want to solve the following...
+//             float3 ldist = min(tlo, thi);
+//             float3 rdist = max(tlo, thi);
 
-            float3 excess = 0.0;
-            excess += select(float3(0.0) < ldist, ldist * ldist, float3(0.f));
-            excess += select(float3(0.0) > rdist, rdist * rdist, float3(0.f));
-            float dist = excess.x + excess.y + excess.z;
+//             float3 excess = 0.0;
+//             excess += select(float3(0.0) < ldist, ldist * ldist, float3(0.f));
+//             excess += select(float3(0.0) > rdist, rdist * rdist, float3(0.f));
+//             float dist = excess.x + excess.y + excess.z;
 
-            // Intersection is true if distance is less than the current closest distance.
-            // There seems to be some bug with intersection tests for inner nodes... leaves appear to work fine...
-            // Perhaps something to do with octant reordering, but I'm not sure why...
-            bool intersects = (dist * (.5 + .5 * sin(tstate.debugTime)) <= tstate.tmax);// || node.header.isLeaf(j * 4 + i);
+//             // Intersection is true if distance is less than the current closest distance.
+//             // There seems to be some bug with intersection tests for inner nodes... leaves appear to work fine...
+//             // Perhaps something to do with octant reordering, but I'm not sure why...
+//             bool intersects = (dist * (.5 + .5 * sin(tstate.debugTime)) <= tstate.tmax);// || node.header.isLeaf(j * 4 + i);
 
-            if (intersects ) {
-                // if (node.header.isLeaf(j * 4 + i)) {
-                //     if (node.header.getLeafRemapOfs(j * 4 + i) >= 8) {
-                //         printf("Error, relative leaf addr out of range!\n");
-                //     }
-                //     debugPrimHits[node.header.getLeafRemapOfs(j * 4 + i)] = 1;
-                // }
-                // else {
-                //     debugNodeHits[j * 4 + i] = j * 4 + i;
-                // }
+//             if (intersects ) {
+//                 // if (node.header.isLeaf(j * 4 + i)) {
+//                 //     if (node.header.getLeafRemapOfs(j * 4 + i) >= 8) {
+//                 //         printf("Error, relative leaf addr out of range!\n");
+//                 //     }
+//                 //     debugPrimHits[node.header.getLeafRemapOfs(j * 4 + i)] = 1;
+//                 // }
+//                 // else {
+//                 //     debugNodeHits[j * 4 + i] = j * 4 + i;
+//                 // }
 
-                const uint top3countbits = extract_byte32(countsMask, i) & 0b111;
-                // for leaves, ofs is the inner node mask. for nodes, it's slot index ^ oct
-                const uint offset = extract_byte32(ofs, i) & 0b11111;
-                hits |= (top3countbits << offset);
-            }
-        }
-    }
+//                 const uint top3countbits = extract_byte32(countsMask, i) & 0b111;
+//                 // for leaves, ofs is the inner node mask. for nodes, it's slot index ^ oct
+//                 const uint offset = extract_byte32(ofs, i) & 0b11111;
+//                 hits |= (top3countbits << offset);
+//             }
+//         }
+//     }
 
-    // Extract inner, leaf node hits
-    let leafHits = hits & 0b00000000000000000000000011111111;
-    let innerHits = (hits & 0b11111111000000000000000000000000) | node.header.getIMask(); // Move valid inner node mask to low byte.
-    tstate.nodeGroup.hits = innerHits;
-    tstate.primGroup.hits = leafHits;
+//     // Extract inner, leaf node hits
+//     let leafHits = hits & 0b00000000000000000000000011111111;
+//     let innerHits = (hits & 0b11111111000000000000000000000000) | node.header.getIMask(); // Move valid inner node mask to low byte.
+//     tstate.nodeGroup.hits = innerHits;
+//     tstate.primGroup.hits = leafHits;
 
-    // Test to confirm that stack entries are correct
-    // if (tstate.debug) {
-    //     StackEntry nodeGroup = tstate.nodeGroup;
-    //     StackEntry primGroup = tstate.primGroup;
-    //     // printf("--------------\n");
-    //     // printf("Num nodes %d numLeaves %d numEmpty %d\n", numNodes, numLeaves, numEmpty);
+//     // Test to confirm that stack entries are correct
+//     // if (tstate.debug) {
+//     //     StackEntry nodeGroup = tstate.nodeGroup;
+//     //     StackEntry primGroup = tstate.primGroup;
+//     //     // printf("--------------\n");
+//     //     // printf("Num nodes %d numLeaves %d numEmpty %d\n", numNodes, numLeaves, numEmpty);
 
-    //     // for (int i = 0; i < 8; ++i) {
-    //     //     if (debugNodeHits[i] != -1 && debugNodeHits[i] != i) {
-    //     //         printf("Debug node hits %d has incorrectly defined value %d\n", i, debugNodeHits[i]);
-    //     //     }
-    //     // }
+//     //     // for (int i = 0; i < 8; ++i) {
+//     //     //     if (debugNodeHits[i] != -1 && debugNodeHits[i] != i) {
+//     //     //         printf("Debug node hits %d has incorrectly defined value %d\n", i, debugNodeHits[i]);
+//     //     //     }
+//     //     // }
 
-    //     while (nodeGroup.hits > 0x00FFFFFF)
-    //     {
-    //         int bitIdx = firstbithigh(nodeGroup.hits);
+//     //     while (nodeGroup.hits > 0x00FFFFFF)
+//     //     {
+//     //         int bitIdx = firstbithigh(nodeGroup.hits);
 
-    //         nodeGroup.hits &= nodeGroup.hits & ~(1 << bitIdx);
+//     //         nodeGroup.hits &= nodeGroup.hits & ~(1 << bitIdx);
 
-    //         // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
-    //         uint slotIdx = (bitIdx ^ tstate.dupoct) & 0x7;
-    //         // int slotIdx = (bitIdx - 24) ^ (7 - tstate.oct);
+//     //         // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
+//     //         uint slotIdx = (bitIdx ^ tstate.dupoct) & 0x7;
+//     //         // int slotIdx = (bitIdx - 24) ^ (7 - tstate.oct);
 
-    //         if (debugNodeHits[slotIdx] != slotIdx) {
-    //             printf("Error, node %d recovered slot Idx %d but should be %d!\n", nodeIdx, slotIdx, debugNodeHits[slotIdx]);
-    //         }
+//     //         if (debugNodeHits[slotIdx] != slotIdx) {
+//     //             printf("Error, node %d recovered slot Idx %d but should be %d!\n", nodeIdx, slotIdx, debugNodeHits[slotIdx]);
+//     //         }
 
-    //         int bruteForceRelativeIdx = 0;
-    //         uint8_t imask = extract_byte32(nodeGroup.hits, 0);
-    //         for (int i = 0; i < slotIdx; ++i) {
-    //             if ((imask & (1 << i)) != 0) 
-    //                 bruteForceRelativeIdx++;
-    //         }
+//     //         int bruteForceRelativeIdx = 0;
+//     //         uint8_t imask = extract_byte32(nodeGroup.hits, 0);
+//     //         for (int i = 0; i < slotIdx; ++i) {
+//     //             if ((imask & (1 << i)) != 0) 
+//     //                 bruteForceRelativeIdx++;
+//     //         }
 
-    //         // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
-    //         int relativeIdx = __popc(nodeGroup.hits & ~(0xFFFFFFFF << slotIdx));
-    //         // int relativeIdx = __popc(tstate.nodeGroup.hits >> slotIdx);
+//     //         // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
+//     //         int relativeIdx = __popc(nodeGroup.hits & ~(0xFFFFFFFF << slotIdx));
+//     //         // int relativeIdx = __popc(tstate.nodeGroup.hits >> slotIdx);
 
-    //         if (relativeIdx != bruteForceRelativeIdx) {
-    //             printf("Error, node %d slot %d recovered relative index %d but actual relative index should be %d. Imask %d\n", nodeIdx, slotIdx, relativeIdx, bruteForceRelativeIdx, imask);
-    //         }
+//     //         if (relativeIdx != bruteForceRelativeIdx) {
+//     //             printf("Error, node %d slot %d recovered relative index %d but actual relative index should be %d. Imask %d\n", nodeIdx, slotIdx, relativeIdx, bruteForceRelativeIdx, imask);
+//     //         }
 
-    //         // else {
-    //         //     printf("Correct, node %d slot %d recovered relative index %d and actual relative index should be %d. Imask %d\n", nodeIdx, slotIdx, relativeIdx, bruteForceRelativeIdx, imask);
-    //         // }      
-    //     }
+//     //         // else {
+//     //         //     printf("Correct, node %d slot %d recovered relative index %d and actual relative index should be %d. Imask %d\n", nodeIdx, slotIdx, relativeIdx, bruteForceRelativeIdx, imask);
+//     //         // }      
+//     //     }
 
-    //     int foundPrims = 0;
+//     //     int foundPrims = 0;
 
-    //     while (primGroup.hits != 0) {
-    //         foundPrims++;
-    //         uint idx = firstbithigh(primGroup.hits);
-    //         primGroup.hits &= ~(1 << idx); // clear the prim from the hits list
+//     //     while (primGroup.hits != 0) {
+//     //         foundPrims++;
+//     //         uint idx = firstbithigh(primGroup.hits);
+//     //         primGroup.hits &= ~(1 << idx); // clear the prim from the hits list
 
-    //         if (debugPrimHits[idx] != 1) {
-    //             printf("Error, recovered relative index %d but leaf not hit!\n", idx);
-    //         }
+//     //         if (debugPrimHits[idx] != 1) {
+//     //             printf("Error, recovered relative index %d but leaf not hit!\n", idx);
+//     //         }
 
-    //         idx += primGroup.firstIdx;
-    //         // ... potentially more testing here...
-    //     }
+//     //         idx += primGroup.firstIdx;
+//     //         // ... potentially more testing here...
+//     //     }
 
-    //     if (foundPrims != numLeaves) {
-    //         printf("Error, not all primitives found! expected %d, actual %d\n", numLeaves, foundPrims);
-    //     }
-    // }
-}
+//     //     if (foundPrims != numLeaves) {
+//     //         printf("Error, not all primitives found! expected %d, actual %d\n", numLeaves, foundPrims);
+//     //     }
+//     // }
+// }
 
-[shader("callable")]
-void TraverseBVH8Ylitie(uniform TraverseRecord record, inout TraversePayload travParams) {
-    RWByteAddressBuffer BVH8N = buffers[record.BVH8N.index];
-    RWByteAddressBuffer BVH8L = buffers[record.BVH8L.index];
+// [shader("callable")]
+// void TraverseBVH8Ylitie(uniform TraverseRecord record, inout TraversePayload travParams) {
+//     RWByteAddressBuffer BVH8N = buffers[record.BVH8N.index];
+//     RWByteAddressBuffer BVH8L = buffers[record.BVH8L.index];
 
-    var traversalStack = Stack<StackEntryYlitie, 32>(); // clear trav stack
-    var tstate = TraversalStateYlitie();
+//     var traversalStack = Stack<StackEntryYlitie, 32>(); // clear trav stack
+//     var tstate = TraversalStateYlitie();
 
-    tstate.nodeGroup = StackEntryYlitie(0, 0, 0);
-    tstate.primGroup = StackEntryYlitie(0, 0, 0);
+//     tstate.nodeGroup = StackEntryYlitie(0, 0, 0);
+//     tstate.primGroup = StackEntryYlitie(0, 0, 0);
 
-    tstate.enablePostponing = PRIMITIVE_POSTPONING;
+//     tstate.enablePostponing = PRIMITIVE_POSTPONING;
 
-    tstate.origin = travParams.OriginAndTMax.xyz;
-    tstate.direction = float3(1.0, 1.0, 1.0);
+//     tstate.origin = travParams.OriginAndTMax.xyz;
+//     tstate.direction = float3(1.0, 1.0, 1.0);
     
-    // Note, tmax is squared to avoid square root operations for computing closest distances
-    tstate.tmax = travParams.OriginAndTMax.w * travParams.OriginAndTMax.w;
+//     // Note, tmax is squared to avoid square root operations for computing closest distances
+//     tstate.tmax = travParams.OriginAndTMax.w * travParams.OriginAndTMax.w;
 
-    // Debug data...
-    tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
-    tstate.debugHits = 0;
-    tstate.debugTime = travParams.time;
-    tstate.showBox = bool(int(tstate.debugTime * 2.f) % 2);
+//     // Debug data...
+//     tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
+//     tstate.debugHits = 0;
+//     tstate.debugTime = travParams.time;
+//     tstate.showBox = bool(int(tstate.debugTime * 2.f) % 2);
 
-    tstate.oct = getOctant(tstate.direction);
-    tstate.dupoct = duplicateByte(tstate.oct);
+//     tstate.oct = getOctant(tstate.direction);
+//     tstate.dupoct = duplicateByte(tstate.oct);
 
-    float tfar = 10.f;
+//     float tfar = 10.f;
 
-    // Intersect root node
-    {
-        BVH8Node node = fetchNode(BVH8N, 0);
-        intersectNodeYlitie(node, 0, tstate);
-    }
+//     // Intersect root node
+//     {
+//         BVH8Node node = fetchNode(BVH8N, 0);
+//         intersectNodeYlitie(node, 0, tstate);
+//     }
 
-    bool firstLeaf = true;
-    uint lastNode = 0;
+//     bool firstLeaf = true;
+//     uint lastNode = 0;
 
-    uint numHits = 0;
-    uint maxNumHits = 1024;//int(tstate.debugTime) % 10;
+//     uint numHits = 0;
+//     uint maxNumHits = 1024;//int(tstate.debugTime) % 10;
 
-    do {
-        // Handle leaves
-        // Seems like this is giving me undefined behavior unfortunately...
-        // const int numTraversing = WaveActiveCountBits(true);
-        if (tstate.primGroup.hits != 0)
-        {
-            bool bottomLevel = true;
+//     do {
+//         // Handle leaves
+//         // Seems like this is giving me undefined behavior unfortunately...
+//         // const int numTraversing = WaveActiveCountBits(true);
+//         if (tstate.primGroup.hits != 0)
+//         {
+//             bool bottomLevel = true;
 
-            if (bottomLevel) {
-                while (tstate.primGroup.hits != 0) {
-                    uint idx = firstbithigh(tstate.primGroup.hits);
-                    tstate.primGroup.hits &= (~(1 << idx)); // clear the prim from the hits list
-                    idx += tstate.primGroup.firstIdx;
+//             if (bottomLevel) {
+//                 while (tstate.primGroup.hits != 0) {
+//                     uint idx = firstbithigh(tstate.primGroup.hits);
+//                     tstate.primGroup.hits &= (~(1 << idx)); // clear the prim from the hits list
+//                     idx += tstate.primGroup.firstIdx;
 
 
-                    // if (tstate.enablePostponing == 1 && 
-                    //     WaveActiveCountBits(true) * 4 < numTraversing) // Is SIMD utilization too low?
-                    //         break;                                     // Postpone primitive testing
+//                     // if (tstate.enablePostponing == 1 && 
+//                     //     WaveActiveCountBits(true) * 4 < numTraversing) // Is SIMD utilization too low?
+//                     //         break;                                     // Postpone primitive testing
 
-                    // if (tstate.debug && tstate.primGroup.firstIdx != node.header.firstPrimIdx) {
-                    //     printf("Error, mismatching base prim index!");
-                    // }
+//                     // if (tstate.debug && tstate.primGroup.firstIdx != node.header.firstPrimIdx) {
+//                     //     printf("Error, mismatching base prim index!");
+//                     // }
 
-                    tstate.debugHits++;
+//                     tstate.debugHits++;
 
-                    // if (tstate.debug && firstLeaf) {
-                    //     printf("Leaf hits 0x%x\n", tstate.primGroup.hits);
-                    // }
+//                     // if (tstate.debug && firstLeaf) {
+//                     //     printf("Leaf hits 0x%x\n", tstate.primGroup.hits);
+//                     // }
 
-                    // Select triangle
+//                     // Select triangle
                     
-                    // if (tstate.debug && firstLeaf) {
-                    //     printf("Rel idx is %d, base idx is %d parentNode should be %d and is %d\n", idx, tstate.primGroup.firstIdx, t);
-                    // }
+//                     // if (tstate.debug && firstLeaf) {
+//                     //     printf("Rel idx is %d, base idx is %d parentNode should be %d and is %d\n", idx, tstate.primGroup.firstIdx, t);
+//                     // }
 
 
 
-                    BVH8Triangle tri = BVH8L.Load<BVH8Triangle>(idx * sizeof(BVH8Triangle));
+//                     BVH8Triangle tri = BVH8L.Load<BVH8Triangle>(idx * sizeof(BVH8Triangle));
 
                     
 
-                    BVH8Node node = fetchNode(BVH8N, tri.debug);
-                    float3[2] parentBounds = getNodeBounds(node);
+//                     BVH8Node node = fetchNode(BVH8N, tri.debug);
+//                     float3[2] parentBounds = getNodeBounds(node);
 
-                    // float dist = computeSquaredMinDistanceToAABB(tstate.origin, parentBounds[0], parentBounds[1]);
-
-
-                    if (tstate.debug == 1) {
-                        float3[2] triaabb;
-                        triaabb[0] = min(min(tri.v0, tri.v1), tri.v2);
-                        triaabb[1] = max(max(tri.v0, tri.v1), tri.v2);
-
-                        if (any(triaabb[0] < parentBounds[0]) || any(triaabb[1] > parentBounds[1]))
-                            printf("Error, tri outside parent bounds\n");
+//                     // float dist = computeSquaredMinDistanceToAABB(tstate.origin, parentBounds[0], parentBounds[1]);
 
 
-                        // for (int i = 0; i < traversalStack.stackptr; ++i) {
-                        //     uint parentNodeIdx = traversalStack.debugItems[i];
-                        //     BVH8Node ancestor = fetchNode(BVH8N, parentNodeIdx);
+//                     if (tstate.debug == 1) {
+//                         float3[2] triaabb;
+//                         triaabb[0] = min(min(tri.v0, tri.v1), tri.v2);
+//                         triaabb[1] = max(max(tri.v0, tri.v1), tri.v2);
+
+//                         if (any(triaabb[0] < parentBounds[0]) || any(triaabb[1] > parentBounds[1]))
+//                             printf("Error, tri outside parent bounds\n");
 
 
-                        // }
+//                         // for (int i = 0; i < traversalStack.stackptr; ++i) {
+//                         //     uint parentNodeIdx = traversalStack.debugItems[i];
+//                         //     BVH8Node ancestor = fetchNode(BVH8N, parentNodeIdx);
 
 
-                        // printf("Expected parent %d and is %d\n", tri.debug, traversalStack.debugItems[traversalStack.stackptr - 1]);
-                    }
+//                         // }
 
-                    float3 p; float2 bc;
-                    float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, p, bc);
+
+//                         // printf("Expected parent %d and is %d\n", tri.debug, traversalStack.debugItems[traversalStack.stackptr - 1]);
+//                     }
+
+//                     float3 p; float2 bc;
+//                     float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, p, bc);
                     
-                    if (dist < tstate.tmax) {
-                        // if (tstate.debug) 
-                        //     printf("New closest, %d, dist %f, debug %d\n", tri.userTriangleID, dist, tri.debug);
-                        tstate.tmax = dist;
-                        // Update the nearest neighbor here
-                        numHits++;
+//                     if (dist < tstate.tmax) {
+//                         // if (tstate.debug) 
+//                         //     printf("New closest, %d, dist %f, debug %d\n", tri.userTriangleID, dist, tri.debug);
+//                         tstate.tmax = dist;
+//                         // Update the nearest neighbor here
+//                         numHits++;
 
-                        if (numHits > maxNumHits) break;
-                    }
+//                         if (numHits > maxNumHits) break;
+//                     }
 
-                }
-                if (numHits > maxNumHits) break;
+//                 }
+//                 if (numHits > maxNumHits) break;
 
-                // If there are more prims to test, push back to stack
-                // if (tstate.primGroup.hits != 0)
-                //     traversalStack.push(tstate.primGroup);
+//                 // If there are more prims to test, push back to stack
+//                 // if (tstate.primGroup.hits != 0)
+//                 //     traversalStack.push(tstate.primGroup);
 
-                firstLeaf = false;
-            }
+//                 firstLeaf = false;
+//             }
             
-            else // todo, top-level leaf transition
-            {
-            }
-        }
+//             else // todo, top-level leaf transition
+//             {
+//             }
+//         }
 
-        // Stack pop?
-        if (tstate.nodeGroup.hits <= 0x00FFFFFF)
-        {
-            // Empty stack -> done
-            if (traversalStack.stackptr <= 0) break;
+//         // Stack pop?
+//         if (tstate.nodeGroup.hits <= 0x00FFFFFF)
+//         {
+//             // Empty stack -> done
+//             if (traversalStack.stackptr <= 0) break;
             
-            // Todo, handle any transitions here back to a top level traveral...
-            // if (traversalStack.stackptr == BLASEntryPoint) ...
+//             // Todo, handle any transitions here back to a top level traveral...
+//             // if (traversalStack.stackptr == BLASEntryPoint) ...
 
-            // Pop the stack
-            tstate.nodeGroup = traversalStack.pop();
-        }
+//             // Pop the stack
+//             tstate.nodeGroup = traversalStack.pop();
+//         }
 
-        // if we have inner node hits
-        if (tstate.nodeGroup.hits > 0x00FFFFFF)
-        {
-            int bitIdx = firstbithigh(tstate.nodeGroup.hits);
-            tstate.nodeGroup.hits &= tstate.nodeGroup.hits & ~(1 << bitIdx);
+//         // if we have inner node hits
+//         if (tstate.nodeGroup.hits > 0x00FFFFFF)
+//         {
+//             int bitIdx = firstbithigh(tstate.nodeGroup.hits);
+//             tstate.nodeGroup.hits &= tstate.nodeGroup.hits & ~(1 << bitIdx);
 
-            // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
-            uint slotIdx = (bitIdx ^ tstate.dupoct) & 0x7;
-            // int slotIdx = (bitIdx - 24) ^ (7 - tstate.oct);
+//             // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
+//             uint slotIdx = (bitIdx ^ tstate.dupoct) & 0x7;
+//             // int slotIdx = (bitIdx - 24) ^ (7 - tstate.oct);
 
-            // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
-            int relativeIdx = __popc(tstate.nodeGroup.hits & ~(0xFFFFFFFF << slotIdx));
+//             // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
+//             int relativeIdx = __popc(tstate.nodeGroup.hits & ~(0xFFFFFFFF << slotIdx));
 
-            // int bruteForceRelativeIdx = 0;
-            // uint8_t imask = extract_byte32(tstate.nodeGroup.hits, 0);
-            // for (int i = 0; i < slotIdx; ++i) {
-            //     if ((imask & (1 << i)) != 0)
-            //         bruteForceRelativeIdx++;
-            // }
-            // int relativeIdx = __popc(tstate.nodeGroup.hits >> slotIdx);
+//             // int bruteForceRelativeIdx = 0;
+//             // uint8_t imask = extract_byte32(tstate.nodeGroup.hits, 0);
+//             // for (int i = 0; i < slotIdx; ++i) {
+//             //     if ((imask & (1 << i)) != 0)
+//             //         bruteForceRelativeIdx++;
+//             // }
+//             // int relativeIdx = __popc(tstate.nodeGroup.hits >> slotIdx);
 
-            BVH8Node node = fetchNode(BVH8N, tstate.nodeGroup.firstIdx + relativeIdx);
+//             BVH8Node node = fetchNode(BVH8N, tstate.nodeGroup.firstIdx + relativeIdx);
 
-            // If nodeGroup still contains hits to test, push it to stack.
-            if (tstate.nodeGroup.hits > 0x00FFFFFF) {
-                traversalStack.push(tstate.nodeGroup);
-            }
+//             // If nodeGroup still contains hits to test, push it to stack.
+//             if (tstate.nodeGroup.hits > 0x00FFFFFF) {
+//                 traversalStack.push(tstate.nodeGroup);
+//             }
             
-            intersectNodeYlitie(node, tstate.nodeGroup.firstIdx + relativeIdx, tstate);
-        }
+//             intersectNodeYlitie(node, tstate.nodeGroup.firstIdx + relativeIdx, tstate);
+//         }
         
-        // Only leaf node hits
-        else
-        {
-            tstate.primGroup = tstate.nodeGroup;
-            tstate.nodeGroup = StackEntryYlitie(0, 0, 0);
-        }
+//         // Only leaf node hits
+//         else
+//         {
+//             tstate.primGroup = tstate.nodeGroup;
+//             tstate.nodeGroup = StackEntryYlitie(0, 0, 0);
+//         }
 
-        #if DYNAMIC_FETCH
-        // todo...
-        #endif
-    } while(true);
+//         #if DYNAMIC_FETCH
+//         // todo...
+//         #endif
+//     } while(true);
 
-    // if (tstate.debug) printf("num prim hits %d\n", tstate.debugHits);
+//     // if (tstate.debug) printf("num prim hits %d\n", tstate.debugHits);
 
-    travParams.hitPrims = tstate.debugHits;
-    travParams.OriginAndTMax.w = sqrt(tstate.tmax);
-}
+//     travParams.hitPrims = tstate.debugHits;
+//     travParams.OriginAndTMax.w = sqrt(tstate.tmax);
+// }
 
 [shader("callable")]
 void TraverseLinear(uniform TraverseRecord record, inout TraversePayload travParams) {

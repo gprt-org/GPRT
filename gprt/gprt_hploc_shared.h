@@ -23,19 +23,30 @@
 
 #include "gprt.h"
 
+#if defined(__SLANG_COMPILER__)
+    #define __inline__ [ForceInline]
+    #define __mutating__ [mutating]
+#else
+    #define __inline__ inline
+    #define __mutating__
+#endif
+
 // Assuming at most 128 geometries for now, but this can be increased if needed.
 // (Might be able to use the full 255... just need to test it out...)
 #ifndef GEOM_ID_BVH2 
 #define GEOM_ID_BVH2 255
 #endif
 
+__inline__ bool isLeaf(uint32_t clusterid) { return (clusterid >> 24) != GEOM_ID_BVH2; }
+__inline__ bool isNode(uint32_t clusterid) { return (clusterid >> 24) == GEOM_ID_BVH2; }
+__inline__ uint8_t getClusterMeta(uint32_t clusterid) { return uint8_t(clusterid >> 24); }
+__inline__ uint32_t getClusterIndex(uint32_t clusterid) { return clusterid & 0x00FFFFFF; }
+
 #ifndef INVALID_ID
 #define INVALID_ID UINT32_MAX
 #endif
 
 #if defined(__SLANG_COMPILER__)
-#define __inline__ [ForceInline]
-#define __mutating__ [mutating]
 
 __inline__ int __popc(uint x) {
     return countbits(x);
@@ -309,9 +320,6 @@ uint vshl_wrap_add_b3_b3(uint val, uint shift, uint addend)
 
 #else
 
-#define __inline__ inline
-#define __mutating__
-
 __inline__ int __popc(unsigned int v) // population count
 {
     // Adapted from:
@@ -344,7 +352,9 @@ struct HPLOCParams {
     int N;              // Number of primitives across all referenced geometries
     gprt::Buffer BVH2;  // BVH2 nodes, excluding leaves ((N - 1) x 32 bytes)
     gprt::Buffer BVH8;  // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
+    gprt::Buffer BVH8P; // BVH8 parents
     gprt::Buffer BVH8L; // BVH8 leaves (N x 64 bytes)
+    gprt::Buffer BVH8LP; // BVH8 leaves (N x 64 bytes)
     gprt::Buffer AC;    // Some atomic counters for allocation and work scheduling (5 x 4 bytes)
     gprt::Buffer I;     // Cluster indices reordered by space filling curve codes (N x 4 bytes)
     gprt::Buffer C;     // Space filling curve codes, sorted in ascending order (N x 8 bytes)
@@ -367,11 +377,16 @@ struct BVH2Node {
     float4 aabbMaxAndR;
 
     #if defined(__SLANG_COMPILER__)
-    __init(int2 leftCluster, int2 rightCluster, float2x3 new_bounds) {
+    __init() {
+        aabbMinAndL = float4(+FLT_MAX);
+        aabbMaxAndR = float4(-FLT_MAX);
+    }
+
+    __init(uint2 leftCluster, uint2 rightCluster, float2x3 new_bounds) {
         aabbMinAndL.xyz = new_bounds[0];
         aabbMaxAndR.xyz = new_bounds[1];
-        uint32_t leftIndex  = (leftCluster.x  & 0x00FFFFFF) | ((leftCluster.y  & 0x000000FF) << 24);
-        uint32_t rightIndex = (rightCluster.x & 0x00FFFFFF) | ((rightCluster.y & 0x000000FF) << 24);
+        uint32_t leftIndex  = (leftCluster.x  & 0x00FFFFFFu) | ((leftCluster.y  & 0x000000FFu) << 24u);
+        uint32_t rightIndex = (rightCluster.x & 0x00FFFFFFu) | ((rightCluster.y & 0x000000FFu) << 24u);
         aabbMinAndL.w = asfloat(leftIndex);
         aabbMaxAndR.w = asfloat(rightIndex);
     }
@@ -427,123 +442,78 @@ struct BVH2Node {
     }
 };
 
-// The header for a BVH8 node from Ylitie et al. 2017.
-// Each of the rows below can be read using an aligned 128-byte load.
-struct BVH8NodeHeader {
-    // Row 1, 32 bytes
-    float3 pos; uint32_t scaleAndIMask;
+//------------------------------------------------------------------------
+// Meta struct contains child node pointers, child node type (inner/leaf) 
+// and number of primitives in leaf child nodes.
+// Values in bits 5-7:
+//      Empty child               -> 0b00000000
+//      1 primitive or inner node -> 0b00100000
+//      2 primitives              -> 0b01100000
+//      3 primitives              -> 0b11100000
+// Values in bits 0-4:
+//      inner node                -> child slot index + 24
+//      leaf node                 -> Index of first triangle (of the leaf) relative to firstRemapIndex
+struct BVH8Meta
+{
+    uint8_t value;
 
-    // Row 2, 32 bytes
-    uint32_t firstNodeIdx; uint32_t firstPrimIdx;
+    __mutating__ __inline__ void setInner            (int childSlot) { value = (uint8_t)(childSlot + 0x38u); }
+    __mutating__ __inline__ void setLeaf             (int remapOfs, int numPrims) { value = (uint8_t)(remapOfs + (0xE0602000u >> (numPrims << 3))); }
+    __mutating__ __inline__ void setEmpty            ()              { value = 0x00u; }
 
-    // Row 3, 32 bytes
-    uint2 meta;
+    __inline__ bool isInner             ()              { return (value >= 0x38u && value < 0x40u); }
+    __inline__ bool isLeaf              ()              { return (value != 0x00u && (value < 0x38u || value >= 0x40u)); }
+    __inline__ bool isEmpty             ()              { return (value == 0x00u); }
 
-    __inline__ __mutating__ void setIMaskBit(uint32_t childSlot, bool isInner) {
-        uint8_t mask = uint8_t(extract_byte32(scaleAndIMask, 3));
-        mask = uint8_t((mask & ~(1 << childSlot)) | (uint8_t(isInner) << childSlot));
-        scaleAndIMask = set_byte32(scaleAndIMask, 3, mask);
-    }
-
-    __inline__ __mutating__ void setScale(uint8_t scaleX, uint8_t scaleY, uint8_t scaleZ) {
-        scaleAndIMask = set_byte32(scaleAndIMask, 0, scaleX);
-        scaleAndIMask = set_byte32(scaleAndIMask, 1, scaleY);
-        scaleAndIMask = set_byte32(scaleAndIMask, 2, scaleZ);
-    }
-
-    __inline__ uint8_t getScaleX() { return extract_byte32(scaleAndIMask, 0); }
-    __inline__ uint8_t getScaleY() { return extract_byte32(scaleAndIMask, 1); }
-    __inline__ uint8_t getScaleZ() { return extract_byte32(scaleAndIMask, 2); }
-    __inline__ uint3 getScale() { return uint3(getScaleX(), getScaleY(), getScaleZ()); }
-
-    __inline__ uint8_t getIMask() { return extract_byte32(scaleAndIMask, 3); }
-
-    __inline__ __mutating__ void setInner(uint32_t childSlot) { 
-        if (childSlot < 4) meta[0] = set_byte32(meta[0], childSlot, uint8_t(childSlot + 0b00111000));
-        else meta[1] = set_byte32(meta[1], childSlot - 4, uint8_t(childSlot + 0b00111000));
-    }
-    __inline__ bool isInner(uint32_t childSlot) { 
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return (value >= 0b00111000 && value < 0b01000000);
-    }
-    
-    __inline__ __mutating__ void setLeaf(uint32_t childSlot, int primOfs, int numPrims) { 
-        uint8_t value = (uint8_t)(primOfs + (0b11100000011000000010000000000000 >> (numPrims << 3))); 
-        if (childSlot < 4) meta[0] = set_byte32(meta[0], childSlot, value);
-        else meta[1] = set_byte32(meta[1], childSlot - 4, value);
-    }
-    __inline__ bool isLeaf(uint32_t childSlot) { 
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return (value != 0b00000000 && (value < 0b00111000 || value >= 0b01000000)); 
-    }
-    
-    __inline__ __mutating__ void setEmpty(uint32_t childSlot) { 
-        if (childSlot < 4) meta[0] = set_byte32(meta[0], childSlot, 0b00000000);
-        else meta[1] = set_byte32(meta[1], childSlot - 4, 0b00000000);
-    }
-    __inline__ bool isEmpty(uint32_t childSlot) { 
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return (value == 0b00000000); 
-    }
-
-    __inline__ int getInnerChildSlot(uint32_t childSlot) { 
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return value - 0b00111000; 
-    }
-    __inline__ int getLeafRemapOfs(uint32_t childSlot) { 
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return value & 0b00011111; 
-    }
-    __inline__ int getLeafNumPrims(uint32_t childSlot) {
-        uint8_t value = uint8_t((childSlot < 4) ? extract_byte32(meta[0], childSlot) : extract_byte32(meta[1], childSlot - 4));
-        return __popc(value >> 5); 
-    }
+    __inline__ int  getInnerChildSlot   ()              { return value - 0x38u; }
+    __inline__ int  getLeafRemapOfs     ()              { return value & 0x1Fu; }
+    __inline__ int  getLeafNumPrims     ()              { return __popc(value >> 5); }
 };
 
+//------------------------------------------------------------------------
+// BVH8NodeHeader contains type and indexing information of child nodes.
+// Child slots store child node index offsets from base index of corresponding 
+// child node type (inner/leaf). Inner and leaf/primitive remap child nodes are 
+// stored continuously and compactly in separate arrays, in same order as child slots.
+// Child slots are sorted in Z-order for ordered traversal:
+// inner, leaf and empty children can end up in any slot.
+//      BVH8Node* childi = nodes[firstChildIdx + getOffset(meta[i])];
+
+// Child node bounding boxes are quantized to 8-bit in coordinate system
+// given by BVH8NodeHeader. Uncompressed boxes can be obtained by
+// box.lo.x = header.pos[0] + lox * header.scale[0] etc.
+struct BVH8NodeHeader // 32 bytes
+{
+    float3    pos;
+    uint8_t   scale[3];
+    uint8_t   innerMask;      // Bitmask of filled inner node children.
+    int       firstChildIdx;  // Index of first child node in subtree.
+    int       firstRemapIdx;  // Index of first primitive remap.
+    BVH8Meta  meta[8];        // Index offsets and child types for each child slot.
+};
+
+struct BVH8Node // 80 bytes
+{
+    BVH8NodeHeader      header;
+
+    float3 lo[8];
+    float3 hi[8];
+
+    // Quantized child bounding boxes for each child slot.
+    // uint8_t       lox[8];
+    // uint8_t       loy[8];
+    // uint8_t       loz[8];
+    // uint8_t       hix[8];
+    // uint8_t       hiy[8];
+    // uint8_t       hiz[8];
+};
+
+
 // An 80 byte BVH8 node structure, combining the header and the quantized child AABBs
-struct BVH8Node {
-    BVH8NodeHeader header;
-    /*n2.xy*/uint2 lox;
-    /*n2.zw*/uint2 loy;
-    /*n3.xy*/uint2 loz;
-    /*n3.zw*/uint2 hix;
-    /*n4.xy*/uint2 hiy;
-    /*n4.zw*/uint2 hiz;
-
-    __inline__ uint8_t getLoX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? lox[0] : lox[1], childSlot % 4); }
-    __inline__ uint8_t getLoY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loy[0] : loy[1], childSlot % 4); }
-    __inline__ uint8_t getLoZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loz[0] : loz[1], childSlot % 4); }
-    __inline__ uint8_t getHiX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hix[0] : hix[1], childSlot % 4); }
-    __inline__ uint8_t getHiY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiy[0] : hiy[1], childSlot % 4); }
-    __inline__ uint8_t getHiZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiz[0] : hiz[1], childSlot % 4); }
-
-    __inline__ __mutating__ void setLoX(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) lox[0] = set_byte32(lox[0], childSlot, value); 
-        else               lox[1] = set_byte32(lox[1], childSlot - 4, value);
-    }
-    __inline__ __mutating__ void setLoY(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) loy[0] = set_byte32(loy[0], childSlot, value); 
-        else               loy[1] = set_byte32(loy[1], childSlot - 4, value);
-    }
-    __inline__ __mutating__ void setLoZ(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) loz[0] = set_byte32(loz[0], childSlot, value); 
-        else               loz[1] = set_byte32(loz[1], childSlot - 4, value);
-    }
-    __inline__ __mutating__ void setHiX(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) hix[0] = set_byte32(hix[0], childSlot, value); 
-        else               hix[1] = set_byte32(hix[1], childSlot - 4, value);
-    }
-    __inline__ __mutating__ void setHiY(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) hiy[0] = set_byte32(hiy[0], childSlot, value); 
-        else               hiy[1] = set_byte32(hiy[1], childSlot - 4, value);
-    }
-    __inline__ __mutating__ void setHiZ(uint32_t childSlot, uint8_t value) {
-        if (childSlot < 4) hiz[0] = set_byte32(hiz[0], childSlot, value); 
-        else               hiz[1] = set_byte32(hiz[1], childSlot - 4, value);
-    }
-
-
-
+// struct BVH8Node {
+//     BVH8NodeHeader header;
+//     float3 lo[8];
+//     float3 hi[8];
     // uint8_t        lox[8];
     // uint8_t        loy[8];
     // uint8_t        loz[8];
@@ -552,7 +522,46 @@ struct BVH8Node {
     // uint8_t        hiz[8]; 
 
 
-};
+
+    // /*n2.xy*/uint2 lox;
+    // /*n2.zw*/uint2 loy;
+    // /*n3.xy*/uint2 loz;
+    // /*n3.zw*/uint2 hix;
+    // /*n4.xy*/uint2 hiy;
+    // /*n4.zw*/uint2 hiz;
+
+    // __inline__ uint8_t getLoX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? lox[0] : lox[1], childSlot % 4); }
+    // __inline__ uint8_t getLoY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loy[0] : loy[1], childSlot % 4); }
+    // __inline__ uint8_t getLoZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loz[0] : loz[1], childSlot % 4); }
+    // __inline__ uint8_t getHiX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hix[0] : hix[1], childSlot % 4); }
+    // __inline__ uint8_t getHiY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiy[0] : hiy[1], childSlot % 4); }
+    // __inline__ uint8_t getHiZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiz[0] : hiz[1], childSlot % 4); }
+
+    // __inline__ __mutating__ void setLoX(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) lox[0] = set_byte32(lox[0], childSlot, value); 
+    //     else               lox[1] = set_byte32(lox[1], childSlot - 4, value);
+    // }
+    // __inline__ __mutating__ void setLoY(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) loy[0] = set_byte32(loy[0], childSlot, value); 
+    //     else               loy[1] = set_byte32(loy[1], childSlot - 4, value);
+    // }
+    // __inline__ __mutating__ void setLoZ(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) loz[0] = set_byte32(loz[0], childSlot, value); 
+    //     else               loz[1] = set_byte32(loz[1], childSlot - 4, value);
+    // }
+    // __inline__ __mutating__ void setHiX(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) hix[0] = set_byte32(hix[0], childSlot, value); 
+    //     else               hix[1] = set_byte32(hix[1], childSlot - 4, value);
+    // }
+    // __inline__ __mutating__ void setHiY(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) hiy[0] = set_byte32(hiy[0], childSlot, value); 
+    //     else               hiy[1] = set_byte32(hiy[1], childSlot - 4, value);
+    // }
+    // __inline__ __mutating__ void setHiZ(uint32_t childSlot, uint8_t value) {
+    //     if (childSlot < 4) hiz[0] = set_byte32(hiz[0], childSlot, value); 
+    //     else               hiz[1] = set_byte32(hiz[1], childSlot - 4, value);
+    // }
+// };
 
 struct BVH8Triangle {
     float3 v0;
@@ -575,7 +584,9 @@ struct TraverseRecord {
     uint N; // number of primitives
     gprt::Buffer BVH2; // BVH2 nodes (N-1 x 64 bytes)
     gprt::Buffer BVH8N; // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
+    gprt::Buffer BVH8NP; // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
     gprt::Buffer BVH8L; // BVH8 leaves
+    gprt::Buffer BVH8LP; // BVH8 leaves
 
     // One buffer per geometry
     gprt::Buffer primBuffers;
