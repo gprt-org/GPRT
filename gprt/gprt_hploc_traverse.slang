@@ -355,14 +355,15 @@ bool rayBox(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float t
     return (max(tc, trange.x) < min(tf, trange.y));
 }
 
-bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
-    float3 tlo = (lo - o) / d;
-    float3 thi = (hi - o) / d;
-    float3 tc3 = min(tlo, thi);
-    float3 tf3 = max(tlo, thi);
-    tc = min3(tc3);
-    return trange.x < tc && tc < trange.y;
-}
+// // Meant to mimic a ray-slab test.
+// bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
+//     float3 tlo = (lo - o) / d;
+//     float3 thi = (hi - o) / d;
+//     float3 tc3 = min(tlo, thi);
+//     float3 tf3 = max(tlo, thi);
+//     tc = min3(tc3);
+//     return trange.x < tc && tc < trange.y;
+// }
 
 // tf = min3(tf3);
 // bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
@@ -380,10 +381,10 @@ bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out fl
     float3 tc3 = min(tlo, thi);
     float3 tf3 = max(tlo, thi);
     float3 d3 = select(0.0 < tc3, tc3,
-                       select(0.0 > tf3, tf3,
-                              float3(0.f, 0.f, 0.f)));
+                    select(0.0 > tf3, tf3,
+                        float3(0.f, 0.f, 0.f)));
     tc = d3.x * d3.x + d3.y * d3.y + d3.z * d3.z;
-    return trange.x < tc && tc < trange.y;
+    return trange.x <= tc && tc <= trange.y;
 }
 
 //------------------------------------------------------------------------
@@ -440,7 +441,7 @@ struct StackEntry {
     uint32_t order;
 };
 
-static const int LOCAL_STACK_SIZE = 32;
+static const int LOCAL_STACK_SIZE = 16;
 
 [ForceInline] void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
@@ -484,33 +485,11 @@ void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool
     float3 orig = tstate.origin;
     float3 dir = tstate.direction;
 
-    // int nodeaddr[8]; 
-    // int nodesHit[8]; 
-    // int slotTypes[8]; 
-    // for (int i = 0; i < 8; ++i) {
-    //     nodeaddr[i] = -1;
-    //     nodesHit[i] = 0;
-    //     slotTypes[i] = -1;
-    // }
-    // float3 parentlo = float3(+FLT_MAX);
-    // float3 parenthi = float3(-FLT_MAX);
-
     uint32_t leafHits = 0;
-    float dists[8];
-    int hitSlots[8];
+    uint2 hitSlotsDists[8];
     for (int i = 0; i < 8; ++i) {
-        dists[i] = FLT_MAX;
-        hitSlots[i] = 0b1111;
+        hitSlotsDists[i] = int2(0b1111, asuint(FLT_MAX));
         BVH8Meta meta = node.header.meta[i];
-        // if (meta.isInner()) {
-        //     slotTypes[i] = 1;
-        // }
-        // if (meta.isLeaf()) {
-        //     slotTypes[i] = 2;
-        // }
-        // if (meta.isEmpty()) {
-            // slotTypes[i] = 0;
-        // }
         
         if (meta.isEmpty()) continue;
 
@@ -524,61 +503,29 @@ void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool
         float3 lo = pos + scale * float3(qlox, qloy, qloz);
         float3 hi = pos + scale * float3(qhix, qhiy, qhiz);
 
-        // float3 lo = node.lo[i];
-        // float3 hi = node.hi[i];
-
-        // parentlo = min(parentlo, lo);
-        // parenthi = max(parenthi, hi);
+        float tclosest;
+        bool hit = minDistTest(orig, dir, float2(0.0, tstate.tmax), lo, hi, tclosest);
+        if (!hit) continue;
         
-        // if (meta.isInner()) {
-        //     uint childSlot = meta.getInnerChildSlot();
-        //     int childOffset = __popc(innerMask & ~(-1 << childSlot));            
-        //     nodeaddr[i] = node.header.firstChildIdx + childOffset;
-        // }
-        // else {
-        //     nodeaddr[i] = node.header.firstRemapIdx + meta.getLeafRemapOfs();
-        // }
-        
-        float dist = sqAABB(tstate.origin, lo, hi);
-        if (dist > tstate.tmax) {
-            continue;
-        }
-
         //nodesHit[i] = 1;
 
-        if (meta.isLeaf()) {
+        if (meta.isLeaf())
             leafHits |= (1 << meta.getLeafRemapOfs()); // 0-23
-        }
-        else {
-            dists[i] = dist;
-            hitSlots[i] = i;
-        }
+        else 
+            hitSlotsDists[i] = uint2(i, asuint(tclosest));
     }
 
-    // Useful information for debugging traversal code. Keeping around for the time being...
-    // if (tstate.debug) {
-    //     printf("Stack ptr %d\n", tstate.sp);
-    //     printf("Parent Node %d dist %f\n", nodeIdx, sdBox(tstate.origin, parentlo, parenthi));
-    //     printf("Slot type: %2d %2d %2d %2d %2d %2d %2d %2d\n", slotTypes[0], slotTypes[1], slotTypes[2], slotTypes[3], slotTypes[4], slotTypes[5], slotTypes[6], slotTypes[7]);
-    //     printf("Slot ofs : %2d %2d %2d %2d %2d %2d %2d %2d\n", nodeaddr[0], nodeaddr[1], nodeaddr[2], nodeaddr[3], nodeaddr[4], nodeaddr[5], nodeaddr[6], nodeaddr[7]);
-    //     printf("Slot hits: %2d %2d %2d %2d %2d %2d %2d %2d\n", nodesHit[0], nodesHit[1], nodesHit[2], nodesHit[3], nodesHit[4], nodesHit[5], nodesHit[6], nodesHit[7]);
-    // }
-
-    if (reorder) BubbleSort(hitSlots, dists);
+    if (reorder) SortWithNetwork(hitSlotsDists);
 
     uint32_t orderBits = 0;
     uint32_t orderHits = 0;
     for (int i = 0; i < 8; ++i) {
-        if (hitSlots[i] != 0b1111) {
+        if (hitSlotsDists[i].x != 0b1111) {
             orderHits |= (1 << i);
-            orderBits |= (uint32_t(hitSlots[i]) << (i * 4));
+            orderBits |= (uint32_t(hitSlotsDists[i].x) << (i * 4));
         }
     }
 
-    // if (tstate.debug) {
-    //     printf("orderBits 0x%x\n", orderBits);
-    // }
-    
     // Extract inner, leaf node hits
     let innerHits = (orderHits << 24) | innerMask; // Move valid inner node mask to low byte.
     tstate.nodegrp_hits = innerHits;
@@ -846,68 +793,49 @@ struct BVH2Stack {
     uint size() { return stack.size(); }
 };
 
-// // Function to swap elements based on condition
-// __inline__ void Swap(inout StackEntry ia, inout StackEntry ib) {
-//     if (ia.dist < ib.dist) {
-//         StackEntry tmp = ia;
-//         ia = ib;
-//         ib = tmp;
-//     }
-// }
-
-// // Sorting network for an array of 8 elements
-// __inline__ void SortWithNetwork(inout StackEntry arr[8]) {
-//     // Level 1
-//     Swap(arr[0], arr[1]);
-//     Swap(arr[2], arr[3]);
-//     Swap(arr[4], arr[5]);
-//     Swap(arr[6], arr[7]);
-
-//     // Level 2
-//     Swap(arr[0], arr[2]);
-//     Swap(arr[1], arr[3]);
-//     Swap(arr[4], arr[6]);
-//     Swap(arr[5], arr[7]);
-
-//     // Level 3
-//     Swap(arr[1], arr[2]);
-//     Swap(arr[5], arr[6]);
-
-//     // Level 4
-//     Swap(arr[0], arr[4]);
-//     Swap(arr[1], arr[5]);
-//     Swap(arr[2], arr[6]);
-//     Swap(arr[3], arr[7]);
-
-//     // Level 5
-//     Swap(arr[1], arr[4]);
-//     Swap(arr[3], arr[6]);
-
-//     // Level 6
-//     Swap(arr[2], arr[4]);
-//     Swap(arr[3], arr[5]);
-
-//     // Level 7
-//     Swap(arr[3], arr[4]);
-// }
-
-void BubbleSort<let N : uint>(inout int keys[N], inout float vals[N]) {
-    for (uint i = 0; i < N; i++)
-    {
-        for (uint j = i; j < N; j++)
-        {
-            if (vals[j] >= vals[i])
-            {
-                int tmpKey = keys[j];
-                keys[j] = keys[i];
-                keys[i] = tmpKey;
-
-                float tmpVal = vals[j];
-                vals[j] = vals[i];
-                vals[i] = tmpVal;
-            }
-        }
+// Function to swap elements based on condition
+__inline__ void Swap(inout uint2 ia, inout uint2 ib) {
+    if (asfloat(ia.y) < asfloat(ib.y)) {
+        uint2 tmp = ia;
+        ia = ib;
+        ib = tmp;
     }
+}
+
+// Sorting network for an array of 8 elements
+__inline__ void SortWithNetwork(inout uint2 arr[8]) {
+    // Level 1
+    Swap(arr[0], arr[1]);
+    Swap(arr[2], arr[3]);
+    Swap(arr[4], arr[5]);
+    Swap(arr[6], arr[7]);
+
+    // Level 2
+    Swap(arr[0], arr[2]);
+    Swap(arr[1], arr[3]);
+    Swap(arr[4], arr[6]);
+    Swap(arr[5], arr[7]);
+
+    // Level 3
+    Swap(arr[1], arr[2]);
+    Swap(arr[5], arr[6]);
+
+    // Level 4
+    Swap(arr[0], arr[4]);
+    Swap(arr[1], arr[5]);
+    Swap(arr[2], arr[6]);
+    Swap(arr[3], arr[7]);
+
+    // Level 5
+    Swap(arr[1], arr[4]);
+    Swap(arr[3], arr[6]);
+
+    // Level 6
+    Swap(arr[2], arr[4]);
+    Swap(arr[3], arr[5]);
+
+    // Level 7
+    Swap(arr[3], arr[4]);
 }
 
 struct IntersectTriangleParams {
