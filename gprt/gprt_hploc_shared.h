@@ -101,8 +101,8 @@ __inline__ float __fmul_ru(float x, float y) {
     return result;
 }
 
-__inline__ float fmaxof3f(float3 a) {
-    return max(max(a.x, a.y), a.z);
+__inline__ float __fmaf_ru(float a, float b, float c) {
+    return nextafter(nextafter(a * b, FLT_MAX) + c, FLT_MAX);
 }
 
 __inline__ int   fastSelect      (int a, int b, int c)       { return (c >= 0) ? a : b; }
@@ -468,7 +468,16 @@ struct BVH8Meta
     __inline__ int  getInnerChildSlot   ()              { return value - 0x38u; }
     __inline__ int  getLeafRemapOfs     ()              { return value & 0x1Fu; }
     __inline__ int  getLeafNumPrims     ()              { return __popc(value >> 5); }
+
+    #if defined(__SLANG_COMPILER__)
+    __init(uint8_t _value) {value = _value;}
+    #endif
 };
+
+__inline__ bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
+__inline__ bool bvh8MetaisLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
+__inline__ bool bvh8MetaisEmpty        (uint value) { return (value == 0x00u); }
+__inline__ int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
 //------------------------------------------------------------------------
 // BVH8NodeHeader contains type and indexing information of child nodes.
@@ -505,6 +514,21 @@ struct BVH8Node // 80 bytes
     uint8_t hiz[8];
 };
 
+// Temporarily using this, since slang doesn't currently support reinterpreting non-32-bit sizes.
+struct BVH8NodeWide
+{
+    uint3 pos;
+    uint packedScale;
+    uint firstChildIdx;
+    uint firstRemapIdx;
+    uint2 meta;
+    uint2 lox;
+    uint2 loy;
+    uint2 loz;
+    uint2 hix;
+    uint2 hiy;
+    uint2 hiz;
+};
 
 // An 80 byte BVH8 node structure, combining the header and the quantized child AABBs
 // struct BVH8Node {

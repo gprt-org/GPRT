@@ -118,7 +118,7 @@ static struct RequestedFeatures {
   bool invocationReordering = true;
 
 
-  bool debugPrintf = true;
+  bool debugPrintf = false;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -9941,7 +9941,7 @@ void Context::buildPipeline() {
       dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
       dynamicState.pDynamicStates = dynamicStates.data();
 
-      rayTracingPipelineCI.pDynamicState = &dynamicState;
+      // rayTracingPipelineCI.pDynamicState = &dynamicState;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " + std::to_string(requestedFeatures.rayRecursionDepth) + ".");
 
