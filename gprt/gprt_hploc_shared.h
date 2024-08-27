@@ -24,10 +24,8 @@
 #include "gprt.h"
 
 #if defined(__SLANG_COMPILER__)
-    #define __inline__ [ForceInline]
     #define __mutating__ [mutating]
 #else
-    #define __inline__ inline
     #define __mutating__
 #endif
 
@@ -37,10 +35,10 @@
 #define GEOM_ID_BVH2 255
 #endif
 
-__inline__ bool isLeaf(uint32_t clusterid) { return (clusterid >> 24) != GEOM_ID_BVH2; }
-__inline__ bool isNode(uint32_t clusterid) { return (clusterid >> 24) == GEOM_ID_BVH2; }
-__inline__ uint8_t getClusterMeta(uint32_t clusterid) { return uint8_t(clusterid >> 24); }
-__inline__ uint32_t getClusterIndex(uint32_t clusterid) { return clusterid & 0x00FFFFFF; }
+inline bool isLeaf(uint32_t clusterid) { return (clusterid >> 24) != GEOM_ID_BVH2; }
+inline bool isNode(uint32_t clusterid) { return (clusterid >> 24) == GEOM_ID_BVH2; }
+inline uint8_t getClusterMeta(uint32_t clusterid) { return uint8_t(clusterid >> 24); }
+inline uint32_t getClusterIndex(uint32_t clusterid) { return clusterid & 0x00FFFFFF; }
 
 #ifndef INVALID_ID
 #define INVALID_ID UINT32_MAX
@@ -48,20 +46,20 @@ __inline__ uint32_t getClusterIndex(uint32_t clusterid) { return clusterid & 0x0
 
 #if defined(__SLANG_COMPILER__)
 
-__inline__ int __popc(uint x) {
+inline int __popc(uint x) {
     return countbits(x);
 }
 
-__inline__ int __bfind(uint x) {
+inline int __bfind(uint x) {
     return firstbithigh(x);
 }
 
-__inline__ float fstrict(float v) // prevents the compiler from optimizing FP32 math on host side
+inline float fstrict(float v) // prevents the compiler from optimizing FP32 math on host side
 {
     return asfloat(asint(v));
 }
 
-__inline__ float __fsub_rd(float a, float b) // returns a-b rounded down
+inline float __fsub_rd(float a, float b) // returns a-b rounded down
 {
     float x = fstrict(fstrict(a) - fstrict(b));
     if (fstrict(x + fstrict(b)) > fstrict(a) || fstrict(fstrict(a) - x) < fstrict(b))
@@ -70,7 +68,7 @@ __inline__ float __fsub_rd(float a, float b) // returns a-b rounded down
     return x;
 }
 
-__inline__ float __fsub_ru(float a, float b) // returns a-b rounded up
+inline float __fsub_ru(float a, float b) // returns a-b rounded up
 {
     float x = fstrict(fstrict(a) - fstrict(b));
     if (fstrict(x + fstrict(b)) < fstrict(a) || fstrict(fstrict(a) - x) > fstrict(b))
@@ -79,11 +77,11 @@ __inline__ float __fsub_ru(float a, float b) // returns a-b rounded up
     return x;
 }
 
-__inline__ float __fmaf_rn(float a, float b, float c)    { return float( double(a) * double(b) + double(c) ); }
-__inline__ float __fmul_rn(float a, float b)             { return a * b; }
-__inline__ float __fadd_rn(float a, float b)             { return a + b; }
+inline float __fmaf_rn(float a, float b, float c)    { return float( double(a) * double(b) + double(c) ); }
+inline float __fmul_rn(float a, float b)             { return a * b; }
+inline float __fadd_rn(float a, float b)             { return a + b; }
 
-__inline__ float __fmul_rd(float x, float y) {
+inline float __fmul_rd(float x, float y) {
     float result = x * y;
     // Check if the result needs to be adjusted to round down
     if (result > x * y) {
@@ -92,7 +90,7 @@ __inline__ float __fmul_rd(float x, float y) {
     return result;
 }
 
-__inline__ float __fmul_ru(float x, float y) {
+inline float __fmul_ru(float x, float y) {
     float result = x * y;
     // Check if the result needs to be adjusted to round up
     if (result < x * y) {
@@ -101,15 +99,15 @@ __inline__ float __fmul_ru(float x, float y) {
     return result;
 }
 
-__inline__ float __fmaf_ru(float a, float b, float c) {
+inline float __fmaf_ru(float a, float b, float c) {
     return nextafter(nextafter(a * b, FLT_MAX) + c, FLT_MAX);
 }
 
-__inline__ int   fastSelect      (int a, int b, int c)       { return (c >= 0) ? a : b; }
-__inline__ float fastSelect      (float a, float b, int c)   { return (c >= 0) ? a : b; }
+inline int   fastSelect      (int a, int b, int c)       { return (c >= 0) ? a : b; }
+inline float fastSelect      (float a, float b, int c)   { return (c >= 0) ? a : b; }
 
 // Extracts the 8 exponent bits from the floating point number that conservatively bound it, avoiding infinity.
-__inline__ uint floatToExponent(float num) {
+inline uint floatToExponent(float num) {
     uint bits = asuint(num);
     uint exponentBits = (bits >> 23) & 0xFF; // Mask to get only the exponent bits
     // Avoiding 255, since that's infinity.
@@ -117,12 +115,12 @@ __inline__ uint floatToExponent(float num) {
 }
 
 // Convert an exponent back to a floating-point scale factor
-__inline__ float exponentToFloat(uint exponent) {
+inline float exponentToFloat(uint exponent) {
     uint bits = exponent << 23;
     return asfloat(bits);
 }
 
-__inline__ float3 exponentToFloat(uint3 exponent) {
+inline float3 exponentToFloat(uint3 exponent) {
     uint3 bits = exponent << 23;
     return asfloat(bits);
 }
@@ -143,7 +141,7 @@ __inline__ float3 exponentToFloat(uint3 exponent) {
 //     return iMask;
 // }
 
-__inline__ uint shf_l_clamp(uint a, uint b, int c) {
+inline uint shf_l_clamp(uint a, uint b, int c) {
     uint32_t  n = min(c, 32);    
     // shift concatenation of [b, a]
     // extract 32 msbs
@@ -151,31 +149,31 @@ __inline__ uint shf_l_clamp(uint a, uint b, int c) {
     return d;
 }
 
-__inline__ uint8_t extract_byte32(uint i, uint n) { 
+inline uint8_t extract_byte32(uint i, uint n) { 
     return uint8_t(i >> (n * 8)); 
 }
 
-__inline__ uint8_t extract_byte64(uint64_t i, uint n) { 
+inline uint8_t extract_byte64(uint64_t i, uint n) { 
     return uint8_t(i >> (n * 8)); 
 }
 
 // now some functions to set bytes
-__inline__ uint32_t set_byte32(uint32_t i, uint32_t n, uint8_t byte) {
+inline uint32_t set_byte32(uint32_t i, uint32_t n, uint8_t byte) {
     return (i & ~(0xFF << (n * 8))) | (uint32_t(byte) << (n * 8));
 }
 
-__inline__ uint64_t set_byte64(uint64_t bits, uint byteIndex, uint8_t byte) {
+inline uint64_t set_byte64(uint64_t bits, uint byteIndex, uint8_t byte) {
     return (bits & ~(0xFFull << (byteIndex * 8))) | (uint64_t(byte) << (byteIndex * 8));
 }
 
-__inline__ uint  duplicateByte(uint value) { 
+inline uint  duplicateByte(uint value) { 
     uint byte = (value & 0xFF);
     uint dup = (byte << 24) | (byte << 16) | (byte << 8) | byte;
     return dup; 
 }
 
 // could probably optimize a bit if needed...
-__inline__ uint8_t getOctant(float3 dir) {
+inline uint8_t getOctant(float3 dir) {
 
     uint oct = shf_l_clamp( asuint(dir.z), 0, 1 );
     oct      = shf_l_clamp( asuint(dir.y), oct, 1 );
@@ -183,14 +181,14 @@ __inline__ uint8_t getOctant(float3 dir) {
     return uint8_t(oct);
 }
 
-__inline__ float3 getOctantDir(uint octant) {
+inline float3 getOctantDir(uint octant) {
     return float3(
                     (((octant >> 2) & 1) == 1) ? -1.0f : 1.0f,
 			        (((octant >> 1) & 1) == 1) ? -1.0f : 1.0f,
 			        (((octant >> 0) & 1) == 1) ? -1.0f : 1.0f);
 }
 
-__inline__ uint32_t sign_extend_s8x4(uint32_t word) {
+inline uint32_t sign_extend_s8x4(uint32_t word) {
     uint32_t result = (uint32_t(uint32_t(uint8_t(word >>  7) * 0xFF)) << 0)
                     | (uint32_t(uint32_t(uint8_t(word >> 15) * 0xFF)) << 8)
                     | (uint32_t(uint32_t(uint8_t(word >> 23) * 0xFF)) << 16)
@@ -198,7 +196,7 @@ __inline__ uint32_t sign_extend_s8x4(uint32_t word) {
     return result;
 }
 
-__inline__ uint64_t sign_extend_s8x8(uint64_t word) {
+inline uint64_t sign_extend_s8x8(uint64_t word) {
     // Combine the sign-extended bytes
     uint64_t result = (uint64_t(uint64_t(uint8_t(word >>  7ull) * 0xFF)) << 0ull)
                     | (uint64_t(uint64_t(uint8_t(word >> 15ull) * 0xFF)) << 8ull)
@@ -211,7 +209,7 @@ __inline__ uint64_t sign_extend_s8x8(uint64_t word) {
     return result;
 }
 
-__inline__ uint64_t replicate_sign_bits64(uint64_t word) {
+inline uint64_t replicate_sign_bits64(uint64_t word) {
     // Step-by-step spread the sign bit to all other bits in each byte
     uint64_t spread_signs = (word & 0x8080808080808080ull) >> 7;
     spread_signs |= spread_signs << 1;
@@ -220,7 +218,7 @@ __inline__ uint64_t replicate_sign_bits64(uint64_t word) {
     return spread_signs;
 }
 
-__inline__ uint32_t vsignExtend4(uint32_t word) {
+inline uint32_t vsignExtend4(uint32_t word) {
     // Step-by-step spread the sign bit to all other bits in each byte
     uint32_t spread_signs = (word & 0x80808080u) >> 7;
     spread_signs |= spread_signs << 1;
@@ -229,7 +227,7 @@ __inline__ uint32_t vsignExtend4(uint32_t word) {
     return spread_signs;
 }
 
-__inline__ uint8_t4 extract_bytes32(uint i) { 
+inline uint8_t4 extract_bytes32(uint i) { 
     uint8_t4 val = uint8_t4(
         uint8_t(i >> (0 * 8)),
         uint8_t(i >> (1 * 8)),
@@ -239,7 +237,7 @@ __inline__ uint8_t4 extract_bytes32(uint i) {
     return val; 
 }
 
-__inline__ uint bfe(uint val, int pos, int len) {
+inline uint bfe(uint val, int pos, int len) {
     uint mask = (1u << len) - 1u; // create a mask with `len` bits set to 1
     return (val >> pos) & mask; // Shift the value right by 'pos' and apply the mask
 }
@@ -320,7 +318,7 @@ uint vshl_wrap_add_b3_b3(uint val, uint shift, uint addend)
 
 #else
 
-__inline__ int __popc(unsigned int v) // population count
+inline int __popc(unsigned int v) // population count
 {
     // Adapted from:
     // http://stackoverflow.com/questions/109023/how-to-count-the-number-of-set-bits-in-a-32-bit-integer
@@ -329,20 +327,20 @@ __inline__ int __popc(unsigned int v) // population count
     return (((v + (v >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24;
 }
 
-__inline__ uint8_t extract_byte32(uint i, uint n) { 
+inline uint8_t extract_byte32(uint i, uint n) { 
     return uint8_t(i >> (n * 8)); 
 }
 
-__inline__ uint8_t extract_byte64(uint64_t i, uint n) { 
+inline uint8_t extract_byte64(uint64_t i, uint n) { 
     return uint8_t(i >> (n * 8)); 
 }
 
 // now some functions to set bytes
-__inline__ uint32_t set_byte32(uint32_t i, uint32_t n, uint8_t byte) {
+inline uint32_t set_byte32(uint32_t i, uint32_t n, uint8_t byte) {
     return (i & ~(0xFF << (n * 8))) | (uint32_t(byte) << (n * 8));
 }
 
-__inline__ uint64_t set_byte64(uint64_t bits, uint byteIndex, uint8_t byte) {
+inline uint64_t set_byte64(uint64_t bits, uint byteIndex, uint8_t byte) {
     return (bits & ~(0xFFull << (byteIndex * 8))) | (uint64_t(byte) << (byteIndex * 8));
 }
 #endif
@@ -457,27 +455,27 @@ struct BVH8Meta
 {
     uint8_t value;
 
-    __mutating__ __inline__ void setInner            (int childSlot) { value = (uint8_t)(childSlot + 0x38u); }
-    __mutating__ __inline__ void setLeaf             (int remapOfs, int numPrims) { value = (uint8_t)(remapOfs + (0xE0602000u >> (numPrims << 3))); }
-    __mutating__ __inline__ void setEmpty            ()              { value = 0x00u; }
+    __mutating__ inline void setInner            (int childSlot) { value = (uint8_t)(childSlot + 0x38u); }
+    __mutating__ inline void setLeaf             (int remapOfs, int numPrims) { value = (uint8_t)(remapOfs + (0xE0602000u >> (numPrims << 3))); }
+    __mutating__ inline void setEmpty            ()              { value = 0x00u; }
 
-    __inline__ bool isInner             ()              { return (value >= 0x38u && value < 0x40u); }
-    __inline__ bool isLeaf              ()              { return (value != 0x00u && (value < 0x38u || value >= 0x40u)); }
-    __inline__ bool isEmpty             ()              { return (value == 0x00u); }
+    inline bool isInner             ()              { return (value >= 0x38u && value < 0x40u); }
+    inline bool isLeaf              ()              { return (value != 0x00u && (value < 0x38u || value >= 0x40u)); }
+    inline bool isEmpty             ()              { return (value == 0x00u); }
 
-    __inline__ int  getInnerChildSlot   ()              { return value - 0x38u; }
-    __inline__ int  getLeafRemapOfs     ()              { return value & 0x1Fu; }
-    __inline__ int  getLeafNumPrims     ()              { return __popc(value >> 5); }
+    inline int  getInnerChildSlot   ()              { return value - 0x38u; }
+    inline int  getLeafRemapOfs     ()              { return value & 0x1Fu; }
+    inline int  getLeafNumPrims     ()              { return __popc(value >> 5); }
 
     #if defined(__SLANG_COMPILER__)
     __init(uint8_t _value) {value = _value;}
     #endif
 };
 
-__inline__ bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
-__inline__ bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
-__inline__ bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
-__inline__ int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
+inline bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
+inline bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
+inline bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
+inline int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
 //------------------------------------------------------------------------
 // BVH8NodeHeader contains type and indexing information of child nodes.
@@ -551,34 +549,34 @@ struct BVH8NodeWide
     // /*n4.xy*/uint2 hiy;
     // /*n4.zw*/uint2 hiz;
 
-    // __inline__ uint8_t getLoX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? lox[0] : lox[1], childSlot % 4); }
-    // __inline__ uint8_t getLoY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loy[0] : loy[1], childSlot % 4); }
-    // __inline__ uint8_t getLoZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loz[0] : loz[1], childSlot % 4); }
-    // __inline__ uint8_t getHiX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hix[0] : hix[1], childSlot % 4); }
-    // __inline__ uint8_t getHiY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiy[0] : hiy[1], childSlot % 4); }
-    // __inline__ uint8_t getHiZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiz[0] : hiz[1], childSlot % 4); }
+    // inline uint8_t getLoX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? lox[0] : lox[1], childSlot % 4); }
+    // inline uint8_t getLoY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loy[0] : loy[1], childSlot % 4); }
+    // inline uint8_t getLoZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loz[0] : loz[1], childSlot % 4); }
+    // inline uint8_t getHiX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hix[0] : hix[1], childSlot % 4); }
+    // inline uint8_t getHiY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiy[0] : hiy[1], childSlot % 4); }
+    // inline uint8_t getHiZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiz[0] : hiz[1], childSlot % 4); }
 
-    // __inline__ __mutating__ void setLoX(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setLoX(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) lox[0] = set_byte32(lox[0], childSlot, value); 
     //     else               lox[1] = set_byte32(lox[1], childSlot - 4, value);
     // }
-    // __inline__ __mutating__ void setLoY(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setLoY(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) loy[0] = set_byte32(loy[0], childSlot, value); 
     //     else               loy[1] = set_byte32(loy[1], childSlot - 4, value);
     // }
-    // __inline__ __mutating__ void setLoZ(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setLoZ(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) loz[0] = set_byte32(loz[0], childSlot, value); 
     //     else               loz[1] = set_byte32(loz[1], childSlot - 4, value);
     // }
-    // __inline__ __mutating__ void setHiX(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setHiX(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) hix[0] = set_byte32(hix[0], childSlot, value); 
     //     else               hix[1] = set_byte32(hix[1], childSlot - 4, value);
     // }
-    // __inline__ __mutating__ void setHiY(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setHiY(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) hiy[0] = set_byte32(hiy[0], childSlot, value); 
     //     else               hiy[1] = set_byte32(hiy[1], childSlot - 4, value);
     // }
-    // __inline__ __mutating__ void setHiZ(uint32_t childSlot, uint8_t value) {
+    // inline __mutating__ void setHiZ(uint32_t childSlot, uint8_t value) {
     //     if (childSlot < 4) hiz[0] = set_byte32(hiz[0], childSlot, value); 
     //     else               hiz[1] = set_byte32(hiz[1], childSlot - 4, value);
     // }

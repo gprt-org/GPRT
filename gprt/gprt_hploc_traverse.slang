@@ -28,14 +28,18 @@
 
 using namespace gprt;
 
-float dot2(float3 v ) { return dot(v,v); }
+inline float dot2(float3 v ) { return dot(v,v); }
 
-float max3(float3 v) {
+inline float max3(float3 v) {
     return max(max(v.x, v.y), v.z);
 }
 
-float min3(float3 v) {
+inline float min3(float3 v) {
     return min(min(v.x, v.y), v.z);
+}
+
+inline float sum3(float3 v) {
+    return v.x + v.y + v.z;
 }
 
 // note, returns squared distance
@@ -375,8 +379,7 @@ bool rayBox(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float t
 //     return trange.x < tc && tc < trange.y;
 // }
 
-[ForceInline]
-bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
+inline bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
     float3 tlo = (lo - o) / d;
     float3 thi = (hi - o) / d;
     float3 tc3 = min(tlo, thi);
@@ -473,7 +476,7 @@ struct StackEntry {
 
 static const int LOCAL_STACK_SIZE = 16;
 
-[ForceInline] void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+inline void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
     StackEntry entry;
     entry.firstIdx = tstate.nodegrp_idx;
@@ -483,7 +486,7 @@ static const int LOCAL_STACK_SIZE = 16;
     tstate.sp = tstate.sp + 1;
 }
 
-[ForceInline] void pushPrimGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+inline void pushPrimGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
     StackEntry entry;
     entry.firstIdx = tstate.primgrp_idx;
@@ -493,14 +496,14 @@ static const int LOCAL_STACK_SIZE = 16;
     tstate.sp = tstate.sp + 1;
 }
 
-[ForceInline] StackEntry stackPop(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+inline StackEntry stackPop(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
     tstate.sp--;
     StackEntry entry = localStack[tstate.sp];
     return entry;
 }
 
-// [ForceInline]
+// inline
 
 //------------------------------------------------------------------------
 void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, bool reorder)
@@ -526,9 +529,10 @@ void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, 
     uint32_t leafHits = 0;
     uint2 hitSlotsDists[8];
     
+    // [loop]
     [unroll]
     for (int i = 0; i < 2; ++i) {
-        uint4 meta4 = (node.meta[i] >> byteShift) & 0xFF;        
+        uint4 meta4 = (node.meta[i] >> byteShift) & 0xFF;
         uint4 qlox4 = (node.lox[i] >> byteShift)  & 0xFF;
         uint4 qloy4 = (node.loy[i] >> byteShift)  & 0xFF;
         uint4 qloz4 = (node.loz[i] >> byteShift)  & 0xFF;
@@ -536,21 +540,24 @@ void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, 
         uint4 qhiy4 = (node.hiy[i] >> byteShift)  & 0xFF;
         uint4 qhiz4 = (node.hiz[i] >> byteShift)  & 0xFF;
         
+        // [loop]
         [unroll]
         for (int j = 0; j < 4; ++j) {
-            uint slot = i * 4 + j;
-            hitSlotsDists[slot] = int2(0b1111, asuint(FLT_MAX));
-
-            float3 tc3 = anear + scale * float3(qlox4[j], qloy4[j], qloz4[j]);
-            float3 tf3 = afar  + scale * float3(qhix4[j], qhiy4[j], qhiz4[j]);
+            // These should be doable using FMA
+            float3 tc3 = scale * float3(qlox4[j], qloy4[j], qloz4[j]) + anear;
+            float3 tf3 = scale * float3(qhix4[j], qhiy4[j], qhiz4[j]) + afar;
             float3 d3 = select(0.0 < tc3, tc3, select(0.0 > tf3, tf3, float3(0.f, 0.f, 0.f)));
-            float tc = d3.x * d3.x + d3.y * d3.y + d3.z * d3.z;
-            if (tc > tstate.tmax || meta4[j] == 0) continue;
-            
-            if (bvh8MetaIsInner(meta4[j]))
-                hitSlotsDists[slot] = uint2(slot, asuint(tc));
-            else 
-                leafHits |= (1 << bvh8MetaGetLeafRemapOfs(meta4[j]));
+            hitSlotsDists[i * 4 + j] = uint2(0b1111, asuint(sum3(d3 * d3)));
+        }
+
+        [unroll]
+        for (int j = 0; j < 4; ++j) 
+        {
+            uint slot = i * 4 + j;
+            if (asfloat(hitSlotsDists[slot].y) < tstate.tmax) {
+                if (bvh8MetaIsInner(meta4[j])) hitSlotsDists[slot].x = slot;
+                else leafHits |= (1 << bvh8MetaGetLeafRemapOfs(meta4[j]));
+            }
         }
     }
 
@@ -573,8 +580,7 @@ void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, 
 }
 
 //------------------------------------------------------------------------
-[ForceInline]
-void traverseBVH8(inout TraversalState tstate) {
+inline void traverseBVH8(inout TraversalState tstate) {
     StackEntry localStack[LOCAL_STACK_SIZE];
     tstate.sp = 0;
 
@@ -711,7 +717,7 @@ void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParam
 }
 
 // Function to swap elements based on condition
-__inline__ void Swap(inout uint2 ia, inout uint2 ib) {
+inline void Swap(inout uint2 ia, inout uint2 ib) {
     if (asfloat(ia.y) < asfloat(ib.y)) {
         uint2 tmp = ia;
         ia = ib;
@@ -719,10 +725,8 @@ __inline__ void Swap(inout uint2 ia, inout uint2 ib) {
     }
 }
 
-// __inline__ 
-
 // Sorting network for an array of 8 elements
-void SortWithNetwork(inout uint2 arr[8]) {
+inline void SortWithNetwork(inout uint2 arr[8]) {
     // Level 1
     Swap(arr[0], arr[1]);
     Swap(arr[2], arr[3]);
