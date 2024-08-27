@@ -475,8 +475,8 @@ struct BVH8Meta
 };
 
 __inline__ bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
-__inline__ bool bvh8MetaisLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
-__inline__ bool bvh8MetaisEmpty        (uint value) { return (value == 0x00u); }
+__inline__ bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
+__inline__ bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
 __inline__ int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
 //------------------------------------------------------------------------

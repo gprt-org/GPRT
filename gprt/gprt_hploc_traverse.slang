@@ -375,6 +375,7 @@ bool rayBox(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float t
 //     return trange.x < tc && tc < trange.y;
 // }
 
+[ForceInline]
 bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
     float3 tlo = (lo - o) / d;
     float3 thi = (hi - o) / d;
@@ -519,40 +520,41 @@ void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, 
     float3 orig = tstate.origin;
     float3 dir = tstate.direction;
 
+    float3 anear = pos - orig;
+    float3 afar = pos - orig;
+
     uint32_t leafHits = 0;
     uint2 hitSlotsDists[8];
+    
+    [unroll]
     for (int i = 0; i < 2; ++i) {
+        uint4 meta4 = (node.meta[i] >> byteShift) & 0xFF;        
+        uint4 qlox4 = (node.lox[i] >> byteShift)  & 0xFF;
+        uint4 qloy4 = (node.loy[i] >> byteShift)  & 0xFF;
+        uint4 qloz4 = (node.loz[i] >> byteShift)  & 0xFF;
+        uint4 qhix4 = (node.hix[i] >> byteShift)  & 0xFF;
+        uint4 qhiy4 = (node.hiy[i] >> byteShift)  & 0xFF;
+        uint4 qhiz4 = (node.hiz[i] >> byteShift)  & 0xFF;
+        
+        [unroll]
         for (int j = 0; j < 4; ++j) {
             uint slot = i * 4 + j;
             hitSlotsDists[slot] = int2(0b1111, asuint(FLT_MAX));
-            let meta = BVH8Meta(uint8_t(node.meta[i] >> byteShift[j]));
+
+            float3 tc3 = anear + scale * float3(qlox4[j], qloy4[j], qloz4[j]);
+            float3 tf3 = afar  + scale * float3(qhix4[j], qhiy4[j], qhiz4[j]);
+            float3 d3 = select(0.0 < tc3, tc3, select(0.0 > tf3, tf3, float3(0.f, 0.f, 0.f)));
+            float tc = d3.x * d3.x + d3.y * d3.y + d3.z * d3.z;
+            if (tc > tstate.tmax || meta4[j] == 0) continue;
             
-            if (meta.isEmpty()) continue;
-
-            uint qlox = (node.lox[i] >> byteShift[j]) & 0xFF;
-            uint qloy = (node.loy[i] >> byteShift[j]) & 0xFF;
-            uint qloz = (node.loz[i] >> byteShift[j]) & 0xFF;
-            uint qhix = (node.hix[i] >> byteShift[j]) & 0xFF;
-            uint qhiy = (node.hiy[i] >> byteShift[j]) & 0xFF;
-            uint qhiz = (node.hiz[i] >> byteShift[j]) & 0xFF;
-
-            float3 lo = pos + scale * float3(qlox, qloy, qloz);
-            float3 hi = pos + scale * float3(qhix, qhiy, qhiz);
-
-            float tclosest;
-            bool hit = minDistTest(orig, dir, float2(0.0, tstate.tmax), lo, hi, tclosest);
-            if (!hit) continue;
-            
-            //nodesHit[i] = 1;
-
-            if (meta.isLeaf())
-                leafHits |= (1 << meta.getLeafRemapOfs()); // 0-23
+            if (bvh8MetaIsInner(meta4[j]))
+                hitSlotsDists[slot] = uint2(slot, asuint(tc));
             else 
-                hitSlotsDists[slot] = uint2(slot, asuint(tclosest));
+                leafHits |= (1 << bvh8MetaGetLeafRemapOfs(meta4[j]));
         }
     }
 
-    if (reorder) SortWithNetwork(hitSlotsDists);
+    SortWithNetwork(hitSlotsDists);
 
     uint32_t orderBits = 0;
     uint32_t orderHits = 0;
