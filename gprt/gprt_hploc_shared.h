@@ -477,110 +477,43 @@ inline bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (val
 inline bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
 inline int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
-//------------------------------------------------------------------------
-// BVH8NodeHeader contains type and indexing information of child nodes.
-// Child slots store child node index offsets from base index of corresponding 
-// child node type (inner/leaf). Inner and leaf/primitive remap child nodes are 
-// stored continuously and compactly in separate arrays, in same order as child slots.
-// Child slots are sorted in Z-order for ordered traversal:
-// inner, leaf and empty children can end up in any slot.
-//      BVH8Node* childi = nodes[firstChildIdx + getOffset(meta[i])];
-
-// Child node bounding boxes are quantized to 8-bit in coordinate system
-// given by BVH8NodeHeader. Uncompressed boxes can be obtained by
-// box.lo.x = header.pos[0] + lox * header.scale[0] etc.
-struct BVH8NodeHeader // 32 bytes
+struct BVH8Node // 128 bytes
 {
-    float3    pos;
-    uint8_t   scale[3];
-    uint8_t   innerMask;      // Bitmask of filled inner node children.
-    int       firstChildIdx;  // Index of first child node in subtree.
-    int       firstRemapIdx;  // Index of first primitive remap.
-    BVH8Meta  meta[8];        // Index offsets and child types for each child slot.
-};
+    //------------------------------------------------------------------------
+    // BVH8NodeHeader contains type and indexing information of child nodes.
+    // Child slots store child node index offsets from base index of corresponding 
+    // child node type (inner/leaf). Inner and leaf/primitive remap child nodes are 
+    // stored continuously and compactly in separate arrays, in same order as child slots.
+    // Child slots are sorted in Z-order for ordered traversal:
+    // inner, leaf and empty children can end up in any slot.
+    //      BVH8Node* childi = nodes[firstChildIdx + getOffset(meta[i])];
 
-struct BVH8Node // 80 bytes
-{
-    BVH8NodeHeader      header;
+    // Child node bounding boxes are quantized to 8-bit in coordinate system
+    // given by BVH8NodeHeader. Uncompressed boxes can be obtained by
+    // box.lo.x = header.pos[0] + lox * header.scale[0] etc.
+    
+    // [32b posx] [32b posy] [32b posz] [8b exp of scale x] [8b exp of scale y] [8b exp of scale z] [8b imask]
+    uint4 posScaleIMask;
+    // [32b first child idx] [32b first leaf idx] [32b meta0-3] [32b meta4-7]
+    uint4 idxAndMeta;
 
-    // Quantized child bounding boxes for each child slot.
-    uint8_t lox[8];
-    uint8_t loy[8];
-    uint8_t loz[8];
-    uint8_t hix[8];
-    uint8_t hiy[8];
-    uint8_t hiz[8];
-};
-
-// Temporarily using this, since slang doesn't currently support reinterpreting non-32-bit sizes.
-struct BVH8NodeWide
-{
-    uint3 pos;
-    uint packedScale;
-    uint firstChildIdx;
-    uint firstRemapIdx;
-    uint2 meta;
+    // Quantized child AABBs for each child slot.
     uint2 lox;
     uint2 loy;
     uint2 loz;
     uint2 hix;
     uint2 hiy;
     uint2 hiz;
+
+    // Quantized child ODOPs for each child slot. 
+    // That brings the structure up to 128 bytes total, which fits within a modern cache line. 
+    uint2 lox2;
+    uint2 loy2;
+    uint2 loz2;
+    uint2 hix2;
+    uint2 hiy2;
+    uint2 hiz2;
 };
-
-// An 80 byte BVH8 node structure, combining the header and the quantized child AABBs
-// struct BVH8Node {
-//     BVH8NodeHeader header;
-//     float3 lo[8];
-//     float3 hi[8];
-    // uint8_t        lox[8];
-    // uint8_t        loy[8];
-    // uint8_t        loz[8];
-    // uint8_t        hix[8];
-    // uint8_t        hiy[8];
-    // uint8_t        hiz[8]; 
-
-
-
-    // /*n2.xy*/uint2 lox;
-    // /*n2.zw*/uint2 loy;
-    // /*n3.xy*/uint2 loz;
-    // /*n3.zw*/uint2 hix;
-    // /*n4.xy*/uint2 hiy;
-    // /*n4.zw*/uint2 hiz;
-
-    // inline uint8_t getLoX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? lox[0] : lox[1], childSlot % 4); }
-    // inline uint8_t getLoY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loy[0] : loy[1], childSlot % 4); }
-    // inline uint8_t getLoZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? loz[0] : loz[1], childSlot % 4); }
-    // inline uint8_t getHiX(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hix[0] : hix[1], childSlot % 4); }
-    // inline uint8_t getHiY(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiy[0] : hiy[1], childSlot % 4); }
-    // inline uint8_t getHiZ(uint32_t childSlot) { return extract_byte32((childSlot < 4) ? hiz[0] : hiz[1], childSlot % 4); }
-
-    // inline __mutating__ void setLoX(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) lox[0] = set_byte32(lox[0], childSlot, value); 
-    //     else               lox[1] = set_byte32(lox[1], childSlot - 4, value);
-    // }
-    // inline __mutating__ void setLoY(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) loy[0] = set_byte32(loy[0], childSlot, value); 
-    //     else               loy[1] = set_byte32(loy[1], childSlot - 4, value);
-    // }
-    // inline __mutating__ void setLoZ(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) loz[0] = set_byte32(loz[0], childSlot, value); 
-    //     else               loz[1] = set_byte32(loz[1], childSlot - 4, value);
-    // }
-    // inline __mutating__ void setHiX(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) hix[0] = set_byte32(hix[0], childSlot, value); 
-    //     else               hix[1] = set_byte32(hix[1], childSlot - 4, value);
-    // }
-    // inline __mutating__ void setHiY(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) hiy[0] = set_byte32(hiy[0], childSlot, value); 
-    //     else               hiy[1] = set_byte32(hiy[1], childSlot - 4, value);
-    // }
-    // inline __mutating__ void setHiZ(uint32_t childSlot, uint8_t value) {
-    //     if (childSlot < 4) hiz[0] = set_byte32(hiz[0], childSlot, value); 
-    //     else               hiz[1] = set_byte32(hiz[1], childSlot - 4, value);
-    // }
-// };
 
 struct BVH8Triangle {
     float3 v0;

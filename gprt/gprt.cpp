@@ -7903,259 +7903,259 @@ struct NNTriangleAccel : public Accel {
 
   void testBVH8Traversal(std::vector<BVH8Node> &nodes, std::vector<BVH8Triangle> &tris) 
   {
-    using namespace math;
-    // "isInner", "nodeIndex", "parentIndex", "childSlot in parent"
-    std::vector<TravBVH8Data> stack;
-    stack.push_back({{}, {}, false, 0, -1});
+  //   using namespace math;
+  //   // "isInner", "nodeIndex", "parentIndex", "childSlot in parent"
+  //   std::vector<TravBVH8Data> stack;
+  //   stack.push_back({{}, {}, false, 0, -1});
 
-    // none of these should exceed 1.
-    std::vector<int> childBaseAddrRefs(nodes.size(), 0);
+  //   // none of these should exceed 1.
+  //   std::vector<int> childBaseAddrRefs(nodes.size(), 0);
 
-    // tests to see if all leaves can be reached by the inner nodes
-    std::vector<int> leafHitCount(tris.size(), 0);
-    while (stack.size() > 0) {
-      auto current = stack.back();
-      stack.pop_back();
+  //   // tests to see if all leaves can be reached by the inner nodes
+  //   std::vector<int> leafHitCount(tris.size(), 0);
+  //   while (stack.size() > 0) {
+  //     auto current = stack.back();
+  //     stack.pop_back();
 
-      // if the item is a leaf...
-      if (current.isLeaf) {
-        // Verify that the leaf is contained in all parent AABBs
-        BVH8Triangle &tri = tris[current.index];
+  //     // if the item is a leaf...
+  //     if (current.isLeaf) {
+  //       // Verify that the leaf is contained in all parent AABBs
+  //       BVH8Triangle &tri = tris[current.index];
 
-        // Write out the parent for debugging on the GPU
-        tri.debug = current.parentIndices[current.parentIndices.size() - 1];
+  //       // Write out the parent for debugging on the GPU
+  //       tri.debug = current.parentIndices[current.parentIndices.size() - 1];
         
-        float3 aabbMin = min(tri.v0, min(tri.v1, tri.v2));
-        float3 aabbMax = max(tri.v0, max(tri.v1, tri.v2));
-        // for (int pid = 0; pid < current.parentStack.size(); ++pid) {
-        //   BVH8Node parentNode = current.parentStack[pid];
-        //   uint qxscl = parentNode.header.scale[0] << 23;
-        //   uint qyscl = parentNode.header.scale[1] << 23;
-        //   uint qzscl = parentNode.header.scale[2] << 23;
-        //   float xscale = *((float*)(&qxscl));
-        //   float yscale = *((float*)(&qyscl));
-        //   float zscale = *((float*)(&qzscl));
-        //   float3 scale = float3(xscale, yscale, zscale);
-        //   float3 parentAABBMin = parentNode.header.pos;
-        //   float3 parentAABBMax = parentNode.header.pos + scale * 255.f;
-        //   if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
-        //     std::cout<<"Error: Leaf AABB is not inside parent AABB" << std::endl;
-        //   }
-        // }
+  //       float3 aabbMin = min(tri.v0, min(tri.v1, tri.v2));
+  //       float3 aabbMax = max(tri.v0, max(tri.v1, tri.v2));
+  //       // for (int pid = 0; pid < current.parentStack.size(); ++pid) {
+  //       //   BVH8Node parentNode = current.parentStack[pid];
+  //       //   uint qxscl = parentNode.header.scale[0] << 23;
+  //       //   uint qyscl = parentNode.header.scale[1] << 23;
+  //       //   uint qzscl = parentNode.header.scale[2] << 23;
+  //       //   float xscale = *((float*)(&qxscl));
+  //       //   float yscale = *((float*)(&qyscl));
+  //       //   float zscale = *((float*)(&qzscl));
+  //       //   float3 scale = float3(xscale, yscale, zscale);
+  //       //   float3 parentAABBMin = parentNode.header.pos;
+  //       //   float3 parentAABBMax = parentNode.header.pos + scale * 255.f;
+  //       //   if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
+  //       //     std::cout<<"Error: Leaf AABB is not inside parent AABB" << std::endl;
+  //       //   }
+  //       // }
 
-        // Also verify primitive is within it's assigned child slot
-        if (current.parentStack.size() > 0) {
-          BVH8Node parentNode = current.parentStack.back();
-          // float3 slotAABBMin = parentNode.lo[current.childSlot];
-          // float3 slotAABBMax = parentNode.hi[current.childSlot];
+  //       // Also verify primitive is within it's assigned child slot
+  //       if (current.parentStack.size() > 0) {
+  //         BVH8Node parentNode = current.parentStack.back();
+  //         // float3 slotAABBMin = parentNode.lo[current.childSlot];
+  //         // float3 slotAABBMax = parentNode.hi[current.childSlot];
 
-          uint lox = parentNode.lox[current.childSlot];
-          uint loy = parentNode.loy[current.childSlot];
-          uint loz = parentNode.loz[current.childSlot];
-          uint hix = parentNode.hix[current.childSlot];
-          uint hiy = parentNode.hiy[current.childSlot];
-          uint hiz = parentNode.hiz[current.childSlot];
-          uint qxscl = uint(parentNode.header.scale[0]) << 23;
-          uint qyscl = uint(parentNode.header.scale[1]) << 23;
-          uint qzscl = uint(parentNode.header.scale[2]) << 23;
-          float xscale = *((float*)(&qxscl));
-          float yscale = *((float*)(&qyscl));
-          float zscale = *((float*)(&qzscl));
-          float3 scale = float3(xscale, yscale, zscale);
-          uint3 lo = uint3(lox, loy, loz);
-          uint3 hi = uint3(hix, hiy, hiz);
-          float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
-          float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
+  //         uint lox = parentNode.lox[current.childSlot];
+  //         uint loy = parentNode.loy[current.childSlot];
+  //         uint loz = parentNode.loz[current.childSlot];
+  //         uint hix = parentNode.hix[current.childSlot];
+  //         uint hiy = parentNode.hiy[current.childSlot];
+  //         uint hiz = parentNode.hiz[current.childSlot];
+  //         uint qxscl = uint(parentNode.header.scale[0]) << 23;
+  //         uint qyscl = uint(parentNode.header.scale[1]) << 23;
+  //         uint qzscl = uint(parentNode.header.scale[2]) << 23;
+  //         float xscale = *((float*)(&qxscl));
+  //         float yscale = *((float*)(&qyscl));
+  //         float zscale = *((float*)(&qzscl));
+  //         float3 scale = float3(xscale, yscale, zscale);
+  //         uint3 lo = uint3(lox, loy, loz);
+  //         uint3 hi = uint3(hix, hiy, hiz);
+  //         float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+  //         float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
           
-          if (any(aabbMin < slotAABBMin) || any(aabbMax > slotAABBMax)) {
-            std::cout<<"Error: Node AABB is not inside assigned child slot" << std::endl;
+  //         if (any(aabbMin < slotAABBMin) || any(aabbMax > slotAABBMax)) {
+  //           std::cout<<"Error: Node AABB is not inside assigned child slot" << std::endl;
 
-            // test to see if the triangle is inside any of the slots...
-            bool inside = false;
-            for (int j = 0; j < 8; ++j) {
-              // float3 slotAABBMin = parentNode.lo[j];
-              // float3 slotAABBMax = parentNode.hi[j];
-              uint lox = parentNode.lox[j];
-              uint loy = parentNode.loy[j];
-              uint loz = parentNode.loz[j];
-              uint hix = parentNode.hix[j];
-              uint hiy = parentNode.hiy[j];
-              uint hiz = parentNode.hiz[j];
-              uint qxscl = parentNode.header.scale[0] << 23;
-              uint qyscl = parentNode.header.scale[1] << 23;
-              uint qzscl = parentNode.header.scale[2] << 23;
-              float xscale = *((float*)(&qxscl));
-              float yscale = *((float*)(&qyscl));
-              float zscale = *((float*)(&qzscl));
-              float3 scale = float3(xscale, yscale, zscale);
-              uint3 lo = uint3(lox, loy, loz);
-              uint3 hi = uint3(hix, hiy, hiz);
-              float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
-              float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
-              if (all(aabbMin >= slotAABBMin) && all(aabbMax <= slotAABBMax)) {
-                inside = true;
-                break;
-              }
-            }
+  //           // test to see if the triangle is inside any of the slots...
+  //           bool inside = false;
+  //           for (int j = 0; j < 8; ++j) {
+  //             // float3 slotAABBMin = parentNode.lo[j];
+  //             // float3 slotAABBMax = parentNode.hi[j];
+  //             uint lox = parentNode.lox[j];
+  //             uint loy = parentNode.loy[j];
+  //             uint loz = parentNode.loz[j];
+  //             uint hix = parentNode.hix[j];
+  //             uint hiy = parentNode.hiy[j];
+  //             uint hiz = parentNode.hiz[j];
+  //             uint qxscl = parentNode.header.scale[0] << 23;
+  //             uint qyscl = parentNode.header.scale[1] << 23;
+  //             uint qzscl = parentNode.header.scale[2] << 23;
+  //             float xscale = *((float*)(&qxscl));
+  //             float yscale = *((float*)(&qyscl));
+  //             float zscale = *((float*)(&qzscl));
+  //             float3 scale = float3(xscale, yscale, zscale);
+  //             uint3 lo = uint3(lox, loy, loz);
+  //             uint3 hi = uint3(hix, hiy, hiz);
+  //             float3 slotAABBMin = parentNode.header.pos + scale * float3(lo);
+  //             float3 slotAABBMax = parentNode.header.pos + scale * float3(hi);
+  //             if (all(aabbMin >= slotAABBMin) && all(aabbMax <= slotAABBMax)) {
+  //               inside = true;
+  //               break;
+  //             }
+  //           }
 
-            if (!inside) {
-              std::cout<<"Error: Node AABB is not inside any child slot" << std::endl;
-            }
-          }
-        }
+  //           if (!inside) {
+  //             std::cout<<"Error: Node AABB is not inside any child slot" << std::endl;
+  //           }
+  //         }
+  //       }
         
-        // Mark the leaf as hit
-        leafHitCount[current.index]++;
-      }
+  //       // Mark the leaf as hit
+  //       leafHitCount[current.index]++;
+  //     }
 
-      // if the item is a node
-      else {
-        BVH8Node node = nodes[current.index];
+  //     // if the item is a node
+  //     else {
+  //       BVH8Node node = nodes[current.index];
 
-        // If node isnt root...
-        if (current.parentStack.size() > 0) {
-          // Get our quantized bounds
-          BVH8Node parentNode = current.parentStack.back();
-          BVH8NodeHeader header = parentNode.header;
-          int childSlot = current.childSlot;
-          // float3 aabbMin = parentNode.lo[childSlot];
-          // float3 aabbMax = parentNode.hi[childSlot];
-          uint lox = parentNode.lox[childSlot];
-          uint loy = parentNode.loy[childSlot];
-          uint loz = parentNode.loz[childSlot];
-          uint hix = parentNode.hix[childSlot];
-          uint hiy = parentNode.hiy[childSlot];
-          uint hiz = parentNode.hiz[childSlot];
-          uint qxscl = uint(parentNode.header.scale[0]) << 23;
-          uint qyscl = uint(parentNode.header.scale[1]) << 23;
-          uint qzscl = uint(parentNode.header.scale[2]) << 23;
-          float xscale = *((float*)(&qxscl));
-          float yscale = *((float*)(&qyscl));
-          float zscale = *((float*)(&qzscl));
-          float3 scale = float3(xscale, yscale, zscale);
-          uint3 lo = uint3(lox, loy, loz);
-          uint3 hi = uint3(hix, hiy, hiz);
-          float3 aabbMin = parentNode.header.pos + scale * float3(lo);
-          float3 aabbMax = parentNode.header.pos + scale * float3(hi);
+  //       // If node isnt root...
+  //       if (current.parentStack.size() > 0) {
+  //         // Get our quantized bounds
+  //         BVH8Node parentNode = current.parentStack.back();
+  //         BVH8NodeHeader header = parentNode.header;
+  //         int childSlot = current.childSlot;
+  //         // float3 aabbMin = parentNode.lo[childSlot];
+  //         // float3 aabbMax = parentNode.hi[childSlot];
+  //         uint lox = parentNode.lox[childSlot];
+  //         uint loy = parentNode.loy[childSlot];
+  //         uint loz = parentNode.loz[childSlot];
+  //         uint hix = parentNode.hix[childSlot];
+  //         uint hiy = parentNode.hiy[childSlot];
+  //         uint hiz = parentNode.hiz[childSlot];
+  //         uint qxscl = uint(parentNode.header.scale[0]) << 23;
+  //         uint qyscl = uint(parentNode.header.scale[1]) << 23;
+  //         uint qzscl = uint(parentNode.header.scale[2]) << 23;
+  //         float xscale = *((float*)(&qxscl));
+  //         float yscale = *((float*)(&qyscl));
+  //         float zscale = *((float*)(&qzscl));
+  //         float3 scale = float3(xscale, yscale, zscale);
+  //         uint3 lo = uint3(lox, loy, loz);
+  //         uint3 hi = uint3(hix, hiy, hiz);
+  //         float3 aabbMin = parentNode.header.pos + scale * float3(lo);
+  //         float3 aabbMax = parentNode.header.pos + scale * float3(hi);
          
-          // // Verify that the node is contained in all parent nodes conservative bounds
-          // for (int pid = 0; pid < current.parentStack.size(); ++pid) {
-          //   BVH8Node parentNode = current.parentStack[pid];
-          //   uint qxscl = parentNode.header.getScaleX() << 23;
-          //   uint qyscl = parentNode.header.getScaleY() << 23;
-          //   uint qzscl = parentNode.header.getScaleZ() << 23;
-          //   float xscale = *((float*)(&qxscl));
-          //   float yscale = *((float*)(&qyscl));
-          //   float zscale = *((float*)(&qzscl));
-          //   float3 scale = float3(xscale, yscale, zscale);
+  //         // // Verify that the node is contained in all parent nodes conservative bounds
+  //         // for (int pid = 0; pid < current.parentStack.size(); ++pid) {
+  //         //   BVH8Node parentNode = current.parentStack[pid];
+  //         //   uint qxscl = parentNode.header.getScaleX() << 23;
+  //         //   uint qyscl = parentNode.header.getScaleY() << 23;
+  //         //   uint qzscl = parentNode.header.getScaleZ() << 23;
+  //         //   float xscale = *((float*)(&qxscl));
+  //         //   float yscale = *((float*)(&qyscl));
+  //         //   float zscale = *((float*)(&qzscl));
+  //         //   float3 scale = float3(xscale, yscale, zscale);
 
-          //   float3 parentAABBMin = parentNode.header.pos;
-          //   float3 parentAABBMax = parentNode.header.pos + scale * 255.f;     
+  //         //   float3 parentAABBMin = parentNode.header.pos;
+  //         //   float3 parentAABBMax = parentNode.header.pos + scale * 255.f;     
                 
-          //   if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
-          //     std::cout<<"Error: Node AABB is not inside parent AABB" << std::endl;
-          //   }
-          // }          
-        }
+  //         //   if (any(aabbMin < parentAABBMin) || any(aabbMax > parentAABBMax)) {
+  //         //     std::cout<<"Error: Node AABB is not inside parent AABB" << std::endl;
+  //         //   }
+  //         // }          
+  //       }
 
-        BVH8NodeHeader header = node.header;
-        uint qxscl = uint(node.header.scale[0]) << 23;
-        uint qyscl = uint(node.header.scale[1]) << 23;
-        uint qzscl = uint(node.header.scale[2]) << 23;
-        float xscale = *((float*)(&qxscl));
-        float yscale = *((float*)(&qyscl));
-        float zscale = *((float*)(&qzscl));
-        float3 parentScale = float3(xscale, yscale, zscale);
-        float3 parentAabbMin = node.header.pos;
-        float3 parentAabbMax = node.header.pos + parentScale * 255.f;
-        uint8_t innerMask = header.innerMask;
+  //       BVH8NodeHeader header = node.header;
+  //       uint qxscl = uint(node.header.scale[0]) << 23;
+  //       uint qyscl = uint(node.header.scale[1]) << 23;
+  //       uint qzscl = uint(node.header.scale[2]) << 23;
+  //       float xscale = *((float*)(&qxscl));
+  //       float yscale = *((float*)(&qyscl));
+  //       float zscale = *((float*)(&qzscl));
+  //       float3 parentScale = float3(xscale, yscale, zscale);
+  //       float3 parentAabbMin = node.header.pos;
+  //       float3 parentAabbMax = node.header.pos + parentScale * 255.f;
+  //       uint8_t innerMask = header.innerMask;
 
-        // push every child of the node onto the stack
-        for (int i = 0; i < 8; ++i) {
-          uint childSlot = i;
-          BVH8Meta meta = header.meta[childSlot];
-          // float3 aabbMin = node.lo[childSlot];
-          // float3 aabbMax = node.hi[childSlot];
+  //       // push every child of the node onto the stack
+  //       for (int i = 0; i < 8; ++i) {
+  //         uint childSlot = i;
+  //         BVH8Meta meta = header.meta[childSlot];
+  //         // float3 aabbMin = node.lo[childSlot];
+  //         // float3 aabbMax = node.hi[childSlot];
           
-          // empty child slot
-          if (meta.isEmpty()) continue;
+  //         // empty child slot
+  //         if (meta.isEmpty()) continue;
 
 
-          // Test to see if quantized child bounds is inside parent
-          uint lox = node.lox[i];
-          uint loy = node.loy[i];
-          uint loz = node.loz[i];
-          uint hix = node.hix[i];
-          uint hiy = node.hiy[i];
-          uint hiz = node.hiz[i];
-          uint3 lo = uint3(lox, loy, loz);
-          uint3 hi = uint3(hix, hiy, hiz);
-          float3 aabbMin = node.header.pos + parentScale * float3(lo);
-          float3 aabbMax = node.header.pos + parentScale * float3(hi);
+  //         // Test to see if quantized child bounds is inside parent
+  //         uint lox = node.lox[i];
+  //         uint loy = node.loy[i];
+  //         uint loz = node.loz[i];
+  //         uint hix = node.hix[i];
+  //         uint hiy = node.hiy[i];
+  //         uint hiz = node.hiz[i];
+  //         uint3 lo = uint3(lox, loy, loz);
+  //         uint3 hi = uint3(hix, hiy, hiz);
+  //         float3 aabbMin = node.header.pos + parentScale * float3(lo);
+  //         float3 aabbMax = node.header.pos + parentScale * float3(hi);
 
-          if (any(aabbMin < parentAabbMin) || any(aabbMax > parentAabbMax)) {
-            std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
-          }
+  //         if (any(aabbMin < parentAabbMin) || any(aabbMax > parentAabbMax)) {
+  //           std::cout<<"Error: Child AABB is not inside parent AABB" << std::endl;
+  //         }
 
             
-          // if child is an inner node...
-          else if (meta.isInner()) {            
-            // Push inner node onto the stack.
-            uint32_t childOffset = __popc(innerMask & ~(-1 << childSlot));
-            // Verify child offset is valid
-            if (childOffset < 0 || childOffset >= 8) {
-              std::cout<<"Error: Inner node has invalid relative offset" << std::endl;
-            }
+  //         // if child is an inner node...
+  //         else if (meta.isInner()) {            
+  //           // Push inner node onto the stack.
+  //           uint32_t childOffset = __popc(innerMask & ~(-1 << childSlot));
+  //           // Verify child offset is valid
+  //           if (childOffset < 0 || childOffset >= 8) {
+  //             std::cout<<"Error: Inner node has invalid relative offset" << std::endl;
+  //           }
 
-            uint32_t childAddr = header.firstChildIdx + childOffset;
+  //           uint32_t childAddr = header.firstChildIdx + childOffset;
             
-            // Verify child address is valid
-            if (childAddr < 0 || childAddr >= nodes.size()) {
-              std::cout<<"Error: Inner node has invalid absolute address" << std::endl;
-            }
+  //           // Verify child address is valid
+  //           if (childAddr < 0 || childAddr >= nodes.size()) {
+  //             std::cout<<"Error: Inner node has invalid absolute address" << std::endl;
+  //           }
 
-            // Create stack entry for inner node
-            TravBVH8Data data = {current.parentStack, current.parentIndices, false, childAddr, i};
-            data.parentStack.push_back(node);
-            data.parentIndices.push_back(current.index);
-            stack.push_back(data);
-          }
+  //           // Create stack entry for inner node
+  //           TravBVH8Data data = {current.parentStack, current.parentIndices, false, childAddr, i};
+  //           data.parentStack.push_back(node);
+  //           data.parentIndices.push_back(current.index);
+  //           stack.push_back(data);
+  //         }
         
-          // if child is a leaf
-          else if (meta.isLeaf()) {
-            int remapOffset = meta.getLeafRemapOfs(); // 0-24
-            int numPrimitives = meta.getLeafNumPrims();
+  //         // if child is a leaf
+  //         else if (meta.isLeaf()) {
+  //           int remapOffset = meta.getLeafRemapOfs(); // 0-24
+  //           int numPrimitives = meta.getLeafNumPrims();
             
-            // Verify relative Index is valid
-            if (remapOffset < 0 || remapOffset >= 24) {
-              std::cout<<"Error: Leaf has invalid relative index. Was meta.setLeaf given an index larger than 24?" << std::endl;
-            }
+  //           // Verify relative Index is valid
+  //           if (remapOffset < 0 || remapOffset >= 24) {
+  //             std::cout<<"Error: Leaf has invalid relative index. Was meta.setLeaf given an index larger than 24?" << std::endl;
+  //           }
             
-            uint32_t leafAddr = header.firstRemapIdx + remapOffset;
-            // Verify absolute address is valid
-            if (leafAddr < 0 || leafAddr >= tris.size()) {
-              std::cout<<"Error: Leaf has invalid absolute address" << std::endl;
-            }
+  //           uint32_t leafAddr = header.firstRemapIdx + remapOffset;
+  //           // Verify absolute address is valid
+  //           if (leafAddr < 0 || leafAddr >= tris.size()) {
+  //             std::cout<<"Error: Leaf has invalid absolute address" << std::endl;
+  //           }
 
-            // Create stack entry for leaf
-            TravBVH8Data data = {current.parentStack, current.parentIndices, true, leafAddr, i};
-            data.parentStack.push_back(node);
-            data.parentIndices.push_back(current.index);
-            stack.push_back(data);
-          }
-          else {
-            std::cout<<"Error, meta data is neither leaf, nor inner, nor empty"<<std::endl;
-          }
+  //           // Create stack entry for leaf
+  //           TravBVH8Data data = {current.parentStack, current.parentIndices, true, leafAddr, i};
+  //           data.parentStack.push_back(node);
+  //           data.parentIndices.push_back(current.index);
+  //           stack.push_back(data);
+  //         }
+  //         else {
+  //           std::cout<<"Error, meta data is neither leaf, nor inner, nor empty"<<std::endl;
+  //         }
 
 
-        }
-      }
-    }
-    for (int i = 0; i < tris.size(); ++i) {
-      if (leafHitCount[i] != 1) {
-        std::cout<<"Error: Leaf " << i << " hit " << leafHitCount[i] << " times" << std::endl;
-      }
-    }
+  //       }
+  //     }
+  //   }
+  //   for (int i = 0; i < tris.size(); ++i) {
+  //     if (leafHitCount[i] != 1) {
+  //       std::cout<<"Error: Leaf " << i << " hit " << leafHitCount[i] << " times" << std::endl;
+  //     }
+  //   }
   }
 
   void printBVH2OverlapStatistics(std::vector<BVH2Node> &nodes, int numLeaves, double &overlap, double &avg) {
@@ -8497,7 +8497,7 @@ struct NNTriangleAccel : public Accel {
     gprtBufferUnmap(hploc.bvh8Triangles);
     
 
-    testBVH8Traversal(bvh8Nodes, bvh8Triangles);
+    // testBVH8Traversal(bvh8Nodes, bvh8Triangles);
 
 
 

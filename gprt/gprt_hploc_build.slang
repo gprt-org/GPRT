@@ -351,7 +351,7 @@ void HPLOC_SFC(uint3 DispatchThreadID: SV_DispatchThreadID, uint3 GroupID: SV_Gr
     bool valid = LoadCenter(params, clusterIndex, center);
 
     // Default to a code that throws invalid primitives to the end
-    uint64_t code = (valid) ? morton64_encode(center) : UINT64_MAX;    
+    uint64_t code = (valid) ? hilbert64_encode(center) : UINT64_MAX;    
 
     // Store the sfc code as the key, and the cluster index as the value
     store<uint64_t>(params.C, threadID, code);
@@ -834,6 +834,7 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
 {
     RWByteAddressBuffer indexPairs = buffers[params.indexPairs.index];
     RWByteAddressBuffer bvh2 = buffers[params.BVH2.index];
+    RWByteAddressBuffer bvh8 = buffers[params.BVH8.index];
 
     int failsafe = 1000000;
     uint32_t bvh2ClusterID = INVALID_ID;
@@ -988,42 +989,45 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         uint zscale = uint(clamp((asint(__fsub_ru(parentAABB[1].z, parentAABB[0].z)) + magic) >> 23, 1, 248));
 
         // Pack quantization position and exponent for each axis into the node header.
+        uint4 byteShift = uint4(0, 8, 16, 24);
+
         BVH8Node node;
         float3 parentLo = parentAABB[0];
-        node.header.pos[0] = parentLo.x;
-        node.header.pos[1] = parentLo.y;
-        node.header.pos[2] = parentLo.z;
-        node.header.scale[0] = uint8_t(xscale);
-        node.header.scale[1] = uint8_t(yscale);
-        node.header.scale[2] = uint8_t(zscale);
-        node.header.innerMask = 0;
-        node.header.firstChildIdx = childNodeBaseIndex;
-        node.header.firstRemapIdx = primitiveBaseIndex;
+        
+
 
         // 1.0f / exp2(scale)
         float xmul = asfloat((254 - xscale) << 23);
         float ymul = asfloat((254 - yscale) << 23);
         float zmul = asfloat((254 - zscale) << 23);
 
+        node.lox = node.loy = node.loz = 0;
+        node.hix = node.hiy = node.hiz = 0;
+        
+        uint8_t imask = 0;
+        BVH8Meta meta[8];
+
         for (int i = 0; i < 8; ++i) {
+            int imod4 = i % 4;
+            int idiv4 = i / 4;
             int j = i - leafStack.size();
 
             // leaf node
             if (i < leafStack.size()) {
                 // (todo... store up to 3 triangles...)
-                node.header.meta[i].setLeaf(/*prim offset*/ i, /*num prims in this leaf*/ 1);
+                meta[i].setLeaf(/*prim offset*/ i, /*num prims in this leaf*/ 1);
             }
 
             // inner node
             else if (j < nodeStack.size()) {
-                node.header.meta[i].setInner(i);
-                node.header.innerMask |= uint8_t(1u << i);
+                meta[i].setInner(i);
+                imask |= uint8_t(1u << i);
             }
             // empty slot
             else {
-                node.header.meta[i].setEmpty();
-                node.lox[i] = node.loy[i] = node.loz[i] = 255;
-                node.hix[i] = node.hiy[i] = node.hiz[i] = 0;
+                meta[i].setEmpty();
+                // node.lox[i] = node.loy[i] = node.loz[i] = 255;
+                // node.hix[i] = node.hiy[i] = node.hiz[i] = 0;
                 continue;
             }
 
@@ -1036,22 +1040,51 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
             // Quantize child AABBs
             // float2x3 childAABB;
             // LoadAABB(params, clusterID, childAABB);
-            // node.lox[i](child, uint8_t(clamp(floor(((childAABB[0].x - parentLo.x) * xmul)), 0, 255)));
-            // node.loy[i](child, uint8_t(clamp(floor(((childAABB[0].y - parentLo.y) * ymul)), 0, 255)));
-            // node.loz[i](child, uint8_t(clamp(floor(((childAABB[0].z - parentLo.z) * zmul)), 0, 255)));
-            // node.hix[i](child, uint8_t(clamp(ceil(((childAABB[1].x - parentLo.x) * xmul)), 0, 255)));
-            // node.xiy[i](child, uint8_t(clamp(ceil(((childAABB[1].y - parentLo.y) * ymul)), 0, 255)));
-            // node.hiz[i](child, uint8_t(clamp(ceil(((childAABB[1].z - parentLo.z) * zmul)), 0, 255)));
-            node.lox[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
-            node.loy[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
-            node.loz[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
-            node.hix[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
-            node.hiy[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
-            node.hiz[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
+            
+            // node.lox[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
+            // node.loy[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
+            // node.loz[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
+            // node.hix[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
+            // node.hiy[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
+            // node.hiz[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
+
+            node.lox[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+            node.loy[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+            node.loz[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+            node.hix[idiv4] |= (uint(clamp(ceil (__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+            node.hiy[idiv4] |= (uint(clamp(ceil (__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+            node.hiz[idiv4] |= (uint(clamp(ceil (__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
         }
 
+        // Setup BVH8 node header
+        uint4 sxyzshft = uint4(xscale, yscale, zscale, imask) << byteShift;
+        uint32_t packedScaleIMask = sxyzshft.x | sxyzshft.y | sxyzshft.z | sxyzshft.w;
+        node.posScaleIMask[0] = asuint(parentLo.x);
+        node.posScaleIMask[1] = asuint(parentLo.y);
+        node.posScaleIMask[2] = asuint(parentLo.z);
+        node.posScaleIMask[3] = packedScaleIMask;
+
+        uint4 meta0123shft = uint4(meta[0].value, meta[1].value, meta[2].value, meta[3].value) << byteShift;
+        uint4 meta4567shft = uint4(meta[4].value, meta[5].value, meta[6].value, meta[7].value) << byteShift;
+        uint32_t meta0123 = meta0123shft.x | meta0123shft.y | meta0123shft.z | meta0123shft.w;
+        uint32_t meta4567 = meta4567shft.x | meta4567shft.y | meta4567shft.z | meta4567shft.w;
+        node.idxAndMeta[0] = childNodeBaseIndex;
+        node.idxAndMeta[1] = primitiveBaseIndex;
+        node.idxAndMeta[2] = meta0123;
+        node.idxAndMeta[3] = meta4567;
+
         // Store the BVH8 node
-        store<BVH8Node>(params.BVH8, bvh8ClusterID, node);
+        float4 n[8] = reinterpret<float4[8]>(node);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 0), n[0]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 1), n[1]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 2), n[2]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 3), n[3]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 4), n[4]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 5), n[5]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 6), n[6]);
+        bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 7), n[7]);
+
+        // store<BVH8Node>(params.BVH8, bvh8ClusterID, node);
 
         // ------------------------------------------------------------------------------------------------------------------------
 

@@ -438,17 +438,18 @@ BVH2Node fetchBVH2Node(RWByteAddressBuffer BVH2N, int node_index) {
     return node;
 }
 
-BVH8NodeWide fetchBVH8Node(RWByteAddressBuffer BVH8N, int node_index) {
-    //return BVH8N.Load<BVH8Node>(node_index * sizeof(BVH8Node));
-
-    float4 n[5];
-    n[0] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 5 + 0));
-    n[1] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 5 + 1));
-    n[2] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 5 + 2));
-    n[3] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 5 + 3));
-    n[4] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 5 + 4));
-    BVH8NodeWide wnode = reinterpret<BVH8NodeWide>(n);
-    return wnode;
+BVH8Node fetchBVH8Node(RWByteAddressBuffer BVH8N, int node_index) {
+    float4 n[8];
+    n[0] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 0));
+    n[1] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 1));
+    n[2] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 2));
+    n[3] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 3));
+    n[4] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 4));
+    n[5] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 5));
+    n[6] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 6));
+    n[7] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 7));
+    BVH8Node node = reinterpret<BVH8Node>(n);
+    return node;
 };
 
 BVH8Triangle fetchTriangle(RWByteAddressBuffer BVH8L, int tri_index) {
@@ -504,79 +505,101 @@ inline StackEntry stackPop(inout StackEntry localStack[LOCAL_STACK_SIZE], inout 
 }
 
 // inline
+float4 OpConvertUToF(uint32_t4 u) {
+    return spirv_asm {
+        result : $$float4 = OpConvertUToF $u;
+    };
+}
 
-//------------------------------------------------------------------------
-void intersectNode(int nodeIdx, BVH8NodeWide node, inout TraversalState tstate, bool reorder)
-{
-    float3 pos = asfloat(node.pos);
-    uint32_t packedScale = node.packedScale;
-    tstate.nodegrp_idx = node.firstChildIdx;
-    tstate.primgrp_idx = node.firstRemapIdx;
+float intersectBox(float3 scale, float3 anear, float3 afar, float3 aabbMin, float3 aabbMax) {
+    float3 tc3 = mad(scale, aabbMin, anear);
+    float3 tf3 = mad(scale, aabbMax, afar);
+    float3 d3 = select(0.0 < tc3, tc3, select(0.0 > tf3, tf3, float3(0.f, 0.f, 0.f)));
+    return dot(d3, d3) - FLT_EPSILON;
+}
 
-    // uint4 byteShift = uint4(24, 16, 8, 0);
-    uint4 byteShift = uint4(0, 8, 16, 24);
+void updateMeta(uint meta, bool hit, float d, uint i, uint j, out float hitSlotDist, inout uint leafHits) {
+    bool leaf = bvh8MetaIsLeaf(meta);
+    bool inner = bvh8MetaIsInner(meta);
+    bool empty = bvh8MetaIsEmpty(meta);
+    uint leafRemapOfs = bvh8MetaGetLeafRemapOfs(meta);
 
-    uint8_t4 scaleAndMask = uint8_t4(uint4(packedScale) >> byteShift);
+    uint slot = i * 4 + j;
+    uint hitslot = select(hit && inner, slot, 0x0000000F);
 
-    float3 scale = asfloat(uint3(scaleAndMask.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
+    hitSlotDist = asfloat((asuint(d) & 0xFFFFFFF0) | hitslot);
+    leafHits |= select(hit && leaf, (1 << leafRemapOfs), 0);
+}
 
-    float3 orig = tstate.origin;
-    float3 dir = tstate.direction;
-
-    float3 anear = pos - orig;
-    float3 afar = pos - orig;
-
-    uint32_t leafHits = 0;
-    uint2 hitSlotsDists[8];
-    
-    // [loop]
-    [unroll]
-    for (int i = 0; i < 2; ++i) {
-        uint4 meta4 = (node.meta[i] >> byteShift) & 0xFF;
-        uint4 qlox4 = (node.lox[i] >> byteShift)  & 0xFF;
-        uint4 qloy4 = (node.loy[i] >> byteShift)  & 0xFF;
-        uint4 qloz4 = (node.loz[i] >> byteShift)  & 0xFF;
-        uint4 qhix4 = (node.hix[i] >> byteShift)  & 0xFF;
-        uint4 qhiy4 = (node.hiy[i] >> byteShift)  & 0xFF;
-        uint4 qhiz4 = (node.hiz[i] >> byteShift)  & 0xFF;
-        
-        // [loop]
-        [unroll]
-        for (int j = 0; j < 4; ++j) {
-            // These should be doable using FMA
-            float3 tc3 = scale * float3(qlox4[j], qloy4[j], qloz4[j]) + anear;
-            float3 tf3 = scale * float3(qhix4[j], qhiy4[j], qhiz4[j]) + afar;
-            float3 d3 = select(0.0 < tc3, tc3, select(0.0 > tf3, tf3, float3(0.f, 0.f, 0.f)));
-            hitSlotsDists[i * 4 + j] = uint2(0b1111, asuint(sum3(d3 * d3)));
-        }
-
-        [unroll]
-        for (int j = 0; j < 4; ++j) 
-        {
-            uint slot = i * 4 + j;
-            if (asfloat(hitSlotsDists[slot].y) < tstate.tmax) {
-                if (bvh8MetaIsInner(meta4[j])) hitSlotsDists[slot].x = slot;
-                else leafHits |= (1 << bvh8MetaGetLeafRemapOfs(meta4[j]));
-            }
-        }
-    }
-
-    SortWithNetwork(hitSlotsDists);
-
+void computeStackEntries(float2x4 hitSlotsDists, uint imask, uint leafHits, inout TraversalState tstate) {
     uint32_t orderBits = 0;
     uint32_t orderHits = 0;
-    for (int i = 0; i < 8; ++i) {
-        if (hitSlotsDists[i].x != 0b1111) {
-            orderHits |= (1 << i);
-            orderBits |= (uint32_t(hitSlotsDists[i].x) << (i * 4));
+
+    [unroll]
+    for (int j = 0; j < 4; ++j) {
+        uint slot = asuint(hitSlotsDists[0][j]) & 0x0000000F;
+        if (slot != 0x0000000F) {
+            orderHits |= (1 << j);
+            orderBits |= (uint32_t(slot) << (j * 4));
         }
     }
 
+    [unroll]
+    for (int j = 0; j < 4; ++j) {
+        uint slot = asuint(hitSlotsDists[1][j]) & 0x0000000F;
+        if (slot != 0x0000000F) {
+            orderHits |= (1 << (4 + j));
+            orderBits |= (uint32_t(slot) << ((4 + j) * 4));
+        }
+    }
+    
     // Extract inner, leaf node hits
-    let innerHits = (orderHits << 24) | scaleAndMask.w; // Move valid inner node mask to low byte.
-    tstate.nodegrp_hits = innerHits;
+    let innerHits2 = (orderHits << 24) | imask; // Move valid inner node mask to low byte.
+    tstate.nodegrp_hits = innerHits2 | imask;
+    // tstate.nodegrp_hits = innerHits | imask;
     tstate.nodegrp_ord = orderBits; 
     tstate.primgrp_hits = leafHits;
+}
+
+//------------------------------------------------------------------------
+void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool reorder)
+{
+    float3 pos = asfloat(node.posScaleIMask.xyz);
+    uint32_t packedScale = node.posScaleIMask.w;
+    tstate.nodegrp_idx = node.idxAndMeta.x;
+    tstate.primgrp_idx = node.idxAndMeta.y;
+    uint2 meta8 = node.idxAndMeta.zw;
+    uint4 byteShift = uint4(0, 8, 16, 24);
+    uint8_t4 scaleAndMask = uint8_t4(uint4(packedScale) >> byteShift);
+    float3 scale = asfloat(uint3(scaleAndMask.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
+    float3 orig = tstate.origin;
+    float3 dir = tstate.direction;
+    float3 anear = pos - orig;
+    float3 afar = pos - orig;
+    uint32_t leafHits = 0;
+    uint32_t innerHits = 0; 
+    float2x4 hitSlotsDists;
+    [unroll]
+    for (uint i = 0; i < 2; ++i) {
+        uint4 meta4 = (meta8[i] >> byteShift) & 0xFF;
+        float4 qlox4 = OpConvertUToF((node.lox[i] >> byteShift)  & 0xFF);
+        float4 qloy4 = OpConvertUToF((node.loy[i] >> byteShift)  & 0xFF);
+        float4 qloz4 = OpConvertUToF((node.loz[i] >> byteShift)  & 0xFF);
+        float4 qhix4 = OpConvertUToF((node.hix[i] >> byteShift)  & 0xFF);
+        float4 qhiy4 = OpConvertUToF((node.hiy[i] >> byteShift)  & 0xFF);
+        float4 qhiz4 = OpConvertUToF((node.hiz[i] >> byteShift)  & 0xFF);
+        [unroll]
+        for (uint j = 0; j < 4; ++j) {
+            float3 lo = float3(qlox4[j], qloy4[j], qloz4[j]);
+            float3 hi = float3(qhix4[j], qhiy4[j], qhiz4[j]);
+            float d = intersectBox(scale, anear, afar, lo, hi);
+            bool hit = d < tstate.tmax;
+            updateMeta(meta4[j], hit, d, i, j, hitSlotsDists[i][j], leafHits);
+        }
+        SortNetwork123(hitSlotsDists[i]);
+    }
+    SortNetwork4567(hitSlotsDists[0], hitSlotsDists[1]);
+    computeStackEntries(hitSlotsDists, scaleAndMask.w, leafHits, tstate);
 }
 
 //------------------------------------------------------------------------
@@ -597,7 +620,7 @@ inline void traverseBVH8(inout TraversalState tstate) {
 
     // Intersect root node
     {
-        BVH8NodeWide node = fetchBVH8Node(tstate.BVH8N, 0);
+        BVH8Node node = fetchBVH8Node(tstate.BVH8N, 0);
         intersectNode(0, node, tstate, enableReordering);
     }
 
@@ -611,7 +634,7 @@ inline void traverseBVH8(inout TraversalState tstate) {
         {
             do
             {
-                if(enablePostponing && countbits( WaveActiveBallot( true ).x ) * 4 < ntrav )  // Is SIMD utilization too low?
+                if(enablePostponing && countbits( WaveActiveBallot( true ).x ) * 2 < ntrav )  // Is SIMD utilization too low?
                     break;                                                                    // Postpone primitive intersections
 
                 tstate.debugHits++;
@@ -670,7 +693,7 @@ inline void traverseBVH8(inout TraversalState tstate) {
 
             // }
 
-            BVH8NodeWide node = fetchBVH8Node(tstate.BVH8N, nodeIdx);
+            BVH8Node node = fetchBVH8Node(tstate.BVH8N, nodeIdx);
 
             // If nodeGroup still contains hits to test, push it to stack.
             if( tstate.nodegrp_hits > 0x00FFFFFF ) {                
@@ -717,48 +740,84 @@ void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParam
 }
 
 // Function to swap elements based on condition
-inline void Swap(inout uint2 ia, inout uint2 ib) {
-    if (asfloat(ia.y) < asfloat(ib.y)) {
-        uint2 tmp = ia;
+
+
+void SortNetwork123(inout float4 arr0) {
+    // Level 1
+    arr0.xy = select((arr0.x < arr0.y).xx, arr0.yx, arr0.xy);
+    arr0.zw = select((arr0.z < arr0.w).xx, arr0.wz, arr0.zw);  
+    
+    // Level 2
+    arr0.xz = select((arr0.x < arr0.z).xx, arr0.zx, arr0.xz);
+    arr0.yw = select((arr0.y < arr0.w).xx, arr0.wy, arr0.yw);
+
+    // Level 3
+    arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
+}
+
+void Swap(inout float ia, inout float ib) {
+    if (ia < ib) {
+        float tmp = ia;
         ia = ib;
         ib = tmp;
     }
 }
 
-// Sorting network for an array of 8 elements
-inline void SortWithNetwork(inout uint2 arr[8]) {
-    // Level 1
-    Swap(arr[0], arr[1]);
-    Swap(arr[2], arr[3]);
-    Swap(arr[4], arr[5]);
-    Swap(arr[6], arr[7]);
-
-    // Level 2
-    Swap(arr[0], arr[2]);
-    Swap(arr[1], arr[3]);
-    Swap(arr[4], arr[6]);
-    Swap(arr[5], arr[7]);
-
-    // Level 3
-    Swap(arr[1], arr[2]);
-    Swap(arr[5], arr[6]);
+void SortNetwork4567(inout float4 arr0, inout float4 arr1) {
+    // Assuming layers 1, 2 and 3 are already sorted
 
     // Level 4
-    Swap(arr[0], arr[4]);
-    Swap(arr[1], arr[5]);
-    Swap(arr[2], arr[6]);
-    Swap(arr[3], arr[7]);
+    Swap(arr0.x, arr1.x);
+    Swap(arr0.y, arr1.y);
+    Swap(arr0.z, arr1.z);
+    Swap(arr0.w, arr1.w);
 
     // Level 5
-    Swap(arr[1], arr[4]);
-    Swap(arr[3], arr[6]);
+    Swap(arr0.y, arr1.x);
+    Swap(arr0.w, arr1.z);
 
     // Level 6
-    Swap(arr[2], arr[4]);
-    Swap(arr[3], arr[5]);
+    Swap(arr0.z, arr1.x);
+    Swap(arr0.w, arr1.y);
 
     // Level 7
-    Swap(arr[3], arr[4]);
+    Swap(arr0.w, arr1.x);
+}
+
+// Sorting network for an array of 8 elements
+inline void SortWithNetwork(inout float4 arr0, inout float4 arr1) {
+    // Level 1
+    arr0.xy = select((arr0.x < arr0.y).xx, arr0.yx, arr0.xy);
+    arr0.zw = select((arr0.z < arr0.w).xx, arr0.wz, arr0.zw);    
+    arr1.xy = select((arr1.x < arr1.y).xx, arr1.yx, arr1.xy);
+    arr1.zw = select((arr1.z < arr1.w).xx, arr1.wz, arr1.zw);
+
+    // Level 2
+    arr0.xz = select((arr0.x < arr0.z).xx, arr0.zx, arr0.xz);
+    arr0.yw = select((arr0.y < arr0.w).xx, arr0.wy, arr0.yw);
+    arr1.xz = select((arr1.x < arr1.z).xx, arr1.zx, arr1.xz);
+    arr1.yw = select((arr1.y < arr1.w).xx, arr1.wy, arr1.yw);
+
+    // Level 3
+    arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
+    arr1.yz = select((arr1.y < arr1.z).xx, arr1.zy, arr1.yz);
+
+    // Level 4
+    Swap(arr0.x, arr1.x);
+    Swap(arr0.y, arr1.y);
+    Swap(arr0.z, arr1.z);
+    Swap(arr0.w, arr1.w);
+
+    // Level 5
+    Swap(arr0.y, arr1.x);
+    Swap(arr0.w, arr1.z);
+
+    // Level 6
+    Swap(arr0.z, arr1.x);
+    Swap(arr0.w, arr1.y);
+
+    // Level 7
+    Swap(arr0.w, arr1.x);
 }
 
 struct IntersectTriangleParams {
@@ -768,6 +827,21 @@ struct IntersectTriangleParams {
     uint QueryFlags : 10;
     float4 ObjectOriginAndTMax;
 };
+
+void OpLine(uint32_t line, uint32_t column)
+{
+    spirv_asm {
+        OpLine $(24) $line $column;
+    };
+}
+
+// Discontinue any source-level location information that might be active from a previous 
+// OpLine instruction,
+void OpNoLine() {
+    spirv_asm {
+        OpNoLine;
+    };
+}
 
 // Built-in nearest triangle program
 [shader("callable")]
