@@ -237,11 +237,6 @@ inline uint8_t4 extract_bytes32(uint i) {
     return val; 
 }
 
-inline uint bfe(uint val, int pos, int len) {
-    uint mask = (1u << len) - 1u; // create a mask with `len` bits set to 1
-    return (val >> pos) & mask; // Shift the value right by 'pos' and apply the mask
-}
-
 // Extract byte value, shift it left with another extracted byte and add the result to u32.
 uint vshl_wrap_add_b0_b0(uint val, uint shift, uint addend)
 {
@@ -440,61 +435,18 @@ struct BVH2Node {
     }
 };
 
-//------------------------------------------------------------------------
-// Meta struct contains child node pointers, child node type (inner/leaf) 
-// and number of primitives in leaf child nodes.
-// Values in bits 5-7:
-//      Empty child               -> 0b00000000
-//      1 primitive or inner node -> 0b00100000
-//      2 primitives              -> 0b01100000
-//      3 primitives              -> 0b11100000
-// Values in bits 0-4:
-//      inner node                -> child slot index + 24
-//      leaf node                 -> Index of first triangle (of the leaf) relative to firstRemapIndex
-struct BVH8Meta
-{
-    uint8_t value;
-
-    __mutating__ inline void setInner            (int childSlot) { value = (uint8_t)(childSlot + 0x38u); }
-    __mutating__ inline void setLeaf             (int remapOfs, int numPrims) { value = (uint8_t)(remapOfs + (0xE0602000u >> (numPrims << 3))); }
-    __mutating__ inline void setEmpty            ()              { value = 0x00u; }
-
-    inline bool isInner             ()              { return (value >= 0x38u && value < 0x40u); }
-    inline bool isLeaf              ()              { return (value != 0x00u && (value < 0x38u || value >= 0x40u)); }
-    inline bool isEmpty             ()              { return (value == 0x00u); }
-
-    inline int  getInnerChildSlot   ()              { return value - 0x38u; }
-    inline int  getLeafRemapOfs     ()              { return value & 0x1Fu; }
-    inline int  getLeafNumPrims     ()              { return __popc(value >> 5); }
-
-    #if defined(__SLANG_COMPILER__)
-    __init(uint8_t _value) {value = _value;}
-    #endif
-};
-
-inline bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
-inline bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
-inline bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
-inline int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
+// inline bool bvh8MetaIsInner        (uint value) { return (value >= 0x38u && value < 0x40u);}
+// inline bool bvh8MetaIsLeaf         (uint value) { return (value != 0x00u && (value < 0x38u || value >= 0x40u));}
+// inline bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
+// inline int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
 struct BVH8Node // 128 bytes
 {
-    //------------------------------------------------------------------------
-    // BVH8NodeHeader contains type and indexing information of child nodes.
-    // Child slots store child node index offsets from base index of corresponding 
-    // child node type (inner/leaf). Inner and leaf/primitive remap child nodes are 
-    // stored continuously and compactly in separate arrays, in same order as child slots.
-    // Child slots are sorted in Z-order for ordered traversal:
-    // inner, leaf and empty children can end up in any slot.
-    //      BVH8Node* childi = nodes[firstChildIdx + getOffset(meta[i])];
+    // [32b posx] [32b posy] [32b posz] [8b exp of scale x] [8b exp of scale y] [8b exp of scale z] [8b smask]
+    uint4 posScaleSMask;
 
-    // Child node bounding boxes are quantized to 8-bit in coordinate system
-    // given by BVH8NodeHeader. Uncompressed boxes can be obtained by
-    // box.lo.x = header.pos[0] + lox * header.scale[0] etc.
-    
-    // [32b posx] [32b posy] [32b posz] [8b exp of scale x] [8b exp of scale y] [8b exp of scale z] [8b imask]
-    uint4 posScaleIMask;
     // [32b first child idx] [32b first leaf idx] [32b meta0-3] [32b meta4-7]
+    // Note, meta is currently only 4 bits per child (ie, one hex).
     uint4 idxAndMeta;
 
     // Quantized child AABBs for each child slot.

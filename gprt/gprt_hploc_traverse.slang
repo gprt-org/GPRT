@@ -394,21 +394,15 @@ inline bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi,
 //------------------------------------------------------------------------
 struct TraversalState {
     uint sp; // stack pointer
-    uint nodegrp_idx;
-    uint nodegrp_hits;
-    uint nodegrp_ord;
-
-    uint primgrp_idx;
-    uint primgrp_hits;
+    
+    StackEntry nodeGroup;
+    StackEntry primGroup;
 
     RWByteAddressBuffer BVH8N;
     RWByteAddressBuffer BVH8L;
 
     RWByteAddressBuffer BVH8NP;
     RWByteAddressBuffer BVH8LP;
-
-    uint8_t oct;
-    uint dupoct;
 
     // note, repurposing tmax for search radius, and ignoring tmin.
     float3 origin; float tmin;
@@ -463,37 +457,30 @@ BVH8Triangle fetchTriangle(RWByteAddressBuffer BVH8L, int tri_index) {
 
 //------------------------------------------------------------------------
 struct StackEntry {
-    uint32_t firstIdx;
-    uint32_t hits;
+    // Indicates whether the group is a primitive group or a node group.
+    uint32_t isPrimGroup : 1;
 
-    // order bits here are a hexadecimal encoding of the slots to visit. 
-    // Using "findLeadingBit" on hits, we can determine the next slot to visit.
-    // so, 00000011 (followed by 24 potential leaf hits) says to first visit hex 1, then hex 0.
-    // if we order bits 0x00000021, then we would visit slot "2", then slot "1".
-    // From there we can use the inner node mask to recover the relative child index. 
-    // (or I suppose we could just directly encode it... depends on what's faster...)
-    uint32_t order;
+    // A base index common to all items in the queue.
+    uint32_t baseIdx : 31;
+    
+    // A queue of the relative indices offset from the base index.
+    uint32_t relIdxQueue : 24; // 3 bits per slot, 8 slots
+
+    // A mask indicating which items of the queue still need processing
+    uint32_t activeQueueMask: 8; // 1 bit per slot, 8 slots
 };
 
 static const int LOCAL_STACK_SIZE = 16;
 
 inline void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
-    StackEntry entry;
-    entry.firstIdx = tstate.nodegrp_idx;
-    entry.hits = tstate.nodegrp_hits;
-    entry.order = tstate.nodegrp_ord;
-    localStack[tstate.sp] = entry;
+    localStack[tstate.sp] = tstate.nodeGroup;
     tstate.sp = tstate.sp + 1;
 }
 
 inline void pushPrimGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
-    StackEntry entry;
-    entry.firstIdx = tstate.primgrp_idx;
-    entry.hits = tstate.primgrp_hits;
-    entry.order = tstate.nodegrp_ord;
-    localStack[tstate.sp] = entry;
+    localStack[tstate.sp] = tstate.primGroup;
     tstate.sp = tstate.sp + 1;
 }
 
@@ -511,95 +498,201 @@ float4 OpConvertUToF(uint32_t4 u) {
     };
 }
 
+float3 OpConvertUToF(uint32_t3 u) {
+    return spirv_asm {
+        result : $$float3 = OpConvertUToF $u;
+    };
+}
+
+uint bitfieldExtract(uint value, int offset, int bits)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint = OpBitFieldUExtract $value $offset $bits
+    };
+    default:
+        return (value >> offset) & ((1u << bits) - 1);
+    }
+}
+
+uint3 bitfieldExtract(uint3 value, int offset, int bits)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint3 = OpBitFieldUExtract $value $offset $bits
+    };
+    default:
+        uint3 result;
+        [ForceUnroll]
+        for (int i = 0; i < 3; ++i)
+        {
+            result[i] = bitfieldExtract(value[i], offset, bits);
+        }
+        return result;
+    }
+}
+
+uint4 bitfieldExtract(uint4 value, int offset, int bits)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint4 = OpBitFieldUExtract $value $offset $bits
+    };
+    default:
+        uint4 result;
+        [ForceUnroll]
+        for (int i = 0; i < 4; ++i)
+        {
+            result[i] = bitfieldExtract(value[i], offset, bits);
+        }
+        return result;
+    }
+}
+
+uint bitfieldInsert(uint base, uint insert, int offset, int bits)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "bitfieldInsert";
+    case spirv: return spirv_asm {
+        result:$$uint = OpBitFieldInsert $base $insert $offset $bits
+    };
+    default:
+        uint clearMask = ~(((1u << bits) - 1u) << offset);
+        uint clearedBase = base & clearMask;
+        uint maskedInsert = (insert & ((1u << bits) - 1u)) << offset;
+        return clearedBase | maskedInsert;
+    }
+}
+
+uint4 bitfieldInsert(uint4 base, uint4 insert, int offset, int bits)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "bitfieldInsert";
+    case spirv: return spirv_asm {
+        result:$$uint4 = OpBitFieldInsert $base $insert $offset $bits
+    };
+    default:
+        uint4 result;
+        [ForceUnroll]
+        for (int i = 0; i < 4; ++i)
+        {
+            result[i] = bitfieldInsert(base[i], insert[i], offset, bits);
+        }
+        return result;
+    }
+}
+
+float unpackUnorm1x8(uint p)
+{
+    const uint byteMask = 0xff;
+    return float(p & byteMask) / 255.0;
+}
+
+float4 unpackUnorm4x8(uint p)
+{
+    __target_switch
+    {
+    case glsl: __intrinsic_asm "unpackUnorm4x8";
+    case spirv: return spirv_asm {
+        result:$$float4 = OpExtInst glsl450 UnpackUnorm4x8 $p
+    };
+    default:
+        return float4(
+            unpackUnorm1x8(p),
+            unpackUnorm1x8(p >> 8),
+            unpackUnorm1x8(p >> 16),
+            unpackUnorm1x8(p >> 24));
+    }
+}
+
 float intersectBox(float3 scale, float3 anear, float3 afar, float3 aabbMin, float3 aabbMax) {
     float3 tc3 = mad(scale, aabbMin, anear);
     float3 tf3 = mad(scale, aabbMax, afar);
     float3 d3 = select(0.0 < tc3, tc3, select(0.0 > tf3, tf3, float3(0.f, 0.f, 0.f)));
-    return dot(d3, d3) - FLT_EPSILON;
+    return dot(d3, d3);
 }
 
-void updateMeta(uint meta, bool hit, float d, uint i, uint j, out float hitSlotDist, inout uint leafHits) {
-    bool leaf = bvh8MetaIsLeaf(meta);
-    bool inner = bvh8MetaIsInner(meta);
-    bool empty = bvh8MetaIsEmpty(meta);
-    uint leafRemapOfs = bvh8MetaGetLeafRemapOfs(meta);
+void computeStackEntries(float2x4 sortedDistsAndMeta, uint nodeBaseIdx, uint primBaseIdx, inout TraversalState tstate) {
+    // Indicates which queue slots contain hits.
+    uint32_t leafHits = 0;
+    uint32_t nodeHits = 0;
 
-    uint slot = i * 4 + j;
-    uint hitslot = select(hit && inner, slot, 0x0000000F);
-
-    hitSlotDist = asfloat((asuint(d) & 0xFFFFFFF0) | hitslot);
-    leafHits |= select(hit && leaf, (1 << leafRemapOfs), 0);
-}
-
-void computeStackEntries(float2x4 hitSlotsDists, uint imask, uint leafHits, inout TraversalState tstate) {
-    uint32_t orderBits = 0;
-    uint32_t orderHits = 0;
+    // The queue of relative indices, 3 bits each and 24b total.
+    uint32_t queue = 0;
 
     [unroll]
-    for (int j = 0; j < 4; ++j) {
-        uint slot = asuint(hitSlotsDists[0][j]) & 0x0000000F;
-        if (slot != 0x0000000F) {
-            orderHits |= (1 << j);
-            orderBits |= (uint32_t(slot) << (j * 4));
-        }
+    for (int i = 0; i < 2; ++i) {
+        // A float containing the hit distance, with the item's 4-bit metadata in the low bits.
+        // If the item is "empty", sortedDistsAndMeta is FLT_MAX.
+        let meta4 = asuint(sortedDistsAndMeta[i]) & 0x0000000F;
+        let hit4 = (sortedDistsAndMeta[i] < tstate.tmax);
+        let leaf4 = bool4(meta4 & 0b1000);
+        
+        // Mark which slots in the queue belong to a leaf or an inner node.
+        let leafHits4 = uint4(hit4 &&  leaf4) << (uint4(0, 1, 2, 3) + (i << 2));
+        let nodeHits4 = uint4(hit4 && !leaf4) << (uint4(0, 1, 2, 3) + (i << 2));
+        leafHits |= leafHits4.x | leafHits4.y | leafHits4.z | leafHits4.w;
+        nodeHits |= nodeHits4.x | nodeHits4.y | nodeHits4.z | nodeHits4.w;
+        
+        // Store the relative index in the priority queue.
+        // note, queueSlot*3 is at most 8*3 = 24 bits. 
+        let relIdx4 = (meta4 & 0b0111) << (uint4(0, 3, 6, 9) + (i * 12));
+        queue |= relIdx4.x | relIdx4.y | relIdx4.z | relIdx4.w;
     }
 
-    [unroll]
-    for (int j = 0; j < 4; ++j) {
-        uint slot = asuint(hitSlotsDists[1][j]) & 0x0000000F;
-        if (slot != 0x0000000F) {
-            orderHits |= (1 << (4 + j));
-            orderBits |= (uint32_t(slot) << ((4 + j) * 4));
-        }
-    }
-    
-    // Extract inner, leaf node hits
-    let innerHits2 = (orderHits << 24) | imask; // Move valid inner node mask to low byte.
-    tstate.nodegrp_hits = innerHits2 | imask;
-    // tstate.nodegrp_hits = innerHits | imask;
-    tstate.nodegrp_ord = orderBits; 
-    tstate.primgrp_hits = leafHits;
+    // Store entries into traversal state
+    tstate.nodeGroup.baseIdx = nodeBaseIdx;
+    tstate.primGroup.baseIdx = primBaseIdx;
+    tstate.nodeGroup.isPrimGroup = 0;
+    tstate.primGroup.isPrimGroup = 1;
+    tstate.nodeGroup.relIdxQueue = queue;
+    tstate.primGroup.relIdxQueue = queue;
+    tstate.nodeGroup.activeQueueMask = nodeHits;
+    tstate.primGroup.activeQueueMask = leafHits;
 }
 
 //------------------------------------------------------------------------
-void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate, bool reorder)
-{
-    float3 pos = asfloat(node.posScaleIMask.xyz);
-    uint32_t packedScale = node.posScaleIMask.w;
-    tstate.nodegrp_idx = node.idxAndMeta.x;
-    tstate.primgrp_idx = node.idxAndMeta.y;
-    uint2 meta8 = node.idxAndMeta.zw;
-    uint4 byteShift = uint4(0, 8, 16, 24);
-    uint8_t4 scaleAndMask = uint8_t4(uint4(packedScale) >> byteShift);
-    float3 scale = asfloat(uint3(scaleAndMask.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
-    float3 orig = tstate.origin;
-    float3 dir = tstate.direction;
-    float3 anear = pos - orig;
-    float3 afar = pos - orig;
-    uint32_t leafHits = 0;
-    uint32_t innerHits = 0; 
-    float2x4 hitSlotsDists;
+
+void intersectNode(int nodeIdx, BVH8Node node, inout TraversalState tstate)
+{    
+    let pos = asfloat(node.posScaleSMask.xyz);
+    let packedScale = node.posScaleSMask.w;
+
+    let meta8 = node.idxAndMeta.zw;
+    let byteShift = uint4(0, 8, 16, 24);
+    let scaleAndMask = uint8_t4(uint4(packedScale) >> byteShift);
+    let scale = asfloat(uint3(scaleAndMask.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
+    let smask = scaleAndMask.w;
+    let anear = pos - tstate.origin;
+    let afar = pos - tstate.origin;
+    float2x4 distsAndMeta;
     [unroll]
     for (uint i = 0; i < 2; ++i) {
-        uint4 meta4 = (meta8[i] >> byteShift) & 0xFF;
-        float4 qlox4 = OpConvertUToF((node.lox[i] >> byteShift)  & 0xFF);
-        float4 qloy4 = OpConvertUToF((node.loy[i] >> byteShift)  & 0xFF);
-        float4 qloz4 = OpConvertUToF((node.loz[i] >> byteShift)  & 0xFF);
-        float4 qhix4 = OpConvertUToF((node.hix[i] >> byteShift)  & 0xFF);
-        float4 qhiy4 = OpConvertUToF((node.hiy[i] >> byteShift)  & 0xFF);
-        float4 qhiz4 = OpConvertUToF((node.hiz[i] >> byteShift)  & 0xFF);
+        let meta4 = meta8[i];
+        let qlo = uint3(node.lox[i], node.loy[i], node.loz[i]);
+        let qhi = uint3(node.hix[i], node.hiy[i], node.hiz[i]);
         [unroll]
         for (uint j = 0; j < 4; ++j) {
-            float3 lo = float3(qlox4[j], qloy4[j], qloz4[j]);
-            float3 hi = float3(qhix4[j], qhiy4[j], qhiz4[j]);
-            float d = intersectBox(scale, anear, afar, lo, hi);
-            bool hit = d < tstate.tmax;
-            updateMeta(meta4[j], hit, d, i, j, hitSlotsDists[i][j], leafHits);
+            let tc3 = mad( scale, OpConvertUToF(bitfieldExtract(qlo, (j << 3), 8)), anear);
+            let tf3 = mad( scale, OpConvertUToF(bitfieldExtract(qhi, (j << 3), 8)), afar);
+            let d3 = clamp(0.0, tc3, tf3);
+            let d = dot(d3, d3);
+            let used = bitfieldExtract(smask, (i << 2) + j, 1);
+            let meta = bitfieldExtract(meta4, (j << 3), 4);
+            distsAndMeta[i][j] = select(bool(used), asfloat((asuint(d - FLT_EPSILON) & 0xFFFFFFF0) | meta), FLT_MAX);
         }
-        SortNetwork123(hitSlotsDists[i]);
+        SortNetwork123(distsAndMeta[i]);
     }
-    SortNetwork4567(hitSlotsDists[0], hitSlotsDists[1]);
-    computeStackEntries(hitSlotsDists, scaleAndMask.w, leafHits, tstate);
+    SortNetwork4567(distsAndMeta[0], distsAndMeta[1]);
+    computeStackEntries(distsAndMeta, node.idxAndMeta.x, node.idxAndMeta.y, tstate);
 }
 
 //------------------------------------------------------------------------
@@ -608,83 +701,89 @@ inline void traverseBVH8(inout TraversalState tstate) {
     tstate.sp = 0;
 
     // Root
-    tstate.nodegrp_idx = 0;
-    tstate.nodegrp_hits = 0;
-    tstate.nodegrp_ord = 0;
+    tstate.nodeGroup.isPrimGroup = 0;
+    tstate.nodeGroup.baseIdx = 0;
+    tstate.nodeGroup.activeQueueMask = 0b00000001;
+    tstate.nodeGroup.relIdxQueue = 0;
 
     int finalTri = 0;
 
-    bool enableReordering = true;
-    bool enablePostponing = false;
+    // bool enablePostponing = false;
     int count = 0;
 
     // Intersect root node
     {
         BVH8Node node = fetchBVH8Node(tstate.BVH8N, 0);
-        intersectNode(0, node, tstate, enableReordering);
+        intersectNode(0, node, tstate);
     }
 
     while (true)
     {
-        int ntrav = countbits( WaveActiveBallot( true ).x );
+        // int ntrav = countbits( WaveActiveBallot( true ).x );
         // if (tstate.debug) printf("Ntrav %d\n", ntrav);
         
         // handle leaves
-        if (tstate.primgrp_hits > 0) // inner node hits? -> traverse
+        if (tstate.primGroup.activeQueueMask > 0)
         {
             do
             {
-                if(enablePostponing && countbits( WaveActiveBallot( true ).x ) * 2 < ntrav )  // Is SIMD utilization too low?
-                    break;                                                                    // Postpone primitive intersections
+                // if(enablePostponing && countbits( WaveActiveBallot( true ).x ) * 2 < ntrav )  // Is SIMD utilization too low?
+                //     break;                                                                    // Postpone primitive intersections
 
                 tstate.debugHits++;
 
-                int idx  = firstbithigh( tstate.primgrp_hits );
-                let hits = tstate.primgrp_hits & ~(1 << idx); // Clear it from list
-                tstate.primgrp_hits = hits;
+                int slot = firstbithigh( tstate.primGroup.activeQueueMask );
+                let activeQueueMask = tstate.primGroup.activeQueueMask & ~(1 << slot); // Clear it from list
+                tstate.primGroup.activeQueueMask = activeQueueMask;
+
+                // Reverse traversal priority
+                int relIdx = int(tstate.primGroup.relIdxQueue >> (slot * 3)) & 0b111;
+                int absIdx = tstate.primGroup.baseIdx + relIdx;
                 
-                int index = idx + tstate.primgrp_idx;
-                BVH8Triangle tri = fetchTriangle(tstate.BVH8L, index);
+                BVH8Triangle tri = fetchTriangle(tstate.BVH8L, absIdx);
                 float2 bc; float3 pclosest;
                 float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
                 if (dist < tstate.tmax) {
-                    finalTri = index;
+                    finalTri = tri.userTriangleID;
                     tstate.tmax = dist;
                 }
-            } while (tstate.primgrp_hits > 0);
+            } while (tstate.primGroup.activeQueueMask > 0);
 
-            if( tstate.primgrp_hits > 0 )
-                pushPrimGroup( localStack, tstate );
+            // if ( tstate.primGroup.activeQueueMask > 0 )
+            //     pushPrimGroup( localStack, tstate );
         }
 
         // stack pop?
-        if ( tstate.nodegrp_hits <= 0x00FFFFFF )
+        if ( tstate.nodeGroup.activeQueueMask == 0 )
         {
-            if( tstate.sp == 0 )  // empty stack ==> done
-                break;
-            
-            var nodeGroup = stackPop( localStack, tstate );
-            tstate.nodegrp_idx = nodeGroup.firstIdx;
-            tstate.nodegrp_hits = nodeGroup.hits;
-            tstate.nodegrp_ord = nodeGroup.order;
+            if( tstate.sp == 0 ) break; // empty stack ==> done            
+            tstate.nodeGroup = stackPop( localStack, tstate );
         }
 
-        if ( tstate.nodegrp_hits > 0x00FFFFFF )  // if what we popped has inner node hits
+        // if current group is actually a prim group...
+        if (tstate.nodeGroup.isPrimGroup == 1)
         {
-            uint8_t innerMask = uint8_t(tstate.nodegrp_hits & 0xFF);
-            int bitIdx = firstbithigh(tstate.nodegrp_hits);
-            let hits = tstate.nodegrp_hits & ~(1 << bitIdx); // Clear it from list
-            tstate.nodegrp_hits = hits;
-
-            // remove 24 bias
-            bitIdx &= 0x7; 
-
-            // Reverse traversal priority
-            int slotIdx = int(tstate.nodegrp_ord >> (bitIdx * 4)) & 0b111;
-            uint32_t relativeIdx = __popc(innerMask & ~(-1 << slotIdx));
+            tstate.primGroup = tstate.nodeGroup;
             
+            // clear to indicate that work has moved into prim group
+            tstate.nodeGroup.activeQueueMask = 0;
+        }
 
-            uint nodeIdx = tstate.nodegrp_idx + relativeIdx;
+        // else current group is a node group
+        else
+        {
+            int slot = firstbithigh( tstate.nodeGroup.activeQueueMask );                
+            let activeQueueMask = tstate.nodeGroup.activeQueueMask & ~(1 << slot); // Clear it from list
+            tstate.nodeGroup.activeQueueMask = activeQueueMask;
+
+            // If nodeGroup still contains hits to test, push it to stack.
+            if ( tstate.nodeGroup.activeQueueMask > 0 ) {
+                pushNodeGroup( localStack, tstate );
+            }
+            
+            // Reverse traversal priority
+            int relIdx = int(tstate.nodeGroup.relIdxQueue >> (slot * 3)) & 0b111;
+            int absIdx = tstate.nodeGroup.baseIdx + relIdx;
 
             // if (tstate.debug && nodeIdx == 7) {
             //     printf("----------------------debugging how we got to 7----------------------\n");
@@ -693,21 +792,8 @@ inline void traverseBVH8(inout TraversalState tstate) {
 
             // }
 
-            BVH8Node node = fetchBVH8Node(tstate.BVH8N, nodeIdx);
-
-            // If nodeGroup still contains hits to test, push it to stack.
-            if( tstate.nodegrp_hits > 0x00FFFFFF ) {                
-                pushNodeGroup( localStack, tstate );
-            }
-            
-            intersectNode(nodeIdx, node, tstate, enableReordering );
-        }
-
-        else  // what we popped is actually a prim group
-        {
-            tstate.primgrp_hits = tstate.nodegrp_hits;
-            tstate.primgrp_idx = tstate.nodegrp_idx;
-            tstate.nodegrp_hits = 0;
+            BVH8Node node = fetchBVH8Node(tstate.BVH8N, absIdx);
+            intersectNode(absIdx, node, tstate );
         }
     }
 
@@ -720,7 +806,7 @@ inline void traverseBVH8(inout TraversalState tstate) {
 //------------------------------------------------------------------------
 [shader("callable")]
 void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParams) {
-    var tstate = TraversalState();
+    TraversalState tstate = TraversalState();
     tstate.BVH8N = buffers[record.BVH8N.index];
     tstate.BVH8L = buffers[record.BVH8L.index];
     tstate.BVH8NP = buffers[record.BVH8NP.index];
@@ -755,70 +841,77 @@ void SortNetwork123(inout float4 arr0) {
     arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
 }
 
-void Swap(inout float ia, inout float ib) {
-    if (ia < ib) {
-        float tmp = ia;
-        ia = ib;
-        ib = tmp;
-    }
+float2 Swap(float2 xy) {
+    return select((xy.x < xy).xx, xy.yx, xy);
+    // if (ia < ib) {
+    //     float tmp = ia;
+    //     ia = ib;
+    //     ib = tmp;
+    // }
 }
 
 void SortNetwork4567(inout float4 arr0, inout float4 arr1) {
     // Assuming layers 1, 2 and 3 are already sorted
-
-    // Level 4
-    Swap(arr0.x, arr1.x);
-    Swap(arr0.y, arr1.y);
-    Swap(arr0.z, arr1.z);
-    Swap(arr0.w, arr1.w);
-
-    // Level 5
-    Swap(arr0.y, arr1.x);
-    Swap(arr0.w, arr1.z);
-
-    // Level 6
-    Swap(arr0.z, arr1.x);
-    Swap(arr0.w, arr1.y);
-
-    // Level 7
-    Swap(arr0.w, arr1.x);
-}
-
-// Sorting network for an array of 8 elements
-inline void SortWithNetwork(inout float4 arr0, inout float4 arr1) {
-    // Level 1
-    arr0.xy = select((arr0.x < arr0.y).xx, arr0.yx, arr0.xy);
-    arr0.zw = select((arr0.z < arr0.w).xx, arr0.wz, arr0.zw);    
-    arr1.xy = select((arr1.x < arr1.y).xx, arr1.yx, arr1.xy);
-    arr1.zw = select((arr1.z < arr1.w).xx, arr1.wz, arr1.zw);
-
-    // Level 2
-    arr0.xz = select((arr0.x < arr0.z).xx, arr0.zx, arr0.xz);
-    arr0.yw = select((arr0.y < arr0.w).xx, arr0.wy, arr0.yw);
-    arr1.xz = select((arr1.x < arr1.z).xx, arr1.zx, arr1.xz);
-    arr1.yw = select((arr1.y < arr1.w).xx, arr1.wy, arr1.yw);
-
-    // Level 3
-    arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
-    arr1.yz = select((arr1.y < arr1.z).xx, arr1.zy, arr1.yz);
-
-    // Level 4
-    Swap(arr0.x, arr1.x);
-    Swap(arr0.y, arr1.y);
-    Swap(arr0.z, arr1.z);
-    Swap(arr0.w, arr1.w);
-
-    // Level 5
-    Swap(arr0.y, arr1.x);
-    Swap(arr0.w, arr1.z);
+    
+    // Level 4 and 5
+    float4 arr01xy = float4(arr0.x, arr0.y, arr1.x, arr1.y);
+    arr01xy = select((arr01xy.xy < arr01xy.zw).xyxy, arr01xy.zwxy, arr01xy.xyzw);
+    arr01xy.yz = select((arr01xy.y < arr01xy.z).xx, arr01xy.zy, arr01xy.yz);
+    arr0.xy = arr01xy.xy;
+    
+    float4 arr01zw = float4(arr0.z, arr0.w, arr1.z, arr1.w);
+    arr01zw = select((arr01zw.xy < arr01zw.zw).xyxy, arr01zw.zwxy, arr01zw.xyzw);
+    arr01zw.yz = select((arr01zw.y < arr01zw.z).xx, arr01zw.zy, arr01zw.yz);
+    arr1.zw = arr01zw.zw;
 
     // Level 6
-    Swap(arr0.z, arr1.x);
-    Swap(arr0.w, arr1.y);
-
+    float4 arr01zxwy = float4(arr01zw.x, arr01xy.z, arr01zw.y, arr01xy.w);
+    arr01zxwy = select((arr01zxwy.xz < arr01zxwy.yw).xxyy, arr01zxwy.yxwz, arr01zxwy.xyzw);
+    arr0.z = arr01zxwy.x;
+    arr1.y = arr01zxwy.w;
+    
     // Level 7
-    Swap(arr0.w, arr1.x);
+    float2 arr01wx = float2(arr01zxwy.z, arr01zxwy.y);
+    arr01wx = select((arr01wx.x < arr01wx.y).xx, arr01wx.yx, arr01wx);
+    arr0.w = arr01wx.x;
+    arr1.x = arr01wx.y;
 }
+
+// // Sorting network for an array of 8 elements
+// inline void SortWithNetwork(inout float4 arr0, inout float4 arr1) {
+//     // Level 1
+//     arr0.xy = select((arr0.x < arr0.y).xx, arr0.yx, arr0.xy);
+//     arr0.zw = select((arr0.z < arr0.w).xx, arr0.wz, arr0.zw);    
+//     arr1.xy = select((arr1.x < arr1.y).xx, arr1.yx, arr1.xy);
+//     arr1.zw = select((arr1.z < arr1.w).xx, arr1.wz, arr1.zw);
+
+//     // Level 2
+//     arr0.xz = select((arr0.x < arr0.z).xx, arr0.zx, arr0.xz);
+//     arr0.yw = select((arr0.y < arr0.w).xx, arr0.wy, arr0.yw);
+//     arr1.xz = select((arr1.x < arr1.z).xx, arr1.zx, arr1.xz);
+//     arr1.yw = select((arr1.y < arr1.w).xx, arr1.wy, arr1.yw);
+
+//     // Level 3
+//     arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
+//     arr1.yz = select((arr1.y < arr1.z).xx, arr1.zy, arr1.yz);
+
+//     // Level 4
+//     Swap(arr0.x, arr1.x);
+//     Swap(arr0.y, arr1.y);
+//     Swap(arr0.z, arr1.z);
+//     Swap(arr0.w, arr1.w);
+
+//     // Level 5
+//     Swap(arr0.y, arr1.x);
+//     Swap(arr0.w, arr1.z);
+
+//     // Level 6
+//     Swap(arr0.z, arr1.x);
+//     Swap(arr0.w, arr1.y);
+
+//     // Level 7
+//     Swap(arr0.w, arr1.x);
+// }
 
 struct IntersectTriangleParams {
     uint GeometryIndex : 8;

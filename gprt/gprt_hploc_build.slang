@@ -994,8 +994,6 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         BVH8Node node;
         float3 parentLo = parentAABB[0];
         
-
-
         // 1.0f / exp2(scale)
         float xmul = asfloat((254 - xscale) << 23);
         float ymul = asfloat((254 - yscale) << 23);
@@ -1004,50 +1002,23 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         node.lox = node.loy = node.loz = 0;
         node.hix = node.hiy = node.hiz = 0;
         
-        uint8_t imask = 0;
-        BVH8Meta meta[8];
+        // smask indicates which child slots are in use.
+        uint8_t smask = 0;
+        uint8_t meta[8] = uint8_t[8](0, 0, 0, 0, 0, 0, 0, 0);
 
         for (int i = 0; i < 8; ++i) {
-            int imod4 = i % 4;
-            int idiv4 = i / 4;
             int j = i - leafStack.size();
+            if      (i < leafStack.size()) meta[i] = uint8_t(0b1000 | i); // leaf node 
+            else if (j < nodeStack.size()) meta[i] = uint8_t(0b0000 | j); // inner node
+            else continue; // empty slot
 
-            // leaf node
-            if (i < leafStack.size()) {
-                // (todo... store up to 3 triangles...)
-                meta[i].setLeaf(/*prim offset*/ i, /*num prims in this leaf*/ 1);
-            }
+            // Mark the slot as in use
+            smask |= uint8_t(1u << i);
 
-            // inner node
-            else if (j < nodeStack.size()) {
-                meta[i].setInner(i);
-                imask |= uint8_t(1u << i);
-            }
-            // empty slot
-            else {
-                meta[i].setEmpty();
-                // node.lox[i] = node.loy[i] = node.loz[i] = 255;
-                // node.hix[i] = node.hiy[i] = node.hiz[i] = 0;
-                continue;
-            }
+            // Quantize the child bounds
+            float3 lo = childBounds[i][0], hi = childBounds[i][1];
 
-            float3 lo = childBounds[i][0];
-            float3 hi = childBounds[i][1];
-
-            // node.lo[i] = childBounds[i][0];
-            // node.hi[i] = childBounds[i][1];
-
-            // Quantize child AABBs
-            // float2x3 childAABB;
-            // LoadAABB(params, clusterID, childAABB);
-            
-            // node.lox[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
-            // node.loy[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
-            // node.loz[i] = uint8_t(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
-            // node.hix[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111));
-            // node.hiy[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111));
-            // node.hiz[i] = uint8_t(clamp(ceil (__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111));
-
+            int imod4 = i % 4, idiv4 = i / 4;
             node.lox[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
             node.loy[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
             node.loz[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
@@ -1057,15 +1028,15 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
         }
 
         // Setup BVH8 node header
-        uint4 sxyzshft = uint4(xscale, yscale, zscale, imask) << byteShift;
-        uint32_t packedScaleIMask = sxyzshft.x | sxyzshft.y | sxyzshft.z | sxyzshft.w;
-        node.posScaleIMask[0] = asuint(parentLo.x);
-        node.posScaleIMask[1] = asuint(parentLo.y);
-        node.posScaleIMask[2] = asuint(parentLo.z);
-        node.posScaleIMask[3] = packedScaleIMask;
+        uint4 sxyzshft = uint4(xscale, yscale, zscale, smask) << byteShift;
+        uint32_t packedScaleSMask = sxyzshft.x | sxyzshft.y | sxyzshft.z | sxyzshft.w;
+        node.posScaleSMask[0] = asuint(parentLo.x);
+        node.posScaleSMask[1] = asuint(parentLo.y);
+        node.posScaleSMask[2] = asuint(parentLo.z);
+        node.posScaleSMask[3] = packedScaleSMask;
 
-        uint4 meta0123shft = uint4(meta[0].value, meta[1].value, meta[2].value, meta[3].value) << byteShift;
-        uint4 meta4567shft = uint4(meta[4].value, meta[5].value, meta[6].value, meta[7].value) << byteShift;
+        uint4 meta0123shft = uint4(meta[0], meta[1], meta[2], meta[3]) << byteShift;
+        uint4 meta4567shft = uint4(meta[4], meta[5], meta[6], meta[7]) << byteShift;
         uint32_t meta0123 = meta0123shft.x | meta0123shft.y | meta0123shft.z | meta0123shft.w;
         uint32_t meta4567 = meta4567shft.x | meta4567shft.y | meta4567shft.z | meta4567shft.w;
         node.idxAndMeta[0] = childNodeBaseIndex;
