@@ -1008,16 +1008,28 @@ void HPLOC_ToBVH8(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCPara
 
         for (int i = 0; i < 8; ++i) {
             int j = i - leafStack.size();
-            if      (i < leafStack.size()) meta[i] = uint8_t(0b1000 | i); // leaf node 
-            else if (j < nodeStack.size()) meta[i] = uint8_t(0b0000 | j); // inner node
-            else continue; // empty slot
-
-            // Mark the slot as in use
-            smask |= uint8_t(1u << i);
+            float3 lo, hi;
+            if      (i < leafStack.size()) {
+                meta[i] = uint8_t(0b1000 | i); // leaf node 
+                // Mark the slot as in use
+                smask |= uint8_t(1u << i);
+                lo = childBounds[i][0]; 
+                hi = childBounds[i][1];
+            }
+            else if (j < nodeStack.size()) {
+                meta[i] = uint8_t(0b0000 | j); // inner node
+                // Mark the slot as in use
+                smask |= uint8_t(1u << i);
+                lo = childBounds[i][0]; 
+                hi = childBounds[i][1];
+            }
+            else {
+                // Empty slot
+                lo = +FLT_MAX;
+                hi = -FLT_MAX;
+            }
 
             // Quantize the child bounds
-            float3 lo = childBounds[i][0], hi = childBounds[i][1];
-
             int imod4 = i % 4, idiv4 = i / 4;
             node.lox[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
             node.loy[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
