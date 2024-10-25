@@ -504,16 +504,14 @@ float3 OpConvertUToF(uint32_t3 u) {
     };
 }
 
-#define ENABLE_BITFIELDS
-
 uint bfe(uint value, int offset, int bits)
 {
     __target_switch
     {
-    // case glsl: __intrinsic_asm "bitfieldExtract";
-    // case spirv: return spirv_asm {
-    //     result:$$uint = OpBitFieldUExtract $value $offset $bits
-    // };
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint = OpBitFieldUExtract $value $offset $bits
+    };
     default:
         return (value >> offset) & ((1u << bits) - 1);
     }
@@ -523,10 +521,10 @@ uint3 bfe(uint3 value, int offset, int bits)
 {
     __target_switch
     {
-    // case glsl: __intrinsic_asm "bitfieldExtract";
-    // case spirv: return spirv_asm {
-    //     result:$$uint3 = OpBitFieldUExtract $value $offset $bits
-    // };
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint3 = OpBitFieldUExtract $value $offset $bits
+    };
     default:
         uint3 result;
         [ForceUnroll]
@@ -542,10 +540,10 @@ uint4 bfe(uint4 value, int offset, int bits)
 {
     __target_switch
     {
-    // case glsl: __intrinsic_asm "bitfieldExtract";
-    // case spirv: return spirv_asm {
-    //     result:$$uint4 = OpBitFieldUExtract $value $offset $bits
-    // };
+    case glsl: __intrinsic_asm "bitfieldExtract";
+    case spirv: return spirv_asm {
+        result:$$uint4 = OpBitFieldUExtract $value $offset $bits
+    };
     default:
         uint4 result;
         [ForceUnroll]
@@ -561,10 +559,10 @@ uint bfi(uint base, uint insert, int offset, int bits)
 {
     __target_switch
     {
-    // case glsl: __intrinsic_asm "bitfieldInsert";
-    // case spirv: return spirv_asm {
-    //     result:$$uint = OpBitFieldInsert $base $insert $offset $bits
-    // };
+    case glsl: __intrinsic_asm "bitfieldInsert";
+    case spirv: return spirv_asm {
+        result:$$uint = OpBitFieldInsert $base $insert $offset $bits
+    };
     default:
         uint clearMask = ~(((1u << bits) - 1u) << offset);
         uint clearedBase = base & clearMask;
@@ -577,10 +575,10 @@ uint4 bfi(uint4 base, uint4 insert, int offset, int bits)
 {
     __target_switch
     {
-    // case glsl: __intrinsic_asm "bitfieldInsert";
-    // case spirv: return spirv_asm {
-    //     result:$$uint4 = OpBitFieldInsert $base $insert $offset $bits
-    // };
+    case glsl: __intrinsic_asm "bitfieldInsert";
+    case spirv: return spirv_asm {
+        result:$$uint4 = OpBitFieldInsert $base $insert $offset $bits
+    };
     default:
         uint4 result;
         [ForceUnroll]
@@ -663,6 +661,83 @@ void computeStackEntries(float2x4 sortedDistsAndMeta, float currentTMax, uint no
 
 //------------------------------------------------------------------------
 
+// #define USE_DOT
+// #define USE_LENGTH
+#define APPROX_L2
+// assumes x and y are positive
+
+    
+    //float k0 = (1./2.) + (1./4.) + (1./8.) + (1./16.) + (1./32.) + (1./512.);
+    //float k1 = (1./8.) + (1./16.) + (1./32.) + (1./64.) + (1./128.);
+    //float k2 = (1./2.) + (1./4.) + (1./32.);
+    //float k3 = (1./2.) + (1./8.);    
+
+float approx_sqrt2_eight_segments(float x, float y)
+{
+    // K=2 
+    // 0.997801 0.064453
+    // 0.981934 0.187500
+    // 0.963867 0.265625
+    // 0.898438 0.437500
+    // 0.868164 0.496094
+    // 0.845703 0.531250
+    // 0.780273 0.625000
+    // 0.781738 0.625000
+
+    float min_xy = min(x, y);
+    float max_xy = max(x, y);
+
+         if (min_xy <= (1./8.) * max_xy) return max_xy * 0.997801 + min_xy * 0.064453;
+    else if (min_xy <= (2./8.) * max_xy) return max_xy * 0.981934 + min_xy * 0.187500;
+    else if (min_xy <= (3./8.) * max_xy) return max_xy * 0.963867 + min_xy * 0.265625;
+    else if (min_xy <= (4./8.) * max_xy) return max_xy * 0.898438 + min_xy * 0.437500;
+    else if (min_xy <= (5./8.) * max_xy) return max_xy * 0.868164 + min_xy * 0.496094;
+    else if (min_xy <= (6./8.) * max_xy) return max_xy * 0.845703 + min_xy * 0.531250;
+    else if (min_xy <= (7./8.) * max_xy) return max_xy * 0.780273 + min_xy * 0.625000;
+    else                                 return max_xy * 0.781738 + min_xy * 0.625000;
+}
+
+float approx_sqrt2_four_segments(float x, float y)
+{
+    // 0.992188 0.124634
+    // 0.937500 0.343750
+    // 0.875000 0.483887
+    // 0.750000 0.656250
+
+    // K = 2
+    //Interval [0.000000, 0.250000]: y = 0.992310 + x * 0.123779, total error = 0.002542
+    //Interval [0.250000, 0.500000]: y = 0.938477 + x * 0.343750, total error = 0.002756
+    //Interval [0.500000, 0.750000]: y = 0.867188 + x * 0.497925, total error = 0.002448
+    //Interval [0.750000, 1.000000]: y = 0.753906 + x * 0.656250, total error = 0.001756
+    float min_xy = min(x, y);
+    float max_xy = max(x, y);
+         if (min_xy <= 0.25 * max_xy) return max_xy * 0.992188 + min_xy * 0.124634;
+    else if (min_xy <= 0.50 * max_xy) return max_xy * 0.937500 + min_xy * 0.343750;
+    else if (min_xy <= 0.75 * max_xy) return max_xy * 0.875000 + min_xy * 0.483887;
+    else                              return max_xy * 0.750000 + min_xy * 0.656250;
+}
+
+float approx_sqrt2_two_segments(float x, float y)
+{
+    //0.968750 0.246094
+    //0.875000 0.468750
+    float min_xy = min(x, y);
+    float max_xy = max(x, y);    
+    float sel = min_xy <= 0.5 * max_xy ? 1.0 : 0.0;
+    float y0 = max_xy * 0.968750 + min_xy * 0.246094;
+    float y1 = max_xy * 0.875000 + min_xy * 0.468750;
+    float d = sel * y0 + (1. - sel) * y1;
+    return d;
+}
+
+float approx_sqrt2(float x, float y)
+{
+
+    //return approx_sqrt2_four_segments(x, y);
+    return approx_sqrt2_eight_segments(x, y);
+    //return approx_sqrt2_two_segments(x, y);
+}
+
 void intersectNode(BVH8Node node, float3 origin, float currentTMax, out StackEntry nodeGroup, out StackEntry primGroup)
 {    
     let pos = asfloat(node.posScaleSMask.xyz);
@@ -685,8 +760,29 @@ void intersectNode(BVH8Node node, float3 origin, float currentTMax, out StackEnt
         for (uint j = 0; j < 4; ++j) {
             let tc3 = mad(scale, bfe(qlo, (j << 3), 8), an);
             let tf3 = mad(scale, bfe(qhi, (j << 3), 8), af);
-            let d3 = clamp(0.0, tc3, tf3);
-            dists[i][j] = dot(d3, d3);
+            float3 p = abs(clamp(0.0, tc3, tf3));
+            //#define APPROX_L2
+            float dist;
+            #ifdef APPROX_L2         
+            // first approximate sqrt(x^2 + y^2)
+            float d_xy = approx_sqrt2(p.x, p.y);            
+            // then, approximate sqrt(d_xy^2 + z^2)
+            dist = approx_sqrt2(d_xy, p.z);  
+            #elif defined(BEAM)
+            //dists[i][j] = max3(d3 * d3); 
+            //dists[i][j] = dot(d3, d3);
+            // An L-inf dist, but wrt the query.
+            // In practice, perf is much worse than L2. 
+            // However, L-Inf works with all affine transformations.
+            // Still realistically need to do the square here,
+            // as most primitives return squared distances to avoid sqrt.
+            // Need to re-test with an ODOP...
+            #elif defined(USE_DOT)
+            dist = dot(p, p);
+            #elif defined(USE_LENGTH)
+            dist = length(p);
+            #endif
+            dists[i][j] = dist;
         }
 
         let off = i << 2;
@@ -743,7 +839,12 @@ inline void traverseBVH8(inout TraversalState tstate) {
                 
                 let tri = fetchTriangle(tstate.BVH8L, absIdx);
                 float2 bc; float3 pclosest;
-                let dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
+                float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
+
+                #ifndef USE_DOT
+                dist = sqrt(dist);
+                #endif
+
                 if (dist < tstate.tmax) {
                     tstate.tmax = dist;
                 }
@@ -821,7 +922,12 @@ void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParam
     tstate.debugTime = travParams.time;
     traverseBVH8(tstate);
     travParams.hitPrims = tstate.debugHits;
+
+    #ifdef USE_DOT
     travParams.OriginAndTMax.w = sqrt(tstate.tmax);
+    #else
+    travParams.OriginAndTMax.w = tstate.tmax;
+    #endif
 }
 
 // Function to swap elements based on condition
