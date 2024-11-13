@@ -94,7 +94,7 @@ template <typename T> struct Mesh {
 
     // Build the bottom level acceleration structure
     accel = gprtTriangleAccelCreate(context, 1, &geometry);
-    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/true);
+    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
     // gprtAccelCompact(context, accel);
   };
 
@@ -119,7 +119,7 @@ main(int ac, char **av) {
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s06_deviceCode);
 
-  // Structure of parameters that change each frame. We can edit these 
+  // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
   pc.now = 0.f;
@@ -163,7 +163,7 @@ main(int ac, char **av) {
   // Next, we'll create a grid of references to the same bottom level
   // acceleration structure. This saves memory and improves performance over
   // creating duplicate meshes.
-  uint32_t numInstances = 50 * 50;
+  uint32_t numInstances = 150 * 150;
   std::vector<GPRTAccel> instanceTrees(numInstances);
   for (int i = 0; i < numInstances; ++i) {
     instanceTrees[i] = instanceMesh.accel;
@@ -189,7 +189,7 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch(transformProgram, {numInstances,1,1}, {1,1,1}, pc);
+  gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
@@ -271,7 +271,7 @@ main(int ac, char **av) {
     // update time to move instance transforms. Then, update only instance
     // accel.
     pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch(transformProgram, {numInstances, 1, 1}, {1,1,1}, pc);
+    gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
     gprtAccelUpdate(context, world);
 
     // Now, trace rays

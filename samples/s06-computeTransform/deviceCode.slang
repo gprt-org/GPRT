@@ -25,7 +25,7 @@
 [[vk::push_constant]] PushConstants pc;
 
 [shader("compute")]
-[numthreads(1,1,1)]
+[numthreads(128,1,1)]
 void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
   int length = int(sqrt(pc.numTransforms));
 
@@ -46,9 +46,9 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
   float zoffset = x + y;
 
   float3x4 transform = float3x4(
-    float4(0.04, 0.0, 0.0, x * width),
-    float4(0.0, 0.04, 0.0, y * depth),
-    float4(0.0, 0.0, 0.04, z * height + zoffset)
+    float4(0.01, 0.0, 0.0, x * width),
+    float4(0.0, 0.01, 0.0, y * depth),
+    float4(0.0, 0.0, 0.01, z * height + zoffset)
   );
 
   int transformID = DispatchThreadID.x;
