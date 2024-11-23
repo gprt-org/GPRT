@@ -36,16 +36,7 @@ jobs:
                             libglu1-mesa-dev \
                             freeglut3-dev \
                             mesa-common-dev
-
-    - name: Build Static
-      shell: bash
-      run: |
-        mkdir bld-static
-        cd bld-static
-        cmake --version
-        cmake ..
-        make VERBOSE=1 -j4
-
+                            
     - name: Build Shared
       shell: bash
       run: |
@@ -55,7 +46,14 @@ jobs:
         cmake .. -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
 
-
+    # - name: Build Static
+    #   shell: bash
+    #   run: |
+    #     mkdir bld-static
+    #     cd bld-static
+    #     cmake --version
+    #     cmake ..
+    #     make VERBOSE=1 -j4
   windows:
     runs-on: windows-latest
 
