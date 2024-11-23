@@ -48,9 +48,7 @@ jobs:
         cmake .. -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
     
-    - name: Debug with tmate on failure
-      if: ${{ failure() }}
-      uses: mxschmitt/action-tmate@v3
+    
       
     - name: Build Static
       shell: bash
@@ -61,7 +59,12 @@ jobs:
         cmake --version
         cmake ..
         make VERBOSE=1 -j4
-        
+    
+    # Useful for debugging
+    # - name: Debug with tmate on failure
+    #   if: ${{ failure() }}
+    #   uses: mxschmitt/action-tmate@v3
+    
   windows:
     runs-on: windows-latest
 
