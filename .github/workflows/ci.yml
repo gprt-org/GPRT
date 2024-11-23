@@ -41,6 +41,7 @@ jobs:
     - name: Build Shared
       shell: bash
       run: |
+        export LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
         mkdir bld-shared
         cd bld-shared
         cmake --version
