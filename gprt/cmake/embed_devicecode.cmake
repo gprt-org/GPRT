@@ -22,61 +22,6 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-include(FetchContent)
-
-find_program(CMAKE_SLANG_COMPILER slangc)
-
-if (CMAKE_SLANG_COMPILER)
-message("Found slangc: ${CMAKE_SLANG_COMPILER}")
-else ()
-  message("Slang compiler not defined...")
-  message("Downloading Slang Compiler...")
-  if (WIN32)
-    FetchContent_Declare(SlangCompiler
-      URL https://github.com/shader-slang/slang/releases/download/v2024.1.21/slang-2024.1.21-win64.zip
-      URL_HASH SHA256=CA1C8E6E85C2BC5B9180A2160DDF2F348201CE581AE6826D70D9B87CDF361E83
-      DOWNLOAD_NO_EXTRACT true
-      DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
-    )
-    FetchContent_Populate(SlangCompiler)
-    message("Extracting...")
-    execute_process(COMMAND powershell Expand-Archive -Force -Path "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64.zip" -DestinationPath "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64" RESULT_VARIABLE EXTRACT_RESULT)
-    if(NOT EXTRACT_RESULT EQUAL 0)
-        message(FATAL_ERROR "Extraction failed with error code: ${EXTRACT_RESULT}")
-    else()
-        message("Done.")
-    endif()
-    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2024.1.21-win64/bin/windows-x64/release/slangc.exe" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
-  else() # linux
-    FetchContent_Declare(HLSLCompiler
-      URL https://github.com/shader-slang/slang/releases/download/v2024.1.21/slang-2024.1.21-linux-x86_64.tar.gz
-      URL_HASH SHA256=309d18f00ce8c74ff2db438e68c0a4620a59cec0ae32ea40f9765adc1764e55e
-      DOWNLOAD_NO_EXTRACT true
-      DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/"
-    )
-    FetchContent_Populate(HLSLCompiler)
-    message("Extracting...")
-    execute_process(COMMAND mkdir -p "${CMAKE_BINARY_DIR}/slang-2024.1.21-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
-    if(NOT EXTRACT_RESULT EQUAL 0)
-        message(FATAL_ERROR "mkdir failed with error code: ${EXTRACT_RESULT}")
-    endif()
-    execute_process(COMMAND tar xzf "${CMAKE_BINARY_DIR}/slang-2024.1.21-linux-x86_64.tar.gz" -C "${CMAKE_BINARY_DIR}/slang-2024.1.21-linux-x86_64" RESULT_VARIABLE EXTRACT_RESULT)
-    if(NOT EXTRACT_RESULT EQUAL 0)
-        message(FATAL_ERROR "tar failed with error code: ${EXTRACT_RESULT}")
-    else()
-        message("Done.")
-    endif()
-    execute_process(COMMAND chmod +x "${CMAKE_BINARY_DIR}/slang-2024.1.21-linux-x86_64/bin/linux-x64/release/slangc")
-    set(CMAKE_SLANG_COMPILER "${CMAKE_BINARY_DIR}/slang-2024.1.21-linux-x86_64/bin/linux-x64/release/slangc" CACHE INTERNAL "CMAKE_SLANG_COMPILER")
-  endif()
-
-  # Test to see if compiler is working
-  execute_process(COMMAND ${CMAKE_SLANG_COMPILER} "-v" RESULT_VARIABLE EXTRACT_RESULT)
-  if(NOT EXTRACT_RESULT EQUAL 0)
-  message("Envoking Slang compiler failed with error code: ${EXTRACT_RESULT}")
-  endif()
-endif()
-
 set(EMBED_DEVICECODE_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 
 function(embed_devicecode)
