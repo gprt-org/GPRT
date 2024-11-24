@@ -170,18 +170,18 @@ main(int ac, char **av) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
 
-  GPRTBufferOf<float4x4> transformBuffer = gprtHostBufferCreate<float4x4>(context, samplers.size(), nullptr);
-
-  pc.transforms = gprtBufferGetHandle(transformBuffer);
-  pc.numTransforms = (uint32_t)samplers.size();
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-  gprtComputeLaunch(transformProgram, {samplers.size(),1,1}, {1,1,1}, pc);
-
   GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
-
   std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, (uint32_t)instances.size(), instances.data());
-  gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
+
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, (uint32_t) instances.size(), instances.data());
+  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtInstanceAccelGetInstances(trianglesTLAS);
+
+  pc.instances = gprtBufferGetHandle(instancesBuffer);
+  pc.numInstances = (uint32_t) instances.size();
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+  gprtComputeLaunch(transformProgram, {samplers.size(), 1, 1}, {1, 1, 1}, pc);
+
+  // gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
   gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
@@ -257,8 +257,8 @@ main(int ac, char **av) {
     }
 
     // Animate transforms
-    pc.now = .5f * (float)gprtGetTime(context);
-    gprtComputeLaunch(transformProgram, {instances.size(), 1, 1}, {1,1,1}, pc);
+    pc.now = .5f * (float) gprtGetTime(context);
+    gprtComputeLaunch(transformProgram, {instances.size(), 1, 1}, {1, 1, 1}, pc);
     gprtAccelUpdate(context, trianglesTLAS);
 
     // Calls the GPU raygen kernel function
@@ -284,7 +284,7 @@ main(int ac, char **av) {
     gprtSamplerDestroy(sampler);
   }
 
-  gprtBufferDestroy(transformBuffer);
+  // gprtBufferDestroy(transformBuffer);
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(texcoordBuffer);
   gprtBufferDestroy(indexBuffer);

@@ -22,18 +22,23 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 [shader("compute")]
-[numthreads(128,1,1)]
-void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
-  int length = int(sqrt(pc.numTransforms));
+[numthreads(128, 1, 1)]
+void
+Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
+  int instanceID = DispatchThreadID.x;
+  gprt::Instance instance = gprt::load<gprt::Instance>(pc.instances, instanceID);
 
-  int xid = DispatchThreadID.x % length;
-  int yid = DispatchThreadID.x / length;
+  int instancesPerSide = int(sqrt(pc.numInstances));
 
-  float px = float(xid) / float(length);
-  float py = float(yid) / float(length);
+  int xid = DispatchThreadID.x % instancesPerSide;
+  int yid = DispatchThreadID.x / instancesPerSide;
+
+  float px = float(xid) / float(instancesPerSide);
+  float py = float(yid) / float(instancesPerSide);
 
   float height = .1;
   float width = 4.0;
@@ -45,14 +50,12 @@ void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
   float z = sin(pc.now + k * x) * cos(pc.now + k * y);
   float zoffset = x + y;
 
-  float3x4 transform = float3x4(
-    float4(0.01, 0.0, 0.0, x * width),
-    float4(0.0, 0.01, 0.0, y * depth),
-    float4(0.0, 0.0, 0.01, z * height + zoffset)
-  );
+  int tfmOffset = __offsetOf(instance, instance.transform);
 
-  int transformID = DispatchThreadID.x;
-  gprt::store(pc.transforms, transformID, transform);
+  float scale = .005;
+  instance.transform = float3x4(float4(scale, 0.0, 0.0, x * width), float4(0.0, scale, 0.0, y * depth),
+                                float4(0.0, 0.0, scale, z * height + zoffset));
+  gprt::store(pc.instances, instanceID, instance);
 }
 
 struct Payload {
@@ -60,15 +63,15 @@ struct Payload {
 };
 
 [shader("raygeneration")]
-void RayGen(uniform RayGenData record) {
+void
+RayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -85,7 +88,8 @@ hsv2rgb(float3 input) {
 }
 
 [shader("closesthit")]
-void ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
+void
+ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
   int3 index = gprt::load<int3>(record.index, primID);
@@ -100,7 +104,8 @@ void ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

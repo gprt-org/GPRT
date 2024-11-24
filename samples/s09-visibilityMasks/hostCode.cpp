@@ -209,15 +209,18 @@ main(int ac, char **av) {
       windowAccel, floorAccel, wallAccel,   windowAccel, floorAccel, wallAccel,   windowAccel,
   };
 
-  GPRTBufferOf<float3x4> transformsBuffer = gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
-
-  GPRTAccel world = gprtInstanceAccelCreate(context, (uint32_t)BLAS.size(), BLAS.data());
-  gprtInstanceAccelSet3x4Transforms(world, transformsBuffer);
+  GPRTAccel world = gprtInstanceAccelCreate(context, (uint32_t) BLAS.size(), BLAS.data());
+  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtInstanceAccelGetInstances(world);
+  gprtBufferMap(instancesBuffer);
+  gprt::Instance *instances = gprtBufferGetPointer(instancesBuffer);
+  for (int i = 0; i < NUM_INSTANCES; ++i) {
+    instances[i].transform = transforms[i];
+  }
 
   // This is new! We want our wall and floor instances to cast shadows,
   // but we don't want our window to cast a shadow.
 
-  // And so, we set the wall and floor visibility masks to 0b11111111,
+  // By default, all instances' visibility masks are initialized to 0b11111111,
   // meaning, any ray traced with any visibility bits "on" will hit those
   // meshes.
 
@@ -226,13 +229,13 @@ main(int ac, char **av) {
   // The last bit being 0 means that instance will be invisible
   // to rays traced with a visibility mask of 0b00000001, since
   // 0b00000001 & 0b1111110 == 0
-  std::vector<uint32_t> masks = {
-      0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111,
-      0b11111110, 0b11111111, 0b11111111, 0b11111110, 0b11111111, 0b11111111, 0b11111110,
-  };
+  instances[2].mask = 0b11111110;
+  instances[5].mask = 0b11111110;
+  instances[8].mask = 0b11111110;
+  instances[11].mask = 0b11111110;
+  instances[14].mask = 0b11111110;
 
-  GPRTBufferOf<uint32_t> masksBuffer = gprtDeviceBufferCreate<uint32_t>(context, masks.size(), masks.data());
-  gprtInstanceAccelSetVisibilityMasks(world, masksBuffer);
+  gprtBufferUnmap(instancesBuffer);
 
   // Now that our instance acceleration structure is setup, build it.
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
@@ -301,7 +304,7 @@ main(int ac, char **av) {
       pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
     }
 
-    pc.lightPos = float3(3.f * sin((float)gprtGetTime(context)), 3.f, 3.f * cos((float)gprtGetTime(context)));
+    pc.lightPos = float3(3.f * sin((float) gprtGetTime(context)), 3.f, 3.f * cos((float) gprtGetTime(context)));
     pc.lightColor = lightColor;
 
     // Calls the GPU raygen kernel function
@@ -339,8 +342,6 @@ main(int ac, char **av) {
   gprtGeomDestroy(windowGeom);
   gprtAccelDestroy(windowAccel);
 
-  gprtBufferDestroy(transformsBuffer);
-  gprtBufferDestroy(masksBuffer);
   gprtAccelDestroy(world);
 
   gprtBufferDestroy(frameBuffer);

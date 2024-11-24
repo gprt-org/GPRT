@@ -6283,25 +6283,11 @@ struct InstanceAccel : public Accel {
   // the total number of geometries referenced by this instance accel's BLASes
   uint32_t numGeometries = -1;
 
-  // caching these for fast updates
+  // caching for faster updates
   size_t instanceOffset = -1;
-  uint64_t visibilityMasksAddress;
-  uint64_t transformBufferAddress;
 
   Buffer *instancesBuffer = nullptr;
   Buffer *accelAddressesBuffer = nullptr;
-
-  struct {
-    Buffer *buffer = nullptr;
-    uint32_t stride = 0;
-    uint32_t offset = 0;
-  } transforms;
-
-  struct {
-    Buffer *buffer = nullptr;
-    // uint32_t stride = 0;
-    // uint32_t offset = 0;
-  } visibilityMasks;
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
@@ -6329,40 +6315,42 @@ struct InstanceAccel : public Accel {
       this->numGeometries = numGeometry;
     }
 
-    instancesBuffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator,
-                                 context->graphicsCommandBuffer, context->graphicsQueue,
-                                 // I guess I need this to use these buffers as input to tree builds?
-                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                     // means we can get this buffer's address with
-                                     // vkGetBufferDeviceAddress
-                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                     // means we can use this buffer as a storage buffer
-                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 // means that this memory is stored directly on the device
-                                 //  (rather than the host, or in a special host/device section)
-                                 // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                                 // VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // temporary
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                 sizeof(VkAccelerationStructureInstanceKHR) * numInstances, 16);
+    instancesBuffer =
+        new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
+                   context->graphicsQueue,
+                   // Means this buffer can be used as a read-only input to an accel build
+                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                       // means we can get this buffer's address with
+                       // vkGetBufferDeviceAddress
+                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                       // means we can use this buffer as a storage buffer
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                   // means that this memory is stored directly on the device
+                   //  (rather than the host, or in a special host/device section)
+                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
+                   //  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                   sizeof(VkAccelerationStructureInstanceKHR) * numInstances, 16);
+
+    instancesBuffer->map();
+
+    for (uint32_t i = 0; i < numInstances; ++i) {
+      VkAccelerationStructureInstanceKHR *instance =
+          &((VkAccelerationStructureInstanceKHR *) instancesBuffer->mapped)[i];
+
+      instance->mask = 0b11111111;
+      instance->instanceCustomIndex = i;
+      // instance->instanceShaderBindingTableRecordOffset = instanceOffset + blasOffsets[i];
+      instance->flags = 0;
+      // instance->accelerationStructureReference = addresses[i];
+      instance->transform = {{
+          {1.0f, 0.0f, 0.0f, 0.0f},   // First row
+          {0.0f, 1.0f, 0.0f, 0.0f},   // Second row
+          {0.0f, 0.0f, 1.0f, 0.0f}    // Third row
+      }};
+    }
   };
 
   ~InstanceAccel(){};
-
-  void setTransforms(Buffer *transforms, uint32_t stride, uint32_t offset) {
-    // assuming no motion blurred triangles for now, so we assume 1 transform
-    // per instance
-    this->transforms.buffer = transforms;
-    this->transforms.stride = stride;
-    this->transforms.offset = offset;
-  }
-
-  void setVisibilityMasks(Buffer *masks = nullptr   //,
-                                                    // size_t count,
-                                                    // size_t stride,
-                                                    // size_t offset
-  ) {
-    this->visibilityMasks.buffer = masks;
-  }
 
   void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
 
@@ -6395,17 +6383,17 @@ struct InstanceAccel : public Accel {
       }
     }
 
-    // If the visibility mask address is -1, we assume a mask of 0xFF
-    visibilityMasksAddress = -1;
-    if (visibilityMasks.buffer != nullptr) {
-      visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
-    }
+    // // If the visibility mask address is -1, we assume a mask of 0xFF
+    // visibilityMasksAddress = -1;
+    // if (visibilityMasks.buffer != nullptr) {
+    //   visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
+    // }
 
-    // If transform buffer address is -1, we assume an identity transformation.
-    transformBufferAddress = -1;
-    if (transforms.buffer != nullptr) {
-      transformBufferAddress = transforms.buffer->deviceAddress;
-    }
+    // // If transform buffer address is -1, we assume an identity transformation.
+    // transformBufferAddress = -1;
+    // if (transforms.buffer != nullptr) {
+    //   transformBufferAddress = transforms.buffer->deviceAddress;
+    // }
 
     // Currently, we always compute the instance addresses and offsets ourselves. Its too complex with the current API
     // for an end user to compute...
@@ -6429,108 +6417,22 @@ struct InstanceAccel : public Accel {
       }
     }
 
-    // Temporary... In the future, we need to be able to construct these instances on the device. However,
+    // Temporary... In the future, we need to be able to set these offsets on the device. However,
     // the current GPRT API is heavily dependent on the "MultiplierForGeometryContributionToHitGroupIndex",
     // which dramatically complicates SBT construction and management. Until we're able to shift the API over
     // to a zero multiplier workflow, we'll just do this on the host for now.
     {
-      uint32_t *maskPtr = nullptr;
-      uint8_t *transformPtr = nullptr;
-
-      if (visibilityMasks.buffer) {
-        visibilityMasks.buffer->map();
-        maskPtr = (uint32_t *) visibilityMasks.buffer->mapped;
-      }
-
-      if (transforms.buffer) {
-        transforms.buffer->map();
-        transformPtr = (uint8_t *) transforms.buffer->mapped;
-      }
-
       instancesBuffer->map();
 
+      // Initialize some of the instance values
       for (uint32_t i = 0; i < numInstances; ++i) {
         VkAccelerationStructureInstanceKHR *instance =
             &((VkAccelerationStructureInstanceKHR *) instancesBuffer->mapped)[i];
-
-        instance->mask = 0xFF;
-        instance->instanceCustomIndex = i;
         instance->instanceShaderBindingTableRecordOffset = instanceOffset + blasOffsets[i];
-        instance->flags = 0;
         instance->accelerationStructureReference = addresses[i];
-        instance->transform = {{
-            {1.0f, 0.0f, 0.0f, 0.0f},   // First row
-            {0.0f, 1.0f, 0.0f, 0.0f},   // Second row
-            {0.0f, 0.0f, 1.0f, 0.0f}    // Third row
-        }};
-
-        if (maskPtr)
-          instance->mask = maskPtr[i];
-        if (transformPtr) {
-          memcpy(&instance->transform, transformPtr + transforms.offset + transforms.stride * i, sizeof(float3x4));
-        }
       }
-
-      if (transforms.buffer)
-        transforms.buffer->unmap();
-      if (visibilityMasks.buffer)
-        visibilityMasks.buffer->unmap();
+      instancesBuffer->unmap();
     }
-
-    // {
-    //   VkCommandBufferBeginInfo cmdBufInfo{};
-    //   struct PushConstants {
-    //     uint64_t instanceBufferAddr;
-    //     uint64_t transformBufferAddr;
-    //     uint64_t accelReferencesAddr;
-    //     uint64_t instanceShaderBindingTableRecordOffset;
-    //     uint64_t transformOffset;
-    //     uint64_t transformStride;
-    //     uint64_t instanceOffsetsBufferAddr;
-    //     uint64_t instanceVisibilityMasksBufferAddr;
-    //     uint64_t pad[16 - 8];
-    //   } pushConstants;
-
-    //   pushConstants.instanceBufferAddr = instancesBuffer->deviceAddress;
-    //   pushConstants.transformBufferAddr = transformBufferAddress;
-    //   pushConstants.accelReferencesAddr = referencesAddress;
-    //   pushConstants.instanceShaderBindingTableRecordOffset = instanceOffset;
-    //   pushConstants.transformOffset = transforms.offset;
-    //   pushConstants.transformStride = transforms.stride;
-    //   pushConstants.instanceOffsetsBufferAddr = instanceOffsetsAddress;
-    //   pushConstants.instanceVisibilityMasksBufferAddr = visibilityMasksAddress;
-
-    //   cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    //   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    //   vkCmdPushConstants(context->graphicsCommandBuffer, context->fillInstanceDataStage.layout,
-    //   VK_SHADER_STAGE_COMPUTE_BIT, 0,
-    //                      sizeof(PushConstants), &pushConstants);
-    //   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-    //   context->fillInstanceDataStage.pipeline);
-    //   // vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-    //   // pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-    //   vkCmdDispatch(context->graphicsCommandBuffer, numInstances, 1, 1);
-    //   err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-
-    //   VkSubmitInfo submitInfo{};
-    //   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    //   submitInfo.pNext = NULL;
-    //   submitInfo.waitSemaphoreCount = 0;
-    //   submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    //   submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    //   submitInfo.commandBufferCount = 1;
-    //   submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    //   submitInfo.signalSemaphoreCount = 0;
-    //   submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    //   err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    //   if (err)
-    //     LOG_ERROR("failed to submit to queue for instance accel build! : \n" + errorString(err));
-
-    //   err = vkQueueWaitIdle(context->graphicsQueue);
-    //   if (err)
-    //     LOG_ERROR("failed to wait for queue idle for instance accel build! : \n" + errorString(err));
-    // }
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -6784,33 +6686,33 @@ struct InstanceAccel : public Accel {
     // assuming transformBufferAddress is already configured from previous build
 
     // Temporary... In the future, I'd like this to be doable from the device...
-    {
-      instancesBuffer->map();
+    // {
+    //   instancesBuffer->map();
 
-      uint32_t *maskPtr = nullptr;
-      uint8_t *transformPtr = nullptr;
+    //   uint32_t *maskPtr = nullptr;
+    //   uint8_t *transformPtr = nullptr;
 
-      if (visibilityMasks.buffer) {
-        visibilityMasks.buffer->map();
-        maskPtr = (uint32_t *) visibilityMasks.buffer->mapped;
-      }
+    //   if (visibilityMasks.buffer) {
+    //     visibilityMasks.buffer->map();
+    //     maskPtr = (uint32_t *) visibilityMasks.buffer->mapped;
+    //   }
 
-      if (transforms.buffer) {
-        transforms.buffer->map();
-        transformPtr = (uint8_t *) transforms.buffer->mapped;
-      }
+    //   if (transforms.buffer) {
+    //     transforms.buffer->map();
+    //     transformPtr = (uint8_t *) transforms.buffer->mapped;
+    //   }
 
-      for (uint32_t i = 0; i < numInstances; ++i) {
-        VkAccelerationStructureInstanceKHR *instance =
-            &((VkAccelerationStructureInstanceKHR *) instancesBuffer->mapped)[i];
-        if (maskPtr)
-          instance->mask = maskPtr[i];
-        if (transformPtr) {
-          memcpy(&instance->transform, transformPtr + transforms.offset + transforms.stride * i, sizeof(float3x4));
-        }
-      }
-      instancesBuffer->unmap();
-    }
+    //   for (uint32_t i = 0; i < numInstances; ++i) {
+    //     gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
+    //     if (maskPtr)
+    //       instance->mask = maskPtr[i];
+    //     // if (transformPtr) {
+    //     //   memcpy(&instance->transform, transformPtr + transforms.offset + transforms.stride * i,
+    //     sizeof(float3x4));
+    //     // }
+    //   }
+    //   instancesBuffer->unmap();
+    // }
 
     // // Use a compute shader to copy data into instances buffer
     // {
@@ -10352,30 +10254,11 @@ gprtInstanceAccelCreate(GPRTContext _context, uint32_t numAccels, GPRTAccel *arr
   return (GPRTAccel) accel;
 }
 
-GPRT_API void
-gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel, GPRTBuffer transforms) {
-  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float3x4), 0);
-}
-
-GPRT_API void
-gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel, GPRTBuffer transforms) {
-  gprtInstanceAccelSetTransforms(instanceAccel, transforms, sizeof(float4x4), 0);
-}
-
-GPRT_API void
-gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer _transforms, uint32_t stride, uint32_t offset) {
+GPRT_API GPRTBufferOf<gprt::Instance>
+gprtInstanceAccelGetInstances(GPRTAccel instanceAccel) {
   LOG_API_CALL();
   InstanceAccel *accel = (InstanceAccel *) instanceAccel;
-  Buffer *transforms = (Buffer *) _transforms;
-  accel->setTransforms(transforms, stride, offset);
-}
-
-GPRT_API void
-gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBuffer _masks) {
-  LOG_API_CALL();
-  InstanceAccel *accel = (InstanceAccel *) instanceAccel;
-  Buffer *masks = (Buffer *) _masks;
-  accel->setVisibilityMasks(masks);
+  return (GPRTBufferOf<gprt::Instance>) accel->instancesBuffer;
 }
 
 GPRT_API void

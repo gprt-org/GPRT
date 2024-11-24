@@ -33,8 +33,9 @@
 #include <vulkan/vulkan.h>
 
 #include "MathConstants.slangh"
-#include "Vector.h"
 #include "Matrix.h"
+#include "Vector.h"
+
 // #include "linalg.h"
 // using namespace linalg;
 // using namespace linalg::detail; // causes conflicts
@@ -44,16 +45,16 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <array>
 #include <assert.h>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
-#include <array>
-#include <type_traits>
-#include <iostream>
-#include <cstdlib>
 
 #ifdef __cplusplus
 #include <cstddef>
@@ -117,7 +118,7 @@ template <typename T> struct _GPRTTextureOf;
 template <typename T> struct _GPRTRayGenOf;
 template <typename T> struct _GPRTMissOf;
 template <typename T> struct _GPRTCallableOf;
-template <typename ...T> struct _GPRTComputeOf;
+template <typename... T> struct _GPRTComputeOf;
 template <typename T> struct _GPRTGeomOf;
 template <typename T> struct _GPRTGeomTypeOf;
 template <typename T> using GPRTRayGenOf = struct _GPRTRayGenOf<T> *;
@@ -125,7 +126,7 @@ template <typename T> using GPRTBufferOf = struct _GPRTBufferOf<T> *;
 template <typename T> using GPRTTextureOf = struct _GPRTTextureOf<T> *;
 template <typename T> using GPRTMissOf = struct _GPRTMissOf<T> *;
 template <typename T> using GPRTCallableOf = struct _GPRTCallableOf<T> *;
-template <typename ...T> using GPRTComputeOf = struct _GPRTComputeOf<T...> *;
+template <typename... T> using GPRTComputeOf = struct _GPRTComputeOf<T...> *;
 template <typename T> using GPRTGeomOf = struct _GPRTGeomOf<T> *;
 template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 
@@ -136,23 +137,26 @@ using GPRTProgram = std::vector<uint8_t>;
 #include "gprt_shared.h"
 
 // General helper functions
-static void runtime_assert(bool condition, const char* message) {
-    if (!condition) {
-        std::cerr << "Runtime assertion failed: " << message << std::endl;
-        std::abort(); // or throw an exception, depending on your needs
-    }
+static void
+runtime_assert(bool condition, const char *message) {
+  if (!condition) {
+    std::cerr << "Runtime assertion failed: " << message << std::endl;
+    std::abort();   // or throw an exception, depending on your needs
+  }
 }
 
-template<typename T>
-void handleArg(std::array<char, PUSH_CONSTANTS_LIMIT>& buffer, size_t& offset, const T& arg) {
+template <typename T>
+void
+handleArg(std::array<char, PUSH_CONSTANTS_LIMIT> &buffer, size_t &offset, const T &arg) {
   static_assert(std::is_trivially_copyable<T>::value, "Non-trivially copyable types are not supported.");
   std::memcpy(buffer.data() + offset, &arg, sizeof(T));
   offset += sizeof(T);
 }
 
 template <typename... Args>
-constexpr size_t totalSizeOf() {
-    return (sizeof(Args) + ... + 0);
+constexpr size_t
+totalSizeOf() {
+  return (sizeof(Args) + ... + 0);
 }
 
 /*! launch params (or "globals") are variables that can be put into
@@ -186,12 +190,7 @@ typedef enum {
   GPRT_MATRIX_FORMAT_ROW_MAJOR
 } GPRTMatrixFormat;
 
-typedef enum {
-  GPRT_UNKNOWN,
-  GPRT_AABBS,
-  GPRT_TRIANGLES,
-  GPRT_CURVES
-} GPRTGeomKind;
+typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_CURVES } GPRTGeomKind;
 
 typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,
@@ -599,7 +598,7 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  */
 GPRT_API void gprtGuiRasterize(GPRTContext context);
 
-/*! Requests the given size (in bytes) to reserve for parameters 
+/*! Requests the given size (in bytes) to reserve for parameters
   of ray tracing programs. Defaults to 256 bytes */
 GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
 
@@ -658,14 +657,16 @@ GPRT_API GPRTCompute gprtComputeCreate(GPRTContext context, GPRTModule module, c
  * GPRT_COMPUTE_PROGRAM in the device code.
  */
 template <typename... Uniforms>
-GPRTComputeOf<Uniforms...> gprtComputeCreate(GPRTContext context, GPRTModule module, std::string entrypoint) {
+GPRTComputeOf<Uniforms...>
+gprtComputeCreate(GPRTContext context, GPRTModule module, std::string entrypoint) {
   return (GPRTComputeOf<Uniforms...>) gprtComputeCreate(context, module, entrypoint.c_str());
 }
 
 GPRT_API void gprtComputeDestroy(GPRTCompute compute);
 
 template <typename... Uniforms>
-void gprtComputeDestroy(GPRTComputeOf<Uniforms...> compute) {
+void
+gprtComputeDestroy(GPRTComputeOf<Uniforms...> compute) {
   gprtComputeDestroy((GPRTCompute) compute);
 }
 
@@ -700,8 +701,7 @@ gprtRayGenCreate(GPRTContext context, GPRTModule module, const char *entrypoint)
 }
 
 // Specialization for void
-template <>
-GPRTRayGenOf<void> gprtRayGenCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
+template <> GPRTRayGenOf<void> gprtRayGenCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 GPRT_API void gprtRayGenDestroy(GPRTRayGen rayGen);
 
@@ -791,8 +791,7 @@ gprtMissCreate(GPRTContext context, GPRTModule module, const char *entrypoint) {
 }
 
 // Specialization for void
-template <>
-GPRTMissOf<void> gprtMissCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
+template <> GPRTMissOf<void> gprtMissCreate<void>(GPRTContext context, GPRTModule module, const char *entrypoint);
 
 GPRT_API void gprtMissSet(GPRTContext context, int rayType, GPRTMiss missProgToUse);
 
@@ -859,7 +858,8 @@ gprtMissSetParameters(GPRTMissOf<T> miss, T *parameters, int deviceID GPRT_IF_CP
   gprtMissSetParameters((GPRTMiss) miss, (void *) parameters, deviceID);
 }
 
-GPRT_API GPRTCallable gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint, size_t recordSize);
+GPRT_API GPRTCallable gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint,
+                                         size_t recordSize);
 
 template <typename T>
 GPRTCallableOf<T>
@@ -880,7 +880,6 @@ gprtCallableDestroy(GPRTCallableOf<T> callableProg) {
 }
 
 GPRT_API void *gprtCallableGetParameters(GPRTCallable callableProg, int deviceID GPRT_IF_CPP(= 0));
-
 
 template <typename T>
 T *
@@ -933,12 +932,12 @@ gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *ar
   \param flags reserved for future use
 */
 GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                            unsigned int flags GPRT_IF_CPP(= 0));
+                                           unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
 gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                         unsigned int flags GPRT_IF_CPP(= 0)) {
+                        unsigned int flags GPRT_IF_CPP(= 0)) {
   return gprtTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
@@ -980,67 +979,7 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint32_t numAccels, GPRTAccel *arrayOfAccels,
                                            unsigned int flags GPRT_IF_CPP(= 0));
 
-GPRT_API void gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBuffer transforms, uint32_t stride,
-                                             uint32_t offset);
-
-template <typename T>
-void
-gprtInstanceAccelSetTransforms(GPRTAccel instanceAccel, GPRTBufferOf<T> transforms, uint32_t stride, uint32_t offset) {
-  gprtInstanceAccelSetTransforms(instanceAccel, (GPRTBuffer) transforms, stride, offset);
-}
-
-GPRT_API void gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel, GPRTBuffer transforms);
-
-template <typename T>
-void
-gprtInstanceAccelSet3x4Transforms(GPRTAccel instanceAccel, GPRTBufferOf<T> transforms) {
-  gprtInstanceAccelSet3x4Transforms((GPRTAccel) instanceAccel, (GPRTBuffer) transforms);
-}
-
-GPRT_API void gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel, GPRTBuffer transforms);
-
-template <typename T>
-void
-gprtInstanceAccelSet4x4Transforms(GPRTAccel instanceAccel, GPRTBufferOf<T> transforms) {
-  gprtInstanceAccelSet4x4Transforms(instanceAccel, (GPRTBuffer) transforms);
-}
-
-/*! sets the list of IDs to use for the child instnaces. By default
-    the instance ID of child #i is simply i, but optix allows to
-    specify a user-defined instnace ID for each instance, which with
-    owl can be done through this array. Array size must match number
-    of instances in the specified group */
-GPRT_API void gprtInstanceAccelSetIDs(GPRTAccel instanceAccel, const uint32_t *instanceIDs);
-
-/**
- * @brief Assigns a 32-bit int buffer to the instance acceleration structure
- * for the visibility mask, with only last 8 bits used. Rays will bitwise AND
- * their instance inclusion mask with these masks, skipping over instances when
- * the result is "0".
- *
- * @param instanceAccel The instance acceleration structure
- * @param masks A buffer of 32-bit ints, one int per instance in the instance
- * acceleration structure.
- */
-GPRT_API void gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBuffer masks);
-
-/**
- * @brief Assigns a 32-bit int buffer to the instance acceleration structure
- * for the visibility mask, with only last 8 bits used. Rays will bitwise AND
- * their instance inclusion mask with these masks, skipping over instances when
- * the result is "0".
- *
- * @tparam T The template type of the given buffer (will be cast to a 32-bit
- * int)
- * @param instanceAccel The instance acceleration structure
- * @param masks A buffer of 32-bit ints, one int per instance in the instance
- * acceleration structure.
- */
-template <typename T>
-void
-gprtInstanceAccelSetVisibilityMasks(GPRTAccel instanceAccel, GPRTBufferOf<T> masks) {
-  gprtInstanceAccelSetVisibilityMasks(instanceAccel, (GPRTBuffer) masks);
-}
+GPRT_API GPRTBufferOf<gprt::Instance> gprtInstanceAccelGetInstances(GPRTAccel instanceAccel);
 
 GPRT_API void gprtAccelDestroy(GPRTAccel accel);
 
@@ -1154,8 +1093,7 @@ gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind) {
 }
 
 // Specialization for void
-template <>
-GPRTGeomTypeOf<void> gprtGeomTypeCreate<void>(GPRTContext context, GPRTGeomKind kind);
+template <> GPRTGeomTypeOf<void> gprtGeomTypeCreate<void>(GPRTContext context, GPRTGeomKind kind);
 
 GPRT_API void gprtGeomTypeDestroy(GPRTGeomType geomType);
 
@@ -1232,24 +1170,25 @@ gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTe
  * @param pushConstantsSize The size of the push constants structure to upload to the device.
  * If 0, no push constants are updated. Currently limited to 128 bytes or less.
  * @param pushConstants A pointer to a structure of push constants to upload to the device.
-*/
+ */
 void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
-                           uint32_t rasterType, uint32_t *instanceCounts,
-                           size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                            void *pushConstants GPRT_IF_CPP(= 0));
+                           uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize GPRT_IF_CPP(= 0),
+                           void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
 void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry, GPRTGeomOf<RecordType> *geometry,
-                      uint32_t rayType, uint32_t *instanceCounts) {
+gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
+                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts) {
   gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
 }
 
 template <typename RecordType, typename PushConstantsType>
 void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry, GPRTGeomOf<RecordType> *geometry,
-                      uint32_t rayType, uint32_t *instanceCounts, PushConstantsType pc) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts, sizeof(PushConstantsType), &pc);
+gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
+                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts,
+                      PushConstantsType pc) {
+  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts,
+                        sizeof(PushConstantsType), &pc);
 }
 
 /**
@@ -1434,17 +1373,17 @@ gprtTextureDestroy(GPRTTextureOf<T> texture) {
 
 /**
  * @brief Creates a buffer using host memory.
- * 
- * This function creates a buffer that utilizes memory located on the host, and that is accessible to all devices. 
- * The buffer created by this function is optimized for high-speed access from the host. 
- * It is suitable for operations where the buffer is primarily accessed and manipulated by 
+ *
+ * This function creates a buffer that utilizes memory located on the host, and that is accessible to all devices.
+ * The buffer created by this function is optimized for high-speed access from the host.
+ * It is suitable for operations where the buffer is primarily accessed and manipulated by
  * the CPU.
- * 
- * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged), 
- * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back 
+ *
+ * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged),
+ * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back
  * into RAM before the GPU can access it. Reads and writes from the GPU are done using the system's
- * Direct Memory Access (DMA) controller. 
- * 
+ * Direct Memory Access (DMA) controller.
+ *
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param size      The size of each element in the buffer.
  * @param count     The number of elements in the buffer. Defaults to 1 (single element).
@@ -1453,20 +1392,21 @@ gprtTextureDestroy(GPRTTextureOf<T> texture) {
  *                  Larger alignment optimizes access but increase memory usage. Defaults to 16.
  * @return GPRTBuffer Returns a handle to the created buffer that resides in host memory.
  */
-GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count = 1, const void *init = nullptr, size_t alignment = 16);
+GPRT_API GPRTBuffer gprtHostBufferCreate(GPRTContext context, size_t size, size_t count = 1, const void *init = nullptr,
+                                         size_t alignment = 16);
 
 /**
  * @brief Creates a typed buffer using host memory.
- * 
+ *
  * This templated function creates a buffer of type T that allows for stricter type safety. Like the non-templated
- * version, the created buffer is accessible to all devices and is pre-mapped to the host, but 
+ * version, the created buffer is accessible to all devices and is pre-mapped to the host, but
  * with slower access speeds on devices compared to the host.
- * 
- * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged), 
- * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back 
+ *
+ * @note The underlying host memory backing this buffer is pinned (ie page-locked, non-paged),
+ * meaning that it stays resident in RAM and doesn't need to be copied from the disk or paged back
  * into RAM before the GPU can access it. Reads and writes from the GPU are done using the system's
- * Direct Memory Access (DMA) controller. 
- * 
+ * Direct Memory Access (DMA) controller.
+ *
  * @tparam T        The data type of elements in the buffer.
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param count     The number of elements in the buffer. Defaults to 1 (single element).
@@ -1484,13 +1424,13 @@ gprtHostBufferCreate(GPRTContext context, size_t count = 1, const T *init = null
 
 /**
  * @brief Creates a buffer using device memory.
- * 
- * This function creates a buffer that utilizes memory located on the device (GPU). 
- * The buffer created by this function is optimized for high-speed access from the device. 
- * It is suitable for operations where the buffer is primarily accessed and manipulated by 
- * the GPU. Reading from and writing to the buffer from the host requires mapping, which triggers 
+ *
+ * This function creates a buffer that utilizes memory located on the device (GPU).
+ * The buffer created by this function is optimized for high-speed access from the device.
+ * It is suitable for operations where the buffer is primarily accessed and manipulated by
+ * the GPU. Reading from and writing to the buffer from the host requires mapping, which triggers
  * an underlying buffer copy to and from the host system.
- * 
+ *
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param size      The size of each element in the buffer.
  * @param count     The number of elements in the buffer. Defaults to 1 (single element).
@@ -1504,13 +1444,13 @@ GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, siz
 
 /**
  * @brief Creates a typed buffer using device memory.
- * 
+ *
  * This templated function creates a buffer of type T that utilizes memory located on the device (GPU).
  * It allows for the buffer to be easily used with specific data types. Like the non-templated
  * version, this buffer is optimized for high-speed GPU access, making it well-suited for operations
- * where the buffer is primarily accessed and manipulated by the device. Reading from and writing to the 
+ * where the buffer is primarily accessed and manipulated by the device. Reading from and writing to the
  * buffer from the host requires mapping, which triggers an underlying buffer copy to and from the host system.
- * 
+ *
  * @tparam T        The data type of elements in the buffer.
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param count     The number of elements in the buffer. Defaults to 1 (single element).
@@ -1528,18 +1468,18 @@ gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nu
 
 /**
  * @brief Creates a shared buffer using device memory accessible to all devices.
- * 
- * This function creates a buffer in the device memory, accessible by both the host and other 
- * devices. Access from the host might be slower compared to direct device access. The buffer's 
+ *
+ * This function creates a buffer in the device memory, accessible by both the host and other
+ * devices. Access from the host might be slower compared to direct device access. The buffer's
  * size may be influenced by resizable BAR, allowing the CPU to access more of the device's memory.
- * 
- * @note In the PCI configuration space, BARs are used to 
- * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device. 
- * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the 
- * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this 
- * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to 
+ *
+ * @note In the PCI configuration space, BARs are used to
+ * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device.
+ * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the
+ * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this
+ * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to
  * access more of the device's memory directly.
- * 
+ *
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param size      The size of each element in the buffer.
  * @param count     The number of elements in the buffer. Defaults to 1 (single element).
@@ -1553,28 +1493,28 @@ GPRT_API GPRTBuffer gprtSharedBufferCreate(GPRTContext context, size_t size, siz
 
 /**
  * @brief Creates a shared, typed buffer using device memory accessible to all devices.
- * 
- * This templated function creates a buffer of type T in the device memory, 
- * accessible by both the host and other devices. While the buffer can be accessed 
- * by the host, such access might be slower compared to direct device access. 
- * The buffer's size and efficiency may be influenced by resizable BAR technology, 
+ *
+ * This templated function creates a buffer of type T in the device memory,
+ * accessible by both the host and other devices. While the buffer can be accessed
+ * by the host, such access might be slower compared to direct device access.
+ * The buffer's size and efficiency may be influenced by resizable BAR technology,
  * enabling more direct CPU access to the device's memory.
- * 
- * @note In the PCI configuration space, BARs are used to 
- * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device. 
- * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the 
- * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this 
- * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to 
+ *
+ * @note In the PCI configuration space, BARs are used to
+ * hold memory addresses. These memory addresses are used by the CPU to access the memory of the PCI device.
+ * Traditionally, these addresses were of a fixed size, limiting the amount of memory of the device that the
+ * CPU could directly access at any given time (typically to 256MB windows). With "Resizable BAR," this
+ * limitation is overcome by allowing these base address registers to be resized, enabling the CPU to
  * access more of the device's memory directly.
- * 
+ *
  * @tparam T        The data type of elements in the buffer.
  * @param context   The GPRTContext in which the buffer is to be created.
  * @param count     The number of elements of type T in the buffer. Defaults to 1.
- * @param init      Optional pointer to an array of type T for initializing the buffer. 
+ * @param init      Optional pointer to an array of type T for initializing the buffer.
  *                  Defaults to nullptr.
  * @param alignment Byte alignment for the buffer, must be a power of two.
- *                  Larger alignment values may optimize device access at the cost of 
- *                  increased memory usage, while smaller values are more memory-efficient 
+ *                  Larger alignment values may optimize device access at the cost of
+ *                  increased memory usage, while smaller values are more memory-efficient
  *                  but might lead to reduced performance. Defaults to 16.
  * @return GPRTBufferOf<T> Returns a handle to the created buffer using shared device memory,
  *                         and is typed according to the specified template parameter T.
@@ -1765,30 +1705,31 @@ gprtBufferTextureCopy(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTTextureO
 
 /**
  * @brief Computes a device-wide exclusive prefix sum, and returns the total amount.
- * Important note, currently the maximum aggregate sum supported is 2^30. 
+ * Important note, currently the maximum aggregate sum supported is 2^30.
  * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
- * 
+ *
  * Exclusive sum requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *can* reference the same buffer object.
  *
  * @param context The GPRT context
  * @param input An input buffer of 32-bit unsigned integers to be summed
  * @param output An output buffer of 32-bit unsigned integers that will store the exclusive sum.
- * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
- * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
- * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and
+ * released internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized
+ * and returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  * Generally, requires 2*log_1024(N) ints of scratch memory.
  */
-GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, GPRTBuffer output,
+                                         GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Computes a device-wide exclusive prefix sum, and returns the total amount.
- * Important note, currently the maximum aggregate sum supported is 2^30. 
+ * Important note, currently the maximum aggregate sum supported is 2^30.
  * This has to do with maintaining coherency between thread blocks and being limited to 32 bit atomics
- * 
+ *
  * Exclusive sum requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *can* reference the same buffer object.
  *
  * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
@@ -1797,72 +1738,76 @@ GPRT_API uint32_t gprtBufferExclusiveSum(GPRTContext context, GPRTBuffer input, 
  * @param context The GPRT context
  * @param input An input buffer of 32-bit unsigned integers to be summed
  * @param output An output buffer of 32-bit unsigned integers that will store the exclusive sum.
- * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and released
- * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
- * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ * @param scratch A scratch buffer to facilitate the exclusive sum. If null, scratch memory will be allocated and
+ * released internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized
+ * and returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+gprtBufferExclusiveSum(GPRTContext context, GPRTBufferOf<T1> input, GPRTBufferOf<T1> output,
+                       GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
   return gprtBufferExclusiveSum(context, (GPRTBuffer) input, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**
- * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total number of 
- * selections is then returned to the user.
- * 
- * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering, 
- * while copies of the unselected items are compacted into the rear of "output" in reverse order. 
- * 
+ * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total
+ * number of selections is then returned to the user.
+ *
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative
+ * ordering, while copies of the unselected items are compacted into the rear of "output" in reverse order.
+ *
  * Partition requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *cannot* reference the same buffer object.
  *
  * @param context The GPRT context
  * @param input An input buffer containing a sequence of 32-bit integers to be reordered
- * @param selectPositive If true, places positive integers to the left and negative integers to the right. 
+ * @param selectPositive If true, places positive integers to the left and negative integers to the right.
  *                       If false, places negative integers to the left and positive integers to the right.
  * @param output An output buffer containing the partitioned sequences by their sign.
- * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and released
- * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
- * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and
+ * released internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized
+ * and returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferPartition(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output,
+                                      GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
- * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total number of 
- * selections is then returned to the user.
- * 
- * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering, 
- * while copies of the unselected items are compacted into the rear of "output" in reverse order. 
- * 
+ * @brief Constructs a partitioned output sequence from 32-bit integers based on their sign and a selection. The total
+ * number of selections is then returned to the user.
+ *
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative
+ * ordering, while copies of the unselected items are compacted into the rear of "output" in reverse order.
+ *
  * Partition requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *cannot* reference the same buffer object.
  *
  * @param context The GPRT context
  * @param input An input buffer containing a sequence of 32-bit integers to be reordered
- * @param selectPositive If true, places positive integers to the left and negative integers to the right. 
+ * @param selectPositive If true, places positive integers to the left and negative integers to the right.
  *                       If false, places negative integers to the left and positive integers to the right.
  * @param output An output buffer containing the partitioned sequences by their sign.
- * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and released
- * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
- * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
+ * @param scratch A scratch buffer to facilitate the partitioning. If null, scratch memory will be allocated and
+ * released internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized
+ * and returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output,
+                    GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
   return gprtBufferPartition(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
 /**
- * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of 
+ * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of
  * selections is then returned to the user.
- * 
- * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering.
- * 
+ *
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative
+ * ordering.
+ *
  * Select requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *cannot* reference the same buffer object.
  *
  * @param context The GPRT context
@@ -1873,16 +1818,18 @@ gprtBufferPartition(GPRTContext context, GPRTBufferOf<T1> input, bool selectPosi
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output, GPRTBuffer scratch GPRT_IF_CPP(= 0));
+GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool selectPositive, GPRTBuffer output,
+                                   GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
- * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of 
+ * @brief Compacts a sequence of 32-bit integers based on their sign and a selection. The total number of
  * selections is then returned to the user.
- * 
- * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative ordering.
- * 
+ *
+ * Copies of selected integers are compacted into the beginning of "output" and maintain their original relative
+ * ordering.
+ *
  * Select requires a temporary "scratch" space
- * 
+ *
  * Input and output buffers *cannot* reference the same buffer object.
  *
  * @param context The GPRT context
@@ -1895,7 +1842,8 @@ GPRT_API uint32_t gprtBufferSelect(GPRTContext context, GPRTBuffer input, bool s
  */
 template <typename T1, typename T2>
 uint32_t
-gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
+gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositive, GPRTBufferOf<T1> output,
+                 GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
   return gprtBufferSelect(context, (GPRTBuffer) input, selectPositive, (GPRTBuffer) output, (GPRTBuffer) scratch);
 }
 
@@ -2011,7 +1959,8 @@ gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 
 template <typename RecordType, typename PushConstantsType>
 void
-gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, PushConstantsType pushConstants) {
+gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x,
+                   PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
   gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x, sizeof(PushConstantsType), &pushConstants);
 }
@@ -2029,7 +1978,8 @@ gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 
 template <typename RecordType, typename PushConstantsType>
 void
-gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, PushConstantsType pushConstants) {
+gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
+                   PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
   gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y, sizeof(PushConstantsType), &pushConstants);
 }
@@ -2041,34 +1991,41 @@ GPRT_API void gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_
 
 template <typename RecordType>
 void
-gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z) {
+gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
+                   uint32_t dims_z) {
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
 }
 
 template <typename RecordType, typename PushConstantsType>
 void
-gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z, PushConstantsType pushConstants) {
-  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT, "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
+gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
+                   uint32_t dims_z, PushConstantsType pushConstants) {
+  static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT,
+                "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
   gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+                        std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
 // Case where compute program uniforms are not known at compilation time
-template<typename... Uniforms>
-void gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
-  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
+template <typename... Uniforms>
+void
+gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
+                "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
 
-  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
-    "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
-  
-  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
-    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT,
+                 "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
 
-  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
+  runtime_assert(
+      groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT,
+      "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
+
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{};   // Initialize with zero
   size_t offset = 0;
-  
+
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
@@ -2076,23 +2033,26 @@ void gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Un
 }
 
 // Case where compute program has compile-time type-safe uniform arguments
-template<typename... Uniforms>
-void gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
-  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT, "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
-  
-  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT, 
-    "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
-  
-  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT, 
-    "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
+template <typename... Uniforms>
+void
+gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
+                "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
 
-  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{}; // Initialize with zero
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT,
+                 "Workgroup count exceeds WORKGROUP_LIMIT. Increase numthreads and reduce the number of workgroups.");
+
+  runtime_assert(
+      groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT,
+      "Thread count per group exceeds THREADGROUP_LIMIT. Reduce thread count and increase workgroup number.");
+
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{};   // Initialize with zero
   size_t offset = 0;
-  
+
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch((GPRTCompute)compute, numGroups, groupSize, pushConstants);
+  _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
 }
 
 GPRT_API void gprtBeginProfile(GPRTContext context);

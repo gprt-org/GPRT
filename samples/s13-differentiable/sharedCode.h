@@ -43,7 +43,7 @@ struct MissProgData {
   float3 color1;
 };
 
-/* A small structure of constants that can change every frame without rebuilding the 
+/* A small structure of constants that can change every frame without rebuilding the
   shader binding table. (must be 128 bytes or less) */
 struct RTPushConstants {
   struct Camera {
@@ -60,7 +60,7 @@ struct ComputeOBBConstants {
   gprt::Buffer indices;
   gprt::Buffer eulRots;
   gprt::Buffer aabbs;
-  gprt::Buffer transforms;
+  gprt::Buffer instance;
   int numTrisToInclude;
 };
 

@@ -163,7 +163,7 @@ main(int ac, char **av) {
   // Next, we'll create a grid of references to the same bottom level
   // acceleration structure. This saves memory and improves performance over
   // creating duplicate meshes.
-  uint32_t numInstances = 150 * 150;
+  uint32_t numInstances = 256 * 256;
   std::vector<GPRTAccel> instanceTrees(numInstances);
   for (int i = 0; i < numInstances; ++i) {
     instanceTrees[i] = instanceMesh.accel;
@@ -173,17 +173,15 @@ main(int ac, char **av) {
   // the instance acceleration structure
   // ------------------------------------------------------------------
 
-  // Similar to the computeVertex example, it is _okay_ to give our instance
-  // acceleration structure an unpopulated buffer of transforms, so long as
-  // those transforms are filled in before we go to build our acceleration
-  // structure.
-  GPRTBufferOf<float3x4> transformBuffer = gprtHostBufferCreate<float3x4>(context, numInstances, nullptr);
+  // Before, we assigned instance transforms on the CPU, one at a time.
+  // Here, we'll assign many transforms in parallel on the GPU, then
+  // build / refit the tree afterwards.
   GPRTAccel world = gprtInstanceAccelCreate(context, numInstances, instanceTrees.data());
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
+  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtInstanceAccelGetInstances(world);
 
   // Parameters for our transform program that'll animate our transforms
-  pc.transforms = gprtBufferGetHandle(transformBuffer);
-  pc.numTransforms = numInstances;
+  pc.instances = gprtBufferGetHandle(instancesBuffer);
+  pc.numInstances = numInstances;
 
   // Build the shader binding table to upload parameters to the device
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
@@ -193,7 +191,7 @@ main(int ac, char **av) {
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -295,7 +293,6 @@ main(int ac, char **av) {
   LOG("cleaning up ...");
 
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtComputeDestroy(transformProgram);

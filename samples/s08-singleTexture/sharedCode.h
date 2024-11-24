@@ -63,7 +63,7 @@ struct PushConstants {
   /*! the current time */
   float now;
 
-  /*! array/buffer of instance transforms */
-  gprt::Buffer transforms;
-  int numTransforms;
+  /*! array/buffer of instances to transform */
+  gprt::Buffer instances;
+  int numInstances;
 };
