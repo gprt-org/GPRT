@@ -2962,8 +2962,6 @@ struct Context {
   bool computePipelinesOutOfDate = true;
   bool rasterPipelinesOutOfDate = true;
 
-  std::vector<Accel *> accels;
-
   Sampler *defaultSampler = nullptr;
   Texture *defaultTexture1D = nullptr;
   Texture *defaultTexture2D = nullptr;
@@ -5846,7 +5844,7 @@ struct InstanceAccel : public Accel {
   // std::vector<Accel *> instances;
 
   // the total number of geometries referenced by this instance accel's BLASes
-  uint32_t numGeometries = -1;
+  uint32_t numGeometries = 0;
 
   // caching for faster updates
   size_t instanceOffset = -1;
@@ -5854,79 +5852,16 @@ struct InstanceAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(Context *context /*, uint32_t numInstances, GPRTAccel *instances*/) : Accel(context, false) {}
-  // this->numInstances = numInstances;
-
-  // // Temporary... For now, assume number of geometry in each instance is exactly 1. We'll have to change
-  // this later...
-  // setNumGeometries(numInstances);
-
-  // if (instances) {
-  //   this->instances.resize(numInstances);
-  //   memcpy(this->instances.data(), instances, sizeof(GPRTAccel *) * numInstances);
-  // }
-
-  //   // count number of geometry referenced.
-  //   uint32_t numGeometry = 0;
-  //   for (uint32_t j = 0; j < this->instances.size(); ++j) {
-  //     if (this->instances[j]->getType() == GPRT_TRIANGLE_ACCEL) {
-  //       TriangleAccel *triangleAccel = (TriangleAccel *) this->instances[j];
-  //       numGeometry += (uint32_t) triangleAccel->geometries.size();
-  //     } else if (this->instances[j]->getType() == GPRT_AABB_ACCEL) {
-  //       AABBAccel *aabbAccel = (AABBAccel *) this->instances[j];
-  //       numGeometry += (uint32_t) aabbAccel->geometries.size();
-  //     } else {
-  //       LOG_ERROR("Unaccounted for BLAS type!");
-  //     }
-  //   }
-  //   this->numGeometries = numGeometry;
-  // }
-
-  // instancesBuffer =
-  //     new Buffer(context->physicalDevice, context->logicalDevice, context->allocator,
-  //     context->graphicsCommandBuffer,
-  //                context->graphicsQueue,
-  //                // Means this buffer can be used as a read-only input to an accel build
-  //                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-  //                    // means we can get this buffer's address with
-  //                    // vkGetBufferDeviceAddress
-  //                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-  //                    // means we can use this buffer as a storage buffer
-  //                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-  //                // means that this memory is stored directly on the device
-  //                //  (rather than the host, or in a special host/device section)
-  //                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,   // temporary
-  //                //  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-  //                sizeof(gprt::Instance) * numInstances, 16);
-
-  // instancesBuffer->map();
-
-  // for (uint32_t i = 0; i < numInstances; ++i) {
-  //   gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
-
-  //   instance->mask = 0b11111111;
-  //   instance->instanceCustomIndex = i;
-  //   // instance->instanceShaderBindingTableRecordOffset = instanceOffset + blasOffsets[i];
-  //   instance->flags = 0;
-  //   // instance->accelerationStructureReference = addresses[i];
-  //   instance->transform = float3x4(float4{1.0f, 0.0f, 0.0f, 0.0f},   // First row
-  //                                  float4{0.0f, 1.0f, 0.0f, 0.0f},   // Second row
-  //                                  float4{0.0f, 0.0f, 1.0f, 0.0f}    // Third row
-  //   );
-  // }
-  // };
+  InstanceAccel(Context *context, uint32_t numInstances, Buffer* instancesBuffer) : Accel(context, false) {
+    this->numInstances = numInstances;
+    this->instancesBuffer = instancesBuffer;
+  }  
 
   ~InstanceAccel(){};
 
-  void setInstancesBuffer(Buffer *instancesBuffer, uint32_t numInstances) {
-    this->instancesBuffer = instancesBuffer;
-    this->numInstances = numInstances;
-
-    // Temporary... For now, assume number of geometry in each instance is exactly 1. We'll have to change this later...
-    setNumGeometries(numInstances);
+  void setNumGeometries(uint32_t numGeometries) {
+    this->numGeometries = numGeometries; 
   }
-
-  void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
 
   uint32_t getNumGeometries() {
     if (this->numGeometries == -1) {
@@ -5938,44 +5873,18 @@ struct InstanceAccel : public Accel {
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
   void updateSBTOffsets() {
-    // Todo, find a way to accelerate this on the GPU
-    // For now, stupid easy solution...
-
-    // Compute the instance offset for the SBT record.
-    //   The instance shader binding table record offset is the total number
-    //   of geometries referenced by all instances up until this instance tree
-    //   multiplied by the number of ray types.
     instanceOffset = 0;
-    for (uint32_t i = 0; i < context->accels.size(); ++i) {
-      if (context->accels[i] == this)
+    for (uint32_t i = 0; i < Accel::accels.size(); ++i) {
+      if (Accel::accels[i] == this)
         break;
-      if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
-        InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
+      if (Accel::accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+        InstanceAccel *instanceAccel = (InstanceAccel *) Accel::accels[i];
         size_t numGeometry = instanceAccel->getNumGeometries();
         instanceOffset += numGeometry * requestedFeatures.numRayTypes;
       }
     }
 
     instancesBuffer->map();
-
-    // Offsets currently computed using an exclusive prefix sum over geometry counts per BLAS.
-    // std::vector<int32_t> blasOffsets(numInstances);
-    // int offset = 0;
-    // for (uint32_t i = 0; i < numInstances; ++i) {
-    //   blasOffsets[i] = offset;
-    //   if (this->instances[i]->getType() == GPRT_TRIANGLE_ACCEL) {
-    //     TriangleAccel *triAccel = (TriangleAccel *) this->instances[i];
-    //     offset += (uint32_t) triAccel->geometries.size() * requestedFeatures.numRayTypes;
-    //   } else if (this->instances[i]->getType() == GPRT_AABB_ACCEL) {
-    //     AABBAccel *aabbAccel = (AABBAccel *) this->instances[i];
-    //     offset += (uint32_t) aabbAccel->geometries.size() * requestedFeatures.numRayTypes;
-    //   } else {
-    //     LOG_ERROR("Error, unknown instance type");
-    //   }
-    // }
-
-    // int numRayTypes = 1;
-    // instances[i].instanceShaderBindingTableRecordOffset = instanceOffset + blasOffsetWithinCurrentTLAS;
 
     // Populate SBT offsets one by one
     int numGeometriesInTLAS = 0;
@@ -5994,31 +5903,6 @@ struct InstanceAccel : public Accel {
     }
     instancesBuffer->unmap();
     setNumGeometries(numGeometriesInTLAS);
-
-    // Throwing the burden of all of this onto the user...
-
-    // // If the visibility mask address is -1, we assume a mask of 0xFF
-    // visibilityMasksAddress = -1;
-    // if (visibilityMasks.buffer != nullptr) {
-    //   visibilityMasksAddress = visibilityMasks.buffer->deviceAddress;
-    // }
-
-    // // If transform buffer address is -1, we assume an identity transformation.
-    // transformBufferAddress = -1;
-    // if (transforms.buffer != nullptr) {
-    //   transformBufferAddress = transforms.buffer->deviceAddress;
-    // }
-
-    // Currently, we always compute the instance addresses and offsets ourselves. Its too complex with the current API
-    // for an end user to compute...
-    // std::vector<uint64_t> addresses(numInstances);
-    // for (uint32_t i = 0; i < numInstances; ++i)
-    //   addresses[i] = this->instances[i]->address;
-
-    // Temporary... In the future, we need to be able to set these offsets on the device. However,
-    // the current GPRT API is heavily dependent on the "MultiplierForGeometryContributionToHitGroupIndex",
-    // which dramatically complicates SBT construction and management. Until we're able to shift the API over
-    // to a zero multiplier workflow, we'll just do this on the host for now.
   }
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
@@ -6066,8 +5950,8 @@ Context::getNumHitRecords() {
   // The total number of geometries is the number of geometries referenced
   // by each top level acceleration structure.
   int totalGeometries = 0;
-  for (int accelID = 0; accelID < accels.size(); ++accelID) {
-    Accel *accel = accels[accelID];
+  for (int accelID = 0; accelID < Accel::accels.size(); ++accelID) {
+    Accel *accel = Accel::accels[accelID];
     if (!accel)
       continue;
     if (accel->getType() == GPRT_INSTANCE_ACCEL) {
@@ -6255,8 +6139,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable->map();
       uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
 
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-        Accel *tlas = accels[tlasID];
+      for (int tlasID = 0; tlasID < Accel::accels.size(); ++tlasID) {
+        Accel *tlas = Accel::accels[tlasID];
         if (!tlas)
           continue;
         if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
@@ -7100,8 +6984,8 @@ Context::buildPipeline() {
     }
 
     // Go over all TLAS by order they were created
-    for (uint32_t tlasID = 0; tlasID < accels.size(); ++tlasID) {
-      Accel *tlas = accels[tlasID];
+    for (uint32_t tlasID = 0; tlasID < Accel::accels.size(); ++tlasID) {
+      Accel *tlas = Accel::accels[tlasID];
       if (!tlas)
         continue;
       if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
@@ -9100,7 +8984,6 @@ gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayO
   LOG_API_CALL();
   Context *context = (Context *) _context;
   AABBAccel *accel = new AABBAccel(context, numGeometries, (AABBGeom *) arrayOfChildGeoms);
-  context->accels.push_back(accel);
   return (GPRTAccel) accel;
 }
 
@@ -9109,7 +8992,6 @@ gprtTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *ar
   LOG_API_CALL();
   Context *context = (Context *) _context;
   TriangleAccel *accel = new TriangleAccel(context, numGeometries, (TriangleGeom *) arrayOfChildGeoms);
-  context->accels.push_back(accel);
   return (GPRTAccel) accel;
 }
 
@@ -9123,9 +9005,7 @@ GPRT_API GPRTAccel
 gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferOf<gprt::Instance> instancesBuffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  InstanceAccel *accel = new InstanceAccel(context /*, numAccels, arrayOfAccels*/);
-  accel->setInstancesBuffer((Buffer *) instancesBuffer, numInstances);
-  context->accels.push_back(accel);
+  InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
 
   // Creating an instance acceleration structure will introduce geom records into
   // the SBT. Therefore, we need to rebuild the pipeline after this.
@@ -9133,29 +9013,6 @@ gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferO
   context->raytracingPipelineOutOfDate = true;
 
   return (GPRTAccel) accel;
-}
-
-// GPRT_API GPRTAccel
-// gprtInstanceAccelCreate(GPRTContext _context /*, uint32_t numAccels , GPRTAccel *arrayOfAccels, unsigned int flags*/)
-// {
-//   LOG_API_CALL();
-//   Context *context = (Context *) _context;
-//   InstanceAccel *accel = new InstanceAccel(context /*, numAccels, arrayOfAccels*/);
-//   context->accels.push_back(accel);
-
-//   // Creating an instance acceleration structure will introduce geom records into
-//   // the SBT. Therefore, we need to rebuild the pipeline after this.
-
-//   context->raytracingPipelineOutOfDate = true;
-
-//   return (GPRTAccel) accel;
-// }
-
-GPRT_API void
-gprtAccelSetInstances(GPRTAccel instanceAccel, GPRTBufferOf<gprt::Instance> instances, uint32_t numInstances) {
-  LOG_API_CALL();
-  InstanceAccel *accel = (InstanceAccel *) instanceAccel;
-  accel->setInstancesBuffer((Buffer *) instances, numInstances);
 }
 
 GPRT_API void
