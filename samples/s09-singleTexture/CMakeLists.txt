@@ -22,17 +22,20 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s07_deviceCode
+    s09_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s07_multipleGeometry hostCode.cpp)
-target_link_libraries(s07_multipleGeometry
+add_executable(s09_textures hostCode.cpp)
+target_link_libraries(s09_textures
   PRIVATE
-    s07_deviceCode
+    s09_deviceCode
     gprt::gprt
-    generator
+    stb_image
+)
+target_compile_definitions(s09_textures
+  PRIVATE ASSETS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../3rdParty/GPRT-SampleAssets/"
 )

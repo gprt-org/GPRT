@@ -208,7 +208,10 @@ main(int ac, char **av) {
   Mesh<TorusKnotMesh> mesh(context, trianglesGeomType, TorusKnotMesh{2, 3, 16, 288});
 
   // Placing that triangles BLAS into a TLAS.
-  GPRTAccel triangleTLAS = gprtInstanceAccelCreate(context, 1, &mesh.accel);
+  gprt::Instance instance = gprtAccelGetInstance(mesh.accel);
+  GPRTBufferOf<gprt::Instance> triangleInstancesBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+
+  GPRTAccel triangleTLAS = gprtInstanceAccelCreate(context, 1, triangleInstancesBuffer);
 
   // Buffers to hold triangle and OBB data
   float3 eul = float3(1.f, 2.f, 3.f);
@@ -217,21 +220,7 @@ main(int ac, char **av) {
   std::vector<float3> euls = {eul, deul, tmp};
   GPRTBufferOf<float3> eulRots = gprtDeviceBufferCreate<float3>(context, 3, euls.data());
   GPRTBufferOf<float3> aabbPositions = gprtDeviceBufferCreate<float3>(context, 2, nullptr);
-  GPRTBufferOf<gprt::Instance> instance = gprtInstanceAccelGetInstances(triangleTLAS);
-
-  ComputeOBBConstants obbPC;
-  obbPC.aabbs = gprtBufferGetHandle(aabbPositions);
-  obbPC.eulRots = gprtBufferGetHandle(eulRots);
-  obbPC.vertices = gprtBufferGetHandle(mesh.vertexBuffer);
-  obbPC.indices = gprtBufferGetHandle(mesh.indexBuffer);
-  obbPC.instance = gprtBufferGetHandle(instance);
-  obbPC.numIndices = mesh.indices.size();
-  obbPC.numTrisToInclude = mesh.indices.size();
-
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-  gprtComputeLaunch(ClearOBB, {1, 1, 1}, {1, 1, 1}, obbPC);
-  gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
-  gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+  // GPRTBufferOf<gprt::Instance> instance = gprtInstanceAccelGetInstances(triangleTLAS);
 
   LOG("building geometries ...");
 
@@ -257,7 +246,9 @@ main(int ac, char **av) {
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // Placing that AABB BLAS into a TLAS.
-  GPRTAccel obbAccel = gprtInstanceAccelCreate(context, 1, &aabbAccel);
+  gprt::Instance aabbInstance = gprtAccelGetInstance(aabbAccel);
+  GPRTBufferOf<gprt::Instance> aabbInstanceBuffer = gprtDeviceBufferCreate(context, 1, &aabbInstance);
+  GPRTAccel obbAccel = gprtInstanceAccelCreate(context, 1, aabbInstanceBuffer);
   gprtAccelBuild(context, obbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
@@ -266,6 +257,20 @@ main(int ac, char **av) {
   rayGenData->obbAccel = gprtAccelGetHandle(obbAccel);
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+
+  ComputeOBBConstants obbPC;
+  obbPC.aabbs = gprtBufferGetHandle(aabbPositions);
+  obbPC.eulRots = gprtBufferGetHandle(eulRots);
+  obbPC.vertices = gprtBufferGetHandle(mesh.vertexBuffer);
+  obbPC.indices = gprtBufferGetHandle(mesh.indexBuffer);
+  obbPC.instance = gprtBufferGetHandle(aabbInstanceBuffer);
+  obbPC.numIndices = mesh.indices.size();
+  obbPC.numTrisToInclude = mesh.indices.size();
+
+  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtComputeLaunch(ClearOBB, {1, 1, 1}, {1, 1, 1}, obbPC);
+  gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+  gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
 
   // ##################################################################
   // now that everything is ready: launch it ....

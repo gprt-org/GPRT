@@ -22,7 +22,7 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s12_deviceCode
+    s12_deviceCode_B
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
@@ -32,6 +32,6 @@ embed_devicecode(
 add_executable(s12_imgui_rt hostCode.cpp)
 target_link_libraries(s12_imgui_rt
   PRIVATE
-    s12_deviceCode
+    s12_deviceCode_B
     gprt::gprt
 )

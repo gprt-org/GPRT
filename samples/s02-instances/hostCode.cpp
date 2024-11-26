@@ -141,19 +141,20 @@ main(int ac, char **av) {
   // we will use the "instance ID" to determine what color each cube should be.
 
   // First, we create a list of BLAS objects
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel, trianglesAccel};
-
-  // Then, we'll create a top level acceleration structure to hold "instances" of these objects.
-  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
-  GPRTBufferOf<gprt::Instance> instances = gprtInstanceAccelGetInstances(world);
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  gprt::Instance instances[NUM_INSTANCES] = {instance, instance, instance};
 
   // Here, we'll assign a transform to each of these instances to place them in our world.
-  gprtBufferMap(instances);
-  gprt::Instance *instancesPtr = gprtBufferGetPointer(instances);
   for (int i = 0; i < NUM_INSTANCES; ++i) {
-    instancesPtr[i].transform = transforms[i];
+    instances[i].transform = transforms[i];
   }
-  gprtBufferUnmap(instances);
+
+  // Then, we'll create a buffer to hold these instance primitives
+  GPRTBufferOf<gprt::Instance> instanceBuffer =
+      gprtDeviceBufferCreate<gprt::Instance>(context, NUM_INSTANCES, instances);
+
+  // We'll also create a top level accel where these instances will be stored in the leaves
+  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, instanceBuffer);
 
   // With our instances fully populated, we can now build our accel.
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
@@ -247,6 +248,7 @@ main(int ac, char **av) {
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(frameBuffer);
+  gprtBufferDestroy(instanceBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(trianglesAccel);

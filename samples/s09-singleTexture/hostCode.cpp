@@ -40,7 +40,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s08_deviceCode;
+extern GPRTProgram s09_deviceCode;
 
 // Vertices are the points that define our texture plane
 const int NUM_VERTICES = 4;
@@ -67,7 +67,7 @@ int3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s08-textures.png";
+const char *outFileName = "s09-textures.png";
 
 float3 lookFrom = {0.f, 0.0f, 10.f};
 float3 lookAt = {0.f, 0.f, 0.f};
@@ -91,9 +91,9 @@ main(int ac, char **av) {
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
-  gprtRequestWindow(fbSize.x, fbSize.y, "Int08 Single Texture");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S09 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s08_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s09_deviceCode);
   PushConstants pc;
   pc.now = 0.f;
 
@@ -171,10 +171,13 @@ main(int ac, char **av) {
   }
 
   GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
-  std::vector<GPRTAccel> instances(samplers.size(), trianglesBLAS);
+  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, (uint32_t) instances.size(), instances.data());
-  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtInstanceAccelGetInstances(trianglesTLAS);
+  std::vector<gprt::Instance> instances(samplers.size(), gprtAccelGetInstance(trianglesBLAS));
+
+  GPRTBufferOf<gprt::Instance> instancesBuffer =
+      gprtDeviceBufferCreate<gprt::Instance>(context, instances.size(), instances.data());
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instancesBuffer);
 
   pc.instances = gprtBufferGetHandle(instancesBuffer);
   pc.numInstances = (uint32_t) instances.size();
@@ -183,7 +186,6 @@ main(int ac, char **av) {
 
   // gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);
 
-  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ------------------------------------------------------------------

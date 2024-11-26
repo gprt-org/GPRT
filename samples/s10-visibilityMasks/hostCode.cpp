@@ -38,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s09_deviceCode;
+extern GPRTProgram s10_deviceCode;
 
 // Scene geometry. Looks a bit intimidating, but basically just a couple
 // hand-plotted triangles, two definiting a floor plane, 16 triangles defining
@@ -100,7 +100,7 @@ float3x4 transforms[NUM_INSTANCES] = {
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s09-visibilityMasks.png";
+const char *outFileName = "s10-visibilityMasks.png";
 
 // Initial camera parameters
 float3 lookFrom = {1.5f, 6.f, -10.f};
@@ -121,9 +121,9 @@ main(int ac, char **av) {
   // the sun.
   LOG("gprt example '" << av[0] << "' starting up");
 
-  gprtRequestWindow(fbSize.x, fbSize.y, "S09 Visibility Masks");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S10 Visibility Masks");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s09_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
 
   PushConstants pc;
 
@@ -204,17 +204,14 @@ main(int ac, char **av) {
   // Now stick both of these into a tree.
   // Note, we're making multiple instances of the same wall and window.
   // The transforms buffer will place these walls and windows into the world
-  std::vector<GPRTAccel> BLAS = {
-      floorAccel,  wallAccel,  windowAccel, floorAccel,  wallAccel,  windowAccel, floorAccel,  wallAccel,
-      windowAccel, floorAccel, wallAccel,   windowAccel, floorAccel, wallAccel,   windowAccel,
+  gprt::Instance floor = gprtAccelGetInstance(floorAccel);
+  gprt::Instance wall = gprtAccelGetInstance(wallAccel);
+  gprt::Instance window = gprtAccelGetInstance(windowAccel);
+  std::vector<gprt::Instance> BLAS = {
+      floor, wall, window, floor, wall, window, floor, wall, window, floor, wall, window, floor, wall, window,
   };
-
-  GPRTAccel world = gprtInstanceAccelCreate(context, (uint32_t) BLAS.size(), BLAS.data());
-  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtInstanceAccelGetInstances(world);
-  gprtBufferMap(instancesBuffer);
-  gprt::Instance *instances = gprtBufferGetPointer(instancesBuffer);
   for (int i = 0; i < NUM_INSTANCES; ++i) {
-    instances[i].transform = transforms[i];
+    BLAS[i].transform = transforms[i];
   }
 
   // This is new! We want our wall and floor instances to cast shadows,
@@ -229,13 +226,16 @@ main(int ac, char **av) {
   // The last bit being 0 means that instance will be invisible
   // to rays traced with a visibility mask of 0b00000001, since
   // 0b00000001 & 0b1111110 == 0
-  instances[2].mask = 0b11111110;
-  instances[5].mask = 0b11111110;
-  instances[8].mask = 0b11111110;
-  instances[11].mask = 0b11111110;
-  instances[14].mask = 0b11111110;
+  BLAS[2].mask = 0b11111110;
+  BLAS[5].mask = 0b11111110;
+  BLAS[8].mask = 0b11111110;
+  BLAS[11].mask = 0b11111110;
+  BLAS[14].mask = 0b11111110;
 
-  gprtBufferUnmap(instancesBuffer);
+  GPRTBufferOf<gprt::Instance> instancesBuffer =
+      gprtDeviceBufferCreate<gprt::Instance>(context, BLAS.size(), BLAS.data());
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, BLAS.size(), instancesBuffer);
 
   // Now that our instance acceleration structure is setup, build it.
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);

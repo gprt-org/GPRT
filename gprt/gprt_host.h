@@ -968,18 +968,13 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 /*! create a new instance acceleration structure with given number of
   instances.
 
-  \param numAccels Number of acceleration structures instantiated in the leaves
+  \param numInstances Number of acceleration structures instantiated in the leaves
   of this acceleration structure, must be non-zero.
 
-  \param arrayOfAccels A array of 'numInstances' child
-  acceleration structures. No accel in this array can be an instance accel.
-
-  \param flags reserved for future use
+  \param instances A buffer of 'numInstances' instances.
 */
-GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint32_t numAccels, GPRTAccel *arrayOfAccels,
-                                           unsigned int flags GPRT_IF_CPP(= 0));
-
-GPRT_API GPRTBufferOf<gprt::Instance> gprtInstanceAccelGetInstances(GPRTAccel instanceAccel);
+GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint numInstances,
+                                           GPRTBufferOf<gprt::Instance> instances);
 
 GPRT_API void gprtAccelDestroy(GPRTAccel accel);
 
@@ -1068,6 +1063,19 @@ GPRT_API void gprtAccelCompact(GPRTContext context, GPRTAccel accel);
 GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0));
 
 GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
+
+/**
+ * @brief Returns an instance of the given acceleration structure, which can then be used as an input
+ * primitive for an instance acceleration structure.
+ *
+ * @param blas The bottom level acceleration structure to create an instance of.
+ *
+ * @note that @param accel must be built before an instance can be returned.
+ *
+ * If the blas is rebuilt, the user might need to create a new instance using this call.
+ * Any returned instance objects do not need to be destroyed.
+ * */
+GPRT_API gprt::Instance gprtAccelGetInstance(GPRTAccel blas);
 
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during

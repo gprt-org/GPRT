@@ -42,36 +42,24 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s06_deviceCode;
+extern GPRTProgram s08_deviceCode;
 
-// initial image resolution
-const int2 fbSize = {1400, 460};
-
-const char *outFileName = "s06-computeTransform.png";
-
-float3 lookFrom = {-2.f, -2.f, 0.f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 0.f, -1.f};
-float cosFovy = 0.3f;
-
-// A class we'll use to quickly generate meshes and bottom level trees
 template <typename T> struct Mesh {
   std::vector<float3> vertices;
   std::vector<uint3> indices;
   GPRTBufferOf<float3> vertexBuffer;
   GPRTBufferOf<uint3> indexBuffer;
   GPRTGeomOf<TrianglesGeomData> geometry;
-  GPRTAccel accel;
 
   Mesh(){};
-  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator) {
-    // Use the generator to generate vertices and indices
+  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color, float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
     while (!vertGenerator.done()) {
       auto vertex = vertGenerator.generate();
       auto position = vertex.position;
-      vertices.push_back(float3(position[0], position[1], position[2]));
+      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
+      vertices.push_back(p.xyz());
       vertGenerator.next();
     }
     while (!triGenerator.done()) {
@@ -81,48 +69,45 @@ template <typename T> struct Mesh {
       triGenerator.next();
     }
 
-    // Upload those to the device, create the geometry
     vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
     indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
     geometry = gprtGeomCreate(context, geomType);
-
-    gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
-    gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
+    gprtTrianglesSetVertices(geometry, vertexBuffer, (uint32_t) vertices.size());
+    gprtTrianglesSetIndices(geometry, indexBuffer, (uint32_t) indices.size());
     geomData->vertex = gprtBufferGetHandle(vertexBuffer);
     geomData->index = gprtBufferGetHandle(indexBuffer);
-
-    // Build the bottom level acceleration structure
-    accel = gprtTriangleAccelCreate(context, 1, &geometry);
-    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
-    // gprtAccelCompact(context, accel);
+    geomData->color = color;
   };
 
-  void cleanupMesh() {
-    gprtAccelDestroy(accel);
+  void cleanup() {
     gprtGeomDestroy(geometry);
     gprtBufferDestroy(vertexBuffer);
     gprtBufferDestroy(indexBuffer);
   };
 };
 
+// initial image resolution
+const int2 fbSize = {1400, 460};
+
+const char *outFileName = "s08-multipleGeometry.png";
+
+float3 lookFrom = {10.f, 10.0f, 10.f};
+float3 lookAt = {0.f, 0.f, 1.f};
+float3 lookUp = {0.f, 0.f, -1.f};
+float cosFovy = 0.4f;
+
 #include <iostream>
 int
 main(int ac, char **av) {
-  // In this example, we'll use a instance transform program to manipulate
-  // instance positions in parallel on the GPU. The point of this example
-  // is to show that the primitives of an instance tree can be efficiently
-  // manipulated, just like any other primitive.
+  // This example serves to demonstrate that multiple geometry can be placed
+  // in the same bottom level acceleration structure.
+  LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S06 Compute Transform");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S08 Multiple Geometry");
   GPRTContext context = gprtContextCreate(nullptr, 1);
-  GPRTModule module = gprtModuleCreate(context, s06_deviceCode);
-
-  // Structure of parameters that change each frame. We can edit these
-  // without rebuilding the shader binding table.
-  PushConstants pc;
-  pc.now = 0.f;
+  GPRTModule module = gprtModuleCreate(context, s08_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -131,93 +116,76 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // Setup geometry types
   // -------------------------------------------------------
-
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "ClosestHit");
-
-  // -------------------------------------------------------
-  // set up instance transform program to animate instances
-  // -------------------------------------------------------
-  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "RayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
   // -------------------------------------------------------
-  // set up miss
+  // set up miss prog
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // ------------------------------------------------------------------
-  // bottom level mesh instances
-  // ------------------------------------------------------------------
+  LOG("building geometries ...");
 
-  // For this example, we'll be animating a grid of utah teapot meshes.
+// ------------------------------------------------------------------
+// Meshes
+// ------------------------------------------------------------------
+#ifndef M_PI
+#define M_PI 3.14
+#endif
+  Mesh<TorusKnotMesh> torusMesh1(
+      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
+      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh2(
+      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
+      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
+  Mesh<TorusKnotMesh> torusMesh3(
+      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
+      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
+  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1, 1, 1),
+                                     math::matrixFromTranslation(float3(0.0f, 0.0f, -4.0f)));
+  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry,
+                                                      floorMesh.geometry};
+  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, geoms.size(), geoms.data());
+  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  // We begin by making one teapot mesh, storing that mesh in a bottom
-  // level acceleration structure.
-  Mesh<TeapotMesh> instanceMesh(context, trianglesGeomType, TeapotMesh{12});
-
-  // Next, we'll create a grid of references to the same bottom level
-  // acceleration structure. This saves memory and improves performance over
-  // creating duplicate meshes.
-  uint32_t numInstances = 256 * 256;
-  std::vector<gprt::Instance> instances(numInstances);
-  for (int i = 0; i < numInstances; ++i) {
-    instances[i] = gprtAccelGetInstance(instanceMesh.accel);
-  }
-
-  // ------------------------------------------------------------------
-  // the instance acceleration structure
-  // ------------------------------------------------------------------
-
-  // Before, we assigned instance transforms on the CPU, one at a time.
-  // Here, we'll assign many transforms in parallel on the GPU, then
-  // build / refit the tree afterwards.
-  GPRTBufferOf<gprt::Instance> instancesBuffer =
-      gprtDeviceBufferCreate<gprt::Instance>(context, numInstances, instances.data());
-  GPRTAccel world = gprtInstanceAccelCreate(context, numInstances, instancesBuffer);
-
-  // Parameters for our transform program that'll animate our transforms
-  pc.instances = gprtBufferGetHandle(instancesBuffer);
-  pc.numInstances = numInstances;
-
-  // Build the shader binding table to upload parameters to the device
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-  // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
-
-  // Now that the transforms are set, we can build our top level acceleration
-  // structure
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
+  gprt::Instance instance = gprtAccelGetInstance(trianglesBLAS);
+  GPRTBufferOf<gprt::Instance> instances = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, instances);
+  gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // ##################################################################
-  // set the parameters for the rest of our kernels
+  // set the parameters for our kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
   LOG("launching ...");
+
+  // Structure of parameters that change each frame. We can edit these
+  // without rebuilding the shader binding table.
+  PushConstants pc;
 
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
@@ -234,6 +202,7 @@ main(int ac, char **av) {
     int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
 
     // If we click the mouse, we should rotate the camera
+    // Here, we implement some simple camera controls
     if (state == GPRT_PRESS || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -243,8 +212,8 @@ main(int ac, char **av) {
 #endif
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
-      float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleX = float(2 * M_PI / fbSize.x);
+      float deltaAngleY = float(M_PI / fbSize.y);
       float xAngle = float(lastxpos - xpos) * deltaAngleX;
       float yAngle = float(lastypos - ypos) * deltaAngleY;
 
@@ -267,13 +236,7 @@ main(int ac, char **av) {
       pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
     }
 
-    // update time to move instance transforms. Then, update only instance
-    // accel.
-    pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
-    gprtAccelUpdate(context, world);
-
-    // Now, trace rays
+    // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
     // If a window exists, presents the framebuffer here to that window
@@ -293,12 +256,15 @@ main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
+  torusMesh1.cleanup();
+  torusMesh2.cleanup();
+  torusMesh3.cleanup();
+  floorMesh.cleanup();
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtComputeDestroy(transformProgram);
-  gprtAccelDestroy(world);
-  instanceMesh.cleanupMesh();
+  gprtAccelDestroy(trianglesBLAS);
+  gprtAccelDestroy(trianglesTLAS);
   gprtGeomTypeDestroy(trianglesGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);

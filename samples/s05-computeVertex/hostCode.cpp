@@ -65,7 +65,7 @@ main(int ac, char **av) {
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s05_deviceCode);
 
-  // Structure of parameters that change each frame. We can edit these 
+  // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
   pc.now = 0.f;
@@ -130,14 +130,17 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute triangles in parallel with a vertex compute shader
-  gprtComputeLaunch(vertexProgram, {(numTriangles + 31u) / 32u,1,1}, {32,1,1}, vertexData);
+  gprtComputeLaunch(vertexProgram, {(numTriangles + 31u) / 32u, 1, 1}, {32, 1, 1}, vertexData);
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // ##################################################################
@@ -221,11 +224,11 @@ main(int ac, char **av) {
 
     // update time to move primitives. then, rebuild accel.
     vertexData.now = float(gprtGetTime(context));
-    gprtComputeLaunch(vertexProgram, {(numTriangles + 31) / 32, 1, 1}, {32,1,1}, vertexData);
+    gprtComputeLaunch(vertexProgram, {(numTriangles + 31) / 32, 1, 1}, {32, 1, 1}, vertexData);
 
     // Now that the vertices have moved, we need to update our bottom level tree.
-    // Note, updates should only be used when primitive counts are unchanged and 
-    // movement is relatively small.  
+    // Note, updates should only be used when primitive counts are unchanged and
+    // movement is relatively small.
     gprtAccelUpdate(context, trianglesAccel);
 
     // And since the bottom level tree is part of the top level tree, we need

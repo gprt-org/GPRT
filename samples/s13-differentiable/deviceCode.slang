@@ -183,7 +183,7 @@ ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConsta
   computeOBB(eul, a, b, c, params.aabbs);
 
   // Also update the visualization of the OBB
-  float3x3 rot = transpose(eul_to_mat3(eul));
+  float3x3 rot = eul_to_mat3(eul);
   gprt::Instance instance = gprt::load<gprt::Instance>(params.instance, 0);
   instance.transform = float3x4(float4(rot[0], 0), float4(rot[1], 0), float4(rot[2], 0));
   gprt::store<gprt::Instance>(params.instance, 0, instance);

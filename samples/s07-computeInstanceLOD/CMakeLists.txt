@@ -22,16 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s09_deviceCode
+    s07_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s09_visibilityMasks hostCode.cpp)
-target_link_libraries(s09_visibilityMasks
+add_executable(s07_computeInstanceLOD hostCode.cpp)
+target_link_libraries(s07_computeInstanceLOD
   PRIVATE
-    s09_deviceCode
+    s07_deviceCode
     gprt::gprt
+    generator
 )
