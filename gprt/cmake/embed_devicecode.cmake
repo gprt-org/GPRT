@@ -34,7 +34,6 @@ function(embed_devicecode)
   unset(EMBED_DEVICECODE_OUTPUTS)
 
   add_custom_command(
-  # add_custom_target(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     COMMAND ${CMAKE_SLANG_COMPILER}
     ${EMBED_DEVICECODE_SOURCES}
@@ -44,6 +43,8 @@ function(embed_devicecode)
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
     -ignore-capabilities
+    -zero-initialize # zero-initialize all variables
+    -g
     -I ${GPRT_INCLUDE_DIR}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slangh ${GPRT_INCLUDE_DIR}/gprt.h

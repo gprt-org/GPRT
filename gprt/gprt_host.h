@@ -1931,6 +1931,14 @@ gprtBufferGetHandle(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   return gprtBufferGetHandle((GPRTBuffer) buffer, deviceID);
 }
 
+
+GPRT_API uint64_t gprtBufferGetDeviceAddress(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
+template <typename T>
+uint64_t gprtBufferGetDeviceAddress(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+  return gprtBufferGetDeviceAddress((GPRTBuffer) buffer, deviceID);
+}
+
+
 /** If a window was requested, this call interprets the given buffer as
  * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents
  * to the window, potentially waiting for the screen to update before swapping.

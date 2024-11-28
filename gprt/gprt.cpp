@@ -106,7 +106,7 @@ static struct RequestedFeatures {
 
   bool invocationReordering = false;
 
-  bool debugPrintf = true;
+  bool debugPrintf = false;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -8921,6 +8921,13 @@ gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
   return gprt::Buffer{buffer->virtualAddress, 0};
+}
+
+GPRT_API uint64_t
+gprtBufferGetDeviceAddress(GPRTBuffer _buffer, int deviceID) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  return buffer->getDeviceAddress();
 }
 
 GPRT_API void
