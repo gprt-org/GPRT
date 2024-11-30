@@ -8494,10 +8494,18 @@ gprtBufferGetSize(GPRTBuffer _buffer, int deviceID) {
 }
 
 GPRT_API void *
-gprtBufferGetPointer(GPRTBuffer _buffer, int deviceID) {
+gprtBufferGetHostPointer(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
   return buffer->mapped;
+}
+
+GPRT_API void *
+gprtBufferGetDevicePointer(GPRTBuffer _buffer, int deviceID) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  uint64_t addr = buffer->getDeviceAddress();
+  return (void*)addr;
 }
 
 GPRT_API void

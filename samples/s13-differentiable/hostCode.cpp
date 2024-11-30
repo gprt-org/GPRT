@@ -357,7 +357,7 @@ main(int ac, char **av) {
 
     // Optimize using Adam
     gprtBufferMap(eulRots);
-    float3 *eulPtr = gprtBufferGetPointer(eulRots);
+    float3 *eulPtr = gprtBufferGetHostPointer(eulRots);
     float LR = powf(10.f, -learningRate);
     float3 grad = eulPtr[1];
     float3 jitter = float3((float) rand() / RAND_MAX, (float) rand() / RAND_MAX, (float) rand() / RAND_MAX) - 0.5f;

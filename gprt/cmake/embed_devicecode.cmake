@@ -45,6 +45,7 @@ function(embed_devicecode)
     -ignore-capabilities
     -zero-initialize # zero-initialize all variables
     -g
+    -O0
     -I ${GPRT_INCLUDE_DIR}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slangh ${GPRT_INCLUDE_DIR}/gprt.h

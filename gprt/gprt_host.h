@@ -627,7 +627,7 @@ GPRT_API void gprtRequestRayQueries();
 
   - int gpu=2;gprtContextCreate(&gpu,1) will create a context on GPU #2
   (where 2 refers to the vulkan device ordinal; from that point on, from
-  gprt's standpoint (eg, during gprtBufferGetPointer() this GPU will
+  gprt's standpoint (eg, during gprtBufferGetHostPointer() this GPU will
   from that point on be known as device #0 */
 GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(= nullptr),
                                        int numDevices GPRT_IF_CPP(= 1));
@@ -1594,12 +1594,12 @@ gprtBufferGetSize(GPRTBufferOf<T> buffer) {
 
   // TODO! update for Vulkan...
   */
-GPRT_API void *gprtBufferGetPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
+GPRT_API void *gprtBufferGetHostPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
 T *
-gprtBufferGetPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
-  return (T *) gprtBufferGetPointer((GPRTBuffer) buffer, deviceID);
+gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtBufferGetHostPointer((GPRTBuffer) buffer, deviceID);
 }
 
 GPRT_API void gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
@@ -1616,6 +1616,14 @@ template <typename T>
 void
 gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
+}
+
+GPRT_API void *gprtBufferGetDevicePointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
+
+template <typename T>
+T *
+gprtBufferGetDevicePointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+  return (T *) gprtBufferGetDevicePointer((GPRTBuffer) buffer, deviceID);
 }
 
 /***

@@ -76,7 +76,7 @@ main(int ac, char **av) {
     GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, 1000000000 / 2);
 
     {
-      uint32_t* ptr = gprtBufferGetPointer(buffer);
+      uint32_t* ptr = gprtBufferGetHostPointer(buffer);
       for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
         ptr[i] = i;
       }
@@ -92,7 +92,7 @@ main(int ac, char **av) {
         throw std::runtime_error("Error, buffer not properly resized!");
 
       // Initial values should be preserved
-      uint32_t* ptr = gprtBufferGetPointer(buffer);
+      uint32_t* ptr = gprtBufferGetHostPointer(buffer);
       for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
         if (ptr[i] != i) {
             throw std::runtime_error("Error, buffer values not preserved!");
@@ -113,7 +113,7 @@ main(int ac, char **av) {
 
     {
       gprtBufferMap(buffer);
-      uint32_t* ptr = gprtBufferGetPointer(buffer);
+      uint32_t* ptr = gprtBufferGetHostPointer(buffer);
       for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
         ptr[i] = i;
       }
@@ -131,7 +131,7 @@ main(int ac, char **av) {
 
       // Initial values should be preserved
       gprtBufferMap(buffer);
-      uint32_t* ptr = gprtBufferGetPointer(buffer);
+      uint32_t* ptr = gprtBufferGetHostPointer(buffer);
       for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
         if (ptr[i] != i) {
             throw std::runtime_error("Error, buffer values not preserved!");

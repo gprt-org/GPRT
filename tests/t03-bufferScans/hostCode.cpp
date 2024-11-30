@@ -62,7 +62,7 @@ main(int ac, char **av) {
     // std::cout<<"Verifying correctness..." << std::endl;
     bool correct = true;
     gprtBufferMap(exclusiveSum);
-    uint32_t* ptr = gprtBufferGetPointer(exclusiveSum);
+    uint32_t* ptr = gprtBufferGetHostPointer(exclusiveSum);
     for (uint32_t i = 0; i < numItems; ++i) {
       if (ptr[i] != hostExclusiveSum[i]) {
         std::cout<<"Error. Item " << i << " is " << ptr[i] << " but should be " << hostExclusiveSum[i] << std::endl;
@@ -140,7 +140,7 @@ main(int ac, char **av) {
     // std::cout<<"Verifying correctness..." << std::endl;
     bool correct = true;
     gprtBufferMap(partition);
-    int32_t* ptr = gprtBufferGetPointer(partition);
+    int32_t* ptr = gprtBufferGetHostPointer(partition);
     memcpy(devicePartition.data(), ptr, numItems * sizeof(int32_t));
     for (uint32_t i = 0; i < numItems; ++i) {
       if (ptr[i] != hostPartition[i]) {
@@ -214,7 +214,7 @@ main(int ac, char **av) {
     // std::cout<<"Verifying correctness..." << std::endl;
     bool correct = true;
     gprtBufferMap(partition);
-    int32_t* ptr = gprtBufferGetPointer(partition);
+    int32_t* ptr = gprtBufferGetHostPointer(partition);
     memcpy(deviceSelection.data(), ptr, numItems * sizeof(int32_t));
     for (uint32_t i = 0; i < numItems; ++i) {
       if (ptr[i] != hostSelection[i]) {
