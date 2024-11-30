@@ -50,7 +50,7 @@ main(int ac, char **av) {
     std::uniform_int_distribution<uint32_t> uniform_dist(0, 4'294'967'295);
 
     gprtBufferMap(data);
-    uint32_t *ptr = gprtBufferGetPointer(data);
+    uint32_t *ptr = gprtBufferGetHostPointer(data);
     for (uint32_t i = 0; i < 100000000; ++i) {
         ptr[i] = uniform_dist(e1);
         dataHost[i] = ptr[i];
@@ -63,7 +63,7 @@ main(int ac, char **av) {
 
     // Assert
     gprtBufferMap(data);
-    ptr = gprtBufferGetPointer(data);
+    ptr = gprtBufferGetHostPointer(data);
     for (uint32_t i = 1; i < 100000000; ++i) {
       if (ptr[i] != dataHost[i]) throw std::runtime_error("Error, found element in output that does not exist in input!");
       if (i > 0 && ptr[i] < ptr[i - 1]) throw std::runtime_error("Error, found out of order element!");
@@ -102,8 +102,8 @@ main(int ac, char **av) {
     
     gprtBufferMap(keys);
     gprtBufferMap(values);
-    uint32_t *kptr = gprtBufferGetPointer(keys);
-    uint32_t *vptr = gprtBufferGetPointer(values);
+    uint32_t *kptr = gprtBufferGetHostPointer(keys);
+    uint32_t *vptr = gprtBufferGetHostPointer(values);
     for (uint32_t i = 0; i < 100000000; ++i) {
         kptr[i] = keyValsHost[i].first;
         vptr[i] = keyValsHost[i].second;
@@ -120,8 +120,8 @@ main(int ac, char **av) {
     // Assert
     gprtBufferMap(keys);
     gprtBufferMap(values);
-    kptr = gprtBufferGetPointer(keys);
-    vptr = gprtBufferGetPointer(values);
+    kptr = gprtBufferGetHostPointer(keys);
+    vptr = gprtBufferGetHostPointer(values);
     for (uint32_t i = 0; i < 100000000; ++i) {
       if (kptr[i] != keyValsHost[i].first) {
         throw std::runtime_error("Error, found key in output that does not exist in input!");

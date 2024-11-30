@@ -128,14 +128,17 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
-  gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1,1,1}, boundsData);
+  gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1, 1, 1}, boundsData);
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
+  gprt::Instance instance = gprtAccelGetInstance(aabbAccel);
+  GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // ##################################################################
@@ -163,7 +166,7 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
-  // Structure of parameters that change each frame. We can edit these 
+  // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
 

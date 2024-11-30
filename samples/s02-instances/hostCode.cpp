@@ -53,9 +53,9 @@ int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4}, {0, 4, 
 // world. The first, second, third and third column represent "right", "up", and
 // "forward" basis respectively. The last column represents the position.
 const int NUM_INSTANCES = 3;
-float transforms[NUM_INSTANCES][12] = {{0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-                                       {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-                                       {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
+float3x4 transforms[NUM_INSTANCES] = {{0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
+                                      {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
+                                      {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -141,19 +141,22 @@ main(int ac, char **av) {
   // we will use the "instance ID" to determine what color each cube should be.
 
   // First, we create a list of BLAS objects
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel, trianglesAccel};
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  gprt::Instance instances[NUM_INSTANCES] = {instance, instance, instance};
 
-  // Then, we create a transform buffer, one transform per instance.
-  // These transforms are defined at the top of our program, in the "transforms"
-  // array referenced by the last parameter here.
-  GPRTBufferOf<float3x4> transformBuffer =
-      gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, (float3x4 *) transforms);
+  // Here, we'll assign a transform to each of these instances to place them in our world.
+  for (int i = 0; i < NUM_INSTANCES; ++i) {
+    instances[i].transform = transforms[i];
+  }
 
-  // Finally, we create a top level acceleration structure here.
-  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
-  // Similar to how we set the vertex and index buffers on triangle primitives,
-  // we set the transforms buffer here for instance primitives
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
+  // Then, we'll create a buffer to hold these instance primitives
+  GPRTBufferOf<gprt::Instance> instanceBuffer =
+      gprtDeviceBufferCreate<gprt::Instance>(context, NUM_INSTANCES, instances);
+
+  // We'll also create a top level accel where these instances will be stored in the leaves
+  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, instanceBuffer);
+
+  // With our instances fully populated, we can now build our accel.
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
@@ -167,7 +170,7 @@ main(int ac, char **av) {
   // now that everything is ready: launch it ....
   // ##################################################################
 
-  // Structure of parameters that change each frame. We can edit these 
+  // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
 
@@ -245,7 +248,7 @@ main(int ac, char **av) {
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
+  gprtBufferDestroy(instanceBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(trianglesAccel);

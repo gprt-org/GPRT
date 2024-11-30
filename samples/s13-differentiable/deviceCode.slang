@@ -1,22 +1,24 @@
 #include "sharedCode.h"
 
 struct Payload {
-  float3 color; float tHit;
+  float3 color;
+  float tHit;
 };
 
-float4 over(float4 a, float4 b) {
+float4
+over(float4 a, float4 b) {
   float4 result;
   result.a = a.a + b.a * (1.f - a.a);
   if (result.a == 0.f)
-    return a; // avoid NaN
+    return a;   // avoid NaN
   result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
   return result;
 }
 
-[shader("compute")] 
-[numthreads(1,1,1)]
-void CompositeGui(uint3 DispatchThreadID : SV_DispatchThreadID, uniform CompositeGuiConstants pc)
-{
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void
+CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiConstants pc) {
   int2 pixelID = DispatchThreadID.xy;
   const int fbOfs = pixelID.x + pc.fbSize.x * pixelID.y;
   float2 fragCoord = pixelID + float2(.5f, .5f);
@@ -32,16 +34,18 @@ void CompositeGui(uint3 DispatchThreadID : SV_DispatchThreadID, uniform Composit
   SamplerState sampler = gprt::getDefaultSampler();
   Texture2D guiTexture = gprt::getTexture2DHandle(pc.guiTexture);
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
-  
+
   // Composite the GUI on top of the scene
   float4 pixelColor = over(guiColor, imageColor);
   gprt::store(pc.frameBuffer, fbOfs, gprt::make_bgra(pixelColor));
 }
 
-[[vk::push_constant]] RTPushConstants pc;
+[[vk::push_constant]]
+RTPushConstants pc;
 
-[shader("raygeneration")] 
-void raygen(uniform RayGenData record) {
+[shader("raygeneration")]
+void
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -49,14 +53,14 @@ void raygen(uniform RayGenData record) {
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure triangleTLAS = gprt::getAccelHandle(record.triangleTLAS);
-  TraceRay(triangleTLAS, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, /*miss type*/0,rayDesc,payload);
+  TraceRay(triangleTLAS, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, /*miss type*/ 0, rayDesc, payload);
 
-  if (payload.tHit > 0.f) rayDesc.TMax = payload.tHit;
+  if (payload.tHit > 0.f)
+    rayDesc.TMax = payload.tHit;
 
   RaytracingAccelerationStructure obbAccel = gprt::getAccelHandle(record.obbAccel);
   TraceRay(obbAccel, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, /*miss type*/ 1, rayDesc, payload);
@@ -65,14 +69,16 @@ void raygen(uniform RayGenData record) {
   gprt::store(record.imageBuffer, fbOfs, float4(payload.color, 1.f));
 }
 
-[shader("closesthit")] 
-void hitTriangle(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+[shader("closesthit")]
+void
+hitTriangle(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
   payload.tHit = RayTCurrent();
 }
 
 [Differentiable]
-float getSurfaceArea(float3 aabbMin, float3 aabbMax) {
+float
+getSurfaceArea(float3 aabbMin, float3 aabbMax) {
   float w = aabbMax.x - aabbMin.x;
   float h = aabbMax.y - aabbMin.y;
   float d = aabbMax.z - aabbMin.z;
@@ -80,7 +86,8 @@ float getSurfaceArea(float3 aabbMin, float3 aabbMax) {
 }
 
 [Differentiable]
-float getVolume(float3 aabbMin, float3 aabbMax) {
+float
+getVolume(float3 aabbMin, float3 aabbMax) {
   float w = aabbMax.x - aabbMin.x;
   float h = aabbMax.y - aabbMin.y;
   float d = aabbMax.z - aabbMin.z;
@@ -88,8 +95,8 @@ float getVolume(float3 aabbMin, float3 aabbMax) {
 }
 
 [Differentiable]
-float3x3 eul_to_mat3(float3 eul)
-{
+float3x3
+eul_to_mat3(float3 eul) {
   float3x3 mat;
   float ci, cj, ch, si, sj, sh, cc, cs, sc, ss;
 
@@ -114,16 +121,11 @@ float3x3 eul_to_mat3(float3 eul)
 }
 
 [Differentiable]
-float computeOBB(
-  float3 eul,
-  no_diff float3 a,
-  no_diff float3 b, 
-  no_diff float3 c,
-  no_diff gprt::Buffer aabbBuffer
-) {
+float
+computeOBB(float3 eul, no_diff float3 a, no_diff float3 b, no_diff float3 c, no_diff gprt::Buffer aabbBuffer) {
   // Compute triangle OBB
   float3x3 rot = eul_to_mat3(eul);
-  float3 aabbMin = float3(1e38f); 
+  float3 aabbMin = float3(1e38f);
   float3 aabbMax = float3(-1e38f);
   a = mul(a, rot);
   b = mul(b, rot);
@@ -134,7 +136,7 @@ float computeOBB(
   aabbMax = max(aabbMax, b);
   aabbMin = min(aabbMin, c);
   aabbMax = max(aabbMax, c);
-  
+
   // In forward pass, we atomically min/max the OBB
   gprt::atomicMin32f(aabbBuffer, 0, aabbMin.x);
   gprt::atomicMin32f(aabbBuffer, 1, aabbMin.y);
@@ -143,15 +145,17 @@ float computeOBB(
   gprt::atomicMax32f(aabbBuffer, 4, aabbMax.y);
   gprt::atomicMax32f(aabbBuffer, 5, aabbMax.z);
 
-  // Note, in the backward pass, combined aabb min and max will take on the 
+  // Note, in the backward pass, combined aabb min and max will take on the
   // atomically combined OBB
   return getSurfaceArea(aabbMin, aabbMax) + getVolume(aabbMin, aabbMax);
 }
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
-  if (DispatchThreadID.x >= 1) return;
+void
+ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+  if (DispatchThreadID.x >= 1)
+    return;
   gprt::store<float3>(params.aabbs, 0, float3(+1e38f));
   gprt::store<float3>(params.aabbs, 1, float3(-1e38f));
 
@@ -161,8 +165,10 @@ void ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBCon
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
-void ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
-  if (DispatchThreadID.x >= params.numTrisToInclude) return; // temp
+void
+ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+  if (DispatchThreadID.x >= params.numTrisToInclude)
+    return;   // temp
   int triID = DispatchThreadID.x;
 
   uint3 tri = gprt::load<uint3>(params.indices, triID);
@@ -172,24 +178,23 @@ void ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBC
 
   // Current euler rotation
   float3 eul = gprt::load<float3>(params.eulRots, 0);
-  
+
   // Compute the current OBB
   computeOBB(eul, a, b, c, params.aabbs);
-  
+
   // Also update the visualization of the OBB
   float3x3 rot = eul_to_mat3(eul);
-  float3x4 transform = float3x4(
-    float4(rot[0], 0), 
-    float4(rot[1], 0), 
-    float4(rot[2], 0)
-  );
-  gprt::store<float3x4>(params.transforms, 0, transform);
+  gprt::Instance instance = gprt::load<gprt::Instance>(params.instance, 0);
+  instance.transform = float3x4(float4(rot[0], 0), float4(rot[1], 0), float4(rot[2], 0));
+  gprt::store<gprt::Instance>(params.instance, 0, instance);
 }
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
-void BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
-  if (DispatchThreadID.x >= params.numTrisToInclude) return; // temp
+void
+BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+  if (DispatchThreadID.x >= params.numTrisToInclude)
+    return;   // temp
   int triID = DispatchThreadID.x;
 
   uint3 tri = gprt::load<uint3>(params.indices, triID);
@@ -201,8 +206,8 @@ void BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBB
   float3 eul = gprt::load<float3>(params.eulRots, 0);
   DifferentialPair<float3> diffEul = diffPair(eul, float3(0));
 
-  bwd_diff(computeOBB) (diffEul, a, b, c, params.aabbs, /*dSurfaceArea*/ 1.0f);
-  
+  bwd_diff(computeOBB)(diffEul, a, b, c, params.aabbs, /*dSurfaceArea*/ 1.0f);
+
   // In our application, the gradient is differentiated rotation
   float3 grad = diffEul.d;
 
@@ -220,13 +225,16 @@ void BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBB
 }
 
 struct BBoxAttributes {
-  float3 cen; float tN;
-  float3 rad; float tF;
+  float3 cen;
+  float tN;
+  float3 rad;
+  float tF;
 };
 
 [shader("intersection")]
-void intersectBoundingBox(uniform BoundingBoxData record) {
-  
+void
+intersectBoundingBox(uniform BoundingBoxData record) {
+
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   float tcur = RayTCurrent();
@@ -250,22 +258,26 @@ void intersectBoundingBox(uniform BoundingBoxData record) {
   attr.tN = max(max(t1.x, t1.y), t1.z);
   attr.tF = min(min(t2.x, t2.y), t2.z);
 
-  if (attr.tN > attr.tF || attr.tF < 0.0) return;
+  if (attr.tN > attr.tF || attr.tF < 0.0)
+    return;
 
   int hitKind = 0;
   if (attr.tN > 0.0) {
     // front face
-    if (attr.tN <= tcur) hitKind |= 1;
+    if (attr.tN <= tcur)
+      hitKind |= 1;
     // back face
-    if (attr.tF <= tcur) hitKind |= 2;
+    if (attr.tF <= tcur)
+      hitKind |= 2;
   }
 
-  if (hitKind != 0) 
+  if (hitKind != 0)
     ReportHit(attr.tN, hitKind, attr);
 }
 
 [shader("closesthit")]
-void hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BoundingBoxData attr) {
+void
+hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BoundingBoxData attr) {
   // Unfortunate driver bugs seem to cause "attr" here to be undefined / junk...
 
   float3 ro = ObjectRayOrigin();
@@ -292,8 +304,7 @@ void hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in Bo
   int hitKind = HitKind();
 
   // front
-  if (bool(hitKind & 1))
-  {
+  if (bool(hitKind & 1)) {
     float3 pos = ro + rd * tN;
     float3 e = smoothstep(rad - 0.03, rad - 0.02, abs(pos - cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
@@ -301,8 +312,7 @@ void hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in Bo
   }
 
   // back
-  if (bool(hitKind & 2))
-  {
+  if (bool(hitKind & 2)) {
     float3 pos = ro + rd * tF;
     float3 e = smoothstep(rad - 0.03, rad - 0.02, abs(pos - cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
@@ -310,8 +320,9 @@ void hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in Bo
   }
 }
 
-[shader("miss")] 
-void triMiss(uniform MissProgData record, inout Payload payload) {
+[shader("miss")]
+void
+triMiss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;
@@ -319,6 +330,6 @@ void triMiss(uniform MissProgData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void obbMiss(uniform MissProgData record, inout Payload payload) {
-}
+void
+obbMiss(uniform MissProgData record, inout Payload payload) {}
 

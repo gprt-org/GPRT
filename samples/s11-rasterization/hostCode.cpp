@@ -38,7 +38,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s10_deviceCode;
+extern GPRTProgram s11_deviceCode;
 
 // Vertices are the points that define our triangles
 const int NUM_TRI_VERTICES = 3;
@@ -94,7 +94,7 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S10 Rasterization");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s10_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s11_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -204,20 +204,19 @@ main(int ac, char **av) {
     gprtTextureClear(colorAttachment);
 
     std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
-    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data(), 
-      0, nullptr, pc);
+    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data(), 0, nullptr, pc);
     gprtTextureClear(depthAttachment);
 
     std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
-    gprtGeomTypeRasterize(context, 
-      /* Where to pull "raster" programs from */
-      trianglesGeomType, 
-      /* The objects we want to rasterize, and in the order to rasterize them in */
-      drawList2.size(), drawList2.data(), 
-      /* How many instances of each object we want to rasterize (will explore in a future sample)*/
-      0, nullptr, 
-      /* Parameters to send to each program, without updating the shader binding table */
-      pc);
+    gprtGeomTypeRasterize(context,
+                          /* Where to pull "raster" programs from */
+                          trianglesGeomType,
+                          /* The objects we want to rasterize, and in the order to rasterize them in */
+                          drawList2.size(), drawList2.data(),
+                          /* How many instances of each object we want to rasterize (will explore in a future sample)*/
+                          0, nullptr,
+                          /* Parameters to send to each program, without updating the shader binding table */
+                          pc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtTexturePresent(context, colorAttachment);

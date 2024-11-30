@@ -36,7 +36,7 @@ main(int ac, char **av) {
 
     {
       gprtBufferMap(A);
-      uint32_t* ptr = gprtBufferGetPointer(A);
+      uint32_t* ptr = gprtBufferGetHostPointer(A);
       for (uint32_t i = 0; i < 100000000; ++i) {
         ptr[i] = i;
       }
@@ -49,7 +49,7 @@ main(int ac, char **av) {
     // Assert
     {
       gprtBufferMap(B);
-      uint32_t* ptr = gprtBufferGetPointer(B);
+      uint32_t* ptr = gprtBufferGetHostPointer(B);
       for (uint32_t i = 0; i < 100000000; ++i) {
         if (ptr[i] != i) throw std::runtime_error("Error, incorrect value!");
       }
@@ -72,7 +72,7 @@ main(int ac, char **av) {
 
     {
       gprtBufferMap(A);
-      uint32_t* ptr = gprtBufferGetPointer(A);
+      uint32_t* ptr = gprtBufferGetHostPointer(A);
       for (uint32_t i = 0; i < 100000000; ++i) {
         ptr[i] = i;
       }
@@ -85,7 +85,7 @@ main(int ac, char **av) {
     // Assert
     {
       gprtBufferMap(B);
-      uint32_t* ptr = gprtBufferGetPointer(B);
+      uint32_t* ptr = gprtBufferGetHostPointer(B);
       for (uint32_t i = 0; i < 100000000 - 1; ++i) {
         if (ptr[i] != i + 1) throw std::runtime_error("Error, incorrect value!");
       }

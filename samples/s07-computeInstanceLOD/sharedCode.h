@@ -22,26 +22,17 @@
 
 #include "gprt.h"
 
-/* variables available to all programs */
-
-/* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;   // vec3i*
+  gprt::Buffer index;
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;   // vec3f *
-  /*! array/buffer of vertex positions */
-  gprt::Buffer texcoord;   // vec2f *
-  /*! base color texture we use for the entire mesh */
-  gprt::Texture texture;
-  /*! an array of texture samplers to use */
-  gprt::Sampler samplers[12];
+  gprt::Buffer vertex;
+  int lvlOfDetail;
 };
 
 struct RayGenData {
+  gprt::Buffer frameBuffer;
   gprt::Accel world;
-  gprt::Buffer framebuffer;
-  int2 fbSize;
 };
 
 /* variables for the miss program */
@@ -57,13 +48,15 @@ struct PushConstants {
     float3 dir_00;
     float3 dir_du;
     float3 dir_dv;
-    float fovy;
   } camera;
 
   /*! the current time */
   float now;
 
+  /* array of BLAS of varying levels of detail */
+  gprt::Buffer meshLODs;
+
   /*! array/buffer of instance transforms */
-  gprt::Buffer transforms;
-  int numTransforms;
+  gprt::Buffer instances;
+  int numInstances;
 };

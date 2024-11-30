@@ -250,7 +250,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, in gprt
       aggregate = WaveReadLaneAt(g_sharedMem[PART_VEC_MASK].x, 1);
   }
 
-  const uint prev = (WAVE_INDEX ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
+  const uint prev = ((WAVE_INDEX != 0) ? WaveReadLaneAt(g_sharedMem[LANE + WAVE_PART_START - 1].x, 0) : 0) + aggregate;
   GroupMemoryBarrierWithGroupSync();
 
   uint lastOffset = (pc.size - 1) % 4;
@@ -336,7 +336,7 @@ void Scan<let LANE_COUNT : uint32_t>(uint3 GroupThreadID, uint3 GroupID, in gprt
   if (i < partSize)
   {
     uint i4 = i + PARTITION_START;
-    g_sharedMem[i].x = LANE ? g_sharedMem[i - 1].x : 0;
+    g_sharedMem[i].x = (LANE != 0) ? g_sharedMem[i - 1].x : 0;
     uint4 exclusiveSums = g_sharedMem[i] + prev;
     // Scatter by exclusive sum
     if (partitioning || selecting)

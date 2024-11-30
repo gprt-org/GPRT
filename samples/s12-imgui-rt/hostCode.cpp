@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s12_deviceCode;
+extern GPRTProgram s12_deviceCode_B;
 
 // Vertices are the points that define our triangles
 const int NUM_VERTICES = 3;
@@ -78,32 +78,31 @@ main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S12 ImGui Ray Tracing");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s12_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s12_deviceCode_B);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // A kernel for compositing imgui and handling temporal antialiasing 
-  GPRTComputeOf<CompositeGuiConstants> CompositeGui = gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
+  // A kernel for compositing imgui and handling temporal antialiasing
+  GPRTComputeOf<CompositeGuiConstants> CompositeGui =
+      gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
 
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
-  
+
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
-  
+
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
-  auto imageBuffer =
-      gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  auto imageBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
 
-  auto imageTexture = gprtDeviceTextureCreate<float4>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
-      fbSize.y, 1, false, nullptr);
+  auto imageTexture = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT,
+                                                      fbSize.x, fbSize.y, 1, false, nullptr);
 
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
@@ -133,18 +132,20 @@ main(int ac, char **av) {
 
   // Next, we will create an instantiation of our geometry declaration.
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  
+
   // We use these calls to tell the geometry what buffers store triangle
   // indices and vertices
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-  
+
   // Placing that geometry into a BLAS.
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Placing that BLAS into a TLAS.
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instancesBuffer);
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
@@ -240,10 +241,9 @@ main(int ac, char **av) {
     gprtGuiRasterize(context);
 
     // Finally, composite the gui onto the screen using a compute shader.
-    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
-                          fbSize.x, fbSize.y, 1);
+    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0, fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1,1,1}, guiPC);
+    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1, 1, 1}, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);
@@ -262,7 +262,6 @@ main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  
   gprtTextureDestroy(guiColorAttachment);
   gprtTextureDestroy(guiDepthAttachment);
 

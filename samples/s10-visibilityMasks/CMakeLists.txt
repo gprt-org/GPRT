@@ -22,20 +22,16 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s08_deviceCode
+    s10_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s08_textures hostCode.cpp)
-target_link_libraries(s08_textures
+add_executable(s10_visibilityMasks hostCode.cpp)
+target_link_libraries(s10_visibilityMasks
   PRIVATE
-    s08_deviceCode
+    s10_deviceCode
     gprt::gprt
-    stb_image
-)
-target_compile_definitions(s08_textures
-  PRIVATE ASSETS_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../3rdParty/GPRT-SampleAssets/"
 )

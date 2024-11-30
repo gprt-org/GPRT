@@ -41,7 +41,7 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s11_deviceCode;
+extern GPRTProgram s12_deviceCode_A;
 
 // Vertices are the points that define our triangles
 const int NUM_TRI_VERTICES = 3;
@@ -91,7 +91,7 @@ int3 guiIndices[NUM_GUI_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s11-imgui.png";
+const char *outFileName = "s12-imgui.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.f, 0.f, -4.f};
@@ -107,9 +107,9 @@ main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S11 ImGui Rasterization");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S12 ImGui Rasterization");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s11_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s12_deviceCode_A);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -181,7 +181,7 @@ main(int ac, char **av) {
   guiData->vertex = gprtBufferGetHandle<float3>(guiVertexBuffer);
   guiData->index = gprtBufferGetHandle<int3>(guiIndexBuffer);
   guiData->texture = gprtTextureGetHandle(guiColorAttachment);
-  guiData->resolution = float2((float)fbSize.x, (float)fbSize.y);
+  guiData->resolution = float2((float) fbSize.x, (float) fbSize.y);
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
 

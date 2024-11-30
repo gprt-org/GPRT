@@ -172,7 +172,7 @@ inline void gprtLBVHBuild(GPRTContext context, GPRTLBVH &lbvh) {
 
     // initialize root AABB
     gprtBufferMap(lbvh.aabbs);
-    float3* aabbPtr = gprtBufferGetPointer(lbvh.aabbs);
+    float3* aabbPtr = gprtBufferGetHostPointer(lbvh.aabbs);
     aabbPtr[0].x = aabbPtr[0].y = aabbPtr[0].z = std::numeric_limits<float>::max();
     aabbPtr[1].x = aabbPtr[1].y = aabbPtr[1].z = -std::numeric_limits<float>::max();
     gprtBufferUnmap(lbvh.aabbs);

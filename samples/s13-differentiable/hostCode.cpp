@@ -38,7 +38,6 @@ using namespace generator;
 
 #include <random>
 
-
 #define LOG(message)                                                                                                   \
   std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
@@ -51,13 +50,14 @@ using namespace generator;
 extern GPRTProgram s13_deviceCode;
 
 // initial image resolution
-const uint2 fbSize = {1400, 460};
+// const uint2 fbSize = {1400, 460};
+const uint2 fbSize = {1024, 1024};
 
 // final image output
 const char *outFileName = "s12-imgui.png";
 
 // Initial camera parameters
-float3 lookFrom = {0.f, -6.f, 0.0f};
+float3 lookFrom = {0.f, -8.f, 0.0f};
 float3 lookAt = {0.f, 0.f, 0.0f};
 float3 lookUp = {0.f, 0.f, -1.f};
 float cosFovy = 0.66f;
@@ -108,7 +108,7 @@ template <typename T> struct Mesh {
 
     // Build the bottom level acceleration structure
     accel = gprtTriangleAccelCreate(context, 1, &geometry);
-    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/true);
+    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
     // gprtAccelCompact(context, accel);
   };
 
@@ -120,7 +120,8 @@ template <typename T> struct Mesh {
   };
 };
 
-uint32_t divUp(int x, int y) {
+uint32_t
+divUp(int x, int y) {
   return (x + (y - 1)) / y;
 }
 
@@ -129,7 +130,8 @@ float3 m1 = float3(0.f, 0.f, 0.f);
 float3 m2 = float3(0.f, 0.f, 0.f);
 int step = 1;
 
-void reset() {
+void
+reset() {
   step = 1;
   m1 = float3(0.f, 0.f, 0.f);
   m2 = float3(0.f, 0.f, 0.f);
@@ -153,13 +155,13 @@ main(int ac, char **av) {
   // set up all the GPU kernels we want to run
   // ##################################################################
 
-  // A kernel for compositing imgui and handling temporal antialiasing 
+  // A kernel for compositing imgui and handling temporal antialiasing
   auto CompositeGui = gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
-  
+
   // Differentiable kernel for computing a tightly fitting oriented bounding box
   auto ClearOBB = gprtComputeCreate<ComputeOBBConstants>(context, module, "ClearOBB");
-  auto ComputeOBB = gprtComputeCreate<ComputeOBBConstants >(context, module, "ComputeOBB");
-  auto BackPropOBB = gprtComputeCreate<ComputeOBBConstants >(context, module, "BackPropOBB");
+  auto ComputeOBB = gprtComputeCreate<ComputeOBBConstants>(context, module, "ComputeOBB");
+  auto BackPropOBB = gprtComputeCreate<ComputeOBBConstants>(context, module, "BackPropOBB");
 
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "hitTriangle");
@@ -167,9 +169,9 @@ main(int ac, char **av) {
   GPRTGeomTypeOf<BoundingBoxData> aabbType = gprtGeomTypeCreate<BoundingBoxData>(context, GPRT_AABBS);
   gprtGeomTypeSetIntersectionProg(aabbType, 0, module, "intersectBoundingBox");
   gprtGeomTypeSetClosestHitProg(aabbType, 0, module, "hitBoundingBox");
-  
+
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
-  
+
   GPRTMissOf<MissProgData> triMiss = gprtMissCreate<MissProgData>(context, module, "triMiss");
   GPRTMissOf<MissProgData> obbMiss = gprtMissCreate<MissProgData>(context, module, "obbMiss");
 
@@ -177,12 +179,10 @@ main(int ac, char **av) {
   // set the parameters for those kernels
   // ##################################################################
 
-  auto imageBuffer =
-      gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  auto imageBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
 
-  auto imageTexture = gprtDeviceTextureCreate<float4>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
-      fbSize.y, 1, false, nullptr);
+  auto imageTexture = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT,
+                                                      fbSize.x, fbSize.y, 1, false, nullptr);
 
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
@@ -207,47 +207,37 @@ main(int ac, char **av) {
   // level acceleration structure.
   Mesh<TorusKnotMesh> mesh(context, trianglesGeomType, TorusKnotMesh{2, 3, 16, 288});
 
+  // Placing that triangles BLAS into a TLAS.
+  gprt::Instance instance = gprtAccelGetInstance(mesh.accel);
+  GPRTBufferOf<gprt::Instance> triangleInstancesBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+
+  GPRTAccel triangleTLAS = gprtInstanceAccelCreate(context, 1, triangleInstancesBuffer);
+
   // Buffers to hold triangle and OBB data
   float3 eul = float3(1.f, 2.f, 3.f);
-  float3 deul = float3(0.f, 0.f, 0.f);  
-  float3 tmp = float3(0.f, 0.f, 0.f);  // just using these to store intermediate results
+  float3 deul = float3(0.f, 0.f, 0.f);
+  float3 tmp = float3(0.f, 0.f, 0.f);   // just using these to store intermediate results
   std::vector<float3> euls = {eul, deul, tmp};
   GPRTBufferOf<float3> eulRots = gprtDeviceBufferCreate<float3>(context, 3, euls.data());
   GPRTBufferOf<float3> aabbPositions = gprtDeviceBufferCreate<float3>(context, 2, nullptr);
-  GPRTBufferOf<float3x4> transformBuffer = gprtHostBufferCreate<float3x4>(context, 1, nullptr);
+  // GPRTBufferOf<gprt::Instance> instance = gprtInstanceAccelGetInstances(triangleTLAS);
 
-  ComputeOBBConstants obbPC;
-  obbPC.aabbs = gprtBufferGetHandle(aabbPositions);
-  obbPC.eulRots = gprtBufferGetHandle(eulRots);
-  obbPC.vertices = gprtBufferGetHandle(mesh.vertexBuffer);
-  obbPC.indices = gprtBufferGetHandle(mesh.indexBuffer);
-  obbPC.transforms = gprtBufferGetHandle(transformBuffer);
-  obbPC.numIndices = mesh.indices.size();
-  obbPC.numTrisToInclude = mesh.indices.size();
-
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-  gprtComputeLaunch(ClearOBB, {1,1,1}, {1,1,1}, obbPC);
-  gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
-  gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
-  
   LOG("building geometries ...");
 
-  // // Create triangle geometry 
+  // // Create triangle geometry
   // GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   // gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   // gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-  
+
   // Place that triangle geometry into a triangles BLAS.
   // GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &mesh.accel);
   // gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  // Placing that triangles BLAS into a TLAS.
-  GPRTAccel triangleTLAS = gprtInstanceAccelCreate(context, 1, &mesh.accel);
   gprtAccelBuild(context, triangleTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  // Create initial aabb geometry 
+  // Create initial aabb geometry
   GPRTGeomOf<BoundingBoxData> aabbGeom = gprtGeomCreate<BoundingBoxData>(context, aabbType);
-  BoundingBoxData* aabbGeomData = gprtGeomGetParameters(aabbGeom);
+  BoundingBoxData *aabbGeomData = gprtGeomGetParameters(aabbGeom);
   aabbGeomData->aabbs = gprtBufferGetHandle(aabbPositions);
   gprtAABBsSetPositions(aabbGeom, aabbPositions, 1);
 
@@ -256,8 +246,9 @@ main(int ac, char **av) {
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // Placing that AABB BLAS into a TLAS.
-  GPRTAccel obbAccel = gprtInstanceAccelCreate(context, 1, &aabbAccel);
-  gprtInstanceAccelSet3x4Transforms(obbAccel, transformBuffer);
+  gprt::Instance aabbInstance = gprtAccelGetInstance(aabbAccel);
+  GPRTBufferOf<gprt::Instance> aabbInstanceBuffer = gprtDeviceBufferCreate(context, 1, &aabbInstance);
+  GPRTAccel obbAccel = gprtInstanceAccelCreate(context, 1, aabbInstanceBuffer);
   gprtAccelBuild(context, obbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
@@ -267,13 +258,25 @@ main(int ac, char **av) {
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
+  ComputeOBBConstants obbPC;
+  obbPC.aabbs = gprtBufferGetHandle(aabbPositions);
+  obbPC.eulRots = gprtBufferGetHandle(eulRots);
+  obbPC.vertices = gprtBufferGetHandle(mesh.vertexBuffer);
+  obbPC.indices = gprtBufferGetHandle(mesh.indexBuffer);
+  obbPC.instance = gprtBufferGetHandle(aabbInstanceBuffer);
+  obbPC.numIndices = mesh.indices.size();
+  obbPC.numTrisToInclude = mesh.indices.size();
+
+  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  gprtComputeLaunch(ClearOBB, {1, 1, 1}, {1, 1, 1}, obbPC);
+  gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+  gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
   LOG("launching ...");
-
-
 
   CompositeGuiConstants guiPC;
   guiPC.fbSize = fbSize;
@@ -344,19 +347,20 @@ main(int ac, char **av) {
     }
 
     // Update the OBB
-    if (step == 1) surfaceAreas.clear();
+    if (step == 1)
+      surfaceAreas.clear();
 
     gprtBufferClear(aabbPositions);
-    gprtComputeLaunch(ClearOBB, {1,1,1}, {1,1,1}, obbPC);
-    gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
-    gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128,1,1}, obbPC);
-      
+    gprtComputeLaunch(ClearOBB, {1, 1, 1}, {1, 1, 1}, obbPC);
+    gprtComputeLaunch(ComputeOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+    gprtComputeLaunch(BackPropOBB, {divUp(obbPC.numTrisToInclude, 128), 1, 1}, {128, 1, 1}, obbPC);
+
     // Optimize using Adam
     gprtBufferMap(eulRots);
-    float3 *eulPtr = gprtBufferGetPointer(eulRots);
+    float3 *eulPtr = gprtBufferGetHostPointer(eulRots);
     float LR = powf(10.f, -learningRate);
     float3 grad = eulPtr[1];
-    float3 jitter = float3((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX) - 0.5f;
+    float3 jitter = float3((float) rand() / RAND_MAX, (float) rand() / RAND_MAX, (float) rand() / RAND_MAX) - 0.5f;
     if (step == 1) {
       m1 = float3(0.f, 0.f, 0.f);
       m2 = float3(0.f, 0.f, 0.f);
@@ -367,7 +371,7 @@ main(int ac, char **av) {
     } else {
       m2 = adamBeta2 * m2 + (1.f - adamBeta2) * (grad * grad);
     }
-    
+
     float3 m_hat = m1 / (1.f - powf(adamBeta1, float(step)));
     float3 v_hat = m2 / (1.f - powf(adamBeta2, float(step)));
 
@@ -395,23 +399,27 @@ main(int ac, char **av) {
     ImGui::Text("Surface Area %f", eulPtr[2].x);
     surfaceAreas.push_back(eulPtr[2].x);
 
-    ImGui::PlotLines("Surface Area", surfaceAreas.data(), surfaceAreas.size(), 0, 0, 3.4028235E38F, 3.4028235E38F, {200.f, 100.f}, 4);
-    
+    ImGui::PlotLines("Surface Area", surfaceAreas.data(), surfaceAreas.size(), 0, 0, 3.4028235E38F, 3.4028235E38F,
+                     {200.f, 100.f}, 4);
+
     // ImGui::Text("Derivative surface Area %f", eulPtr[2].y);
 
     ImGui::Text("Step %d", step);
 
-    if (ImGui::Checkbox("Use Vector Adam Optimizer", &useVectorAdam)) reset();
-    
-    if (ImGui::SliderInt("Tris to include", &obbPC.numTrisToInclude, 1, mesh.indices.size())) reset();
-    
+    if (ImGui::Checkbox("Use Vector Adam Optimizer", &useVectorAdam))
+      reset();
+
+    if (ImGui::SliderInt("Tris to include", &obbPC.numTrisToInclude, 1, mesh.indices.size()))
+      reset();
+
     ImGui::SliderFloat("Learning rate 1e10^-n", &learningRate, .1, 2);
     ImGui::SliderFloat("Adam Beta 1 1e10^-n", &adamBeta1, .9, .999);
     ImGui::SliderFloat("Adam Beta 2 1e10^-n", &adamBeta2, .9, .999);
 
     if (ImGui::Button("Reset")) {
       reset();
-      eulPtr[0] = 6.28f * float3((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX) - 3.14f;
+      eulPtr[0] =
+          6.28f * float3((float) rand() / RAND_MAX, (float) rand() / RAND_MAX, (float) rand() / RAND_MAX) - 3.14f;
     }
 
     gprtBufferUnmap(eulRots);
@@ -423,10 +431,9 @@ main(int ac, char **av) {
     gprtGuiRasterize(context);
 
     // Finally, composite the gui onto the screen using a compute shader.
-    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
-                          fbSize.x, fbSize.y, 1);
+    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0, fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1,1,1}, guiPC);
+    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1, 1, 1}, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);
@@ -445,7 +452,6 @@ main(int ac, char **av) {
 
   LOG("cleaning up ...");
 
-  
   gprtTextureDestroy(guiColorAttachment);
   gprtTextureDestroy(guiDepthAttachment);
 

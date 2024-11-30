@@ -137,7 +137,10 @@ main(int ac, char **av) {
   // a top level acceleration structure, or a TLAS. (we'll cover this later.)
   // Rays can only be traced into TLAS, so for now we just make one BLAS
   // instance.
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &trianglesAccel);
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Here, we place a reference to our TLAS in the ray generation
@@ -160,7 +163,7 @@ main(int ac, char **av) {
 
   LOG("launching ...");
 
-  // Structure of parameters that change each frame. We can edit these 
+  // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
 
@@ -242,6 +245,7 @@ main(int ac, char **av) {
   gprtBufferDestroy(vertexBuffer);
   gprtBufferDestroy(indexBuffer);
   gprtBufferDestroy(frameBuffer);
+  gprtBufferDestroy(instanceBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(trianglesAccel);

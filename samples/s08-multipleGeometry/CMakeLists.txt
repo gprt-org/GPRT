@@ -22,16 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s11_deviceCode
+    s08_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s11_imgui_raster hostCode.cpp)
-target_link_libraries(s11_imgui_raster
+add_executable(s08_multipleGeometry hostCode.cpp)
+target_link_libraries(s08_multipleGeometry
   PRIVATE
-    s11_deviceCode
+    s08_deviceCode
     gprt::gprt
+    generator
 )

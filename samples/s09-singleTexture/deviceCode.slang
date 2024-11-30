@@ -22,7 +22,8 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float spreadAngle;
@@ -44,32 +45,30 @@ AngleAxis3x3(float angle, float3 axis) {
 }
 
 [shader("compute")]
-[numthreads(1,1,1)]
-void Transform(uint3 DispatchThreadID : SV_DispatchThreadID) {
+[numthreads(1, 1, 1)]
+void
+Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
-  int transformID = DispatchThreadID.x;
+  int instanceID = DispatchThreadID.x;
 
-  int transformX = transformID / 2;
-  int transformY = transformID % 2;
+  int transformX = instanceID / 2;
+  int transformY = instanceID % 2;
 
-  int numTransforms = pc.numTransforms;
+  int numInstances = pc.numInstances;
   float angle = pc.now;
   float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
-  float4 transforma = float4(aa[0], lerp(-5, 5, transformX / float((numTransforms / 2) - 1)));
-  float4 transformb = float4(aa[1], lerp(-1, 1, transformY));
-  float4 transformc = float4(aa[2], 0.0);
-  float4 transformd = float4(0.0, 0.0, 0.0, 1.0);
+  gprt::Instance instance = gprt::load<gprt::Instance>(pc.instances, instanceID);
+  instance.transform = float3x4(float4(aa[0], lerp(-5, 5, transformX / float((numInstances / 2) - 1))),
+                                float4(aa[1], lerp(-1, 1, transformY)), float4(aa[2], 0.0));
 
-  gprt::store(pc.transforms, transformID * 4 + 0, transforma);
-  gprt::store(pc.transforms, transformID * 4 + 1, transformb);
-  gprt::store(pc.transforms, transformID * 4 + 2, transformc);
-  gprt::store(pc.transforms, transformID * 4 + 3, transformd);
+  gprt::store(pc.instances, instanceID, instance);
 }
 
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -78,8 +77,7 @@ void raygen(uniform RayGenData record) {
   // Generate ray
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 1e38f;
 
@@ -105,7 +103,8 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
+void
+closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   // compute normal:
   uint instanceID = InstanceIndex();
   uint primID = PrimitiveIndex();
@@ -183,7 +182,8 @@ void closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
   float3 color = bool(pattern & 1) ? record.color1 : record.color0;

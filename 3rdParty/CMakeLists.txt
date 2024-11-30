@@ -90,7 +90,43 @@ ENDIF(WIN32)
 IF (NOT Vulkan_FOUND)
   message(FATAL_ERROR "Could not find Vulkan library!")
 ELSE()
+  
+  # Look for the Slang compiler within the Vulkan bin directory
   message(STATUS ${Vulkan_LIBRARY})
+
+  message(STATUS ${Vulkan_GLSLC_EXECUTABLE})
+
+  get_filename_component(VULKAN_COMPILER_PATH ${Vulkan_GLSLC_EXECUTABLE} DIRECTORY)
+  message(STATUS ${VULKAN_COMPILER_PATH})
+
+  find_program(CMAKE_SLANG_COMPILER slangc
+    HINTS "${VULKAN_COMPILER_PATH}"
+    # PATHS /another/path
+    # NO_DEFAULT_PATH
+  )
+
+  # find_program(CMAKE_SLANG_COMPILER slangc)
+  if (CMAKE_SLANG_COMPILER)
+  message("Found slangc: ${CMAKE_SLANG_COMPILER}")
+
+  # Test to see if compiler is working
+  execute_process(COMMAND ${CMAKE_SLANG_COMPILER} "-v" 
+    OUTPUT_FILE slang_version.txt
+    RESULT_VARIABLE SLANG_EXIT_CODE
+    ERROR_VARIABLE SLANG_VERSION # Slang seems to output version to stderr, so for now we output that.
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  
+  if(NOT SLANG_EXIT_CODE EQUAL 0)
+  message(ERROR "Envoking Slang compiler failed with error code: ${SLANG_EXIT_CODE}")
+  else()
+  message(STATUS "Slang version reported by envoking compiler: ${SLANG_VERSION}" )
+  endif()
+  
+  else ()
+  message(ERROR " slangc appears to be missing from ${VULKAN_COMPILER_PATH}. Please ensure your Vulkan SDK is updated to 1.3.296 or newer.")
+  endif()
+
 ENDIF()
 
 # Find Vulkan Memory Allocator
