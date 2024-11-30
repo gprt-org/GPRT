@@ -1,6 +1,6 @@
 
 [![License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/natevm/vkrt/actions/workflows/ci.yml/badge.svg)](https://github.com/natevm/vkrt/actions/workflows/ci.yml)
+[![CI](https://github.com/gprt-org/GPRT/actions/workflows/ci.yml/badge.svg)](https://github.com/gprt-org/GPRT/actions/workflows/ci.yml)
 
 # GPRT (General Purpose Raytracing Toolkit)
 GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
