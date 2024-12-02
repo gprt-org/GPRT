@@ -45,8 +45,10 @@ function(embed_devicecode)
     -matrix-layout-row-major
     -ignore-capabilities
     -zero-initialize # zero-initialize all variables
-    -g
-    -O0
+    -allow-glsl
+    -gpdb
+    -g3
+    -O3
     -I ${GPRT_INCLUDE_DIR}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slangh ${GPRT_INCLUDE_DIR}/gprt.h ${GPRT_INCLUDE_DIR}/gprt_shared.h

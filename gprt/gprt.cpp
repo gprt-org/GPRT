@@ -115,7 +115,7 @@ static struct RequestedFeatures {
   bool rayQueries = false;
 
   // setting to true for now, but generally only supported on latest nvidia
-  bool invocationReordering = false;
+  bool invocationReordering = true;
 
 
   bool debugPrintf = false;
@@ -6112,7 +6112,7 @@ struct InstanceAccel : public Accel {
 struct NNTriangleAccel : public Accel {
   std::vector<NNTriangleGeom *> geometries;
 
-  GPRTCallableOf<TraverseRecord> traverseBVH8Callable;
+  GPRTCallableOf<TraverseBVH8Record> traverseBVH8Callable;
   GPRTCallableOf<TraverseRecord> traverseBVH2Callable;
   GPRTCallableOf<TraverseRecord> traverseLinearCallable;
 
@@ -6202,16 +6202,18 @@ struct NNTriangleAccel : public Accel {
     TraverseRecord record;
     record.N = hploc.params.N;
     record.BVH8N = hploc.params.BVH8;
-    record.BVH8NP = hploc.params.BVH8P;
     record.BVH8L = hploc.params.BVH8L;
-    record.BVH8LP = hploc.params.BVH8LP;
     record.BVH2 = hploc.params.BVH2;
     record.primBuffers = gprtBufferGetHandle(hploc.trianglesBuffers);
     record.vertBuffers = gprtBufferGetHandle(hploc.verticesBuffers);
     record.InstanceContributionToHitGroupIndex = instanceSBTOffset;
-    gprtCallableSetParameters(traverseBVH8Callable, &record);
     gprtCallableSetParameters(traverseBVH2Callable, &record);
     gprtCallableSetParameters(traverseLinearCallable, &record);
+
+    TraverseBVH8Record bvh8Record;
+    bvh8Record.BVH8N_ptr = (uint32_t*)gprtBufferGetDevicePointer(hploc.bvh8Nodes);
+    bvh8Record.BVH8L_ptr = (float4*)gprtBufferGetDevicePointer(hploc.bvh8Triangles);
+    gprtCallableSetParameters(traverseBVH8Callable, &bvh8Record);
 
 
     gprtBufferMap(hploc.trianglesBuffers);
@@ -6248,7 +6250,7 @@ struct NNTriangleAccel : public Accel {
     if (numGeometries > 128) throw std::runtime_error("Currently only 2^7 geometries supported in one BLAS");
 
     // Callable handles for traversal
-    traverseBVH8Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH8");
+    traverseBVH8Callable = gprtCallableCreate<TraverseBVH8Record>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH8");
     traverseBVH2Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH2");
     traverseLinearCallable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseLinear");
 

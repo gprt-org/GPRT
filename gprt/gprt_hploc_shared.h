@@ -484,13 +484,16 @@ struct TriangleRecord {
     gprt::Buffer vertices;  // Triangle vertex buffers, one handle per geometry
 };
 
+struct TraverseBVH8Record {
+    uint32_t* BVH8N_ptr; // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
+    float4* BVH8L_ptr;
+};
+
 struct TraverseRecord {
     uint N; // number of primitives
     gprt::Buffer BVH2; // BVH2 nodes (N-1 x 64 bytes)
     gprt::Buffer BVH8N; // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
-    gprt::Buffer BVH8NP; // BVH8 nodes (ceil((N x 2 - 1) / 8) x 80 bytes)
     gprt::Buffer BVH8L; // BVH8 leaves
-    gprt::Buffer BVH8LP; // BVH8 leaves
 
     // One buffer per geometry
     gprt::Buffer primBuffers;

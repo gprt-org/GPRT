@@ -224,89 +224,7 @@ float findClosestPointTriangle(float3 pa, float3 pb, float3 pc, float3 x, out fl
     return length(x - p);
 }
 
-// from real time collision detection
-float findClosestPointTriangleSquared(float3 pa, float3 pb, float3 pc, float3 x, out float3 p, out float2 t)
-{
-    // source: real time collision detection
-    // check if x in vertex region outside pa
-    float3 ab = pb - pa;
-    float3 ac = pc - pa;
-    float3 ax = x - pa;
-    float d1 = dot(ab, ax);
-    float d2 = dot(ac, ax);
-    if (d1 <= 0.0 && d2 <= 0.0)
-    {
-        // barycentric coordinates (1, 0, 0)
-        t = float2(1.0, 0.0);
-        p = pa;
-        return dot2(x - p);
-    }
 
-    // check if x in vertex region outside pb
-    float3 bx = x - pb;
-    float d3 = dot(ab, bx);
-    float d4 = dot(ac, bx);
-    if (d3 >= 0.0 && d4 <= d3)
-    {
-        // barycentric coordinates (0, 1, 0)
-        t = float2(0.0, 1.0);
-        p = pb;
-        return dot2(x - p);
-    }
-
-    // check if x in vertex region outside pc
-    float3 cx = x - pc;
-    float d5 = dot(ab, cx);
-    float d6 = dot(ac, cx);
-    if (d6 >= 0.0 && d5 <= d6)
-    {
-        // barycentric coordinates (0, 0, 1)
-        t = float2(0.0, 0.0);
-        p = pc;
-        return dot2(x - p);
-    }
-
-    // check if x in edge region of ab, if so return projection of x onto ab
-    float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
-    {
-        // barycentric coordinates (1 - v, v, 0)
-        float v = d1 / (d1 - d3);
-        t = float2(1.0 - v, v);
-        p = pa + ab * v;
-        return dot2(x - p);
-    }
-
-    // check if x in edge region of ac, if so return projection of x onto ac
-    float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
-    {
-        // barycentric coordinates (1 - w, 0, w)
-        float w = d2 / (d2 - d6);
-        t = float2(1.0 - w, 0.0);
-        p = pa + ac * w;
-        return dot2(x - p);
-    }
-
-    // check if x in edge region of bc, if so return projection of x onto bc
-    float va = d3 * d6 - d5 * d4;
-    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
-    {
-        // barycentric coordinates (0, 1 - w, w)
-        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        t = float2(0.0, 1.0 - w);
-        p = pb + (pc - pb) * w;
-        return dot2(x - p);
-    }
-
-    // x inside face region. Compute p through its barycentric coordinates (u, v, w)
-    float denom = 1.0 / (va + vb + vc);
-    float v = vb * denom;
-    float w = vc * denom;
-    t = float2(1.0 - v - w, v);
-    p = pa + ab * v + ac * w; //= u*a + v*b + w*c, u = va*denom = 1.0f - v - w
-    return dot2(x - p);
-}
 
 // Calcs signed distance to a box of semi-size "rad" centered at
 // the origin. It works in 2D, 3D, 4D any number of dimensions by
@@ -359,26 +277,6 @@ bool rayBox(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float t
     return (max(tc, trange.x) < min(tf, trange.y));
 }
 
-// // Meant to mimic a ray-slab test.
-// bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
-//     float3 tlo = (lo - o) / d;
-//     float3 thi = (hi - o) / d;
-//     float3 tc3 = min(tlo, thi);
-//     float3 tf3 = max(tlo, thi);
-//     tc = min3(tc3);
-//     return trange.x < tc && tc < trange.y;
-// }
-
-// tf = min3(tf3);
-// bool maxDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
-//     float3 tlo = (lo - o) / d;
-//     float3 thi = (hi - o) / d;
-//     float3 tc3 = min(tlo, thi);
-//     float3 tf3 = max(tlo, thi);
-//     float tc = max3(tf3);
-//     return trange.x < tc && tc < trange.y;
-// }
-
 inline bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi, out float tc) {
     float3 tlo = (lo - o) / d;
     float3 thi = (hi - o) / d;
@@ -391,40 +289,9 @@ inline bool minDistTest(float3 o, float3 d, float2 trange, float3 lo, float3 hi,
     return trange.x <= tc && tc <= trange.y;
 }
 
-//------------------------------------------------------------------------
-struct TraversalState {
-    uint sp; // stack pointer
-    
-    StackEntry nodeGroup;
-    StackEntry primGroup;
-
-    RWByteAddressBuffer BVH8N;
-    RWByteAddressBuffer BVH8L;
-
-    RWByteAddressBuffer BVH8NP;
-    RWByteAddressBuffer BVH8LP;
-
-    // note, repurposing tmax for search radius, and ignoring tmin.
-    float3 origin; float tmin;
-    float3 direction; float tmax;
-
-    float2 triUV;
-
-    int enablePostponing;
-
-    // debug data...
-    uint debug;
-    uint debugHits;
-    float debugTime;
-
-    __init() {
-    }
-};
 
 //------------------------------------------------------------------------
-BVH2Node fetchBVH2Node(RWByteAddressBuffer BVH2N, int node_index) {
-    //return BVH2N.Load<BVH2Node>(node_index * sizeof(BVH2Node));
-
+inline BVH2Node fetchBVH2Node(RWByteAddressBuffer BVH2N, int node_index) {
     float4 n[2];
     n[0] = BVH2N.LoadAligned<float4>(sizeof(float4) * (node_index * 2 + 0));
     n[1] = BVH2N.LoadAligned<float4>(sizeof(float4) * (node_index * 2 + 1));
@@ -432,50 +299,22 @@ BVH2Node fetchBVH2Node(RWByteAddressBuffer BVH2N, int node_index) {
     return node;
 }
 
-BVH8Node fetchBVH8Node(RWByteAddressBuffer BVH8N, int node_index) {
-    float4 n[8];
-    n[0] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 0));
-    n[1] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 1));
-    n[2] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 2));
-    n[3] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 3));
-    n[4] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 4));
-    n[5] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 5));
-    n[6] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 6));
-    n[7] = BVH8N.LoadAligned<float4>(sizeof(float4) * (node_index * 8 + 7));
-    BVH8Node node = reinterpret<BVH8Node>(n);
-    return node;
-};
-
-BVH8Triangle fetchTriangle(RWByteAddressBuffer BVH8L, int tri_index) {
-    float4 n[3];
-    n[0] = BVH8L.LoadAligned<float4>(sizeof(float4) * (tri_index * 3 + 0));
-    n[1] = BVH8L.LoadAligned<float4>(sizeof(float4) * (tri_index * 3 + 1));
-    n[2] = BVH8L.LoadAligned<float4>(sizeof(float4) * (tri_index * 3 + 2));
-    BVH8Triangle tri = reinterpret<BVH8Triangle>(n);
-    return tri;
+BVH8Triangle fetchTriangle(float4* BVH8L, int tri_index) {
+    return reinterpret<BVH8Triangle>(float4[3](
+        BVH8L[tri_index * 3 + 0],
+        BVH8L[tri_index * 3 + 1],
+        BVH8L[tri_index * 3 + 2]));
 }
 
 //------------------------------------------------------------------------
-struct StackEntry {
-    // Indicates whether the group is a primitive group or a node group.
-    uint32_t isPrimGroup : 1;
 
-    // A base index common to all items in the queue.
-    uint32_t baseIdx : 31;
-    
-    // A queue of the relative indices offset from the base index.
-    uint32_t relIdxQueue : 24; // 3 bits per slot, 8 slots
 
-    // A mask indicating which items of the queue still need processing
-    uint32_t hits: 8; // 1 bit per slot, 8 slots
-};
-
-static const int LOCAL_STACK_SIZE = 16;
-
-inline void pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
+inline bool pushNodeGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
 {
     localStack[tstate.sp] = tstate.nodeGroup;
     tstate.sp = tstate.sp + 1;
+    if (tstate.sp == LOCAL_STACK_SIZE) return false;
+    return true;
 }
 
 inline void pushPrimGroup(inout StackEntry localStack[LOCAL_STACK_SIZE], inout TraversalState tstate)
@@ -504,123 +343,89 @@ float3 OpConvertUToF(uint32_t3 u) {
     };
 }
 
-uint bfe(uint value, int offset, int bits)
+[ForceInline]
+inline uint bfe(uint value, int offset, int bits)
 {
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "bitfieldExtract";
-    case spirv: return spirv_asm {
+    return spirv_asm {
         result:$$uint = OpBitFieldUExtract $value $offset $bits
     };
-    default:
-        return (value >> offset) & ((1u << bits) - 1);
-    }
 }
 
-uint3 bfe(uint3 value, int offset, int bits)
+[ForceInline]
+inline uint3 bfe(uint3 value, int offset, int bits)
 {
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "bitfieldExtract";
-    case spirv: return spirv_asm {
+    return spirv_asm {
         result:$$uint3 = OpBitFieldUExtract $value $offset $bits
     };
-    default:
-        uint3 result;
-        [ForceUnroll]
-        for (int i = 0; i < 3; ++i)
-        {
-            result[i] = bfe(value[i], offset, bits);
-        }
-        return result;
-    }
 }
 
-uint4 bfe(uint4 value, int offset, int bits)
+[ForceInline]
+inline uint bfi(uint base, uint insert, int offset, int bits)
 {
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "bitfieldExtract";
-    case spirv: return spirv_asm {
-        result:$$uint4 = OpBitFieldUExtract $value $offset $bits
-    };
-    default:
-        uint4 result;
-        [ForceUnroll]
-        for (int i = 0; i < 4; ++i)
-        {
-            result[i] = bfe(value[i], offset, bits);
-        }
-        return result;
-    }
-}
-
-uint bfi(uint base, uint insert, int offset, int bits)
-{
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "bitfieldInsert";
-    case spirv: return spirv_asm {
+    return spirv_asm {
         result:$$uint = OpBitFieldInsert $base $insert $offset $bits
     };
-    default:
-        uint clearMask = ~(((1u << bits) - 1u) << offset);
-        uint clearedBase = base & clearMask;
-        uint maskedInsert = (insert & ((1u << bits) - 1u)) << offset;
-        return clearedBase | maskedInsert;
-    }
 }
 
-uint4 bfi(uint4 base, uint4 insert, int offset, int bits)
+//------------------------------------------------------------------------
+
+#define USE_DOT
+
+[__unsafeForceInlineEarly]
+inline void intersectNode(inout TraversalState tstate, const uint node_index, const uint64_t BVH8N)
 {
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "bitfieldInsert";
-    case spirv: return spirv_asm {
-        result:$$uint4 = OpBitFieldInsert $base $insert $offset $bits
-    };
-    default:
-        uint4 result;
-        [ForceUnroll]
-        for (int i = 0; i < 4; ++i)
-        {
-            result[i] = bfi(base[i], insert[i], offset, bits);
+    const uint *baseuPtr = ((uint *)(BVH8N)) + (32 * node_index);
+    const uint8_t4 *baseu8Ptr = (uint8_t4 *)baseuPtr;
+    const float3 *basef3Ptr = (float3 *)baseuPtr;
+    const float *basefPtr = (float *)baseuPtr;
+
+    const float3 pos = *basef3Ptr;
+    const uint8_t4 psam = baseu8Ptr[3];
+
+    tstate.nodeGroup.baseIdx = baseuPtr[4];
+    tstate.primGroup.baseIdx = baseuPtr[5];
+
+    let meta8 : vector<uint, 2> = uint2(baseuPtr[6], baseuPtr[7]);
+    let scale = uintBitsToFloat(uint3(psam.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
+    let smask = psam.w;
+
+    let apos = pos - tstate.origin;
+
+    // Seems like the below code needs to be re-written as pure SPIR-V...
+    // Otherwise, the compiler generates a ton of SFU ops converting unnecessarily between int8 and FP32...
+
+    let aabbPtr = (baseuPtr + 8);
+    float2x4 dists;
+    [unroll]
+    for (uint i = 0; i < 2; ++i) {
+        let lox = *(aabbPtr + (0 | i));
+        let loy = *(aabbPtr + (2 | i));
+        let loz = *(aabbPtr + (4 | i));
+        let hix = *(aabbPtr + (6 | i));
+        let hiy = *(aabbPtr + (8 | i));
+        let hiz = *(aabbPtr + (10 | i));
+
+        let qlo : vector<uint, 3> = uint3(lox, loy, loz);
+        let qhi : vector<uint, 3> = uint3(hix, hiy, hiz);
+
+        [unroll]
+        for (uint j = 0; j < 4; ++j) {
+            // let used = bfe(smask, off | j, 1);
+            let tc3 = mad(scale, bfe(qlo, (j << 3), 8), apos);
+            let tf3 = mad(scale, bfe(qhi, (j << 3), 8), apos);
+            let p = abs(clamp(0.0, tc3, tf3));
+            dists[i][j] = dot(p, p);
         }
-        return result;
+
+        let off : uint = i << 2;
+        let used4 = bool4(bfe(smask, off | 0, 1), bfe(smask, off | 1, 1), bfe(smask, off | 2, 1), bfe(smask, off | 3, 1));
+        let meta4 = uint4(bfe(meta8[i], 0, 4), bfe(meta8[i], 8, 4), bfe(meta8[i], 16, 4), bfe(meta8[i], 24, 4));
+        dists[i] = select(used4, asfloat((asuint(dists[i] - FLT_EPSILON) & 0xFFFFFFF0) | meta4), FLT_MAX);
+
+        SortNetwork123(dists[i]);
     }
-}
+    SortNetwork4567(dists[0], dists[1]);
 
-float unpackUnorm1x8(uint p)
-{
-    const uint byteMask = 0xff;
-    return float(p & byteMask) / 255.0;
-}
-
-float4 unpackUnorm4x8(uint p)
-{
-    __target_switch
-    {
-    case glsl: __intrinsic_asm "unpackUnorm4x8";
-    case spirv: return spirv_asm {
-        result:$$float4 = OpExtInst glsl450 UnpackUnorm4x8 $p
-    };
-    default:
-        return float4(
-            unpackUnorm1x8(p),
-            unpackUnorm1x8(p >> 8),
-            unpackUnorm1x8(p >> 16),
-            unpackUnorm1x8(p >> 24));
-    }
-}
-
-float intersectBox(float3 scale, float3 anear, float3 afar, float3 aabbMin, float3 aabbMax) {
-    float3 tc3 = mad(scale, aabbMin, anear);
-    float3 tf3 = mad(scale, aabbMax, afar);
-    float3 d3 = clamp(0.0, tc3, tf3);
-    return dot(d3, d3);
-}
-
-void computeStackEntries(float2x4 sortedDistsAndMeta, float currentTMax, uint nodeBaseIdx, uint primBaseIdx, out StackEntry nodeGroup, out StackEntry primGroup) {
     // Indicates which queue slots contain hits.
     uint32_t leafHits = 0;
     uint32_t nodeHits = 0;
@@ -632,212 +437,96 @@ void computeStackEntries(float2x4 sortedDistsAndMeta, float currentTMax, uint no
     for (int i = 0; i < 2; ++i) {
         // A float containing the hit distance, with the item's 4-bit metadata in the low bits.
         // If the item is "empty", sortedDistsAndMeta is FLT_MAX.
-        let meta4 = asuint(sortedDistsAndMeta[i]) & 0x0000000F;
-        let hit4 = (sortedDistsAndMeta[i] < currentTMax);
+        let meta4 = asuint(dists[i]) & 0x0000000F;
+        let hit4 = (dists[i] < tstate.tmax);
         let leaf4 = bool4(meta4 & 0b1000);
-        
+
         // Mark which slots in the queue belong to a leaf or an inner node.
-        let leafHits4 = uint4(hit4 &&  leaf4) << (uint4(0, 1, 2, 3) + (i << 2));
+        let leafHits4 = uint4(hit4 && leaf4) << (uint4(0, 1, 2, 3) + (i << 2));
         let nodeHits4 = uint4(hit4 && !leaf4) << (uint4(0, 1, 2, 3) + (i << 2));
         leafHits |= leafHits4.x | leafHits4.y | leafHits4.z | leafHits4.w;
         nodeHits |= nodeHits4.x | nodeHits4.y | nodeHits4.z | nodeHits4.w;
-        
+
         // Store the relative index in the priority queue.
-        // note, queueSlot*3 is at most 8*3 = 24 bits. 
+        // note, queueSlot*3 is at most 8*3 = 24 bits.
         let relIdx4 = (meta4 & 0b0111) << (uint4(0, 3, 6, 9) + (i * 12));
         queue |= relIdx4.x | relIdx4.y | relIdx4.z | relIdx4.w;
     }
 
     // Store entries into traversal state
-    nodeGroup.baseIdx = nodeBaseIdx;
-    primGroup.baseIdx = primBaseIdx;
-    nodeGroup.isPrimGroup = 0;
-    primGroup.isPrimGroup = 1;
-    nodeGroup.relIdxQueue = queue;
-    primGroup.relIdxQueue = queue;
-    nodeGroup.hits = nodeHits;
-    primGroup.hits = leafHits;
-}
-
-//------------------------------------------------------------------------
-
-// #define USE_DOT
-// #define USE_LENGTH
-#define APPROX_L2
-// assumes x and y are positive
-
-    
-    //float k0 = (1./2.) + (1./4.) + (1./8.) + (1./16.) + (1./32.) + (1./512.);
-    //float k1 = (1./8.) + (1./16.) + (1./32.) + (1./64.) + (1./128.);
-    //float k2 = (1./2.) + (1./4.) + (1./32.);
-    //float k3 = (1./2.) + (1./8.);    
-
-float approx_sqrt2_eight_segments(float x, float y)
-{
-    // K=2 
-    // 0.997801 0.064453
-    // 0.981934 0.187500
-    // 0.963867 0.265625
-    // 0.898438 0.437500
-    // 0.868164 0.496094
-    // 0.845703 0.531250
-    // 0.780273 0.625000
-    // 0.781738 0.625000
-
-    float min_xy = min(x, y);
-    float max_xy = max(x, y);
-
-         if (min_xy <= (1./8.) * max_xy) return max_xy * 0.997801 + min_xy * 0.064453;
-    else if (min_xy <= (2./8.) * max_xy) return max_xy * 0.981934 + min_xy * 0.187500;
-    else if (min_xy <= (3./8.) * max_xy) return max_xy * 0.963867 + min_xy * 0.265625;
-    else if (min_xy <= (4./8.) * max_xy) return max_xy * 0.898438 + min_xy * 0.437500;
-    else if (min_xy <= (5./8.) * max_xy) return max_xy * 0.868164 + min_xy * 0.496094;
-    else if (min_xy <= (6./8.) * max_xy) return max_xy * 0.845703 + min_xy * 0.531250;
-    else if (min_xy <= (7./8.) * max_xy) return max_xy * 0.780273 + min_xy * 0.625000;
-    else                                 return max_xy * 0.781738 + min_xy * 0.625000;
-}
-
-float approx_sqrt2_four_segments(float x, float y)
-{
-    // 0.992188 0.124634
-    // 0.937500 0.343750
-    // 0.875000 0.483887
-    // 0.750000 0.656250
-
-    // K = 2
-    //Interval [0.000000, 0.250000]: y = 0.992310 + x * 0.123779, total error = 0.002542
-    //Interval [0.250000, 0.500000]: y = 0.938477 + x * 0.343750, total error = 0.002756
-    //Interval [0.500000, 0.750000]: y = 0.867188 + x * 0.497925, total error = 0.002448
-    //Interval [0.750000, 1.000000]: y = 0.753906 + x * 0.656250, total error = 0.001756
-    float min_xy = min(x, y);
-    float max_xy = max(x, y);
-         if (min_xy <= 0.25 * max_xy) return max_xy * 0.992188 + min_xy * 0.124634;
-    else if (min_xy <= 0.50 * max_xy) return max_xy * 0.937500 + min_xy * 0.343750;
-    else if (min_xy <= 0.75 * max_xy) return max_xy * 0.875000 + min_xy * 0.483887;
-    else                              return max_xy * 0.750000 + min_xy * 0.656250;
-}
-
-float approx_sqrt2_two_segments(float x, float y)
-{
-    //0.968750 0.246094
-    //0.875000 0.468750
-    float min_xy = min(x, y);
-    float max_xy = max(x, y);    
-    float sel = min_xy <= 0.5 * max_xy ? 1.0 : 0.0;
-    float y0 = max_xy * 0.968750 + min_xy * 0.246094;
-    float y1 = max_xy * 0.875000 + min_xy * 0.468750;
-    float d = sel * y0 + (1. - sel) * y1;
-    return d;
-}
-
-float approx_sqrt2(float x, float y)
-{
-
-    //return approx_sqrt2_four_segments(x, y);
-    return approx_sqrt2_eight_segments(x, y);
-    //return approx_sqrt2_two_segments(x, y);
-}
-
-void intersectNode(BVH8Node node, float3 origin, float currentTMax, out StackEntry nodeGroup, out StackEntry primGroup)
-{    
-    let pos = asfloat(node.posScaleSMask.xyz);
-    let packedScale = node.posScaleSMask.w;
-    let meta8 = node.idxAndMeta.zw;
-    let byteShift = uint4(0, 8, 16, 24);
-    let scaleAndMask = uint8_t4(uint4(packedScale) >> byteShift);
-    let scale = asfloat(uint3(scaleAndMask.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
-    let smask = scaleAndMask.w;
-    let an = pos - origin;
-    let af = pos - origin;
-
-    float2x4 dists;    
-    [unroll]
-    for (uint i = 0; i < 2; ++i) {
-        let qlo = uint3(node.lox[i], node.loy[i], node.loz[i]);
-        let qhi = uint3(node.hix[i], node.hiy[i], node.hiz[i]);
-
-        [unroll]
-        for (uint j = 0; j < 4; ++j) {
-            let tc3 = mad(scale, bfe(qlo, (j << 3), 8), an);
-            let tf3 = mad(scale, bfe(qhi, (j << 3), 8), af);
-            float3 p = abs(clamp(0.0, tc3, tf3));
-            //#define APPROX_L2
-            float dist;
-            #ifdef APPROX_L2         
-            // first approximate sqrt(x^2 + y^2)
-            float d_xy = approx_sqrt2(p.x, p.y);            
-            // then, approximate sqrt(d_xy^2 + z^2)
-            dist = approx_sqrt2(d_xy, p.z);  
-            #elif defined(BEAM)
-            //dists[i][j] = max3(d3 * d3); 
-            //dists[i][j] = dot(d3, d3);
-            // An L-inf dist, but wrt the query.
-            // In practice, perf is much worse than L2. 
-            // However, L-Inf works with all affine transformations.
-            // Still realistically need to do the square here,
-            // as most primitives return squared distances to avoid sqrt.
-            // Need to re-test with an ODOP...
-            #elif defined(USE_DOT)
-            dist = dot(p, p);
-            #elif defined(USE_LENGTH)
-            dist = length(p);
-            #endif
-            dists[i][j] = dist;
-        }
-
-        let off = i << 2;
-        let used4 = uint4(bfe(smask, off + 0, 1), bfe(smask, off + 1, 1), bfe(smask, off + 2, 1), bfe(smask, off + 3, 1));
-        let meta4 = uint4(bfe( meta8[i], 0, 4),   bfe( meta8[i], 8, 4),   bfe( meta8[i], 16, 4),  bfe( meta8[i], 24, 4));
-        dists[i] = select(bool4(used4), asfloat((asuint(dists[i] - FLT_EPSILON) & 0xFFFFFFF0) | meta4), FLT_MAX);
-
-        SortNetwork123(dists[i]);
-    }
-    SortNetwork4567(dists[0], dists[1]);
-    computeStackEntries(dists, currentTMax, node.idxAndMeta.x, node.idxAndMeta.y, nodeGroup, primGroup);
-}
-
-//------------------------------------------------------------------------
-inline void traverseBVH8(inout TraversalState tstate) {
-    StackEntry localStack[LOCAL_STACK_SIZE];
-    tstate.sp = 0;
-
-    // Root
     tstate.nodeGroup.isPrimGroup = 0;
-    tstate.nodeGroup.baseIdx = 0;
-    tstate.nodeGroup.hits = 0b00000001;
-    tstate.nodeGroup.relIdxQueue = 0;
+    tstate.primGroup.isPrimGroup = 1;
+    tstate.nodeGroup.relIdxQueue = queue;
+    tstate.primGroup.relIdxQueue = queue;
+    tstate.nodeGroup.hits = nodeHits;
+    tstate.primGroup.hits = leafHits;
+}
 
-    // bool enablePostponing = false;
+//------------------------------------------------------------------------
+[shader("callable")]
+void TraverseBVH8(uniform uint64_t BVH8N_ptr, uniform uint64_t BVH8L_ptr, inout TraversalState tstate) {
+    // TraversalState tstate;
+    // Stack localStack;
 
-    // Intersect root node
-    {
-        let node = fetchBVH8Node(tstate.BVH8N, 0);
-        intersectNode(node, tstate.origin, tstate.tmax, tstate.nodeGroup, tstate.primGroup);
-    }
+    //  // 2*LOCAL_STACK_SIZE (ie, 16) registers
+    
+        
 
+    // int ntrav = WaveGetLaneCount();
+    // int ntraversingPrims = 0;
+    // int test = WaveActiveCountBits( true );
+
+    // do {
+
+    // const int maxSteps = 8;
+
+    // StackEntry primStack[8];
+    // int primStackPtr = 0;
+
+    // Process inner nodes
+
+    int primHits = 0;
     while (true)
     {
+        // infLoopDetect--;
+        // if (infLoopDetect < 0) break;
+
         // int ntrav = countbits( WaveActiveBallot( true ).x );
         // if (tstate.debug) printf("Ntrav %d\n", ntrav);
+        // tstate.debugHits = ntrav;
         
         // handle leaves
         if (tstate.primGroup.hits > 0)
         {
-            do
+            primHits++;
+            // if (tstate.scheduleReorder == false) {                
+            //     tstate.scheduleReorder = true;
+            //     return;
+            // }
+            // else tstate.scheduleReorder = false;
+
+            // handle leaves
+            while (tstate.primGroup.hits > 0)
             {
-                // if(enablePostponing && countbits( WaveActiveBallot( true ).x ) * 2 < ntrav )  // Is SIMD utilization too low?
-                //     break;                                                                    // Postpone primitive intersections
+                // if (countbits(WaveActiveBallot(true).x) * 2 < ntrav) // Is SIMD utilization too low?
+                //     tstate.debugHits = 32;
 
-                tstate.debugHits++;
+                // tstate.debugHits++;
 
-                let slot = firstbithigh( tstate.primGroup.hits );
-                tstate.primGroup.hits = bfi(tstate.primGroup.hits, 0, slot, 1); // Clear it from list
+                let slot = firstbithigh(tstate.primGroup.hits);
+                // if (slot < 0) break;
+                tstate.primGroup.hits = bitfieldInsert(tstate.primGroup.hits, 0, slot, 1); // Clear it from list
 
                 // Reverse traversal priority
                 let relIdx = int(tstate.primGroup.relIdxQueue >> (slot * 3)) & 0b111;
                 let absIdx = tstate.primGroup.baseIdx + relIdx;
                 
-                let tri = fetchTriangle(tstate.BVH8L, absIdx);
+                let BVH8L = (float4*)BVH8L_ptr;
+                let tri = reinterpret<BVH8Triangle>(float4[3](
+                BVH8L[absIdx * 3 + 0],
+                BVH8L[absIdx * 3 + 1],
+                BVH8L[absIdx * 3 + 2]));
+                // let tri = fetchTriangle(, absIdx);
                 float2 bc; float3 pclosest;
                 float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
 
@@ -848,17 +537,75 @@ inline void traverseBVH8(inout TraversalState tstate) {
                 if (dist < tstate.tmax) {
                     tstate.tmax = dist;
                 }
-            } while (tstate.primGroup.hits > 0);
 
-            // if ( tstate.primGroup.hits > 0 )
-            //     pushPrimGroup( localStack, tstate );
+                // if (tstate.debugHits == 32) break;
+                // if(enablePostponing && ntraversingPrims * 2 < ntrav )  // Is SIMD utilization too low?
+                // if(enablePostponing && 2 < ntrav )  // Is SIMD utilization too low?
+                //     break;                                             // Postpone primitive intersections
+            }
+
+            // Potential pre-emption
+            // if (primHits > 10) break; 
+
+            // // Delay processing primitives until later (trying to reduce divergence...)
+            // if (tstate.primGroup.hits > 0) {
+            //     primStack[primStackPtr] = tstate.primGroup;
+            //     primStackPtr = primStackPtr + 1;
+            // }
+
+            // // testing...
+            // while (tstate.primGroup.hits > 0)
+            // {                
+            //     // if (countbits(WaveActiveBallot(true).x) * 2 < ntrav) // Is SIMD utilization too low?
+            //     //     tstate.debugHits = 32;
+
+            //     // tstate.debugHits++;
+
+            //     let slot = firstbithigh(tstate.primGroup.hits);
+            //     // if (slot < 0) break;
+            //     tstate.primGroup.hits = bitfieldInsert(tstate.primGroup.hits, 0, slot, 1); // Clear it from list
+
+            //     // Reverse traversal priority
+            //     let relIdx = int(tstate.primGroup.relIdxQueue >> (slot * 3)) & 0b111;
+            //     let absIdx = tstate.primGroup.baseIdx + relIdx;
+                
+            //     let BVH8L = (float4*)tstate.BVH8L_ptr;
+            //     let tri = reinterpret<BVH8Triangle>(float4[3](
+            //     BVH8L[absIdx * 3 + 0],
+            //     BVH8L[absIdx * 3 + 1],
+            //     BVH8L[absIdx * 3 + 2]));
+            //     // let tri = fetchTriangle(, absIdx);
+            //     float2 bc; float3 pclosest;
+            //     float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
+
+            //     // #ifndef USE_DOT
+            //     // dist = sqrt(dist);
+            //     // #endif
+
+            //     if (dist < tstate.tmax) {
+            //         tstate.tmax = dist;
+            //     }
+
+            //     // if (tstate.debugHits == 32) break;
+            //     // if(enablePostponing && ntraversingPrims * 2 < ntrav )  // Is SIMD utilization too low?
+            //     // if(enablePostponing && 2 < ntrav )  // Is SIMD utilization too low?
+            //     //     break;                                             // Postpone primitive intersections
+            // }            
         }
 
         // stack pop?
         if ( tstate.nodeGroup.hits == 0 )
         {
-            if( tstate.sp == 0 ) break; // empty stack ==> done            
-            tstate.nodeGroup = stackPop( localStack, tstate );
+            if( tstate.sp == 0 ) {
+                tstate.doneTraversing = true;
+                break; // empty stack ==> done
+            }
+
+            {
+                tstate.sp--;
+                tstate.nodeGroup = tstate.localStack[tstate.sp];
+            }
+            // tstate.nodeGroup = stackPop(tstate.localStack, tstate );
         }
 
         // if current group is actually a prim group...
@@ -877,8 +624,10 @@ inline void traverseBVH8(inout TraversalState tstate) {
             tstate.nodeGroup.hits = bfi(tstate.nodeGroup.hits, 0, slot, 1); // Clear it from list
 
             // If nodeGroup still contains hits to test, push it to stack.
-            if ( tstate.nodeGroup.hits > 0 ) {
-                pushNodeGroup( localStack, tstate );
+            if (tstate.nodeGroup.hits > 0) {
+                tstate.localStack[tstate.sp] = tstate.nodeGroup;
+                tstate.sp = tstate.sp + 1;                
+                // pushNodeGroup(tstate.localStack, tstate);
             }
             
             // Reverse traversal priority
@@ -891,43 +640,62 @@ inline void traverseBVH8(inout TraversalState tstate) {
             //             bitIdxBefore   , hitsBefore   , hits        , bitIdx        , tstate.nodegrp_ord   , slotIdx   , relativeIdx,    tstate.nodegrp_idx);
 
             // }
-
-            let node = fetchBVH8Node(tstate.BVH8N, absIdx);
-            intersectNode(node, tstate.origin, tstate.tmax, tstate.nodeGroup, tstate.primGroup );
+            intersectNode(tstate, absIdx, BVH8N_ptr);
         }
     }
 
-    // if (tstate.debug) {
-    //     uint parent = tstate.BVH8LP.Load<uint>(finalTri * sizeof(uint));
-    //     printf("final tri: %d parent %d\n", finalTri, parent);
-    // }
-}
+    // // Work through the primitives pushed onto the primitive queue
+    // for (int step = maxSteps - 1; step >= 0; --step)
+    // {
+    //     if( primStackPtr == 0 ) {
+    //         break; // empty stack ==> done
+    //     }
 
-//------------------------------------------------------------------------
-[shader("callable")]
-void TraverseBVH8(uniform TraverseRecord record, inout TraversePayload travParams) {
-    TraversalState tstate = TraversalState();
-    tstate.BVH8N = buffers[record.BVH8N.index];
-    tstate.BVH8L = buffers[record.BVH8L.index];
-    tstate.BVH8NP = buffers[record.BVH8NP.index];
-    tstate.BVH8LP = buffers[record.BVH8LP.index];
-    tstate.origin = travParams.OriginAndTMax.xyz;
-    tstate.direction = float3(1.0, 1.0, 1.0);
-    tstate.tmax = travParams.OriginAndTMax.w;
-    tstate.debug = bool(travParams.QueryFlags & NN_FLAG_DEBUG);
-    // if (tstate.debug) {
-    //     printf("----------------------\n");
-    // }
-    tstate.debugHits = 0;
-    tstate.debugTime = travParams.time;
-    traverseBVH8(tstate);
-    travParams.hitPrims = tstate.debugHits;
+    //     // pop a primitive to test...
+    //     {
+    //         primStackPtr--;
+    //         tstate.primGroup = primStack[primStackPtr];
+    //     }
 
-    #ifdef USE_DOT
-    travParams.OriginAndTMax.w = sqrt(tstate.tmax);
-    #else
-    travParams.OriginAndTMax.w = tstate.tmax;
-    #endif
+    //     // handle leaves
+    //     while (tstate.primGroup.hits > 0)
+    //     {
+    //         // if (countbits(WaveActiveBallot(true).x) * 2 < ntrav) // Is SIMD utilization too low?
+    //         //     tstate.debugHits = 32;
+
+    //         // tstate.debugHits++;
+
+    //         let slot = firstbithigh(tstate.primGroup.hits);
+    //         // if (slot < 0) break;
+    //         tstate.primGroup.hits = bitfieldInsert(tstate.primGroup.hits, 0, slot, 1); // Clear it from list
+
+    //         // Reverse traversal priority
+    //         let relIdx = int(tstate.primGroup.relIdxQueue >> (slot * 3)) & 0b111;
+    //         let absIdx = tstate.primGroup.baseIdx + relIdx;
+            
+    //         let BVH8L = (float4*)tstate.BVH8L_ptr;
+    //         let tri = reinterpret<BVH8Triangle>(float4[3](
+    //         BVH8L[absIdx * 3 + 0],
+    //         BVH8L[absIdx * 3 + 1],
+    //         BVH8L[absIdx * 3 + 2]));
+    //         // let tri = fetchTriangle(, absIdx);
+    //         float2 bc; float3 pclosest;
+    //         float dist = findClosestPointTriangleSquared(tri.v0, tri.v1, tri.v2, tstate.origin, pclosest, bc);
+
+    //         // #ifndef USE_DOT
+    //         // dist = sqrt(dist);
+    //         // #endif
+
+    //         if (dist < tstate.tmax) {
+    //             tstate.tmax = dist;
+    //         }
+
+    //         // if (tstate.debugHits == 32) break;
+    //         // if(enablePostponing && ntraversingPrims * 2 < ntrav )  // Is SIMD utilization too low?
+    //         // if(enablePostponing && 2 < ntrav )  // Is SIMD utilization too low?
+    //         //     break;                                             // Postpone primitive intersections
+    //     }        
+    // }
 }
 
 // Function to swap elements based on condition
@@ -982,42 +750,6 @@ void SortNetwork4567(inout float4 arr0, inout float4 arr1) {
     arr1.x = arr01wx.y;
 }
 
-// // Sorting network for an array of 8 elements
-// inline void SortWithNetwork(inout float4 arr0, inout float4 arr1) {
-//     // Level 1
-//     arr0.xy = select((arr0.x < arr0.y).xx, arr0.yx, arr0.xy);
-//     arr0.zw = select((arr0.z < arr0.w).xx, arr0.wz, arr0.zw);    
-//     arr1.xy = select((arr1.x < arr1.y).xx, arr1.yx, arr1.xy);
-//     arr1.zw = select((arr1.z < arr1.w).xx, arr1.wz, arr1.zw);
-
-//     // Level 2
-//     arr0.xz = select((arr0.x < arr0.z).xx, arr0.zx, arr0.xz);
-//     arr0.yw = select((arr0.y < arr0.w).xx, arr0.wy, arr0.yw);
-//     arr1.xz = select((arr1.x < arr1.z).xx, arr1.zx, arr1.xz);
-//     arr1.yw = select((arr1.y < arr1.w).xx, arr1.wy, arr1.yw);
-
-//     // Level 3
-//     arr0.yz = select((arr0.y < arr0.z).xx, arr0.zy, arr0.yz);
-//     arr1.yz = select((arr1.y < arr1.z).xx, arr1.zy, arr1.yz);
-
-//     // Level 4
-//     Swap(arr0.x, arr1.x);
-//     Swap(arr0.y, arr1.y);
-//     Swap(arr0.z, arr1.z);
-//     Swap(arr0.w, arr1.w);
-
-//     // Level 5
-//     Swap(arr0.y, arr1.x);
-//     Swap(arr0.w, arr1.z);
-
-//     // Level 6
-//     Swap(arr0.z, arr1.x);
-//     Swap(arr0.w, arr1.y);
-
-//     // Level 7
-//     Swap(arr0.w, arr1.x);
-// }
-
 struct IntersectTriangleParams {
     uint GeometryIndex : 8;
     uint PrimitiveIndex : 24;
@@ -1025,21 +757,6 @@ struct IntersectTriangleParams {
     uint QueryFlags : 10;
     float4 ObjectOriginAndTMax;
 };
-
-void OpLine(uint32_t line, uint32_t column)
-{
-    spirv_asm {
-        OpLine $(24) $line $column;
-    };
-}
-
-// Discontinue any source-level location information that might be active from a previous 
-// OpLine instruction,
-void OpNoLine() {
-    spirv_asm {
-        OpNoLine;
-    };
-}
 
 // Built-in nearest triangle program
 [shader("callable")]

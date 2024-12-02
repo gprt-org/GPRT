@@ -631,7 +631,145 @@ struct TraversePayload {
   uint UserPayload[2]; 
 };
 
+// 2 registers
+struct StackEntry {
+    // Indicates whether the group is a primitive group or a node group.
+    uint32_t isPrimGroup : 1;
 
+    // A base index common to all items in the queue.
+    uint32_t baseIdx : 31;
+    
+    // A queue of the relative indices offset from the base index.
+    uint32_t relIdxQueue : 24; // 3 bits per slot, 8 slots
+
+    // A mask indicating which items of the queue still need processing
+    uint32_t hits: 8; // 1 bit per slot, 8 slots
+
+    __init() {
+        isPrimGroup = 0;
+        baseIdx = 0;
+        relIdxQueue = 0;
+        hits = 0;
+    }
+};
+
+#define LOCAL_STACK_SIZE 8
+
+struct TraversalState {
+  uint doneTraversing;
+  uint scheduleReorder;
+  uint64_t BVH8L_ptr;
+
+  StackEntry localStack[LOCAL_STACK_SIZE]; // 2*LOCAL_STACK_SIZE (ie, 16) registers
+  uint sp; // stack pointer     (1 register)
+  StackEntry nodeGroup;     //  (2 registers)
+  StackEntry primGroup;     //  (2 registers)
+
+
+  // uint32_t *BVH8N;
+  // float4 *BVH8L;
+
+  // note, repurposing tmax for search radius, and ignoring tmin.
+  float3 origin; float tmax;
+  // float3 direction; float tmax;
+
+  float2 triUV;
+
+  //int enablePostponing;
+
+  // debug data...
+  uint debug;
+  uint debugHits;
+  // float debugTime;
+
+  __init() {
+  }
+};
+
+
+// from real time collision detection
+float findClosestPointTriangleSquared(float3 pa, float3 pb, float3 pc, float3 x, out float3 p, out float2 t)
+{
+    // source: real time collision detection
+    // check if x in vertex region outside pa
+    float3 ab = pb - pa;
+    float3 ac = pc - pa;
+    float3 ax = x - pa;
+    float d1 = dot(ab, ax);
+    float d2 = dot(ac, ax);
+    if (d1 <= 0.0 && d2 <= 0.0)
+    {
+        // barycentric coordinates (1, 0, 0)
+        t = float2(1.0, 0.0);
+        p = pa;
+        return dot(x - p, x - p);
+    }
+
+    // check if x in vertex region outside pb
+    float3 bx = x - pb;
+    float d3 = dot(ab, bx);
+    float d4 = dot(ac, bx);
+    if (d3 >= 0.0 && d4 <= d3)
+    {
+        // barycentric coordinates (0, 1, 0)
+        t = float2(0.0, 1.0);
+        p = pb;
+        return dot(x - p, x - p);
+    }
+
+    // check if x in vertex region outside pc
+    float3 cx = x - pc;
+    float d5 = dot(ab, cx);
+    float d6 = dot(ac, cx);
+    if (d6 >= 0.0 && d5 <= d6)
+    {
+        // barycentric coordinates (0, 0, 1)
+        t = float2(0.0, 0.0);
+        p = pc;
+        return dot(x - p, x - p);
+    }
+
+    // check if x in edge region of ab, if so return projection of x onto ab
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
+    {
+        // barycentric coordinates (1 - v, v, 0)
+        float v = d1 / (d1 - d3);
+        t = float2(1.0 - v, v);
+        p = pa + ab * v;
+        return dot(x - p, x - p);
+    }
+
+    // check if x in edge region of ac, if so return projection of x onto ac
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
+    {
+        // barycentric coordinates (1 - w, 0, w)
+        float w = d2 / (d2 - d6);
+        t = float2(1.0 - w, 0.0);
+        p = pa + ac * w;
+        return dot(x - p, x - p);
+    }
+
+    // check if x in edge region of bc, if so return projection of x onto bc
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
+    {
+        // barycentric coordinates (0, 1 - w, w)
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        t = float2(0.0, 1.0 - w);
+        p = pb + (pc - pb) * w;
+        return dot(x - p, x - p);
+    }
+
+    // x inside face region. Compute p through its barycentric coordinates (u, v, w)
+    float denom = 1.0 / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    t = float2(1.0 - v - w, v);
+    p = pa + ab * v + ac * w; //= u*a + v*b + w*c, u = va*denom = 1.0f - v - w
+    return dot(x - p, x - p);
+}
 
   // float3 Origin;
   // float closestDistance;
@@ -679,10 +817,46 @@ NNQDebugData TraceNNQ<T>(
   payload.OriginAndTMax = float4(Query.Origin, Query.TMax);
   payload.UserPayload = reinterpret<uint[2], T>(Payload);
 
-  payload.time = debugTime;
 
-  // for debugging
-  CallShader(accel.TraverseBVH8Callable, payload);
+  
+
+  payload.time = debugTime;
+  
+  TraversalState tstate;
+  tstate.origin = payload.OriginAndTMax.xyz;
+  // tstate.direction = float3(1.0, 1.0, 1.0);
+  tstate.tmax = payload.OriginAndTMax.w;
+  tstate.debug = bool(payload.QueryFlags & NN_FLAG_DEBUG);
+  tstate.debugHits = 0;
+
+  tstate.doneTraversing = false;
+  tstate.scheduleReorder = false;
+  
+  // Put root on stack
+  tstate.nodeGroup.isPrimGroup = 0;
+  tstate.nodeGroup.baseIdx = 0;
+  tstate.nodeGroup.hits = 0b00000001;
+  tstate.nodeGroup.relIdxQueue = 0;
+  tstate.debugHits = 0;
+  tstate.sp = 0;
+  for (int i = 0; i < LOCAL_STACK_SIZE; ++i) {
+    tstate.localStack[i] = StackEntry();
+  }
+
+
+  while (!bool(tstate.doneTraversing))
+  { 
+    CallShader(accel.TraverseBVH8Callable, tstate);
+    tstate.debugHits++;
+
+    
+    // if (tstate.debugHits > 10) break;
+  }
+
+  
+
+  payload.hitPrims = tstate.debugHits;
+  payload.OriginAndTMax.w = sqrt(tstate.tmax);
 
   Payload = reinterpret<T>(payload.UserPayload);
 
