@@ -330,64 +330,84 @@ inline StackEntry stackPop(inout StackEntry localStack[LOCAL_STACK_SIZE], inout 
     return entry;
 }
 
-// inline
-float4 OpConvertUToF(uint32_t4 u) {
-    return spirv_asm {
-        result : $$float4 = OpConvertUToF $u;
-    };
-}
-
-float3 OpConvertUToF(uint32_t3 u) {
-    return spirv_asm {
-        result : $$float3 = OpConvertUToF $u;
-    };
-}
-
-[ForceInline]
-inline uint bfe(uint value, int offset, int bits)
-{
-    return spirv_asm {
-        result:$$uint = OpBitFieldUExtract $value $offset $bits
-    };
-}
-
-[ForceInline]
-inline uint3 bfe(uint3 value, int offset, int bits)
-{
-    return spirv_asm {
-        result:$$uint3 = OpBitFieldUExtract $value $offset $bits
-    };
-}
-
-[ForceInline]
-inline uint bfi(uint base, uint insert, int offset, int bits)
-{
-    return spirv_asm {
-        result:$$uint = OpBitFieldInsert $base $insert $offset $bits
-    };
-}
 
 //------------------------------------------------------------------------
 
 #define USE_DOT
 
+
+[ForceInline]
+inline T loadAligned<int alignment, T>(T *ptr)
+{
+#define USE_ALIGNED_LOADS
+#ifdef USE_ALIGNED_LOADS
+
+    __target_switch
+    {
+    case spirv:
+        return spirv_asm {
+            result = OpLoad $$T $ptr Aligned !alignment;
+        };
+    default:
+        return *ptr;
+    }
+#else
+    return *ptr;
+#endif
+}
+
+
+        // // Declare the types
+        // %_ptr_PhysicalStorageBuffer_v4float = OpTypePointer PhysicalStorageBuffer %v4float;
+
+        // // Access the pointer
+        // %ptr = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_v4float $ptr;
+
+        // // Load the value with alignment of 16 bytes
+        // %value = OpLoad %v4float %ptr Aligned 16;
+
+        // // Return the loaded value
+        // result:$$float4 = %value;
+
+    // return spirv_asm {
+    //     temp = OpPtrAcccessChain %_ptr_PhysicalStorageBuffer_v4float %ptr_0 %int_0;
+    //     result : $$float4 = OpLoad %v4float %ptr %int_0;
+    // };
+
 [__unsafeForceInlineEarly]
 inline void intersectNode(inout TraversalState tstate, const uint node_index, const uint64_t BVH8N)
 {
+    const float4 *fpPtr = ((float4 *)(BVH8N)) + (8 * node_index);
+    const uint4 *uiPtr = ((uint4 *)(BVH8N)) + (8 * node_index);
+
+    // float4 A = ptr[0];
+    float4 A = loadAligned<16, float4>(fpPtr);
+    uint4 B = loadAligned<16, uint4>(uiPtr + 1);
+
+    const float3 pos = A.xyz;
+    const uint32_t scaleAndMask = asuint(A.w);
+    
+
+
     const uint *baseuPtr = ((uint *)(BVH8N)) + (32 * node_index);
     const uint8_t4 *baseu8Ptr = (uint8_t4 *)baseuPtr;
     const float3 *basef3Ptr = (float3 *)baseuPtr;
     const float *basefPtr = (float *)baseuPtr;
 
-    const float3 pos = *basef3Ptr;
-    const uint8_t4 psam = baseu8Ptr[3];
+   
 
-    tstate.nodeGroup.baseIdx = baseuPtr[4];
-    tstate.primGroup.baseIdx = baseuPtr[5];
+    // const float3 pos = *basef3Ptr;
+    // const uint8_t4 psam = baseu8Ptr[3];
 
-    let meta8 : vector<uint, 2> = uint2(baseuPtr[6], baseuPtr[7]);
-    let scale = uintBitsToFloat(uint3(psam.xyz) << 23); // Shift 8-bit scale to floating-point exponent bits.
-    let smask = psam.w;
+    tstate.nodeGroup.setBaseIndex(B.x);
+    tstate.primGroup.setBaseIndex(B.y);
+
+    let meta8 : vector<uint, 2> = B.zw;
+    const uint3 expBits = uint3(bfe(scaleAndMask, 0, 8), bfe(scaleAndMask, 8, 8), bfe(scaleAndMask, 16, 8)) << 23;
+    const uint smask = bfe(scaleAndMask, 24, 8);
+
+    float3 scale = float3(asfloat(expBits.x), asfloat(expBits.y), asfloat(expBits.z)); // Shift 8-bit scale to floating-point exponent bits.
+    
 
     let apos = pos - tstate.origin;
 
@@ -395,15 +415,22 @@ inline void intersectNode(inout TraversalState tstate, const uint node_index, co
     // Otherwise, the compiler generates a ton of SFU ops converting unnecessarily between int8 and FP32...
 
     let aabbPtr = (baseuPtr + 8);
+    uint4[3] aabbRawData;
+    aabbRawData[0] = loadAligned<16, uint4>(uiPtr + 2);
+    aabbRawData[1] = loadAligned<16, uint4>(uiPtr + 3);
+    aabbRawData[2] = loadAligned<16, uint4>(uiPtr + 4);
+
+    let aabbData = reinterpret<LoHiData>(aabbRawData);
+
     float2x4 dists;
     [unroll]
     for (uint i = 0; i < 2; ++i) {
-        let lox = *(aabbPtr + (0 | i));
-        let loy = *(aabbPtr + (2 | i));
-        let loz = *(aabbPtr + (4 | i));
-        let hix = *(aabbPtr + (6 | i));
-        let hiy = *(aabbPtr + (8 | i));
-        let hiz = *(aabbPtr + (10 | i));
+        let lox = /*select(*/aabbData.lox[i];//) *(aabbPtr + (0 | i));
+        let loy = /*select(*/aabbData.loy[i];//) *(aabbPtr + (2 | i));
+        let loz = /*select(*/aabbData.loz[i];//) *(aabbPtr + (4 | i));
+        let hix = /*select(*/aabbData.hix[i];//) *(aabbPtr + (6 | i));
+        let hiy = /*select(*/aabbData.hiy[i];//) *(aabbPtr + (8 | i));
+        let hiz = /*select(*/aabbData.hiz[i];//) *(aabbPtr + (10 | i));
 
         let qlo : vector<uint, 3> = uint3(lox, loy, loz);
         let qhi : vector<uint, 3> = uint3(hix, hiy, hiz);
@@ -454,12 +481,12 @@ inline void intersectNode(inout TraversalState tstate, const uint node_index, co
     }
 
     // Store entries into traversal state
-    tstate.nodeGroup.isPrimGroup = 0;
-    tstate.primGroup.isPrimGroup = 1;
-    tstate.nodeGroup.relIdxQueue = queue;
-    tstate.primGroup.relIdxQueue = queue;
-    tstate.nodeGroup.hits = nodeHits;
-    tstate.primGroup.hits = leafHits;
+    tstate.nodeGroup.setPrimGroup(0);
+    tstate.primGroup.setPrimGroup(1);
+    tstate.nodeGroup.setRelIdxQueue(queue);
+    tstate.primGroup.setRelIdxQueue(queue);
+    tstate.nodeGroup.setHits(nodeHits);
+    tstate.primGroup.setHits(leafHits);
 }
 
 //------------------------------------------------------------------------
@@ -496,7 +523,7 @@ void TraverseBVH8(uniform uint64_t BVH8N_ptr, uniform uint64_t BVH8L_ptr, inout 
         // tstate.debugHits = ntrav;
         
         // handle leaves
-        if (tstate.primGroup.hits > 0)
+        if (tstate.primGroup.getHits() > 0)
         {
             primHits++;
             // if (tstate.scheduleReorder == false) {                
@@ -506,20 +533,20 @@ void TraverseBVH8(uniform uint64_t BVH8N_ptr, uniform uint64_t BVH8L_ptr, inout 
             // else tstate.scheduleReorder = false;
 
             // handle leaves
-            while (tstate.primGroup.hits > 0)
+            while (tstate.primGroup.getHits() > 0)
             {
                 // if (countbits(WaveActiveBallot(true).x) * 2 < ntrav) // Is SIMD utilization too low?
                 //     tstate.debugHits = 32;
 
                 // tstate.debugHits++;
 
-                let slot = firstbithigh(tstate.primGroup.hits);
+                let slot = firstbithigh(tstate.primGroup.getHits());
                 // if (slot < 0) break;
-                tstate.primGroup.hits = bitfieldInsert(tstate.primGroup.hits, 0, slot, 1); // Clear it from list
+                tstate.primGroup.setHits(bfi(tstate.primGroup.getHits(), 0, slot, 1)); // Clear it from list
 
                 // Reverse traversal priority
-                let relIdx = int(tstate.primGroup.relIdxQueue >> (slot * 3)) & 0b111;
-                let absIdx = tstate.primGroup.baseIdx + relIdx;
+                let relIdx = int(tstate.primGroup.getRelIdxQueue() >> (slot * 3)) & 0b111;
+                let absIdx = tstate.primGroup.getBaseIndex() + relIdx;
                 
                 let BVH8L = (float4*)BVH8L_ptr;
                 let tri = reinterpret<BVH8Triangle>(float4[3](
@@ -594,7 +621,7 @@ void TraverseBVH8(uniform uint64_t BVH8N_ptr, uniform uint64_t BVH8L_ptr, inout 
         }
 
         // stack pop?
-        if ( tstate.nodeGroup.hits == 0 )
+        if ( tstate.nodeGroup.getHits() == 0 )
         {
             if( tstate.sp == 0 ) {
                 tstate.doneTraversing = true;
@@ -609,30 +636,30 @@ void TraverseBVH8(uniform uint64_t BVH8N_ptr, uniform uint64_t BVH8L_ptr, inout 
         }
 
         // if current group is actually a prim group...
-        if (tstate.nodeGroup.isPrimGroup == 1)
+        if (tstate.nodeGroup.isPrimGroup() == 1)
         {
             tstate.primGroup = tstate.nodeGroup;
             
             // clear to indicate that work has moved into prim group
-            tstate.nodeGroup.hits = 0;
+            tstate.nodeGroup.setHits(0);
         }
 
         // else current group is a node group
         else
         {
-            let slot = firstbithigh( tstate.nodeGroup.hits );
-            tstate.nodeGroup.hits = bfi(tstate.nodeGroup.hits, 0, slot, 1); // Clear it from list
+            let slot = firstbithigh( tstate.nodeGroup.getHits() );
+            tstate.nodeGroup.setHits(bfi(tstate.nodeGroup.getHits(), 0, slot, 1)); // Clear it from list
 
             // If nodeGroup still contains hits to test, push it to stack.
-            if (tstate.nodeGroup.hits > 0) {
+            if (tstate.nodeGroup.getHits() > 0) {
                 tstate.localStack[tstate.sp] = tstate.nodeGroup;
                 tstate.sp = tstate.sp + 1;                
                 // pushNodeGroup(tstate.localStack, tstate);
             }
             
             // Reverse traversal priority
-            let relIdx = int(tstate.nodeGroup.relIdxQueue >> (slot * 3)) & 0b111;
-            let absIdx = tstate.nodeGroup.baseIdx + relIdx;
+            let relIdx = int(tstate.nodeGroup.getRelIdxQueue() >> (slot * 3)) & 0b111;
+            let absIdx = tstate.nodeGroup.getBaseIndex() + relIdx;
 
             // if (tstate.debug && nodeIdx == 7) {
             //     printf("----------------------debugging how we got to 7----------------------\n");

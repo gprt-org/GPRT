@@ -440,6 +440,16 @@ struct BVH2Node {
 // inline bool bvh8MetaIsEmpty        (uint value) { return (value == 0x00u); }
 // inline int  bvh8MetaGetLeafRemapOfs(uint value) { return value & 0x1Fu; }
 
+struct LoHiData {
+    // Quantized child AABBs for each child slot.
+    uint2 lox;
+    uint2 loy;
+    uint2 loz;
+    uint2 hix;
+    uint2 hiy;
+    uint2 hiz;
+};
+
 struct BVH8Node // 128 bytes
 {
     // [32b posx] [32b posy] [32b posz] [8b exp of scale x] [8b exp of scale y] [8b exp of scale z] [8b smask]

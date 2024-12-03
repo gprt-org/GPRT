@@ -6298,9 +6298,9 @@ struct NNTriangleAccel : public Accel {
     hploc.clusterIDs = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
     hploc.codes = gprtDeviceBufferCreate<uint64_t>(opaqueContext, hploc.params.N);
     hploc.bvh2Nodes = gprtDeviceBufferCreate<BVH2Node>(opaqueContext, expectedBvh2Nodes);
-    hploc.bvh8Nodes = gprtDeviceBufferCreate<BVH8Node>(opaqueContext, expectedBvh8Nodes);
+    hploc.bvh8Nodes = gprtDeviceBufferCreate<BVH8Node>(opaqueContext, expectedBvh8Nodes, nullptr, 256);
     hploc.bvh8Parents = gprtDeviceBufferCreate<int>(opaqueContext, expectedBvh8Nodes);
-    hploc.bvh8Triangles = gprtDeviceBufferCreate<BVH8Triangle>(opaqueContext, hploc.params.N);
+    hploc.bvh8Triangles = gprtDeviceBufferCreate<BVH8Triangle>(opaqueContext, hploc.params.N, nullptr, 256);
     hploc.bvh8TriangleParents = gprtDeviceBufferCreate<int>(opaqueContext, hploc.params.N);
     hploc.parentIDs = gprtDeviceBufferCreate<int32_t>(opaqueContext, hploc.params.N);
     hploc.atomicCounters = gprtDeviceBufferCreate<int>(opaqueContext, 6);

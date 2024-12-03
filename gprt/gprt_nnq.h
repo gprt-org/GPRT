@@ -631,25 +631,99 @@ struct TraversePayload {
   uint UserPayload[2]; 
 };
 
+
+// inline
+float4 OpConvertUToF(uint32_t4 u) {
+    return spirv_asm {
+        result : $$float4 = OpConvertUToF $u;
+    };
+}
+
+float3 OpConvertUToF(uint32_t3 u) {
+    return spirv_asm {
+        result : $$float3 = OpConvertUToF $u;
+    };
+}
+
+[ForceInline]
+inline uint bfe(uint value, int offset, int bits)
+{
+    return spirv_asm {
+        result:$$uint = OpBitFieldUExtract $value $offset $bits
+    };
+}
+
+[ForceInline]
+inline uint3 bfe(uint3 value, int offset, int bits)
+{
+    return spirv_asm {
+        result:$$uint3 = OpBitFieldUExtract $value $offset $bits
+    };
+}
+
+[ForceInline]
+inline uint bfi(uint base, uint insert, int offset, int bits)
+{
+    return spirv_asm {
+        result:$$uint = OpBitFieldInsert $base $insert $offset $bits
+    };
+}
+
+// 2 registers
+// struct StackEntry {
+//     // Indicates whether the group is a primitive group or a node group.
+//     uint32_t isPrimGroup : 1;
+
+//     // A base index common to all items in the queue.
+//     uint32_t baseIdx : 31;
+    
+//     // A queue of the relative indices offset from the base index.
+//     uint32_t relIdxQueue : 24; // 3 bits per slot, 8 slots
+
+//     // A mask indicating which items of the queue still need processing
+//     uint32_t hits: 8; // 1 bit per slot, 8 slots
+
+//     __init() {
+//         isPrimGroup = 0;
+//         baseIdx = 0;
+//         relIdxQueue = 0;
+//         hits = 0;
+//     }
+// };
+
+
+
 // 2 registers
 struct StackEntry {
+    uint32_t R0;
+    uint32_t R1;
+
     // Indicates whether the group is a primitive group or a node group.
-    uint32_t isPrimGroup : 1;
+    bool isPrimGroup() {return bool(bfe(R0, 31, 1));}
+
+    [mutating]
+    void setPrimGroup(bool primGroup) {R0 = bfi(R0, int(primGroup), 31, 1);}
 
     // A base index common to all items in the queue.
-    uint32_t baseIdx : 31;
+    uint32_t getBaseIndex() {return bfe(R0, 0, 31);}
+
+    [mutating]
+    void setBaseIndex(uint32_t index) {R0 = bfi(R0, index, 0, 31);}
     
     // A queue of the relative indices offset from the base index.
-    uint32_t relIdxQueue : 24; // 3 bits per slot, 8 slots
+    uint32_t getRelIdxQueue() {return bfe(R1, 8, 24);}
+
+    [mutating]
+    void setRelIdxQueue(uint32_t relIdxQueue) {R1 = bfi(R1, relIdxQueue, 8, 24);}
 
     // A mask indicating which items of the queue still need processing
-    uint32_t hits: 8; // 1 bit per slot, 8 slots
+    uint32_t getHits() {return bfe(R1, 0, 8);}
+
+    [mutating]
+    void setHits(uint32_t hits) {R1 = bfi(R1, hits, 0, 8); } 
 
     __init() {
-        isPrimGroup = 0;
-        baseIdx = 0;
-        relIdxQueue = 0;
-        hits = 0;
+        R0 = R1 = 0;
     }
 };
 
@@ -833,10 +907,8 @@ NNQDebugData TraceNNQ<T>(
   tstate.scheduleReorder = false;
   
   // Put root on stack
-  tstate.nodeGroup.isPrimGroup = 0;
-  tstate.nodeGroup.baseIdx = 0;
-  tstate.nodeGroup.hits = 0b00000001;
-  tstate.nodeGroup.relIdxQueue = 0;
+  tstate.nodeGroup = StackEntry();
+  tstate.nodeGroup.setHits(0b00000001);
   tstate.debugHits = 0;
   tstate.sp = 0;
   for (int i = 0; i < LOCAL_STACK_SIZE; ++i) {
