@@ -30,7 +30,7 @@ PushConstants pc;
 void
 Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   int instanceID = DispatchThreadID.x;
-  gprt::Instance instance = gprt::load<gprt::Instance>(pc.instances, instanceID);
+  gprt::Instance instance = pc.instances[instanceID];
 
   int instancesPerSide = int(sqrt(pc.numInstances));
 
@@ -50,12 +50,10 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   float z = sin(pc.now + k * x) * cos(pc.now + k * y);
   float zoffset = x + y;
 
-  int tfmOffset = __offsetOf(instance, instance.transform);
-
   float scale = .005;
   instance.transform = float3x4(float4(scale, 0.0, 0.0, x * width), float4(0.0, scale, 0.0, y * depth),
                                 float4(0.0, 0.0, scale, z * height + zoffset));
-  gprt::store(pc.instances, instanceID, instance);
+  pc.instances[instanceID] = instance;
 }
 
 struct Payload {
@@ -77,7 +75,7 @@ RayGen(uniform RayGenData record) {
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload);
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 float3
@@ -92,10 +90,10 @@ void
 ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
   float3 rayDir = normalize(ObjectRayDirection());
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();

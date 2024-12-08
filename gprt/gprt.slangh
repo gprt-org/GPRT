@@ -29,60 +29,60 @@
  */
 #pragma once
 
-// #ifndef FLT_MAX 
+// #ifndef FLT_MAX
 // #define FLT_MAX 3.402823466e+38
 // #endif
 // #ifndef FLT_MIN
 // #define FLT_MIN 1.175494351e-38
 // #endif
 
-#define DBL_DECIMAL_DIG  17                      // # of decimal digits of rounding precision
-#define DBL_DIG          15                      // # of decimal digits of precision
-#define DBL_EPSILON      2.2204460492503131e-016 // smallest such that 1.0+DBL_EPSILON != 1.0
-#define DBL_HAS_SUBNORM  1                       // type does support subnormal numbers
-#define DBL_MANT_DIG     53                      // # of bits in mantissa
-#define DBL_MAX          1.7976931348623158e+308 // max value
-#define DBL_MAX_10_EXP   308                     // max decimal exponent
-#define DBL_MAX_EXP      1024                    // max binary exponent
-#define DBL_MIN          2.2250738585072014e-308 // min positive value
-#define DBL_MIN_10_EXP   (-307)                  // min decimal exponent
-#define DBL_MIN_EXP      (-1021)                 // min binary exponent
-#define _DBL_RADIX       2                       // exponent radix
-#define DBL_TRUE_MIN     4.9406564584124654e-324 // min positive value
+#define DBL_DECIMAL_DIG 17                        // # of decimal digits of rounding precision
+#define DBL_DIG         15                        // # of decimal digits of precision
+#define DBL_EPSILON     2.2204460492503131e-016   // smallest such that 1.0+DBL_EPSILON != 1.0
+#define DBL_HAS_SUBNORM 1                         // type does support subnormal numbers
+#define DBL_MANT_DIG    53                        // # of bits in mantissa
+#define DBL_MAX         1.7976931348623158e+308   // max value
+#define DBL_MAX_10_EXP  308                       // max decimal exponent
+#define DBL_MAX_EXP     1024                      // max binary exponent
+#define DBL_MIN         2.2250738585072014e-308   // min positive value
+#define DBL_MIN_10_EXP  (-307)                    // min decimal exponent
+#define DBL_MIN_EXP     (-1021)                   // min binary exponent
+#define _DBL_RADIX      2                         // exponent radix
+#define DBL_TRUE_MIN    4.9406564584124654e-324   // min positive value
 
-#define FLT_DECIMAL_DIG  9                       // # of decimal digits of rounding precision
-#define FLT_DIG          6                       // # of decimal digits of precision
-#define FLT_EPSILON      1.192092896e-07F        // smallest such that 1.0+FLT_EPSILON != 1.0
-#define FLT_HAS_SUBNORM  1                       // type does support subnormal numbers
-#define FLT_GUARD        0
-#define FLT_MANT_DIG     24                      // # of bits in mantissa
-#define FLT_MAX          3.402823466e+38F        // max value
-#define FLT_MAX_10_EXP   38                      // max decimal exponent
-#define FLT_MAX_EXP      128                     // max binary exponent
-#define FLT_MIN          1.175494351e-38F        // min normalized positive value
-#define FLT_MIN_10_EXP   (-37)                   // min decimal exponent
-#define FLT_MIN_EXP      (-125)                  // min binary exponent
-#define FLT_NORMALIZE    0
-#define FLT_RADIX        2                       // exponent radix
-#define FLT_TRUE_MIN     1.401298464e-45F        // min positive value
+#define FLT_DECIMAL_DIG 9                  // # of decimal digits of rounding precision
+#define FLT_DIG         6                  // # of decimal digits of precision
+#define FLT_EPSILON     1.192092896e-07F   // smallest such that 1.0+FLT_EPSILON != 1.0
+#define FLT_HAS_SUBNORM 1                  // type does support subnormal numbers
+#define FLT_GUARD       0
+#define FLT_MANT_DIG    24                 // # of bits in mantissa
+#define FLT_MAX         3.402823466e+38F   // max value
+#define FLT_MAX_10_EXP  38                 // max decimal exponent
+#define FLT_MAX_EXP     128                // max binary exponent
+#define FLT_MIN         1.175494351e-38F   // min normalized positive value
+#define FLT_MIN_10_EXP  (-37)              // min decimal exponent
+#define FLT_MIN_EXP     (-125)             // min binary exponent
+#define FLT_NORMALIZE   0
+#define FLT_RADIX       2                  // exponent radix
+#define FLT_TRUE_MIN    1.401298464e-45F   // min positive value
 
-#define LDBL_DIG         DBL_DIG                 // # of decimal digits of precision
-#define LDBL_EPSILON     DBL_EPSILON             // smallest such that 1.0+LDBL_EPSILON != 1.0
-#define LDBL_HAS_SUBNORM DBL_HAS_SUBNORM         // type does support subnormal numbers
-#define LDBL_MANT_DIG    DBL_MANT_DIG            // # of bits in mantissa
-#define LDBL_MAX         DBL_MAX                 // max value
-#define LDBL_MAX_10_EXP  DBL_MAX_10_EXP          // max decimal exponent
-#define LDBL_MAX_EXP     DBL_MAX_EXP             // max binary exponent
-#define LDBL_MIN         DBL_MIN                 // min normalized positive value
-#define LDBL_MIN_10_EXP  DBL_MIN_10_EXP          // min decimal exponent
-#define LDBL_MIN_EXP     DBL_MIN_EXP             // min binary exponent
-#define _LDBL_RADIX      _DBL_RADIX              // exponent radix
-#define LDBL_TRUE_MIN    DBL_TRUE_MIN            // min positive value
+#define LDBL_DIG         DBL_DIG           // # of decimal digits of precision
+#define LDBL_EPSILON     DBL_EPSILON       // smallest such that 1.0+LDBL_EPSILON != 1.0
+#define LDBL_HAS_SUBNORM DBL_HAS_SUBNORM   // type does support subnormal numbers
+#define LDBL_MANT_DIG    DBL_MANT_DIG      // # of bits in mantissa
+#define LDBL_MAX         DBL_MAX           // max value
+#define LDBL_MAX_10_EXP  DBL_MAX_10_EXP    // max decimal exponent
+#define LDBL_MAX_EXP     DBL_MAX_EXP       // max binary exponent
+#define LDBL_MIN         DBL_MIN           // min normalized positive value
+#define LDBL_MIN_10_EXP  DBL_MIN_10_EXP    // min decimal exponent
+#define LDBL_MIN_EXP     DBL_MIN_EXP       // min binary exponent
+#define _LDBL_RADIX      _DBL_RADIX        // exponent radix
+#define LDBL_TRUE_MIN    DBL_TRUE_MIN      // min positive value
 
-#define HLF_EPSILON      9.77e-04h               // smallest such that 1.0h+HLF_EPSILON != 1.0h
-#define HLF_MAX          65504.h                 // max value
+#define HLF_EPSILON 9.77e-04h   // smallest such that 1.0h+HLF_EPSILON != 1.0h
+#define HLF_MAX     65504.h     // max value
 
-#define DECIMAL_DIG      DBL_DECIMAL_DIG
+#define DECIMAL_DIG DBL_DECIMAL_DIG
 
 #include "gprt_shared.h"
 
@@ -92,15 +92,20 @@
 // to compute and raster programs.
 //
 // Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
-[[vk::binding(0, 1)]] SamplerState samplers[];
-[[vk::binding(0, 2)]] Texture1D texture1Ds[];
-[[vk::binding(0, 3)]] Texture2D texture2Ds[];
-[[vk::binding(0, 4)]] Texture3D texture3Ds[];
+[[vk::binding(0, 1)]]
+SamplerState samplers[];
+[[vk::binding(0, 2)]]
+Texture1D texture1Ds[];
+[[vk::binding(0, 3)]]
+Texture2D texture2Ds[];
+[[vk::binding(0, 4)]]
+Texture3D texture3Ds[];
 
 // globally coherent here causes memory barriers and syncs to flush data across
 // the entire GPU such that other groups can see writes. Without this specifier,
 // a memory barrier or sync will only flush a UAV within the current group.
-[[vk::binding(0, 5)]] globallycoherent RWByteAddressBuffer buffers[];
+[[vk::binding(0, 5)]]
+globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -123,16 +128,19 @@ make_bgra(float3 color) {
 }
 
 inline uint32_t
-make_bgra(const float4 color) {
+make_bgra(float4 color) {
+  float gamma = 2.2;
+  color.rgb = pow(color.rgb, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) +
          (make_8bit(color.w) << 24);
 }
 
-float4 over(float4 a, float4 b) {
+float4
+over(float4 a, float4 b) {
   float4 result;
   result.a = a.a + b.a * (1.f - a.a);
   if (result.a == 0.f)
-    return a; // avoid NaN
+    return a;   // avoid NaN
   result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
   return result;
 }
@@ -142,11 +150,13 @@ float4 over(float4 a, float4 b) {
 //   uint64_t y;
 // };
 
-T load<T>(in Buffer buffer, uint32_t index) {
+T
+load<T>(in Buffer buffer, uint32_t index) {
   return buffers[buffer.index].Load<T>(index * sizeof(T));
 }
 
-void store<T>(in Buffer buffer, uint32_t index, in T value) {
+void
+store<T>(in Buffer buffer, uint32_t index, in T value) {
   buffers[buffer.index].Store<T>(index * sizeof(T), value);
 }
 
@@ -158,7 +168,6 @@ getAccelHandle(Accel accel) {
   return spirv_asm {
     result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
   };
-//   return getAccelHandle(accel.x);
 }
 
 RWByteAddressBuffer
@@ -198,15 +207,17 @@ atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value
   while (value < asfloat(ret_i)) {
     uint old = ret_i;
     buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
-    if (ret_i == old) break;
+    if (ret_i == old)
+      break;
   }
   return asfloat(ret_i);
 }
 
-// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// Derivative of an atomic max is discontinuous, where only an exact match between value
 // and the currently stored max is non-zero
 [BackwardDerivativeOf(atomicMin32f)]
-void atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+void
+atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
   float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
 }
@@ -223,10 +234,11 @@ atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value
   return asfloat(ret_i);
 }
 
-// Derivative of an atomic max is discontinuous, where only an exact match between value 
+// Derivative of an atomic max is discontinuous, where only an exact match between value
 // and the currently stored max is non-zero
 [BackwardDerivativeOf(atomicMax32f)]
-void atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+void
+atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
   float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
 }

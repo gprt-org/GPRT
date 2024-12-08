@@ -32,9 +32,9 @@ getPos(float px, float py, float k, float width, float depth, float height, floa
 }
 
 [shader("compute")]
-[numthreads(32,1,1)]
-void Vertex(uint3 DispatchThreadID : SV_DispatchThreadID, uniform TrianglesGeomData uniforms) 
-{
+[numthreads(32, 1, 1)]
+void
+Vertex(uint3 DispatchThreadID: SV_DispatchThreadID, uniform TrianglesGeomData uniforms) {
   int gridSize = uniforms.gridSize;
   int TriID = DispatchThreadID.x;
 
@@ -64,34 +64,35 @@ void Vertex(uint3 DispatchThreadID : SV_DispatchThreadID, uniform TrianglesGeomD
     v2 = getPos(gx, gy + dy, k, width, depth, height, uniforms.now);
   }
 
-  gprt::store(uniforms.index, TriID, index);
-  gprt::store(uniforms.vertex, index.x, v0);
-  gprt::store(uniforms.vertex, index.y, v1);
-  gprt::store(uniforms.vertex, index.z, v2);
+  uniforms.index[TriID] = index;
+  uniforms.vertex[index.x] = v0;
+  uniforms.vertex[index.y] = v1;
+  uniforms.vertex[index.z] = v2;
 }
 
 struct Payload {
   float3 color;
 };
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 [shader("raygeneration")]
-void RayGen(uniform RayGenData record) {
+void
+RayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload);
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 float3
@@ -102,13 +103,14 @@ hsv2rgb(float3 input) {
 }
 
 [shader("closesthit")]
-void ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
+void
+ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
   float3 rayDir = WorldRayDirection();
 
@@ -118,7 +120,8 @@ void ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

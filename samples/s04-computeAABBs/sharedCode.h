@@ -26,32 +26,23 @@
 
 struct SphereBoundsData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
+  float3 *vertex;   // vec3f*
   /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
+  float *radius;   // float *
   /*! array/buffer of AABBs */
-  gprt::Buffer aabbs;
-};
-
-struct SphereBoundsData2 {
-  /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
-  /*! array/buffer of AABBs */
-  gprt::Buffer aabbs;
+  float3 *aabbs;
 };
 
 /* variables for the triangle mesh geometry */
 struct SphereGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer vertex;   // vec3f*
+  float3 *vertex;   // vec3f*
   /*! array/buffer of vertex positions */
-  gprt::Buffer radius;   // float *
+  float *radius;   // float *
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 

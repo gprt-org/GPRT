@@ -22,7 +22,8 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float3 color;
@@ -31,8 +32,8 @@ struct Payload {
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record)
-{
+void
+simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -40,8 +41,7 @@ void simpleRayGen(uniform RayGenData record)
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -56,7 +56,7 @@ void simpleRayGen(uniform RayGenData record)
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 // This intersection program will be called when rays hit our axis
@@ -67,7 +67,8 @@ void simpleRayGen(uniform RayGenData record)
 // Instead, we pass data through a customizable Attributes structure
 // for further processing by closest hit / any hit programs.
 [shader("intersection")]
-void AABBIntersection(uniform AABBGeomData record) {
+void
+AABBIntersection(uniform AABBGeomData record) {
   ReportHit(0.1f, /*hitKind*/ 0, /*attribute*/ float3(1.f, 1.f, 1.f));
 }
 
@@ -82,7 +83,8 @@ void AABBIntersection(uniform AABBGeomData record) {
 // Also note, this program is also called after all ReportHit's have been
 // called and we can conclude which reported hit is closest.
 [shader("closesthit")]
-void AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in float3 color) {
+void
+AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in float3 color) {
   payload.color = color;
 }
 
@@ -90,7 +92,8 @@ void AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in float
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

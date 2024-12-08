@@ -24,13 +24,13 @@
 
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;
+  uint3 *index;
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;
+  float3 *vertex;
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 
@@ -52,7 +52,7 @@ struct PushConstants {
   /*! the current time */
   float now;
 
-  /*! array/buffer of instance transforms */
-  gprt::Buffer instances;
   int numInstances;
+  /*! array/buffer of instance transforms */
+  gprt::Instance *instances;
 };

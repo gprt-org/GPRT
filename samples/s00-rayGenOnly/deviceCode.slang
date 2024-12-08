@@ -22,9 +22,9 @@
 
 #include "sharedCode.h"
 
-[shader("raygeneration")] 
-void simpleRayGen(uniform RayGenData record)
-{
+[shader("raygeneration")]
+void
+simpleRayGen(uniform RayGenData record) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
 
@@ -40,5 +40,5 @@ void simpleRayGen(uniform RayGenData record)
 
   // find the frame buffer location (x + width*y) and put the result there
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(color);
 }

@@ -23,7 +23,7 @@
 #include "gprt.h"
 
 struct TrianglesGeomData {
-  int tmp; // unused
+  int tmp;   // unused
 };
 
 struct RayGenData {
@@ -37,7 +37,7 @@ struct MissProgData {
   float3 color1;
 };
 
-/* A small structure of constants that can change every frame without rebuilding the 
+/* A small structure of constants that can change every frame without rebuilding the
   shader binding table. (must be 128 bytes or less) */
 struct RTPushConstants {
   struct Camera {
@@ -51,6 +51,6 @@ struct RTPushConstants {
 struct CompositeGuiConstants {
   uint2 fbSize;
   gprt::Buffer imageBuffer;
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Texture guiTexture;
 };

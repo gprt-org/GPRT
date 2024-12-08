@@ -61,7 +61,7 @@ float2 texcoords[NUM_VERTICES] = {
 
 // Indices connect those vertices together.
 const int NUM_INDICES = 2;
-int3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
+uint3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -154,7 +154,7 @@ main(int ac, char **av) {
   // ------------------------------------------------------------------
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
   GPRTBufferOf<float2> texcoordBuffer = gprtDeviceBufferCreate<float2>(context, NUM_VERTICES, texcoords);
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_INDICES, indices);
 
   GPRTGeomOf<TrianglesGeomData> plane = gprtGeomCreate(context, trianglesGeomType);
 
@@ -162,9 +162,9 @@ main(int ac, char **av) {
   gprtTrianglesSetIndices(plane, indexBuffer, NUM_INDICES);
 
   TrianglesGeomData *planeData = gprtGeomGetParameters(plane);
-  planeData->index = gprtBufferGetHandle(indexBuffer);
-  planeData->vertex = gprtBufferGetHandle(vertexBuffer);
-  planeData->texcoord = gprtBufferGetHandle(texcoordBuffer);
+  planeData->index = gprtBufferGetDevicePointer(indexBuffer);
+  planeData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  planeData->texcoord = gprtBufferGetDevicePointer(texcoordBuffer);
   planeData->texture = gprtTextureGetHandle(texture);
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
@@ -179,7 +179,7 @@ main(int ac, char **av) {
       gprtDeviceBufferCreate<gprt::Instance>(context, instances.size(), instances.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instancesBuffer);
 
-  pc.instances = gprtBufferGetHandle(instancesBuffer);
+  pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = (uint32_t) instances.size();
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch(transformProgram, {samplers.size(), 1, 1}, {1, 1, 1}, pc);
@@ -194,7 +194,7 @@ main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-  raygenData->framebuffer = gprtBufferGetHandle(frameBuffer);
+  raygenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   raygenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors

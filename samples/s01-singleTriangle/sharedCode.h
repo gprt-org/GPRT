@@ -30,7 +30,7 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 
@@ -40,7 +40,7 @@ struct MissProgData {
   float3 color1;
 };
 
-/* A small structure of constants that can change every frame without rebuilding the 
+/* A small structure of constants that can change every frame without rebuilding the
   shader binding table. (must be 128 bytes or less) */
 struct PushConstants {
   struct Camera {

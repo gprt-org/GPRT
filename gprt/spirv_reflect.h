@@ -31,7 +31,9 @@ VERSION HISTORY
 #ifndef SPIRV_REFLECT_H
 #define SPIRV_REFLECT_H
 
+
 #include "spirv.h"
+
 
 #include <stdint.h>
 #include <string.h>
@@ -163,9 +165,19 @@ typedef enum SpvReflectUserType {
   SPV_REFLECT_USER_TYPE_APPEND_STRUCTURED_BUFFER,
   SPV_REFLECT_USER_TYPE_BUFFER,
   SPV_REFLECT_USER_TYPE_BYTE_ADDRESS_BUFFER,
+  SPV_REFLECT_USER_TYPE_CONSTANT_BUFFER,
   SPV_REFLECT_USER_TYPE_CONSUME_STRUCTURED_BUFFER,
   SPV_REFLECT_USER_TYPE_INPUT_PATCH,
   SPV_REFLECT_USER_TYPE_OUTPUT_PATCH,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_BUFFER,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_BYTE_ADDRESS_BUFFER,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_STRUCTURED_BUFFER,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_TEXTURE_1D,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_TEXTURE_1D_ARRAY,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_TEXTURE_2D,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_TEXTURE_2D_ARRAY,
+  SPV_REFLECT_USER_TYPE_RASTERIZER_ORDERED_TEXTURE_3D,
+  SPV_REFLECT_USER_TYPE_RAYTRACING_ACCELERATION_STRUCTURE,
   SPV_REFLECT_USER_TYPE_RW_BUFFER,
   SPV_REFLECT_USER_TYPE_RW_BYTE_ADDRESS_BUFFER,
   SPV_REFLECT_USER_TYPE_RW_STRUCTURED_BUFFER,
@@ -175,6 +187,8 @@ typedef enum SpvReflectUserType {
   SPV_REFLECT_USER_TYPE_RW_TEXTURE_2D_ARRAY,
   SPV_REFLECT_USER_TYPE_RW_TEXTURE_3D,
   SPV_REFLECT_USER_TYPE_STRUCTURED_BUFFER,
+  SPV_REFLECT_USER_TYPE_SUBPASS_INPUT,
+  SPV_REFLECT_USER_TYPE_SUBPASS_INPUT_MS,
   SPV_REFLECT_USER_TYPE_TEXTURE_1D,
   SPV_REFLECT_USER_TYPE_TEXTURE_1D_ARRAY,
   SPV_REFLECT_USER_TYPE_TEXTURE_2D,
@@ -182,6 +196,7 @@ typedef enum SpvReflectUserType {
   SPV_REFLECT_USER_TYPE_TEXTURE_2DMS,
   SPV_REFLECT_USER_TYPE_TEXTURE_2DMS_ARRAY,
   SPV_REFLECT_USER_TYPE_TEXTURE_3D,
+  SPV_REFLECT_USER_TYPE_TEXTURE_BUFFER,
   SPV_REFLECT_USER_TYPE_TEXTURE_CUBE,
   SPV_REFLECT_USER_TYPE_TEXTURE_CUBE_ARRAY,
 } SpvReflectUserType;
@@ -375,7 +390,9 @@ typedef struct SpvReflectTypeDescription {
   const char*                       type_name;
   // Non-NULL if type is member of a struct
   const char*                       struct_member_name;
-  SpvStorageClass                   storage_class;
+
+  // The storage class (SpvStorageClass) if the type, and -1 if it does not have a storage class.
+  int                               storage_class;
   SpvReflectTypeFlags               type_flags;
   SpvReflectDecorationFlags         decoration_flags;
 
@@ -411,7 +428,9 @@ typedef struct SpvReflectInterfaceVariable {
   SpvStorageClass                     storage_class;
   const char*                         semantic;
   SpvReflectDecorationFlags           decoration_flags;
-  SpvBuiltIn                          built_in;
+  
+  // The builtin id (SpvBuiltIn) if the variable is a builtin, and -1 otherwise.
+  int                                 built_in;
   SpvReflectNumericTraits             numeric;
   SpvReflectArrayTraits               array;
 
@@ -476,6 +495,8 @@ typedef struct SpvReflectDescriptorBinding {
   uint32_t                            accessed;
   uint32_t                            uav_counter_id;
   struct SpvReflectDescriptorBinding* uav_counter_binding;
+  uint32_t                            byte_address_buffer_offset_count;
+  uint32_t*                           byte_address_buffer_offsets;
 
   SpvReflectTypeDescription*          type_description;
 
@@ -554,6 +575,7 @@ typedef struct SpvReflectCapability {
 typedef struct SpvReflectSpecializationConstant {
   uint32_t spirv_id;
   uint32_t constant_id;
+  const char* name;
 } SpvReflectSpecializationConstant;
 
 /*! @struct SpvReflectShaderModule
@@ -1780,9 +1802,9 @@ inline const char* ShaderModule::GetEntryPointName() const {
   return this->GetEntryPointName(0);
 }
 
-/*! @fn GetEntryPoint
+/*! @fn GetSourceFile
 
-  @return Returns entry point
+  @return Returns source file
 
 */
 inline const char* ShaderModule::GetSourceFile() const {

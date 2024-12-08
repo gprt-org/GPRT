@@ -30,7 +30,7 @@ struct AABBGeomData {
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 

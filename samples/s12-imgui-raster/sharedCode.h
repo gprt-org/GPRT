@@ -25,23 +25,23 @@
 // note! HLSL aligns to float4 boundaries!
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;    // int3*
-  gprt::Buffer vertex;   // float3*
-  gprt::Buffer color;    // float3*
+  uint3 *index;
+  float3 *vertex;
+  float3 *color;
 };
 
 /* variables for the geometry representing the background */
 struct BackgroundData {
-  gprt::Buffer index;    // int3*
-  gprt::Buffer vertex;   // float3*
+  uint3 *index;
+  float3 *vertex;
   float3 color0;
   float3 color1;
 };
 
 /* variables for the geometry representing the background */
 struct GUIData {
-  gprt::Buffer index;    // int3*
-  gprt::Buffer vertex;   // float3*
+  uint3 *index;
+  float3 *vertex;
   gprt::Texture texture;
   float2 resolution;
 };

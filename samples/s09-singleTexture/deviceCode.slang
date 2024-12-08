@@ -59,11 +59,11 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   float angle = pc.now;
   float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
-  gprt::Instance instance = gprt::load<gprt::Instance>(pc.instances, instanceID);
+  gprt::Instance instance = pc.instances[instanceID];
   instance.transform = float3x4(float4(aa[0], lerp(-5, 5, transformX / float((numInstances / 2) - 1))),
                                 float4(aa[1], lerp(-1, 1, transformY)), float4(aa[2], 0.0));
 
-  gprt::store(pc.instances, instanceID, instance);
+  pc.instances[instanceID] = instance;
 }
 
 [shader("raygeneration")]
@@ -99,7 +99,7 @@ raygen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + dims.x * pixelID.y;
-  gprt::store(record.framebuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 [shader("closesthit")]
@@ -108,16 +108,16 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   // compute normal:
   uint instanceID = InstanceIndex();
   uint primID = PrimitiveIndex();
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
 
   // compute texture coordinate:
-  float2 TCA = gprt::load<float2>(record.texcoord, index.x);
-  float2 TCB = gprt::load<float2>(record.texcoord, index.y);
-  float2 TCC = gprt::load<float2>(record.texcoord, index.z);
+  float2 TCA = record.texcoord[index.x];
+  float2 TCB = record.texcoord[index.y];
+  float2 TCC = record.texcoord[index.z];
   float2 TC = TCB * bc.x + TCC * bc.y + TCA * (1.f - (bc.x + bc.y));
 
   // fetch the texture and sampler for this plane

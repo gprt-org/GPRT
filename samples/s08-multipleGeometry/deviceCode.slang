@@ -22,14 +22,16 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float3 color;
 };
 
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -38,8 +40,7 @@ void raygen(uniform RayGenData record) {
   // Generate ray
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 1e38f;
 
@@ -56,24 +57,26 @@ void raygen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_rgba(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 [shader("closesthit")]
-void closesthit(uniform TrianglesGeomData record, inout Payload payload) {
+void
+closesthit(uniform TrianglesGeomData record, inout Payload payload) {
   // compute normal:
   uint primID = PrimitiveIndex();
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
   float3 rayDir = normalize(ObjectRayDirection());
   payload.color = (.2f + .8f * abs(dot(rayDir, Ng))) * record.color;
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
   float3 color = bool(pattern & 1) ? record.color1 : record.color0;

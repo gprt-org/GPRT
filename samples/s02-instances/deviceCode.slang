@@ -22,7 +22,8 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float3 color;
@@ -30,8 +31,9 @@ struct Payload {
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-[shader("raygeneration")] 
-void simpleRayGen(uniform RayGenData record) {
+[shader("raygeneration")]
+void
+simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -39,8 +41,7 @@ void simpleRayGen(uniform RayGenData record) {
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -55,7 +56,7 @@ void simpleRayGen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 float3
@@ -68,15 +69,16 @@ hsv2rgb(float3 input) {
 // This closest hit program will be called when rays hit triangles.
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
-[shader("closesthit")] 
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+[shader("closesthit")]
+void
+TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
   float3 rayDir = WorldRayDirection();
 
@@ -87,8 +89,9 @@ void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in fl
 // This miss program will be called when rays miss all primitives.
 // We often define some "default" ray payload behavior here,
 // for example, returning a background color.
-[shader("miss")] 
-void miss(uniform MissProgData record, inout Payload payload) {
+[shader("miss")]
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

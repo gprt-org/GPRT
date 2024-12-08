@@ -22,7 +22,8 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float4 color;
@@ -39,7 +40,8 @@ over(float4 a, float4 b) {
 }
 
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record) {
+void
+simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -47,8 +49,7 @@ void simpleRayGen(uniform RayGenData record) {
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -127,18 +128,19 @@ void simpleRayGen(uniform RayGenData record) {
   }
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(shadedColor.rgb));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(shadedColor);
 }
 
 [shader("closesthit")]
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
+void
+TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
-  int3 index = gprt::load<int3>(record.indices, primID);
-  float3 A = gprt::load<float3>(record.vertices, index.x);
-  float3 B = gprt::load<float3>(record.vertices, index.y);
-  float3 C = gprt::load<float3>(record.vertices, index.z);
+  uint3 index = record.indices[primID];
+  float3 A = record.vertices[index.x];
+  float3 B = record.vertices[index.y];
+  float3 C = record.vertices[index.z];
 
   payload.color = record.color;
   payload.hitT = RayTCurrent();
@@ -149,7 +151,8 @@ void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = float4(bool(pattern & 1) ? record.color1 : record.color0, 1.f);

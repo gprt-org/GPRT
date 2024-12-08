@@ -31,7 +31,7 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 
@@ -54,9 +54,9 @@ struct PushConstants {
   float now;
 
   /* array of BLAS of varying levels of detail */
-  gprt::Buffer meshLODs;
+  gprt::Instance *meshLODs;
 
   /*! array/buffer of instance transforms */
-  gprt::Buffer instances;
+  gprt::Instance *instances;
   int numInstances;
 };

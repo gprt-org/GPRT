@@ -60,13 +60,13 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   float distCameraToObject = distance(pc.camera.pos, center);
   uint level = uint(lerp(numLODs - 1, 0.0, clamp((distCameraToObject - minDist) / (maxDist - minDist), 0.0, 1.0)));
 
-  gprt::Instance instance = gprt::load<gprt::Instance>(pc.meshLODs, level);
+  gprt::Instance instance = pc.meshLODs[level];
 
   instance.transform[0] = float4(scale, 0.0, 0.0, center.x);
   instance.transform[1] = float4(0.0, scale, 0.0, center.y);
   instance.transform[2] = float4(0.0, 0.0, scale, center.z);
 
-  gprt::store(pc.instances, instanceID, instance);
+  pc.instances[instanceID] = instance;
 }
 
 struct Payload {
@@ -88,7 +88,7 @@ RayGen(uniform RayGenData record) {
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   TraceRay(world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload);
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 float3

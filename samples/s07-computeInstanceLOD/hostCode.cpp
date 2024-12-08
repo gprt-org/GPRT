@@ -187,8 +187,8 @@ main(int ac, char **av) {
   GPRTAccel world = gprtInstanceAccelCreate(context, numInstances, instancesBuffer);
 
   // Parameters for our transform program that'll animate our transforms
-  pc.meshLODs = gprtBufferGetHandle(meshLODBuffer);
-  pc.instances = gprtBufferGetHandle(instancesBuffer);
+  pc.meshLODs = gprtBufferGetDevicePointer(meshLODBuffer);
+  pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = numInstances;
 
   // Build the shader binding table to upload parameters to the device
@@ -206,11 +206,11 @@ main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors

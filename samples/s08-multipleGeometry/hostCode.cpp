@@ -75,8 +75,8 @@ template <typename T> struct Mesh {
     TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
     gprtTrianglesSetVertices(geometry, vertexBuffer, (uint32_t) vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, (uint32_t) indices.size());
-    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-    geomData->index = gprtBufferGetHandle(indexBuffer);
+    geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+    geomData->index = gprtBufferGetDevicePointer(indexBuffer);
     geomData->color = color;
   };
 
@@ -167,7 +167,7 @@ main(int ac, char **av) {
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
   // Miss program checkerboard background colors

@@ -27,11 +27,11 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;   // vec3i*
+  uint3 *index;   // vec3i*
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;   // vec3f *
+  float3 *vertex;   // vec3f *
   /*! array/buffer of vertex positions */
-  gprt::Buffer texcoord;   // vec2f *
+  float2 *texcoord;   // vec2f *
   /*! base color texture we use for the entire mesh */
   gprt::Texture texture;
   /*! an array of texture samplers to use */
@@ -40,7 +40,7 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   gprt::Accel world;
-  gprt::Buffer framebuffer;
+  uint *frameBuffer;
   int2 fbSize;
 };
 
@@ -64,6 +64,6 @@ struct PushConstants {
   float now;
 
   /*! array/buffer of instances to transform */
-  gprt::Buffer instances;
+  gprt::Instance *instances;
   int numInstances;
 };

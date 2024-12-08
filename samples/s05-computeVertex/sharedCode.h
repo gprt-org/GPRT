@@ -24,9 +24,9 @@
 
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;
+  uint3 *index;
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;
+  float3 *vertex;
   /*! the number of triangles along a row */
   uint32_t gridSize;
   /* the current time */
@@ -34,7 +34,7 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 

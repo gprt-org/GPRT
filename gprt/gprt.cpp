@@ -100,6 +100,10 @@ static struct RequestedFeatures {
   uint32_t maxRayHitAttributeSize = 2;
   uint32_t recordSize = 512;
 
+  // Not all GPUs support the RT pipeline.
+  // Currently we assume this is true, but down the road would be nice to make optional.
+  bool rayTracingPipeline = true;
+
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
@@ -3289,6 +3293,10 @@ struct Context {
     // Required by VK_KHR_spirv_1_4
     enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
 
+    // Required for floating point atomics
+    enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_KHR_SHADER_RELAXED_EXTENDED_INSTRUCTION_EXTENSION_NAME);
+
     if (requestedFeatures.window) {
       // If the device will be used for presenting to a display via a swapchain
       // we need to request the swapchain extension
@@ -3391,34 +3399,68 @@ struct Context {
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
 
     // Features should be checked by the end application before using them
+    void *pNext = nullptr;
+    // VkPhysicalDeviceFloatControlsPropertiesKHR floatControlsProperties = {
+    //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR};
+    // floatControlsProperties.denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+    // floatControlsProperties.pNext = pNext;
+    // pNext = &floatControlsProperties;
+
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
+    atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+    atomicFloatFeatures.shaderBufferFloat32Atomics = true;
+    atomicFloatFeatures.shaderSharedFloat32Atomics = true;
+    atomicFloatFeatures.pNext = pNext;
+    pNext = &atomicFloatFeatures;
+
+    // VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT atomicFloat2Features = {};
+    // atomicFloat2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT;
+    // atomicFloat2Features.shaderBufferFloat32AtomicMinMax = true;
+    // atomicFloat2Features.shaderSharedFloat32AtomicMinMax = true;
+    // atomicFloat2Features.pNext = pNext;
+    // pNext = &atomicFloat2Features;
+
     VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
-    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
-    invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
-    invocationReorderFeatures.pNext = nullptr;
+    if (requestedFeatures.invocationReordering) {
+      invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+      invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+      invocationReorderFeatures.pNext = pNext;
+      pNext = &invocationReorderFeatures;
+    }
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructureFeatures.pNext = &invocationReorderFeatures;
+    accelerationStructureFeatures.pNext = pNext;
+    pNext = &accelerationStructureFeatures;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
-    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.pNext = &accelerationStructureFeatures;
+    if (requestedFeatures.rayTracingPipeline) {
+      rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+      rtPipelineFeatures.pNext = pNext;
+      pNext = &rtPipelineFeatures;
+    }
 
     VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
-    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    rtQueryFeatures.pNext = &rtPipelineFeatures;
+    if (requestedFeatures.rayQueries) {
+      rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+      rtQueryFeatures.rayQuery = requestedFeatures.rayQueries;
+      rtQueryFeatures.pNext = pNext;
+      pNext = &rtQueryFeatures;
+    }
 
     deviceVulkan12Features = {};
     deviceVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    deviceVulkan12Features.pNext = &rtQueryFeatures;
+    deviceVulkan12Features.pNext = pNext;
+    pNext = &deviceVulkan12Features;
 
     deviceVulkan11Features = {};
     deviceVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    deviceVulkan11Features.pNext = &deviceVulkan12Features;
+    deviceVulkan11Features.pNext = pNext;
+    pNext = &deviceVulkan11Features;
 
     deviceFeatures2 = {};
     deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures2.pNext = &deviceVulkan11Features;
+    deviceFeatures2.pNext = pNext;
 
     // fill in above structs
     vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
@@ -5852,16 +5894,14 @@ struct InstanceAccel : public Accel {
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(Context *context, uint32_t numInstances, Buffer* instancesBuffer) : Accel(context, false) {
+  InstanceAccel(Context *context, uint32_t numInstances, Buffer *instancesBuffer) : Accel(context, false) {
     this->numInstances = numInstances;
     this->instancesBuffer = instancesBuffer;
-  }  
+  }
 
   ~InstanceAccel(){};
 
-  void setNumGeometries(uint32_t numGeometries) {
-    this->numGeometries = numGeometries; 
-  }
+  void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
 
   uint32_t getNumGeometries() {
     if (this->numGeometries == -1) {
@@ -8505,7 +8545,7 @@ gprtBufferGetDevicePointer(GPRTBuffer _buffer, int deviceID) {
   LOG_API_CALL();
   Buffer *buffer = (Buffer *) _buffer;
   uint64_t addr = buffer->getDeviceAddress();
-  return (void*)addr;
+  return (void *) addr;
 }
 
 GPRT_API void

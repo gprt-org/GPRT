@@ -22,11 +22,18 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 struct Payload {
   float3 color;
 };
+
+inline uint32_t
+make_bgra(float3 color) {
+  color = saturate(pow(color, 1.0 / 2.2)) * 255.0;
+  return (uint32_t(color.z) << 0) + (uint32_t(color.y) << 8) + (uint32_t(color.x) << 16) + (0xffU << 24);
+}
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
@@ -35,8 +42,9 @@ struct Payload {
 //
 // The second is the type and name of the shader record. A shader record
 // can be thought of as the parameters passed to this kernel.
-[shader("raygeneration")] 
-void simpleRayGen(uniform RayGenData record) {
+[shader("raygeneration")]
+void
+simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -44,8 +52,7 @@ void simpleRayGen(uniform RayGenData record) {
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -60,7 +67,7 @@ void simpleRayGen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 // This closest hit program will be called when rays hit triangles.
@@ -79,8 +86,9 @@ void simpleRayGen(uniform RayGenData record) {
 // For triangles, this is always a struct containing two floats
 // called "barycentrics", which we use to interpolate per-vertex
 // values.
-[shader("closesthit")] 
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+[shader("closesthit")]
+void
+TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
@@ -92,8 +100,9 @@ void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in fl
 //
 // The second is the type and name of the shader record. A shader record
 // can be thought of as the parameters passed to this kernel.
-[shader("miss")] 
-void miss(uniform MissProgData record, inout Payload payload) {
+[shader("miss")]
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

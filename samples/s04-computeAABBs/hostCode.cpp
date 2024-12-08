@@ -116,13 +116,13 @@ main(int ac, char **av) {
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
 
   SphereGeomData *geomData = gprtGeomGetParameters(aabbGeom);
-  geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-  geomData->radius = gprtBufferGetHandle(radiusBuffer);
+  geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  geomData->radius = gprtBufferGetDevicePointer(radiusBuffer);
 
   SphereBoundsData boundsData;
-  boundsData.vertex = gprtBufferGetHandle(vertexBuffer);
-  boundsData.radius = gprtBufferGetHandle(radiusBuffer);
-  boundsData.aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
+  boundsData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  boundsData.radius = gprtBufferGetDevicePointer(radiusBuffer);
+  boundsData.aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
 
   // compute AABBs in parallel with a compute shader
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
@@ -146,11 +146,11 @@ main(int ac, char **av) {
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors

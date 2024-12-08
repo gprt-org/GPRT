@@ -27,13 +27,13 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;   // vec3i*
+  int3 *index;   // vec3i*
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;   // vec3f *
+  float3 *vertex;   // vec3f *
 };
 
 struct RayGenData {
-  gprt::Buffer frameBuffer;
+  uint *frameBuffer;
   gprt::Accel world;
 };
 

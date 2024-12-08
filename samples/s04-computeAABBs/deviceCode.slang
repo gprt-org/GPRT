@@ -26,10 +26,12 @@ struct Payload {
   float3 color;
 };
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]]
+PushConstants pc;
 
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record) {
+void
+simpleRayGen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -37,8 +39,7 @@ void simpleRayGen(uniform RayGenData record) {
 
   RayDesc rayDesc;
   rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction =
-      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -53,27 +54,29 @@ void simpleRayGen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(payload.color));
+  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
 
 [shader("compute")]
-[numthreads(1,1,1)]
-void SphereBounds(uint3 DispatchThreadID : SV_DispatchThreadID, uniform SphereBoundsData record) {
+[numthreads(1, 1, 1)]
+void
+SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsData record) {
   int primID = DispatchThreadID.x;
-  float3 position = gprt::load<float3>(record.vertex, primID);
-  float radius = gprt::load<float>(record.radius, primID);
+  float3 position = record.vertex[primID];
+  float radius = record.radius[primID];
   float3 aabbMin = position - float3(radius, radius, radius);
   float3 aabbMax = position + float3(radius, radius, radius);
-  gprt::store(record.aabbs, 2 * primID, aabbMin);
-  gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
+  record.aabbs[2 * primID] = aabbMin;
+  record.aabbs[2 * primID + 1] = aabbMax;
 }
 
 [shader("intersection")]
-void SphereIntersection(uniform SphereGeomData record) {
+void
+SphereIntersection(uniform SphereGeomData record) {
   uint primID = PrimitiveIndex();
 
-  float3 position = gprt::load<float3>(record.vertex, primID);
-  float radius = gprt::load<float>(record.radius, primID);
+  float3 position = record.vertex[primID];
+  float radius = record.radius[primID];
 
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
@@ -94,7 +97,8 @@ void SphereIntersection(uniform SphereGeomData record) {
 }
 
 [shader("closesthit")]
-void SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in Attribute attribute) {
+void
+SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in Attribute attribute) {
   float3 origin = attribute.posrad.xyz;
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
   float3 normal = normalize(hitPos - origin);
@@ -102,7 +106,8 @@ void SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in A
 }
 
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void
+miss(uniform MissProgData record, inout Payload payload) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   payload.color = bool(pattern & 1) ? record.color1 : record.color0;

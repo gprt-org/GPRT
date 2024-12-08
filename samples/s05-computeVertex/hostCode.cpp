@@ -116,14 +116,14 @@ main(int ac, char **av) {
 
   // Parameters for the geometry when a ray hits it.
   TrianglesGeomData *geomData = gprtGeomGetParameters(trianglesGeom);
-  geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-  geomData->index = gprtBufferGetHandle(indexBuffer);
+  geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  geomData->index = gprtBufferGetDevicePointer(indexBuffer);
   geomData->gridSize = GRID_SIDE_LENGTH;
 
   // Parameters for our vertex program that'll animate our vertices
   TrianglesGeomData vertexData;
-  vertexData.vertex = gprtBufferGetHandle(vertexBuffer);
-  vertexData.index = gprtBufferGetHandle(indexBuffer);
+  vertexData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  vertexData.index = gprtBufferGetDevicePointer(indexBuffer);
   vertexData.gridSize = GRID_SIDE_LENGTH;
 
   // Build the shader binding table to upload parameters to the device
@@ -152,7 +152,7 @@ main(int ac, char **av) {
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
 
   // Assign the tree handle to our ray generation program's record
   rayGenData->world = gprtAccelGetHandle(world);

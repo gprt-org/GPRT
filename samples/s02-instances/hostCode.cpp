@@ -111,7 +111,7 @@ main(int ac, char **av) {
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -130,8 +130,8 @@ main(int ac, char **av) {
   // Here, we additionally set the vertex and index parameters of our goemetry
   // so that we can access these buffers when a ray hits the mesh
   TrianglesGeomData *triangleData = gprtGeomGetParameters(trianglesGeom);
-  triangleData->vertex = gprtBufferGetHandle(vertexBuffer);
-  triangleData->index = gprtBufferGetHandle(indexBuffer);
+  triangleData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  triangleData->index = gprtBufferGetDevicePointer(indexBuffer);
 
   // Place that single cube mesh in a bottom level acceleration structure
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);

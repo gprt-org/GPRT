@@ -57,7 +57,7 @@ float3 triColors[NUM_TRI_VERTICES] = {
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
 const int NUM_TRI_INDICES = 1;
-int3 triIndices[NUM_TRI_INDICES] = {{0, 1, 2}};
+uint3 triIndices[NUM_TRI_INDICES] = {{0, 1, 2}};
 
 // These vertices and indices are used to define two triangles
 // that will act as a backdrop
@@ -70,7 +70,7 @@ float3 backdropVertices[NUM_BACKDROP_VERTICES] = {
 };
 
 const int NUM_BACKDROP_INDICES = 2;
-int3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
+uint3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
@@ -125,24 +125,25 @@ main(int ac, char **av) {
   LOG("building geometries ...");
   GPRTBufferOf<float3> triVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triVertices);
   GPRTBufferOf<float3> triColorBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triColors);
-  GPRTBufferOf<int3> triIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_TRI_INDICES, triIndices);
+  GPRTBufferOf<uint3> triIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_TRI_INDICES, triIndices);
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, triVertexBuffer, NUM_TRI_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, triIndexBuffer, NUM_TRI_INDICES);
   TrianglesGeomData *tridata = gprtGeomGetParameters(trianglesGeom);
-  tridata->color = gprtBufferGetHandle<float3>(triColorBuffer);
-  tridata->vertex = gprtBufferGetHandle<float3>(triVertexBuffer);
-  tridata->index = gprtBufferGetHandle<int3>(triIndexBuffer);
+  tridata->color = gprtBufferGetDevicePointer(triColorBuffer);
+  tridata->vertex = gprtBufferGetDevicePointer(triVertexBuffer);
+  tridata->index = gprtBufferGetDevicePointer(triIndexBuffer);
 
   GPRTBufferOf<float3> backdropVertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_BACKDROP_VERTICES, backdropVertices);
-  GPRTBufferOf<int3> backdropIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_BACKDROP_INDICES, backdropIndices);
+  GPRTBufferOf<uint3> backdropIndexBuffer =
+      gprtDeviceBufferCreate<uint3>(context, NUM_BACKDROP_INDICES, backdropIndices);
   GPRTGeomOf<BackgroundData> bgGeom = gprtGeomCreate<BackgroundData>(context, backdropGeomType);
   gprtTrianglesSetVertices(bgGeom, backdropVertexBuffer, NUM_BACKDROP_VERTICES);
   gprtTrianglesSetIndices(bgGeom, backdropIndexBuffer, NUM_BACKDROP_INDICES);
   BackgroundData *bgdata = gprtGeomGetParameters(bgGeom);
-  bgdata->vertex = gprtBufferGetHandle<float3>(backdropVertexBuffer);
-  bgdata->index = gprtBufferGetHandle<int3>(backdropIndexBuffer);
+  bgdata->vertex = gprtBufferGetDevicePointer(backdropVertexBuffer);
+  bgdata->index = gprtBufferGetDevicePointer(backdropIndexBuffer);
   bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
   bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
 

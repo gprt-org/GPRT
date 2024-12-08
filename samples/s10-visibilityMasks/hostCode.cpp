@@ -50,7 +50,7 @@ float3 floorVertices[NUM_FLOOR_VERTICES] = {
 };
 
 const int NUM_FLOOR_INDICES = 6;
-int3 floorIndices[NUM_FLOOR_INDICES] = {
+uint3 floorIndices[NUM_FLOOR_INDICES] = {
     {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
 };
 
@@ -67,7 +67,7 @@ float3 wallVertices[NUM_WALL_VERTICES] = {
 };
 
 const int NUM_WALL_INDICES = 16;
-int3 wallIndices[NUM_WALL_INDICES] = {
+uint3 wallIndices[NUM_WALL_INDICES] = {
     {0, 1, 2},    {3, 4, 5},    {6, 7, 8},    {9, 10, 11},  {12, 13, 14}, {15, 16, 17}, {18, 19, 20}, {21, 22, 23},
     {24, 25, 26}, {27, 28, 29}, {30, 31, 32}, {33, 34, 35}, {36, 37, 38}, {39, 40, 41}, {42, 43, 44}, {45, 46, 47}};
 
@@ -77,7 +77,7 @@ float3 windowVertices[NUM_WINDOW_VERTICES] = {
 };
 
 const int NUM_WINDOW_INDICES = 6;
-int3 windowIndices[NUM_WINDOW_INDICES] = {
+uint3 windowIndices[NUM_WINDOW_INDICES] = {
     {0, 1, 2}, {3, 4, 5}, {6, 7, 8}, {9, 10, 11}, {12, 13, 14}, {15, 16, 17},
 };
 
@@ -146,7 +146,7 @@ main(int ac, char **av) {
 
   // Setup pixel frame buffer
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -157,7 +157,7 @@ main(int ac, char **av) {
 
   // First, we'll make a floor mesh
   GPRTBufferOf<float3> floorVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_FLOOR_VERTICES, floorVertices);
-  GPRTBufferOf<int3> floorIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_FLOOR_INDICES, floorIndices);
+  GPRTBufferOf<uint3> floorIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_FLOOR_INDICES, floorIndices);
   GPRTGeomOf<TrianglesGeomData> floorGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(floorGeom, floorVertexBuffer, NUM_FLOOR_VERTICES);
   gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
@@ -167,12 +167,12 @@ main(int ac, char **av) {
 
   // The floor will have a brown-ish color to it
   floorData->color = float4(153.f / 255.f, 121.f / 255.f, 80.f / 255.f, 1.f);
-  floorData->vertices = gprtBufferGetHandle(floorVertexBuffer);
-  floorData->indices = gprtBufferGetHandle(floorIndexBuffer);
+  floorData->vertices = gprtBufferGetDevicePointer(floorVertexBuffer);
+  floorData->indices = gprtBufferGetDevicePointer(floorIndexBuffer);
 
   // Then, we'll make a wall with a hole in it where our window will go.
   GPRTBufferOf<float3> wallVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_WALL_VERTICES, wallVertices);
-  GPRTBufferOf<int3> wallIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_WALL_INDICES, wallIndices);
+  GPRTBufferOf<uint3> wallIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_WALL_INDICES, wallIndices);
   GPRTGeomOf<TrianglesGeomData> wallGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(wallGeom, wallVertexBuffer, NUM_WALL_VERTICES);
   gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
@@ -182,13 +182,13 @@ main(int ac, char **av) {
 
   // The wall has an off-white color
   wallData->color = float4(230.f / 255.f, 225.f / 255.f, 221.f / 255.f, 1.f);
-  wallData->vertices = gprtBufferGetHandle(wallVertexBuffer);
-  wallData->indices = gprtBufferGetHandle(wallIndexBuffer);
+  wallData->vertices = gprtBufferGetDevicePointer(wallVertexBuffer);
+  wallData->indices = gprtBufferGetDevicePointer(wallIndexBuffer);
 
   // Finally we'll make a window
   GPRTBufferOf<float3> windowVertexBuffer =
       gprtDeviceBufferCreate<float3>(context, NUM_WINDOW_VERTICES, windowVertices);
-  GPRTBufferOf<int3> windowIndexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_WINDOW_INDICES, windowIndices);
+  GPRTBufferOf<uint3> windowIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_WINDOW_INDICES, windowIndices);
   GPRTGeomOf<TrianglesGeomData> windowGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(windowGeom, windowVertexBuffer, NUM_WINDOW_VERTICES);
   gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
@@ -198,8 +198,8 @@ main(int ac, char **av) {
 
   // The window has a blue-ish color, and an alpha transparency of 50%.
   windowData->color = float4(199.f / 255.f, 227.f / 255.f, 225.f / 255.f, 0.5f);
-  windowData->vertices = gprtBufferGetHandle(windowVertexBuffer);
-  windowData->indices = gprtBufferGetHandle(windowIndexBuffer);
+  windowData->vertices = gprtBufferGetDevicePointer(windowVertexBuffer);
+  windowData->indices = gprtBufferGetDevicePointer(windowIndexBuffer);
 
   // Now stick both of these into a tree.
   // Note, we're making multiple instances of the same wall and window.

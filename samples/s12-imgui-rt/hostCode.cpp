@@ -162,7 +162,7 @@ main(int ac, char **av) {
 
   CompositeGuiConstants guiPC;
   guiPC.fbSize = fbSize;
-  guiPC.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   guiPC.imageBuffer = gprtBufferGetHandle(imageBuffer);
   guiPC.guiTexture = gprtTextureGetHandle(guiColorAttachment);
 
