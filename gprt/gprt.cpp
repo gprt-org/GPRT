@@ -3156,7 +3156,12 @@ struct Context {
     // need this for printf to work
     const char *layerNames[1] = {"VK_LAYER_KHRONOS_validation"};
     instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
-    instanceCreateInfo.enabledLayerCount = 1;
+
+    if (requestedFeatures.debugPrintf) {
+      instanceCreateInfo.enabledLayerCount = 1;
+    } else {
+      instanceCreateInfo.enabledLayerCount = 0;
+    }
 
     VkResult err;
 
