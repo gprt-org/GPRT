@@ -24,7 +24,7 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
   float2 uv = (fragCoord) / float2(pc.fbSize);
 
   // Load color of the rendered image
-  float4 imageColor = gprt::load<float4>(pc.imageBuffer, fbOfs);
+  float4 imageColor = pc.imageBuffer[fbOfs];
 
   // Sample the color from the GUI texture
   SamplerState sampler = gprt::getDefaultSampler();
@@ -67,7 +67,7 @@ raygen(uniform RayGenData record) {
   );
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  gprt::store(record.imageBuffer, fbOfs, float4(payload.color, 1.0f));
+  record.imageBuffer[fbOfs] = float4(payload.color, 1.0f);
 }
 
 [shader("closesthit")]

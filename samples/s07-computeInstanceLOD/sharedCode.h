@@ -24,9 +24,9 @@
 
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  gprt::Buffer index;
+  uint3 *index;
   /*! array/buffer of vertex positions */
-  gprt::Buffer vertex;
+  float3 *vertex;
   int lvlOfDetail;
 };
 

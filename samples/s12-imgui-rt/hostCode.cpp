@@ -108,7 +108,7 @@ main(int ac, char **av) {
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->imageBuffer = gprtBufferGetHandle(imageBuffer);
+  rayGenData->imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -163,7 +163,7 @@ main(int ac, char **av) {
   CompositeGuiConstants guiPC;
   guiPC.fbSize = fbSize;
   guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
-  guiPC.imageBuffer = gprtBufferGetHandle(imageBuffer);
+  guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
   guiPC.guiTexture = gprtTextureGetHandle(guiColorAttachment);
 
   RTPushConstants rtPC;

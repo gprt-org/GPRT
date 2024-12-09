@@ -104,10 +104,10 @@ ClosestHit(uniform TrianglesGeomData record, inout Payload payload, in float2 bc
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
 
-  int3 index = gprt::load<int3>(record.index, primID);
-  float3 A = gprt::load<float3>(record.vertex, index.x);
-  float3 B = gprt::load<float3>(record.vertex, index.y);
-  float3 C = gprt::load<float3>(record.vertex, index.z);
+  uint3 index = record.index[primID];
+  float3 A = record.vertex[index.x];
+  float3 B = record.vertex[index.y];
+  float3 C = record.vertex[index.z];
   float3 Ng = normalize(cross(B - A, C - A));
   float3 rayDir = normalize(ObjectRayDirection());
   float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();

@@ -150,15 +150,15 @@ over(float4 a, float4 b) {
 //   uint64_t y;
 // };
 
-T
-load<T>(in Buffer buffer, uint32_t index) {
-  return buffers[buffer.index].Load<T>(index * sizeof(T));
-}
+// T
+// load<T>(in Buffer buffer, uint32_t index) {
+//   return buffers[buffer.index].Load<T>(index * sizeof(T));
+// }
 
-void
-store<T>(in Buffer buffer, uint32_t index, in T value) {
-  buffers[buffer.index].Store<T>(index * sizeof(T), value);
-}
+// void
+// store<T>(in Buffer buffer, uint32_t index, in T value) {
+//   buffers[buffer.index].Store<T>(index * sizeof(T), value);
+// }
 
 // [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 
@@ -170,10 +170,10 @@ getAccelHandle(Accel accel) {
   };
 }
 
-RWByteAddressBuffer
-getBufferHandle(Buffer buffer) {
-  return buffers[buffer.index];
-}
+// RWByteAddressBuffer
+// getBufferHandle(Buffer buffer) {
+//   return buffers[buffer.index];
+// }
 
 Texture1D
 getTexture1DHandle(gprt::Texture texture) {

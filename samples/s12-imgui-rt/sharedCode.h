@@ -27,7 +27,7 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  gprt::Buffer imageBuffer;
+  float4 *imageBuffer;
   gprt::Accel world;
 };
 
@@ -50,7 +50,7 @@ struct RTPushConstants {
 
 struct CompositeGuiConstants {
   uint2 fbSize;
-  gprt::Buffer imageBuffer;
+  float4 *imageBuffer;
   uint *frameBuffer;
   gprt::Texture guiTexture;
 };

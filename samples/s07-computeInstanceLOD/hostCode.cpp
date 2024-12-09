@@ -67,7 +67,7 @@ template <typename T> struct Mesh {
   GPRTGeomOf<TrianglesGeomData> geometry;
   GPRTAccel accel;
 
-  Mesh(){};
+  Mesh() {};
   Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, int lvlOfDetail, T generator) {
     // Use the generator to generate vertices and indices
     auto vertGenerator = generator.vertices();
@@ -93,8 +93,8 @@ template <typename T> struct Mesh {
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
-    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-    geomData->index = gprtBufferGetHandle(indexBuffer);
+    geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+    geomData->index = gprtBufferGetDevicePointer(indexBuffer);
     geomData->lvlOfDetail = lvlOfDetail;
 
     // Build the bottom level acceleration structure
