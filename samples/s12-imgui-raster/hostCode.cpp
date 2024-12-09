@@ -184,7 +184,8 @@ main(int ac, char **av) {
   guiData->texture = gprtTextureGetHandle(guiColorAttachment);
   guiData->resolution = float2((float) fbSize.x, (float) fbSize.y);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_RASTER);
+  // Upload our newly assigned parameters to the shader binding table.
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....

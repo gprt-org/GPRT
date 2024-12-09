@@ -101,6 +101,9 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
+  // Calling an SBT build here to compile our newly made programs.
+  gprtBuildShaderBindingTable(context);
+
   // ##################################################################
   // set the parameters for our compute kernel
   // ##################################################################
@@ -123,9 +126,6 @@ main(int ac, char **av) {
   boundsData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
   boundsData.radius = gprtBufferGetDevicePointer(radiusBuffer);
   boundsData.aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
-
-  // compute AABBs in parallel with a compute shader
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
   gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1, 1, 1}, boundsData);
@@ -158,7 +158,8 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  // Upload our newly assigned parameters to the shader binding table.
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....

@@ -51,7 +51,7 @@ template <typename T> struct Mesh {
   GPRTBufferOf<uint3> indexBuffer;
   GPRTGeomOf<TrianglesGeomData> geometry;
 
-  Mesh(){};
+  Mesh() {};
   Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color, float4x4 transform) {
     auto vertGenerator = generator.vertices();
     auto triGenerator = generator.triangles();
@@ -175,6 +175,7 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
+  // Upload our newly assigned parameters to the shader binding table.
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################

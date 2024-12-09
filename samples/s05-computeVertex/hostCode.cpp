@@ -95,6 +95,9 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
+  // Calling an SBT build here to compile our newly made programs.
+  gprtBuildShaderBindingTable(context);
+
   // ##################################################################
   // set the parameters for our triangle mesh and compute kernel
   // ##################################################################
@@ -125,9 +128,6 @@ main(int ac, char **av) {
   vertexData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
   vertexData.index = gprtBufferGetDevicePointer(indexBuffer);
   vertexData.gridSize = GRID_SIDE_LENGTH;
-
-  // Build the shader binding table to upload parameters to the device
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute triangles in parallel with a vertex compute shader
   gprtComputeLaunch(vertexProgram, {(numTriangles + 31u) / 32u, 1, 1}, {32, 1, 1}, vertexData);
@@ -162,11 +162,8 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  // ##################################################################
-  // build *SBT* required to trace the groups
-  // ##################################################################
-
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  // Upload our newly assigned parameters to the shader binding table.
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....

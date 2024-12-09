@@ -134,14 +134,8 @@ atomicAccumulate(float *derivBufferPtr, uint idx, float val) {
   for (;;) {
     uint oldInt = derivBuffer[idx].load();
     float oldFloat = asfloat(oldInt);
-
     float newFloat = oldFloat + val;
-
     uint newInt = asuint(newFloat);
-
-    // compareExchange() returns the value at the location before the operation.
-    // If it's changed, we have contention between threads & need to try again.
-    //
     if (derivBuffer[idx].compareExchange(oldInt, newInt) == oldInt)
       break;
   }

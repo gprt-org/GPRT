@@ -218,7 +218,8 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  // Upload our newly assigned parameters to the shader binding table.
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....

@@ -243,7 +243,8 @@ main(int ac, char **av) {
   // Set the accel handle
   rayGenData->world = gprtAccelGetHandle(world);
 
-  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+  // Upload our newly assigned parameters to the shader binding table.
+  gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
