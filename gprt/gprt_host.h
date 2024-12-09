@@ -83,7 +83,8 @@
 #define GPRT_API /* bla */
 #endif
 
-#define GPRT_OFFSETOF(type, member) (uint32_t)((char *) (&((struct type *) 0)->member) - (char *) (((struct type *) 0)))
+#define GPRT_OFFSETOF(type, member)                                                                                    \
+  (uint32_t) ((char *) (&((struct type *) 0)->member) - (char *) (((struct type *) 0)))
 
 // Terminal colors
 #define GPRT_TERMINAL_RED           "\033[0;31m"
@@ -1931,21 +1932,20 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
   gprtBufferSortPayload(context, (GPRTBuffer) keys, (GPRTBuffer) values, (GPRTBuffer) scratch);
 }
 
-GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
+// GPRT_API gprt::Buffer gprtBufferGetHandle(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-gprt::Buffer
-gprtBufferGetHandle(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
-  return gprtBufferGetHandle((GPRTBuffer) buffer, deviceID);
-}
+// template <typename T>
+// gprt::Buffer
+// gprtBufferGetHandle(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+//   return gprtBufferGetHandle((GPRTBuffer) buffer, deviceID);
+// }
 
-
-GPRT_API uint64_t gprtBufferGetDeviceAddress(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
-template <typename T>
-uint64_t gprtBufferGetDeviceAddress(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
-  return gprtBufferGetDeviceAddress((GPRTBuffer) buffer, deviceID);
-}
-
+// GPRT_API uint64_t gprtBufferGetDeviceAddress(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
+// template <typename T>
+// uint64_t
+// gprtBufferGetDeviceAddress(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+//   return gprtBufferGetDeviceAddress((GPRTBuffer) buffer, deviceID);
+// }
 
 /** If a window was requested, this call interprets the given buffer as
  * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents

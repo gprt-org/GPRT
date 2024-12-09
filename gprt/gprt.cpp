@@ -837,9 +837,9 @@ struct Buffer {
   size_t getSize() { return (size_t) size; }
 
   /* Default Constructor */
-  Buffer(){};
+  Buffer() {};
 
-  ~Buffer(){};
+  ~Buffer() {};
 
   Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator,
          VkCommandBuffer _commandBuffer, VkQueue _queue, VkBufferUsageFlags _usageFlags,
@@ -1009,9 +1009,9 @@ struct Texture {
   } stagingBuffer;
 
   /* Default Constructor */
-  Texture(){};
+  Texture() {};
 
-  ~Texture(){};
+  ~Texture() {};
 
   void setImageLayout(VkCommandBuffer cmdbuffer, VkImage image, VkImageLayout oldImageLayout,
                       VkImageLayout newImageLayout, VkImageSubresourceRange subresourceRange,
@@ -1779,9 +1779,9 @@ struct Sampler {
   // Instead, we make our own virtual "sampler address space".
   uint32_t address = -1;
 
-  Sampler(){};
+  Sampler() {};
 
-  ~Sampler(){};
+  ~Sampler() {};
 
   Sampler(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkFilter magFilter, VkFilter minFilter,
           VkSamplerMipmapMode mipFilter, uint32_t anisotropy, VkSamplerAddressMode addressMode,
@@ -2737,7 +2737,7 @@ struct Geom : public SBTEntry {
       address = geoms.size() - 1;
     }
   };
-  ~Geom(){};
+  ~Geom() {};
 
   void destroy() {
     // Free geometry slot for use by subsequently made geometries
@@ -4314,7 +4314,7 @@ struct Context {
     vkDestroyInstance(instance, nullptr);
   }
 
-  ~Context(){};
+  ~Context() {};
 
   void buildSBT(GPRTBuildSBTFlags flags);
 
@@ -5117,7 +5117,7 @@ public:
     vkGetPhysicalDeviceProperties2(context->physicalDevice, &deviceProperties2);
   };
 
-  ~Accel(){};
+  ~Accel() {};
 
   // Acceleration structure handles will change only when the backing memory changes.
   // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
@@ -5557,7 +5557,7 @@ public:
       freeScratchBuffer();
   }
 
-  virtual void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory){};
+  virtual void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {};
   virtual void update() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
@@ -5764,7 +5764,7 @@ struct TriangleAccel : public Accel {
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
 
-  ~TriangleAccel(){};
+  ~TriangleAccel() {};
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
@@ -5828,7 +5828,7 @@ struct AABBAccel : public Accel {
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
   };
 
-  ~AABBAccel(){};
+  ~AABBAccel() {};
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
@@ -5899,7 +5899,7 @@ struct InstanceAccel : public Accel {
     this->instancesBuffer = instancesBuffer;
   }
 
-  ~InstanceAccel(){};
+  ~InstanceAccel() {};
 
   void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
 
@@ -8660,11 +8660,12 @@ bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuff
     gprtBuildShaderBindingTable(_context);
   }
 
+  // Todo, remove these buffer handles in favor of device pointers
   gprt::ScanParams scanParams;
   scanParams.size = numItems;
-  scanParams.output = gprtBufferGetHandle(_output);
-  scanParams.input = gprtBufferGetHandle(_input);
-  scanParams.state = gprtBufferGetHandle(_scratch);
+  scanParams.output = gprt::Buffer{output->virtualAddress, 0};   // gprtBufferGetHandle(_output);
+  scanParams.input = gprt::Buffer{input->virtualAddress, 0};     // gprtBufferGetHandle(_input);
+  scanParams.state = gprt::Buffer{scratch->virtualAddress, 0};   // gprtBufferGetHandle(_scratch);
   scanParams.flags = 0;
   if (partition)
     scanParams.flags |= SCAN_PARTITION;
@@ -8964,12 +8965,12 @@ gprtBufferSortPayload(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values
   bufferSort(_context, _keys, _values, _scratch);
 }
 
-GPRT_API gprt::Buffer
-gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
-  LOG_API_CALL();
-  Buffer *buffer = (Buffer *) _buffer;
-  return gprt::Buffer{buffer->virtualAddress, 0};
-}
+// GPRT_API gprt::Buffer
+// gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
+//   LOG_API_CALL();
+//   Buffer *buffer = (Buffer *) _buffer;
+//   return gprt::Buffer{buffer->virtualAddress, 0};
+// }
 
 GPRT_API uint64_t
 gprtBufferGetDeviceAddress(GPRTBuffer _buffer, int deviceID) {
