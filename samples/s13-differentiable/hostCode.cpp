@@ -77,7 +77,7 @@ template <typename T> struct Mesh {
   GPRTGeomOf<TrianglesGeomData> geometry;
   GPRTAccel accel;
 
-  Mesh(){};
+  Mesh() {};
   Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator) {
     // Use the generator to generate vertices and indices
     auto vertGenerator = generator.vertices();
@@ -103,8 +103,8 @@ template <typename T> struct Mesh {
     gprtTrianglesSetVertices(geometry, vertexBuffer, vertices.size());
     gprtTrianglesSetIndices(geometry, indexBuffer, indices.size());
     TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
-    geomData->vertex = gprtBufferGetHandle(vertexBuffer);
-    geomData->index = gprtBufferGetHandle(indexBuffer);
+    geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
+    geomData->index = gprtBufferGetDevicePointer(indexBuffer);
 
     // Build the bottom level acceleration structure
     accel = gprtTriangleAccelCreate(context, 1, &geometry);
@@ -188,7 +188,7 @@ main(int ac, char **av) {
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->imageBuffer = gprtBufferGetHandle(imageBuffer);
+  rayGenData->imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(triMiss);
@@ -238,7 +238,7 @@ main(int ac, char **av) {
   // Create initial aabb geometry
   GPRTGeomOf<BoundingBoxData> aabbGeom = gprtGeomCreate<BoundingBoxData>(context, aabbType);
   BoundingBoxData *aabbGeomData = gprtGeomGetParameters(aabbGeom);
-  aabbGeomData->aabbs = gprtBufferGetHandle(aabbPositions);
+  aabbGeomData->aabbs = gprtBufferGetDevicePointer(aabbPositions);
   gprtAABBsSetPositions(aabbGeom, aabbPositions, 1);
 
   // Place that geometry into an AABB BLAS.
@@ -259,11 +259,11 @@ main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   ComputeOBBConstants obbPC;
-  obbPC.aabbs = gprtBufferGetHandle(aabbPositions);
-  obbPC.eulRots = gprtBufferGetHandle(eulRots);
-  obbPC.vertices = gprtBufferGetHandle(mesh.vertexBuffer);
-  obbPC.indices = gprtBufferGetHandle(mesh.indexBuffer);
-  obbPC.instance = gprtBufferGetHandle(aabbInstanceBuffer);
+  obbPC.aabbs = gprtBufferGetDevicePointer(aabbPositions);
+  obbPC.eulRots = gprtBufferGetDevicePointer(eulRots);
+  obbPC.vertices = gprtBufferGetDevicePointer(mesh.vertexBuffer);
+  obbPC.indices = gprtBufferGetDevicePointer(mesh.indexBuffer);
+  obbPC.instance = gprtBufferGetDevicePointer(aabbInstanceBuffer);
   obbPC.numIndices = mesh.indices.size();
   obbPC.numTrisToInclude = mesh.indices.size();
 
@@ -280,8 +280,8 @@ main(int ac, char **av) {
 
   CompositeGuiConstants guiPC;
   guiPC.fbSize = fbSize;
-  guiPC.frameBuffer = gprtBufferGetHandle(frameBuffer);
-  guiPC.imageBuffer = gprtBufferGetHandle(imageBuffer);
+  guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
+  guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
   guiPC.guiTexture = gprtTextureGetHandle(guiColorAttachment);
 
   RTPushConstants rtPC;

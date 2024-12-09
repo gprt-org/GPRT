@@ -23,16 +23,16 @@
 #include "gprt.h"
 
 struct TrianglesGeomData {
-  gprt::Buffer vertex;
-  gprt::Buffer index;
+  float3 *vertex;
+  uint3 *index;
 };
 
 struct BoundingBoxData {
-  gprt::Buffer aabbs;
+  float3 *aabbs;
 };
 
 struct RayGenData {
-  gprt::Buffer imageBuffer;
+  float4 *imageBuffer;
   gprt::Accel triangleTLAS;
   gprt::Accel obbAccel;
 };
@@ -56,17 +56,17 @@ struct RTPushConstants {
 
 struct ComputeOBBConstants {
   int numIndices;
-  gprt::Buffer vertices;
-  gprt::Buffer indices;
-  gprt::Buffer eulRots;
-  gprt::Buffer aabbs;
-  gprt::Buffer instance;
+  float3 *vertices;
+  uint3 *indices;
+  float3 *eulRots;
+  float3 *aabbs;
+  gprt::Instance *instance;
   int numTrisToInclude;
 };
 
 struct CompositeGuiConstants {
   uint2 fbSize;
-  gprt::Buffer imageBuffer;
-  gprt::Buffer frameBuffer;
+  float4 *imageBuffer;
+  uint *frameBuffer;
   gprt::Texture guiTexture;
 };
