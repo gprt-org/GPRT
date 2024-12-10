@@ -117,7 +117,7 @@ static struct RequestedFeatures {
 #ifdef NDEBUG
     return false;
 #else
-    return true;
+    return false;
 #endif
   }
 } requestedFeatures;
@@ -287,7 +287,7 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 }
 
 // Contains definitions for internal entry points
-extern std::vector<uint8_t> scanDeviceCode;
+// extern std::vector<uint8_t> scanDeviceCode;
 extern std::vector<uint8_t> sortDeviceCode;
 
 // forward declarations...
@@ -1913,8 +1913,7 @@ struct Compute : public SBTEntry {
   void buildPipeline(VkDescriptorSetLayout recordDescriptorSetLayout, VkDescriptorSetLayout samplerDescriptorSetLayout,
                      VkDescriptorSetLayout texture1DDescriptorSetLayout,
                      VkDescriptorSetLayout texture2DDescriptorSetLayout,
-                     VkDescriptorSetLayout texture3DDescriptorSetLayout,
-                     VkDescriptorSetLayout bufferDescriptorSetLayout) {
+                     VkDescriptorSetLayout texture3DDescriptorSetLayout) {
     // If we already have a pipeline layout, free it so that we can make a new one
     if (pipelineLayout) {
       vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
@@ -1939,7 +1938,7 @@ struct Compute : public SBTEntry {
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout,    samplerDescriptorSetLayout,
                                                   texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                                  texture3DDescriptorSetLayout, bufferDescriptorSetLayout};
+                                                  texture3DDescriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
@@ -2483,8 +2482,7 @@ struct GeomType : public SBTEntry {
                            VkDescriptorSetLayout samplerDescriptorSetLayout,
                            VkDescriptorSetLayout texture1DDescriptorSetLayout,
                            VkDescriptorSetLayout texture2DDescriptorSetLayout,
-                           VkDescriptorSetLayout texture3DDescriptorSetLayout,
-                           VkDescriptorSetLayout bufferDescriptorSetLayout) {
+                           VkDescriptorSetLayout texture3DDescriptorSetLayout) {
     // we need both of these to be set, otherwise we can't build a raster pipeline...
     if (!vertexShaderUsed[rasterType] || !pixelShaderUsed[rasterType])
       return;
@@ -2620,7 +2618,7 @@ struct GeomType : public SBTEntry {
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout,    samplerDescriptorSetLayout,
                                                   texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                                  texture3DDescriptorSetLayout, bufferDescriptorSetLayout};
+                                                  texture3DDescriptorSetLayout};
     pipelineLayoutInfo.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
 
@@ -2979,7 +2977,6 @@ struct Context {
   VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool bufferDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
   VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
 
@@ -2990,7 +2987,6 @@ struct Context {
   uint32_t previousNumTexture1Ds = 0;
   uint32_t previousNumTexture2Ds = 0;
   uint32_t previousNumTexture3Ds = 0;
-  uint32_t previousNumBuffers = 0;
   uint32_t previousNumRasterRecords = 0;
   uint32_t previousNumComputeRecords = 0;
 
@@ -2998,7 +2994,6 @@ struct Context {
   VkDescriptorSetLayout texture1DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture2DDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout texture3DDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout bufferDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout rasterRecordDescriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSetLayout computeRecordDescriptorSetLayout = VK_NULL_HANDLE;
 
@@ -3006,7 +3001,6 @@ struct Context {
   VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet bufferDescriptorSet = VK_NULL_HANDLE;
 
   VkDescriptorSet rasterRecordDescriptorSet = VK_NULL_HANDLE;
   VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
@@ -3020,7 +3014,7 @@ struct Context {
   std::map<std::string, Compute *> internalComputePrograms;
 
   Module *radixSortModule = nullptr;
-  Module *scanModule = nullptr;
+  // Module *scanModule = nullptr;
 
   // TODO, we can probably refactor this...
   struct SortStages {
@@ -3300,8 +3294,7 @@ struct Context {
 
     // Required for floating point atomics
     enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_RELAXED_EXTENDED_INSTRUCTION_EXTENSION_NAME);
-
+    
     if (requestedFeatures.window) {
       // If the device will be used for presenting to a display via a swapchain
       // we need to request the swapchain extension
@@ -3747,7 +3740,7 @@ struct Context {
 
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
-    scanModule = new Module(scanDeviceCode);
+    // scanModule = new Module(scanDeviceCode);
 
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4099,10 +4092,6 @@ struct Context {
       vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
       texture3DDescriptorSet = nullptr;
     }
-    if (bufferDescriptorSet) {
-      vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
-      bufferDescriptorSet = nullptr;
-    }
 
     if (samplerDescriptorSetLayout) {
       vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
@@ -4128,10 +4117,6 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
       computeRecordDescriptorSetLayout = nullptr;
     }
-    if (bufferDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
-      bufferDescriptorSetLayout = nullptr;
-    }
 
     if (samplerDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
@@ -4156,10 +4141,6 @@ struct Context {
     if (computeRecordDescriptorPool) {
       vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
       computeRecordDescriptorPool = nullptr;
-    }
-    if (bufferDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
-      bufferDescriptorPool = nullptr;
     }
     if (imguiPool) {
       vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
@@ -4247,7 +4228,6 @@ struct Context {
     previousNumTexture1Ds = 0;
     previousNumTexture2Ds = 0;
     previousNumTexture3Ds = 0;
-    previousNumBuffers = 0;
     previousNumRasterRecords = 0;
     previousNumComputeRecords = 0;
 
@@ -4693,14 +4673,14 @@ struct Context {
     }
 
     // Scanning stages
-    {
-      Context *context = this;
-      internalComputePrograms.insert(
-          {"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
-      internalComputePrograms.insert(
-          {"Scan", new Compute(context, context->logicalDevice, scanModule,
-                               ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
-    }
+    // {
+    //   Context *context = this;
+    //   internalComputePrograms.insert(
+    //       {"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
+    //   internalComputePrograms.insert(
+    //       {"Scan", new Compute(context, context->logicalDevice, scanModule,
+    //                            ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
+    // }
 
     computePipelinesOutOfDate = true;
   }
@@ -6692,114 +6672,6 @@ Context::buildPipeline() {
     previousNumTexture3Ds = (uint32_t) Texture::texture3Ds.size();
   }
 
-  // If the number of buffers has changed, we need to make a new
-  // descriptor pool
-  if (bufferDescriptorPool && previousNumBuffers != Buffer::buffers.size()) {
-    vkFreeDescriptorSets(logicalDevice, bufferDescriptorPool, 1, &bufferDescriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, bufferDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, bufferDescriptorPool, nullptr);
-    bufferDescriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating buffer space");
-  }
-  if (!bufferDescriptorPool) {
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = std::max(uint32_t(Buffer::buffers.size()), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &bufferDescriptorPool));
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    binding.descriptorCount = poolSize.descriptorCount;
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    setLayoutBindingFlags.bindingCount = 1;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &bufferDescriptorSetLayout));
-
-    // Now, making the descriptor sets
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = bufferDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &bufferDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &bufferDescriptorSet));
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
-
-    std::vector<VkDescriptorBufferInfo> bufferDescriptors(poolSize.descriptorCount);
-    for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-      VkBuffer buffer = defaultBuffer->buffer;
-      VkDeviceSize range = defaultBuffer->size;
-
-      if (Buffer::buffers.size() > 0 && Buffer::buffers[i]) {
-        buffer = Buffer::buffers[i]->buffer;
-        range = Buffer::buffers[i]->size;
-      }
-
-      bufferDescriptors[i].offset = 0;
-      bufferDescriptors[i].buffer = buffer;
-      bufferDescriptors[i].range = range;
-    }
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = 0;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
-    writeDescriptorSets[0].pImageInfo = 0;
-    writeDescriptorSets[0].dstSet = bufferDescriptorSet;
-    writeDescriptorSets[0].pBufferInfo = bufferDescriptors.data();
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-
-    // Finally, keep track of if the buffer count here changes
-    previousNumBuffers = (uint32_t) Buffer::buffers.size();
-  }
-
   // If the number of raster records has changed, we need to make a new buffer of
   // raster program records
   if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
@@ -6952,8 +6824,7 @@ Context::buildPipeline() {
         samplerDescriptorSetLayout,
         texture1DDescriptorSetLayout,
         texture2DDescriptorSetLayout,
-        texture3DDescriptorSetLayout,
-        bufferDescriptorSetLayout};
+        texture3DDescriptorSetLayout};
     pipelineLayoutCI.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCI.pSetLayouts = layouts.data();
 
@@ -7154,7 +7025,7 @@ Context::buildPipeline() {
         continue;
       Compute::computes[i]->buildPipeline(computeRecordDescriptorSetLayout, samplerDescriptorSetLayout,
                                           texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                          texture3DDescriptorSetLayout, bufferDescriptorSetLayout);
+                                          texture3DDescriptorSetLayout);
     }
     computePipelinesOutOfDate = false;
   }
@@ -7167,7 +7038,7 @@ Context::buildPipeline() {
       for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
         GeomType::geomTypes[i]->buildRasterPipeline(
             rasterType, rasterRecordDescriptorSetLayout, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout, bufferDescriptorSetLayout);
+            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout);
       }
     }
     rasterPipelinesOutOfDate = false;
@@ -7788,7 +7659,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
 
       std::vector<VkDescriptorSet> descriptorSets = {
           context->rasterRecordDescriptorSet, context->samplerDescriptorSet,   context->texture1DDescriptorSet,
-          context->texture2DDescriptorSet,    context->texture3DDescriptorSet, context->bufferDescriptorSet};
+          context->texture2DDescriptorSet,    context->texture3DDescriptorSet};
 
       uint32_t offset = (uint32_t) geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -8641,59 +8512,63 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
 uint32_t
 bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition,
            bool select, bool selectPositive) {
-  LOG_API_CALL();
+  LOG_ERROR("Not implemented yet\n");  
+  return -1;
 
-  Context *context = (Context *) _context;
-  Buffer *input = (Buffer *) _input;
-  Buffer *output = (Buffer *) _output;
-  Buffer *scratch = (Buffer *) _scratch;
+  // LOG_API_CALL();
+  // Context *context = (Context *) _context;
+  // Buffer *input = (Buffer *) _input;
+  // Buffer *output = (Buffer *) _output;
+  // Buffer *scratch = (Buffer *) _scratch;
 
-  // note, input->getSize() here should always be a multiple of 16 bytes
-  uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
+  // // note, input->getSize() here should always be a multiple of 16 bytes
+  // uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["InitScan"];
-  auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["Scan"];
-  uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
+  // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["InitScan"];
+  // auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["Scan"];
+  // uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
 
-  // Each group gets an aggregate/inclusive prefix and a status flag.
-  // We also reserve one int for the total aggregate count, and one
-  // for group-to-partition scheduling
-  if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
-    // updating SBT, since we're using atomics here...
-    // (requires updating descriptor sets when buffer allocations change)
-    scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
-    gprtBuildShaderBindingTable(_context);
-  }
+  // // Each group gets an aggregate/inclusive prefix and a status flag.
+  // // We also reserve one int for the total aggregate count, and one
+  // // for group-to-partition scheduling
+  // if (scratch->getSize() < (numThreadBlocks + 2) * sizeof(uint32_t)) {
+  //   // updating SBT, since we're using atomics here...
+  //   // (requires updating descriptor sets when buffer allocations change)
+  //   scratch->resize((numThreadBlocks + 2) * sizeof(uint32_t), false);
+  //   gprtBuildShaderBindingTable(_context);
+  // }
 
-  // Todo, remove these buffer handles in favor of device pointers
-  gprt::ScanParams scanParams;
-  scanParams.size = numItems;
-  scanParams.output = gprt::Buffer{output->virtualAddress, 0};   // gprtBufferGetHandle(_output);
-  scanParams.input = gprt::Buffer{input->virtualAddress, 0};     // gprtBufferGetHandle(_input);
-  scanParams.state = gprt::Buffer{scratch->virtualAddress, 0};   // gprtBufferGetHandle(_scratch);
-  scanParams.flags = 0;
-  if (partition)
-    scanParams.flags |= SCAN_PARTITION;
-  else if (select)
-    scanParams.flags |= SCAN_SELECT;
+  // // Todo, remove these buffer handles in favor of device pointers
+  // gprt::ScanParams scanParams;
+  // scanParams.size = numItems;
+  // scanParams.output = gprt::Buffer{output->virtualAddress, 0};   // gprtBufferGetHandle(_output);
+  // scanParams.input = gprt::Buffer{input->virtualAddress, 0};     // gprtBufferGetHandle(_input);
+  // scanParams.state = gprt::Buffer{scratch->virtualAddress, 0};   // gprtBufferGetHandle(_scratch);
+  // scanParams.inputPtr = (uint64_t)gprtBufferGetDevicePointer(_input);
+  // scanParams.outputPtr = (uint64_t)gprtBufferGetDevicePointer(_output);
+  // scanParams.flags = 0;
+  // if (partition)
+  //   scanParams.flags |= SCAN_PARTITION;
+  // else if (select)
+  //   scanParams.flags |= SCAN_SELECT;
 
-  if (selectPositive)
-    scanParams.flags |= SCAN_SELECT_POSITIVE;
+  // if (selectPositive)
+  //   scanParams.flags |= SCAN_SELECT_POSITIVE;
 
-  uint3 numGroups = {numThreadBlocks, 1, 1};
-  uint3 groupSize = {1, 1, 1};
-  gprtComputeLaunch(InitChainedDecoupledExclusive, numGroups, groupSize, scanParams);
+  // uint3 numGroups = {numThreadBlocks, 1, 1};
+  // uint3 groupSize = {1, 1, 1};
+  // gprtComputeLaunch(InitChainedDecoupledExclusive, numGroups, groupSize, scanParams);
 
-  if (context->subgroupProperties.subgroupSize == 32)
-    groupSize = {32, SCAN_PARTITON_SIZE / (16 * 32), 1};
-  else
-    groupSize = {64, SCAN_PARTITON_SIZE / (16 * 64), 1};   // Todo, account for lane sizes other than 32/64
-  gprtComputeLaunch(ChainedDecoupledExclusive, numGroups, groupSize, scanParams);
+  // if (context->subgroupProperties.subgroupSize == 32)
+  //   groupSize = {32, SCAN_PARTITON_SIZE / (16 * 32), 1};
+  // else
+  //   groupSize = {64, SCAN_PARTITON_SIZE / (16 * 64), 1};   // Todo, account for lane sizes other than 32/64
+  // gprtComputeLaunch(ChainedDecoupledExclusive, numGroups, groupSize, scanParams);
 
-  scratch->map(sizeof(uint32_t), 0);
-  uint32_t total = *((uint32_t *) scratch->mapped);
-  scratch->unmap(sizeof(uint32_t), 0);
-  return total;
+  // scratch->map(sizeof(uint32_t), 0);
+  // uint32_t total = *((uint32_t *) scratch->mapped);
+  // scratch->unmap(sizeof(uint32_t), 0);
+  // return total;
 }
 
 uint32_t
@@ -9175,8 +9050,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
   std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
-                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet,
-                                                 context->bufferDescriptorSet};
+                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           context->raytracingPipelineLayout, 1, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
@@ -9322,7 +9196,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
                                                  context->texture1DDescriptorSet,     context->texture2DDescriptorSet,
-                                                 context->texture3DDescriptorSet,     context->bufferDescriptorSet};
+                                                 context->texture3DDescriptorSet};
 
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
   uint32_t offset = (uint32_t) compute->address * recordSize;

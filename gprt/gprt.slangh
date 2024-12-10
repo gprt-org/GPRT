@@ -101,11 +101,14 @@ Texture2D texture2Ds[];
 [[vk::binding(0, 4)]]
 Texture3D texture3Ds[];
 
+// Update, we now use buffer pointers for all buffer data. This helps avoid the need for
+// indirect buffer accessses through the below binding.
+
 // globally coherent here causes memory barriers and syncs to flush data across
 // the entire GPU such that other groups can see writes. Without this specifier,
 // a memory barrier or sync will only flush a UAV within the current group.
-[[vk::binding(0, 5)]]
-globallycoherent RWByteAddressBuffer buffers[];
+// [[vk::binding(0, 5)]]
+// globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -201,74 +204,76 @@ getDefaultSampler() {
   return samplers[0];
 }
 
-no_diff float
-atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
-  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
-  while (value < asfloat(ret_i)) {
-    uint old = ret_i;
-    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
-    if (ret_i == old)
-      break;
-  }
-  return asfloat(ret_i);
-}
+// Todo: update below to support pointers
 
-// Derivative of an atomic max is discontinuous, where only an exact match between value
-// and the currently stored max is non-zero
-[BackwardDerivativeOf(atomicMin32f)]
-void
-atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
-  float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
-  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
-}
+// no_diff float
+// atomicMin32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+//   uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
+//   while (value < asfloat(ret_i)) {
+//     uint old = ret_i;
+//     buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+//     if (ret_i == old)
+//       break;
+//   }
+//   return asfloat(ret_i);
+// }
 
-no_diff float
-atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
-  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
-  while (value > asfloat(ret_i)) {
-    uint old = ret_i;
-    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
-    if (ret_i == old)
-      break;
-  }
-  return asfloat(ret_i);
-}
+// // Derivative of an atomic max is discontinuous, where only an exact match between value
+// // and the currently stored max is non-zero
+// [BackwardDerivativeOf(atomicMin32f)]
+// void
+// atomicMin32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+//   float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
+//   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+// }
 
-// Derivative of an atomic max is discontinuous, where only an exact match between value
-// and the currently stored max is non-zero
-[BackwardDerivativeOf(atomicMax32f)]
-void
-atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
-  float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
-  value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
-}
+// no_diff float
+// atomicMax32f(no_diff in Buffer buffer, no_diff uint32_t index, inout float value) {
+//   uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
+//   while (value > asfloat(ret_i)) {
+//     uint old = ret_i;
+//     buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, asuint(value), ret_i);
+//     if (ret_i == old)
+//       break;
+//   }
+//   return asfloat(ret_i);
+// }
 
-float
-atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
-  uint old, newint;
-  uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
-  do {
-    old = ret_i;
-    newint = asuint(asfloat(old) + value);
-    buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
-  } while (ret_i != old);
+// // Derivative of an atomic max is discontinuous, where only an exact match between value
+// // and the currently stored max is non-zero
+// [BackwardDerivativeOf(atomicMax32f)]
+// void
+// atomicMax32f(in Buffer buffer, uint32_t index, inout DifferentialPair<float> value) {
+//   float ret = buffers[buffer.index].Load<float>(index * sizeof(float));
+//   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
+// }
 
-  return asfloat(ret_i);
-}
+// float
+// atomicAdd32f(in Buffer buffer, uint32_t index, float value) {
+//   uint old, newint;
+//   uint ret_i = asuint(buffers[buffer.index].Load<float>(index * sizeof(float)));
+//   do {
+//     old = ret_i;
+//     newint = asuint(asfloat(old) + value);
+//     buffers[buffer.index].InterlockedCompareExchange(index * sizeof(float), old, newint, ret_i);
+//   } while (ret_i != old);
 
-uint32_t
-atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
-  uint32_t old;
-  buffers[buffer.index].InterlockedAdd(index * sizeof(uint32_t), value, old);
-  return old;
-}
+//   return asfloat(ret_i);
+// }
 
-uint32_t
-atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
-  uint32_t old;
-  buffers[buffer.index].InterlockedOr(index * sizeof(uint32_t), value, old);
-  return old;
-}
+// uint32_t
+// atomicAdd(in Buffer buffer, uint32_t index, uint32_t value) {
+//   uint32_t old;
+//   buffers[buffer.index].InterlockedAdd(index * sizeof(uint32_t), value, old);
+//   return old;
+// }
+
+// uint32_t
+// atomicOr(in Buffer buffer, uint32_t index, uint32_t value) {
+//   uint32_t old;
+//   buffers[buffer.index].InterlockedOr(index * sizeof(uint32_t), value, old);
+//   return old;
+// }
 
 }
 

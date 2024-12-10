@@ -90,12 +90,13 @@ namespace gprt {
 typedef uint32_t Texture;
 typedef uint32_t Sampler;
 
+// Update: now, we simply use Slang's pointer type for buffers
 // Shared between Slang and C++
-struct Buffer {
-  // eventually will become address as features progress
-  uint32_t index;
-  uint32_t temp;
-};
+// struct Buffer {
+//   // eventually will become address as features progress
+//   uint32_t index;
+//   uint32_t temp;
+// };
 
 /** The reference to the acceleration structure.
  * @note this handle is subject to change if the memory backing the accel changes.
@@ -160,12 +161,17 @@ struct Instance {
 //   };
 // #endif
 
-// Parameters to the built-in scan compute kernels
-struct ScanParams {
-  uint32_t size;
-  uint32_t flags;
-  Buffer input;
-  Buffer output;
-  Buffer state;
-};
+
+// Temporarily disabling... This is blocking us from dropping the buffers descriptor array
+
+// // Parameters to the built-in scan compute kernels
+// struct ScanParams {
+//   uint32_t size;
+//   uint32_t flags;
+//   gprt::Buffer input;
+//   gprt::Buffer output;
+//   Buffer state;
+// };
+
+
 };   // namespace gprt

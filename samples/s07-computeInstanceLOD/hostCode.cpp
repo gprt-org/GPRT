@@ -154,6 +154,9 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
+  // Calling an SBT build here to compile our newly made programs.
+  gprtBuildShaderBindingTable(context);
+
   // ------------------------------------------------------------------
   // bottom level mesh instances
   // ------------------------------------------------------------------
@@ -190,9 +193,6 @@ main(int ac, char **av) {
   pc.meshLODs = gprtBufferGetDevicePointer(meshLODBuffer);
   pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = numInstances;
-
-  // Build the shader binding table to upload parameters to the device
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Now, compute transforms in parallel with a transform compute shader
   gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
