@@ -646,19 +646,60 @@ float3 OpConvertUToF(uint32_t3 u) {
 }
 
 [ForceInline]
-inline uint bfe(uint value, int offset, int bits)
+uint16_t bfe16(uint value, int offset, int bits)
 {
+    // __target_switch
+    // {
+    // case glsl: __intrinsic_asm "bitfieldExtract";
+    // case spirv: 
+    return uint16_t(spirv_asm {
+        result:$$uint = OpBitFieldUExtract $value $offset $bits
+    });
+    // default:
+    //     return (value >> offset) & ((1u << bits) - 1);
+    // }
+}
+
+[ForceInline]
+uint bfe(uint value, int offset, int bits)
+{
+    // __target_switch
+    // {
+    // case glsl: __intrinsic_asm "bitfieldExtract";
+    // case spirv: 
     return spirv_asm {
         result:$$uint = OpBitFieldUExtract $value $offset $bits
     };
+    // default:
+    //     return (value >> offset) & ((1u << bits) - 1);
+    // }
 }
+
+// [ForceInline]
+// inline uint bfe(uint value, int offset, int bits)
+// {
+//     return spirv_asm {
+//         result:$$uint = OpBitFieldUExtract $value $offset $bits
+//     };
+// }
 
 [ForceInline]
 inline uint3 bfe(uint3 value, int offset, int bits)
 {
+  // __target_switch
+  //   {
+  //   case glsl: __intrinsic_asm "bitfieldExtract";
+    // case spirv: 
     return spirv_asm {
         result:$$uint3 = OpBitFieldUExtract $value $offset $bits
     };
+  //   default:
+        // return uint3(bfe(value.x, offset, bits), bfe(value.y, offset, bits), bfe(value.z, offset, bits));
+    // }
+
+    // return spirv_asm {
+    //     result:$$uint3 = OpBitFieldUExtract $value $offset $bits
+    // };
 }
 
 [ForceInline]
@@ -744,7 +785,9 @@ struct TraversalState {
   // float4 *BVH8L;
 
   // note, repurposing tmax for search radius, and ignoring tmin.
-  float3 origin; float tmax;
+  float3 origin; 
+  float tmax;
+  uint32_t itmax;
   // float3 direction; float tmax;
 
   float2 triUV;
@@ -900,6 +943,7 @@ NNQDebugData TraceNNQ<T>(
   tstate.origin = payload.OriginAndTMax.xyz;
   // tstate.direction = float3(1.0, 1.0, 1.0);
   tstate.tmax = payload.OriginAndTMax.w;
+  tstate.itmax = asuint(tstate.tmax);
   tstate.debug = bool(payload.QueryFlags & NN_FLAG_DEBUG);
   tstate.debugHits = 0;
 

@@ -6113,11 +6113,11 @@ struct NNTriangleAccel : public Accel {
   std::vector<NNTriangleGeom *> geometries;
 
   GPRTCallableOf<TraverseBVH8Record> traverseBVH8Callable;
-  GPRTCallableOf<TraverseRecord> traverseBVH2Callable;
-  GPRTCallableOf<TraverseRecord> traverseLinearCallable;
+  // GPRTCallableOf<TraverseRecord> traverseBVH2Callable;
+  // GPRTCallableOf<TraverseRecord> traverseLinearCallable;
 
   // One of these per geometry, one per "ray type"
-  std::vector<GPRTCallableOf<TriangleRecord>> intersectTriangleCallable;
+  // std::vector<GPRTCallableOf<TriangleRecord>> intersectTriangleCallable;
   GPRTBufferOf<uint32_t> SBTIndices;
   uint32_t instanceSBTOffset;
   uint numGeometries;
@@ -6207,8 +6207,8 @@ struct NNTriangleAccel : public Accel {
     record.primBuffers = gprtBufferGetHandle(hploc.trianglesBuffers);
     record.vertBuffers = gprtBufferGetHandle(hploc.verticesBuffers);
     record.InstanceContributionToHitGroupIndex = instanceSBTOffset;
-    gprtCallableSetParameters(traverseBVH2Callable, &record);
-    gprtCallableSetParameters(traverseLinearCallable, &record);
+    // gprtCallableSetParameters(traverseBVH2Callable, &record);
+    // gprtCallableSetParameters(traverseLinearCallable, &record);
 
     TraverseBVH8Record bvh8Record;
     bvh8Record.BVH8N_ptr = (uint32_t*)gprtBufferGetDevicePointer(hploc.bvh8Nodes);
@@ -6251,15 +6251,15 @@ struct NNTriangleAccel : public Accel {
 
     // Callable handles for traversal
     traverseBVH8Callable = gprtCallableCreate<TraverseBVH8Record>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH8");
-    traverseBVH2Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH2");
-    traverseLinearCallable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseLinear");
+    // traverseBVH2Callable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseBVH2");
+    // traverseLinearCallable = gprtCallableCreate<TraverseRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "TraverseLinear");
 
-    nnAccelHandle.TraverseBVH2Callable = ((Callable*)traverseBVH2Callable)->address;
+    // nnAccelHandle.TraverseBVH2Callable = ((Callable*)traverseBVH2Callable)->address;
     nnAccelHandle.TraverseBVH8Callable = ((Callable*)traverseBVH8Callable)->address;
-    nnAccelHandle.TraverseLinearCallable = ((Callable*)traverseLinearCallable)->address;
+    // nnAccelHandle.TraverseLinearCallable = ((Callable*)traverseLinearCallable)->address;
 
     SBTIndices = gprtDeviceBufferCreate<uint32_t>(opaqueContext, numGeometries * requestedFeatures.numRayTypes);
-    intersectTriangleCallable.resize(numGeometries * requestedFeatures.numRayTypes);
+    // intersectTriangleCallable.resize(numGeometries * requestedFeatures.numRayTypes);
     instanceSBTOffset = Callable::callables.size(); // the offset into the callable SBT is the number of callables already in the SBT
 
     hploc.params.N = 0;
@@ -6276,14 +6276,14 @@ struct NNTriangleAccel : public Accel {
 
       // For now, create callable programs for each geometry
       // (eventually, I want to allow users to set these)
-      for (int j = 0; j < requestedFeatures.numRayTypes; ++j) {
-        TriangleRecord triangleRecord;
-        triangleRecord.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
-        triangleRecord.vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
+      // for (int j = 0; j < requestedFeatures.numRayTypes; ++j) {
+      //   TriangleRecord triangleRecord;
+      //   triangleRecord.triangles = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->index.buffer);
+      //   triangleRecord.vertices = gprtBufferGetHandle((GPRTBuffer)this->geometries[i]->vertex.buffers[0]);
 
-        intersectTriangleCallable[i * requestedFeatures.numRayTypes + j] = gprtCallableCreate<TriangleRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "IntersectTriangle");
-        gprtCallableSetParameters(intersectTriangleCallable[i], &triangleRecord);
-      }
+      //   intersectTriangleCallable[i * requestedFeatures.numRayTypes + j] = gprtCallableCreate<TriangleRecord>((GPRTContext)context, (GPRTModule)context->hplocTraverseModule, "IntersectTriangle");
+      //   gprtCallableSetParameters(intersectTriangleCallable[i], &triangleRecord);
+      // }
     }
 
     hploc.primPrefixBuffer = gprtDeviceBufferCreate<uint32_t>(opaqueContext, primPrefix.size(), primPrefix.data());
