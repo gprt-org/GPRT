@@ -71,8 +71,9 @@
 #include "imgui_impl_vulkan.h"
 
 // For advanced vulkan memory allocation
-#define VMA_VULKAN_VERSION 1002000   // Vulkan 1.2
+#define VMA_VULKAN_VERSION 1003000   // Vulkan 1.2
 #define VMA_IMPLEMENTATION
+// #define VMA_DEBUG_LOG printf
 #include "vma/vk_mem_alloc.h"
 
 // For FFX radix sort
@@ -914,11 +915,16 @@ struct Buffer {
       bufferCreateInfo.size = size;
       // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
+      // VmaAllocationCreateInfo allocInfo = {};
+      // allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+      // allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+      // VK_CHECK_RESULT(vmaCreateBufferWithAlignment(allocator, &bufferCreateInfo, &allocInfo, alignment,
+      //                                              &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+      // std::cout<<std::endl;
       VmaAllocationCreateInfo allocInfo = {};
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
       allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-      VK_CHECK_RESULT(vmaCreateBufferWithAlignment(allocator, &bufferCreateInfo, &allocInfo, alignment,
-                                                   &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
@@ -5386,7 +5392,7 @@ public:
   // - std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
   // - std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
   // - std::vector<uint32_t> maxPrimitiveCounts;
-  void innerBuildProc() {
+  void innerBuildProc(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     VkResult err;
 
     // Get size info
@@ -5803,7 +5809,7 @@ struct TriangleAccel : public Accel {
       geomRange.transformOffset = 0;
     }
 
-    innerBuildProc();
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
   }
 };
 
@@ -5858,7 +5864,7 @@ struct AABBAccel : public Accel {
       maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
     }
 
-    innerBuildProc();
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
   }
 };
 
@@ -5961,7 +5967,7 @@ struct InstanceAccel : public Accel {
     this->accelerationBuildStructureRangeInfoPtrs.resize(1);
     this->accelerationBuildStructureRangeInfoPtrs[0] = &this->accelerationBuildStructureRangeInfos[0];
 
-    innerBuildProc();
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
   }
 
   void update() {
