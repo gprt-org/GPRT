@@ -95,7 +95,7 @@ static struct RequestedFeatures {
   uint32_t numRayTypes = 1;
 
   // On AMD, might require RADV driver...
-  uint32_t rayRecursionDepth = 31;
+  uint32_t rayRecursionDepth = 1;
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
