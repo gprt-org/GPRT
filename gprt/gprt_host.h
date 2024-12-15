@@ -191,7 +191,7 @@ typedef enum {
   GPRT_MATRIX_FORMAT_ROW_MAJOR
 } GPRTMatrixFormat;
 
-typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_CURVES } GPRTGeomKind;
+typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS } GPRTGeomKind;
 
 typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,
@@ -342,8 +342,28 @@ GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, ui
 template <typename T1, typename T2>
 void
 gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
-                        uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                        uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
+}
+
+GPRT_API void gprtLSSSetVertices(GPRTGeom lssGeom, GPRTBuffer vertices, uint32_t count,
+                                 uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtLSSSetVertices(GPRTGeomOf<T1> lssGeom, GPRTBufferOf<T2> vertices, uint32_t count,
+                   uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtLSSSetVertices((GPRTGeom) lssGeom, (GPRTBuffer) vertices, count, stride, offset);
+}
+
+GPRT_API void gprtLSSSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
+                                uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtLSSSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
+                  uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtLSSSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 
 /*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ)
@@ -902,7 +922,7 @@ gprtCallableSetParameters(GPRTCallableOf<T> callable, T *parameters, int deviceI
   \param numGeometries Number of geometries in this acceleration structure, must
   be non-zero.
 
-  \param arrayOfChildGeoms A array of 'numGeometries' child
+  \param arrayOfChildGeoms An array of 'numGeometries' child
   geometries. Every geom in this array must be a valid gprt geometry
   created with gprtGeomCreate, and must be of a GPRT_GEOM_USER
   type.
@@ -925,7 +945,7 @@ gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *ar
   \param numGeometries Number of geometries in this acceleration structure, must
   be non-zero.
 
-  \param arrayOfChildGeoms A array of 'numGeometries' child
+  \param arrayOfChildGeoms An array of 'numGeometries' child
   geometries. Every geom in this array must be a valid gprt geometry
   created with gprtGeomCreate, and must be of a GPRT_TRIANGLES
   type.
@@ -942,28 +962,51 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
   return gprtTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
 }
 
-// // ------------------------------------------------------------------
-// /*! create a new acceleration structure for "curves" geometries.
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for sphere geometries.
 
-//   \param numGeometries Number of geometries in this acceleration structure,
-//   must be non-zero.
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
 
-//   \param arrayOfChildGeoms A array of 'numGeometries' child
-//   geometries. Every geom in this array must be a valid gprt geometry
-//   created with gprtGeomCreate, and must be of a GPRT_GEOM_CURVES
-//   type.
+  \param arrayOfChildGeoms An array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_SPHERES
+  type.
 
-//   \param flags reserved for future use
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+                                         unsigned int flags GPRT_IF_CPP(= 0));
 
-//   Note that in order to use curves geometries you _have_ to call
-//   gprtEnableCurves() before curves are used; in particular, curves
-//   _have_ to already be enabled when the pipeline gets compiled.
-// */
-// GPRT_API GPRTAccel
-// gprtCurvesAccelCreate(GPRTContext context,
-//                          size_t     numCurveGeometries,
-//                          GPRTGeom   *curveGeometries,
-//                          unsigned int flags GPRT_IF_CPP(=0));
+template <typename T>
+GPRTAccel
+gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+                      unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtSphereAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+}
+
+// ------------------------------------------------------------------
+/*! create a new acceleration structure for line swept sphere geometries.
+
+  \param numGeometries Number of geometries in this acceleration structure, must
+  be non-zero.
+
+  \param arrayOfChildGeoms An array of 'numGeometries' child
+  geometries. Every geom in this array must be a valid gprt geometry
+  created with gprtGeomCreate, and must be of a GPRT_LSS
+  type.
+
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+                                      unsigned int flags GPRT_IF_CPP(= 0));
+
+template <typename T>
+GPRTAccel
+gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
+                   unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtLSSAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+}
 
 // ------------------------------------------------------------------
 /*! create a new instance acceleration structure with given number of

@@ -79,6 +79,9 @@
 // For FFX radix sort
 #include "gprt_sort.h"
 
+// For software fallbacks for various primitive types
+#include "gprt_fallbacks.h"
+
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
  * platforms.
@@ -99,7 +102,7 @@ static struct RequestedFeatures {
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
-  uint32_t recordSize = 512;
+  uint32_t recordSize = 256;
 
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
@@ -110,8 +113,9 @@ static struct RequestedFeatures {
   bool rayQueries = false;
 
   bool invocationReordering = false;
+  bool linearSweptSpheres = false;
 
-  bool debugPrintf = false;
+  bool debugPrintf = true;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -289,7 +293,8 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
 
 // Contains definitions for internal entry points
 // extern std::vector<uint8_t> scanDeviceCode;
-extern std::vector<uint8_t> sortDeviceCode;
+extern GPRTProgram sortDeviceCode;
+extern GPRTProgram fallbacksDeviceCode;
 
 // forward declarations...
 struct Context;
@@ -297,6 +302,10 @@ struct Geom;
 struct GeomType;
 struct TriangleGeom;
 struct TriangleGeomType;
+struct SphereGeom;
+struct SphereGeomType;
+struct LSSGeom;
+struct LSSGeomType;
 struct AABBGeom;
 struct AABBGeomType;
 struct NNPointGeom;
@@ -924,7 +933,8 @@ struct Buffer {
       VmaAllocationCreateInfo allocInfo = {};
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
       allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+                                      &stagingBuffer.allocation, nullptr));
     }
 
     // If a pointer to the buffer data has been passed, map the buffer and
@@ -1942,7 +1952,7 @@ struct Compute : public SBTEntry {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout,    samplerDescriptorSetLayout,
+    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,
                                                   texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
                                                   texture3DDescriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = (uint32_t) layouts.size();
@@ -2622,7 +2632,7 @@ struct GeomType : public SBTEntry {
     // The layout here describes descriptor sets and push constants used
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout,    samplerDescriptorSetLayout,
+    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,
                                                   texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
                                                   texture3DDescriptorSetLayout};
     pipelineLayoutInfo.setLayoutCount = (uint32_t) layouts.size();
@@ -2664,6 +2674,7 @@ struct GeomType : public SBTEntry {
     }
   }
 
+  // This is a bit dumb. We shouldn't be creating all these shader modules...
   void destroy() {
     // Free geomtype slot for use by subsequently made geomtypes
     GeomType::geomTypes[address] = nullptr;
@@ -2807,6 +2818,102 @@ struct TriangleGeomType : public GeomType {
   GPRTGeomKind getKind() { return GPRT_TRIANGLES; }
 };
 
+struct SphereGeom : public Geom {
+  struct {
+    uint32_t count = 0;    // number of vertices
+    uint32_t stride = 0;   // stride between vertices
+    uint32_t offset = 0;   // an offset in bytes to the first vertex
+    std::vector<Buffer *> buffers;
+  } vertex;
+
+  SphereGeom(SphereGeomType *_geomType) : Geom() {
+    geomType = (GeomType *) _geomType;
+
+    // Allocate the variables for this geometry
+    this->SBTRecord = (uint8_t *) malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
+  };
+  ~SphereGeom() { free(this->SBTRecord); };
+
+  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+    // assuming no motion blurred triangles for now, so we assume 1 buffer
+    vertex.buffers.resize(1);
+    vertex.buffers[0] = vertices;
+    vertex.count = count;
+    vertex.stride = stride;
+    vertex.offset = offset;
+  }
+};
+
+struct SphereGeomType : public GeomType {
+  SphereGeomType(VkDevice logicalDevice, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(logicalDevice, numRayTypes, recordSize) {}
+  ~SphereGeomType() {}
+
+  Geom *createGeom() { return new SphereGeom(this); }
+
+  GPRTGeomKind getKind() { return GPRT_SPHERES; }
+};
+
+struct LSSGeom : public Geom {
+  struct {
+    uint32_t count = 0;         // number of indices
+    uint32_t stride = 0;        // stride between indices
+    uint32_t offset = 0;        // offset in bytes to the first index
+    uint32_t firstVertex = 0;   // added to the index values before fetching vertices
+    Buffer *buffer = nullptr;
+  } index;
+
+  struct {
+    uint32_t count = 0;    // number of vertices
+    uint32_t stride = 0;   // stride between vertices
+    uint32_t offset = 0;   // an offset in bytes to the first vertex
+    std::vector<Buffer *> buffers;
+  } vertex;
+
+  // true: endcap0 enabled, false: endcap0 disabled
+  bool endcap0 = true;
+  // true: endcap1 enabled, false: endcap1 disabled
+  bool endcap1 = true;
+  // false: return entry hits, true: return exit hits
+  bool exitTest = false;
+
+  LSSGeom(LSSGeomType *_geomType) : Geom() {
+    geomType = (GeomType *) _geomType;
+
+    // Allocate the variables for this geometry
+    this->SBTRecord = (uint8_t *) malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
+  };
+  ~LSSGeom() { free(this->SBTRecord); };
+
+  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+    // assuming no motion blurred triangles for now, so we assume 1 buffer
+    vertex.buffers.resize(1);
+    vertex.buffers[0] = vertices;
+    vertex.count = count;
+    vertex.stride = stride;
+    vertex.offset = offset;
+  }
+
+  void setIndices(Buffer *indices, uint32_t count, uint32_t stride, uint32_t offset) {
+    index.buffer = indices;
+    index.count = count;
+    index.stride = stride;
+    index.offset = offset;
+  }
+};
+
+struct LSSGeomType : public GeomType {
+  LSSGeomType(VkDevice logicalDevice, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(logicalDevice, numRayTypes, recordSize) {}
+  ~LSSGeomType() {}
+
+  Geom *createGeom() { return new LSSGeom(this); }
+
+  GPRTGeomKind getKind() { return GPRT_LSS; }
+};
+
 struct AABBGeom : public Geom {
   struct {
     uint32_t count;
@@ -2893,6 +3000,12 @@ struct Context {
   VkPhysicalDeviceFeatures2 deviceFeatures2;
   VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
   VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
+  VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV linearSweptSpheresFeatures;
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
+  VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
+
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
 
@@ -3021,6 +3134,10 @@ struct Context {
 
   Module *radixSortModule = nullptr;
   // Module *scanModule = nullptr;
+  Module *fallbacksModule = nullptr;
+  VkShaderModule fallbacksVKModule = VK_NULL_HANDLE;
+
+  VkPipelineShaderStageCreateInfo LSSIntersectionShaderStage;
 
   // TODO, we can probably refactor this...
   struct SortStages {
@@ -3300,7 +3417,7 @@ struct Context {
 
     // Required for floating point atomics
     enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
-    
+
     if (requestedFeatures.window) {
       // If the device will be used for presenting to a display via a swapchain
       // we need to request the swapchain extension
@@ -3316,6 +3433,10 @@ struct Context {
     if (requestedFeatures.invocationReordering) {
       enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
     }
+
+    // if (requestedFeatures.linearSweptSpheres) {
+    //   enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
+    // }
 
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
     enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
@@ -3410,7 +3531,7 @@ struct Context {
     // floatControlsProperties.pNext = pNext;
     // pNext = &floatControlsProperties;
 
-    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures = {};
+    atomicFloatFeatures = {};
     atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
     atomicFloatFeatures.shaderBufferFloat32Atomics = true;
     atomicFloatFeatures.shaderSharedFloat32Atomics = true;
@@ -3423,31 +3544,37 @@ struct Context {
     // atomicFloat2Features.shaderSharedFloat32AtomicMinMax = true;
     // atomicFloat2Features.pNext = pNext;
     // pNext = &atomicFloat2Features;
+    linearSweptSpheresFeatures = {};
+    linearSweptSpheresFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_LINEAR_SWEPT_SPHERES_FEATURES_NV;
+    if (requestedFeatures.linearSweptSpheres) {
+      // linearSweptSpheresFeatures.linearSweptSpheres = true;
+      // linearSweptSpheresFeatures.spheres = true;
+      linearSweptSpheresFeatures.pNext = pNext;
+      pNext = &linearSweptSpheresFeatures;
+    }
 
-    VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures{};
-    if (requestedFeatures.invocationReordering) {
-      invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
-      invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+    invocationReorderFeatures = {};
+    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+    if (requestedFeatures.rayQueries) {
+      // invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
       invocationReorderFeatures.pNext = pNext;
       pNext = &invocationReorderFeatures;
     }
 
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+    accelerationStructureFeatures = {};
     accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelerationStructureFeatures.pNext = pNext;
     pNext = &accelerationStructureFeatures;
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
-    if (requestedFeatures.rayTracingPipeline) {
-      rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-      rtPipelineFeatures.pNext = pNext;
-      pNext = &rtPipelineFeatures;
-    }
+    rtPipelineFeatures = {};
+    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipelineFeatures.pNext = pNext;
+    pNext = &rtPipelineFeatures;
 
-    VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures{};
+    rtQueryFeatures = {};
+    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
     if (requestedFeatures.rayQueries) {
-      rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-      rtQueryFeatures.rayQuery = requestedFeatures.rayQueries;
+      // rtQueryFeatures.rayQuery = requestedFeatures.rayQueries;
       rtQueryFeatures.pNext = pNext;
       pNext = &rtQueryFeatures;
     }
@@ -3747,6 +3874,7 @@ struct Context {
     // 7. Create a module for internal device entry points
     radixSortModule = new Module(sortDeviceCode);
     // scanModule = new Module(scanDeviceCode);
+    fallbacksModule = new Module(fallbacksDeviceCode);
 
     // Swapchain semaphores and fences
     if (requestedFeatures.window) {
@@ -4688,6 +4816,28 @@ struct Context {
     //                            ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
     // }
 
+    // Fallback primitive programs
+    {
+      Context *context = this;
+      internalComputePrograms.insert({"LSSBounds", new Compute(context, context->logicalDevice, fallbacksModule,
+                                                               "LSSBounds", sizeof(LSSParameters))});
+
+      std::vector<unsigned int, std::allocator<unsigned int>> binary;
+      binary = fallbacksModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo{};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fallbacksVKModule));
+
+      context->LSSIntersectionShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      context->LSSIntersectionShaderStage.stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+      context->LSSIntersectionShaderStage.module = fallbacksVKModule;
+      context->LSSIntersectionShaderStage.pName = "LSSIntersection";
+      assert(context->LSSIntersectionShaderStage.module != VK_NULL_HANDLE);
+    }
     computePipelinesOutOfDate = true;
   }
 
@@ -4732,6 +4882,11 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
 
       vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
+    }
+
+    // destroy fallback stages
+    {
+      vkDestroyShaderModule(logicalDevice, fallbacksVKModule, nullptr);
     }
 
     std::vector<std::string> progNames;
@@ -5033,10 +5188,11 @@ typedef enum {
   GPRT_UNKNOWN_ACCEL = 0x0,
   GPRT_INSTANCE_ACCEL = 0x1,
   GPRT_TRIANGLE_ACCEL = 0x2,
-  GPRT_AABB_ACCEL = 0x3,
-  GPRT_NN_POINT_ACCEL = 0x4,
-  GPRT_NN_EDGE_ACCEL = 0x5,
-  GPRT_NN_TRIANGLE_ACCEL = 0x6,
+  GPRT_LSS_ACCEL = 0x3,
+  GPRT_AABB_ACCEL = 0x4,
+  GPRT_NN_POINT_ACCEL = 0x5,
+  GPRT_NN_EDGE_ACCEL = 0x6,
+  GPRT_NN_TRIANGLE_ACCEL = 0x7,
 } AccelType;
 
 struct Accel {
@@ -5813,6 +5969,225 @@ struct TriangleAccel : public Accel {
   }
 };
 
+struct SphereAccel : public Accel {
+  std::vector<VkAccelerationStructureGeometrySpheresDataNV> accelerationStructureGeometrySpheres;
+
+  SphereAccel(Context *context, size_t numGeometries, SphereGeom *geometries) : Accel(context, true) {
+    this->geometries.resize(numGeometries);
+    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  };
+
+  ~SphereAccel() {};
+
+  AccelType getType() { return GPRT_LSS_ACCEL; }
+
+  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+    this->buildMode = buildMode;
+
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    accelerationStructureGeometrySpheres.resize(geometries.size());
+
+    maxPrimitiveCounts.resize(geometries.size());
+    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+      auto &geom = accelerationStructureGeometries[gid];
+      SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+
+      geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+
+      // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      //   means, anyhit should only be called once.
+      //   If absent, then an anyhit shader might be called more than once...
+      geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      // apparently, geom.flags can't be 0, otherwise we get a device loss on
+      // build...
+
+      // Specify that the geometry type is LSS
+      geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+
+      // Pass the sphere structure into the pNext of the geometry
+      VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
+      geom.pNext = &sphereData;
+
+      // Fill out the LSS data
+      sphereData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_SPHERES_DATA_NV;
+      sphereData.pNext = nullptr;
+
+      // Vertex data (assuming an XYZR float4 format)
+      sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+      sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
+      sphereData.vertexStride = sizeof(float4);
+      sphereData.radiusStride = sizeof(float4);
+      sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
+      sphereData.radiusData.deviceAddress =
+          sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
+
+      // Index data
+      sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
+
+      maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+
+      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+      geomRange.primitiveCount = sphereGeom->vertex.count;
+      geomRange.primitiveOffset = sphereGeom->vertex.offset;
+      geomRange.firstVertex = 0;
+      geomRange.transformOffset = 0;
+    }
+
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  }
+};
+
+// todo, implement refit...
+struct LSSAccel : public Accel {
+  std::vector<VkAccelerationStructureGeometryLinearSweptSpheresDataNV> accelerationStructureGeometryLinearSweptSpheres;
+
+  // AABBs for when we need to fall back to a software implementation
+  GPRTBufferOf<float3> fallbackAABBs = nullptr;
+  std::vector<uint32_t> fallbackAABBOffsets;
+
+  bool useBuiltInLSS;
+
+  LSSAccel(Context *context, size_t numGeometries, LSSGeom *geometries) : Accel(context, true) {
+    this->geometries.resize(numGeometries);
+    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+    useBuiltInLSS = (context->linearSweptSpheresFeatures.linearSweptSpheres);
+
+    // If we don't have hardware acceleration for LSS, fall back to AABBs
+    if (!useBuiltInLSS) {
+      fallbackAABBOffsets.resize(numGeometries + 1);
+      // Placeholder. The actual allocation here will vary from build to build.
+      fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
+    }
+  };
+
+  ~LSSAccel() {};
+
+  AccelType getType() { return GPRT_LSS_ACCEL; }
+
+  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+    this->buildMode = buildMode;
+
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    accelerationStructureGeometryLinearSweptSpheres.resize(geometries.size());
+
+    maxPrimitiveCounts.resize(geometries.size());
+
+    if (!useBuiltInLSS) {
+      // Do a prefix sum over the LSS counts
+      fallbackAABBOffsets[0] = 0;
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
+        fallbackAABBOffsets[gid + 1] = lssGeom->index.count + fallbackAABBOffsets[gid];
+      }
+
+      // Resize the AABB buffer if needed...
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+      }
+
+      // Now populate the AABB buffer using the fallback bounds kernel
+      auto LSSBounds = (GPRTComputeOf<LSSBoundsParameters>) context->internalComputePrograms["LSSBounds"];
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
+
+        LSSBoundsParameters params;
+        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+        params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
+        params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
+        params.offset = fallbackAABBOffsets[gid];
+        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
+        gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
+      }
+    }
+
+    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+      auto &geom = accelerationStructureGeometries[gid];
+      LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
+
+      geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+
+      // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      //   means, anyhit should only be called once.
+      //   If absent, then an anyhit shader might be called more than once...
+      geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      // apparently, geom.flags can't be 0, otherwise we get a device loss on
+      // build...
+
+      // If we have hardware accelerated support for LSS, use the built-in type
+      if (context->linearSweptSpheresFeatures.linearSweptSpheres) {
+        // Specify that the geometry type is LSS
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+
+        // Pass the LSS structure into the pNext of the geometry
+        VkAccelerationStructureGeometryLinearSweptSpheresDataNV &lssData =
+            accelerationStructureGeometryLinearSweptSpheres[gid];
+        geom.pNext = &lssData;
+
+        // Fill out the LSS data
+        lssData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_LINEAR_SWEPT_SPHERES_DATA_NV;
+        lssData.pNext = nullptr;
+
+        // Vertex data (assuming an XYZR float4 format)
+        lssData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        lssData.radiusFormat = VK_FORMAT_R32_SFLOAT;
+        lssData.vertexStride = sizeof(float4);
+        lssData.radiusStride = sizeof(float4);
+        lssData.vertexData.deviceAddress = lssGeom->vertex.buffers[0]->deviceAddress + lssGeom->vertex.offset;
+        lssData.radiusData.deviceAddress =
+            lssGeom->vertex.buffers[0]->deviceAddress + lssGeom->vertex.offset + sizeof(float3);
+
+        // Index data
+        lssData.indexingMode = VK_RAY_TRACING_LSS_INDEXING_MODE_LIST_NV;   // could also be successive
+        lssData.indexType = VK_INDEX_TYPE_UINT32;
+        lssData.indexData.deviceAddress = lssGeom->index.buffer->deviceAddress;
+        lssData.indexStride = sizeof(uint2);
+
+        // Can also be
+        lssData.endCapsMode = VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV;
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = lssGeom->index.count;
+        geomRange.primitiveOffset = lssGeom->index.offset;
+        geomRange.firstVertex = lssGeom->index.firstVertex;
+        geomRange.transformOffset = 0;
+      }
+      // Otherwise, fall back to AABBs and software isect.
+      else {
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
+
+        // aabb data
+        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
+        geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
+        geom.geometry.aabbs.stride = 2 * sizeof(float3);
+        geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
+        // ((VkDeviceAddress) ( + offsetInBytes));
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = lssGeom->index.count;
+        // geomRange.primitiveOffset = lssGeom->aabb.offset;
+        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.firstVertex = 0;   // unused
+        geomRange.transformOffset = 0;
+      }
+
+      maxPrimitiveCounts[gid] = lssGeom->index.count;
+    }
+
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  }
+};
+
 struct AABBAccel : public Accel {
   AABBAccel(Context *context, size_t numGeometries, AABBGeom *geometries) : Accel(context, true) {
     this->geometries.resize(numGeometries);
@@ -6008,12 +6383,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
   const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
-  if (requestedFeatures.recordSize > maxGroupSize) {
+  if ((requestedFeatures.recordSize * 2) > maxGroupSize) {
     LOG_ERROR("Requested record size is too large! Max record size for this platform is " +
               std::to_string(maxGroupSize) + " bytes.");
   }
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+  // Doubling the record size to allow GPRT to store internal facing data
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, (requestedFeatures.recordSize * 2)), groupAlignment);
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
@@ -6210,6 +6586,21 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   recordOffset = recordOffset + handleSize;
                   uint8_t *params = mapped + recordOffset;
                   memcpy(params, geom->SBTRecord, geom->recordSize);
+
+                  // If implementing a software fallback, additionally memcpy data required for intersection testing
+                  if (geom->geomType->getKind() == GPRT_LSS && !linearSweptSpheresFeatures.linearSweptSpheres) {
+                    LSSGeom *lss = (LSSGeom *) geom;
+                    LSSParameters isectParams;
+                    isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+                    isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+                    isectParams.endcap0 = lss->endcap0;
+                    isectParams.endcap1 = lss->endcap1;
+                    isectParams.exitTest = lss->exitTest;
+                    isectParams.numLSS = lss->index.count;
+
+                    uint8_t *internalParams = params + requestedFeatures.recordSize;
+                    memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+                  }
                 }
               }
             } else {
@@ -6711,7 +7102,7 @@ Context::buildPipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
 
     rasterRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -6778,7 +7169,7 @@ Context::buildPipeline() {
 
     const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
     const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
 
     computeRecordBuffer =
         new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
@@ -6827,9 +7218,7 @@ Context::buildPipeline() {
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     std::vector<VkDescriptorSetLayout> layouts = {
         computeRecordDescriptorSetLayout /* not actually using this one, but VK wants something valid...*/,
-        samplerDescriptorSetLayout,
-        texture1DDescriptorSetLayout,
-        texture2DDescriptorSetLayout,
+        samplerDescriptorSetLayout, texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
         texture3DDescriptorSetLayout};
     pipelineLayoutCI.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCI.pSetLayouts = layouts.data();
@@ -6923,7 +7312,6 @@ Context::buildPipeline() {
         gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
 
         for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-
           // First, need to make a map from accel address back to gprt accel*...
           uint64_t accelAddr = instances[blasID].__gprtAccelAddress;
 
@@ -6937,13 +7325,28 @@ Context::buildPipeline() {
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
           else if (blas->getType() == GPRT_AABB_ACCEL)
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-          else
+          else if (blas->getType() == GPRT_LSS_ACCEL) {
+            if (linearSweptSpheresFeatures.linearSweptSpheres) {
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            } else {
+              // AABB fallback
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            }
+          } else {
             LOG_ERROR("Unsupported blas type found in TLAS.");
+          }
 
           // Add a record for every geometry-raytype permutation
           for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
             auto &geom = blas->geometries[geomID];
             for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+
+              // Supply a software fallback intersectors when hardware support is missing
+              if (geom->geomType->getKind() == GPRT_LSS && !linearSweptSpheresFeatures.linearSweptSpheres) {
+                gprtGeomTypeSetIntersectionProg((GPRTGeomType) (geom->geomType), rayType, (GPRTModule) fallbacksModule,
+                                                "LSSIntersection");
+              }
+
               VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
               shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
               shaderGroup.type = shaderGroupType;
@@ -7042,9 +7445,9 @@ Context::buildPipeline() {
       if (!GeomType::geomTypes[i])
         continue;
       for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
-        GeomType::geomTypes[i]->buildRasterPipeline(
-            rasterType, rasterRecordDescriptorSetLayout, samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-            texture2DDescriptorSetLayout, texture3DDescriptorSetLayout);
+        GeomType::geomTypes[i]->buildRasterPipeline(rasterType, rasterRecordDescriptorSetLayout,
+                                                    samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
+                                                    texture2DDescriptorSetLayout, texture3DDescriptorSetLayout);
       }
     }
     rasterPipelinesOutOfDate = false;
@@ -7663,9 +8066,9 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
         instanceCount = instanceCounts[i];
       }
 
-      std::vector<VkDescriptorSet> descriptorSets = {
-          context->rasterRecordDescriptorSet, context->samplerDescriptorSet,   context->texture1DDescriptorSet,
-          context->texture2DDescriptorSet,    context->texture3DDescriptorSet};
+      std::vector<VkDescriptorSet> descriptorSets = {context->rasterRecordDescriptorSet, context->samplerDescriptorSet,
+                                                     context->texture1DDescriptorSet, context->texture2DDescriptorSet,
+                                                     context->texture3DDescriptorSet};
 
       uint32_t offset = (uint32_t) geom->address * recordSize;
       vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -7784,6 +8187,22 @@ gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
   triangles->setIndices(indices, count, stride, offset);
+}
+
+GPRT_API void
+gprtLSSSetVertices(GPRTGeom _lssGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  LSSGeom *lssGeom = (LSSGeom *) _lssGeom;
+  Buffer *vertices = (Buffer *) _vertices;
+  lssGeom->setVertices(vertices, count, stride, offset);
+}
+
+GPRT_API void
+gprtLSSSetIndices(GPRTGeom _lssGeom, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  LSSGeom *lssGeom = (LSSGeom *) _lssGeom;
+  Buffer *indices = (Buffer *) _indices;
+  lssGeom->setIndices(indices, count, stride, offset);
 }
 
 void
@@ -8005,6 +8424,10 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   case GPRT_AABBS:
     geomType = new AABBGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    break;
+  case GPRT_LSS:
+    geomType = new LSSGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    // Set built-in intersector here?
     break;
   default:
     GPRT_NOTIMPLEMENTED;
@@ -8518,7 +8941,7 @@ gprtBufferResize(GPRTContext _context, GPRTBuffer _buffer, size_t size, size_t c
 uint32_t
 bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuffer _scratch, bool partition,
            bool select, bool selectPositive) {
-  LOG_ERROR("Not implemented yet\n");  
+  LOG_ERROR("Not implemented yet\n");
   return -1;
 
   // LOG_API_CALL();
@@ -8530,9 +8953,10 @@ bufferScan(GPRTContext _context, GPRTBuffer _input, GPRTBuffer _output, GPRTBuff
   // // note, input->getSize() here should always be a multiple of 16 bytes
   // uint32_t numItems = uint32_t(input->getSize() / sizeof(uint32_t));
 
-  // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["InitScan"];
-  // auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>) context->internalComputePrograms["Scan"];
-  // uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) / SCAN_PARTITON_SIZE;
+  // auto InitChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>)
+  // context->internalComputePrograms["InitScan"]; auto ChainedDecoupledExclusive = (GPRTComputeOf<gprt::ScanParams>)
+  // context->internalComputePrograms["Scan"]; uint32_t numThreadBlocks = (numItems + (SCAN_PARTITON_SIZE - 1)) /
+  // SCAN_PARTITON_SIZE;
 
   // // Each group gets an aggregate/inclusive prefix and a status flag.
   // // We also reserve one int for the total aggregate count, and one
@@ -8938,9 +9362,19 @@ gprtTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *ar
 }
 
 GPRT_API GPRTAccel
-gprtCurveAccelCreate(GPRTContext context, uint32_t numCurveGeometries, GPRTGeom *curveGeometries, unsigned int flags) {
-  GPRT_NOTIMPLEMENTED;
-  return nullptr;
+gprtSphereAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  SphereAccel *accel = new SphereAccel(context, numGeometries, (SphereGeom *) arrayOfChildGeoms);
+  return (GPRTAccel) accel;
+}
+
+GPRT_API GPRTAccel
+gprtLSSAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  LSSAccel *accel = new LSSAccel(context, numGeometries, (LSSGeom *) arrayOfChildGeoms);
+  return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
@@ -9201,7 +9635,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
   std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
-                                                 context->texture1DDescriptorSet,     context->texture2DDescriptorSet,
+                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet,
                                                  context->texture3DDescriptorSet};
 
   const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);

@@ -30,6 +30,15 @@ include(cmake/embed_devicecode.cmake)
 
 embed_devicecode(
   OUTPUT_TARGET
+    fallbacksDeviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_fallbacks.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/gprt_fallbacks.slang
+)
+
+embed_devicecode(
+  OUTPUT_TARGET
     sortDeviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_sort.h
@@ -80,6 +89,7 @@ set_target_properties(gprt
 target_link_libraries(gprt
     PUBLIC
     ${Vulkan_LIBRARY}
+    fallbacksDeviceCode
     sortDeviceCode
     # scanDeviceCode
     glfw
