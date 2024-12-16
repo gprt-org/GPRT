@@ -178,9 +178,6 @@ intersect_ray_lss(float3 rayOrig, float3 rayDir,              // input ray
 void
 LSSIntersection(uniform uint32_t userData[64], uniform LSSParameters lss) {
   uint primID = PrimitiveIndex();
-
-  printf("Hello from LSS Intersection!\n");
-
   uint2 I = LoadAligned<8>(lss.indices + primID);
   float4 P0 = LoadAligned<16>(lss.vertices + I.x);
   float4 P1 = LoadAligned<16>(lss.vertices + I.y);
@@ -224,4 +221,43 @@ LSSBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform LSSBoundsParamete
   uint32_t offset = lss.offset;
   lss.aabbs[(offset * 2) + 2 * primID] = aabbMin;
   lss.aabbs[(offset * 2) + 2 * primID + 1] = aabbMax;
+}
+
+[shader("intersection")]
+void
+SphereIntersection(uniform uint32_t userData[64], uniform SphereParameters s) {
+  uint primID = PrimitiveIndex();
+  float4 P0 = LoadAligned<16>(s.vertices + primID);
+  bool exitTest = bool(s.exitTest);
+
+  float t, u;
+  if (intersect_ray_lss(ObjectRayOrigin(), ObjectRayDirection(),   // input ray
+                        P0.xyz, P0.xyz, P0.w, P0.w,                // input curve
+                        true,                                      // true: endcap0 enabled, false: endcap0 disabled
+                        true, RayTMin(), RayTCurrent(),            // input interval
+                        exitTest, t, u))                           // output ray param (t), curve param (u)
+  {
+    // HitKindLssPrimitiveNV eventually...
+    ReportHit(t, /*hitKind*/ 0, 0.0);
+  }
+}
+
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void
+SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsParameters s) {
+  int primID = DispatchThreadID.x;
+  if (primID >= s.count)
+    return;
+
+  float4 P0 = LoadAligned<16>(s.vertices + primID);
+  float3 aabbMin = +float3(FLT_MAX);
+  float3 aabbMax = -float3(FLT_MAX);
+
+  aabbMin = min(aabbMin, (P0.xyz - max(P0.w, 0.0)));
+  aabbMax = max(aabbMax, (P0.xyz + max(P0.w, 0.0)));
+
+  uint32_t offset = s.offset;
+  s.aabbs[(offset * 2) + 2 * primID] = aabbMin;
+  s.aabbs[(offset * 2) + 2 * primID + 1] = aabbMax;
 }

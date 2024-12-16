@@ -53,18 +53,18 @@ float4 vertices[NUM_VERTICES] = {
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1.
 const int NUM_INDICES = 10;
-int2 indices[NUM_INDICES] = {{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}};
+uint2 indices[NUM_INDICES] = {{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s03-singleLSS.png";
+const char *outFileName = "s03-lineSweptSpheres.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.0f, 0.0f, 6.0f};
 float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 1.f, 0.f};
+float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
@@ -76,7 +76,7 @@ main(int ac, char **av) {
   LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single Line-Swept Sphere");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Line-Swept Spheres");
   GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s03_deviceCode_lss);
 
@@ -121,7 +121,7 @@ main(int ac, char **av) {
   // first float4 defines a starting "xyz" position and starting radius "w", and then
   // the second float4 defines the end position and end radius.
   GPRTBufferOf<float4> vertexBuffer = gprtDeviceBufferCreate<float4>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int2> indexBuffer = gprtDeviceBufferCreate<int2>(context, NUM_INDICES, indices);
+  GPRTBufferOf<uint2> indexBuffer = gprtDeviceBufferCreate<uint2>(context, NUM_INDICES, indices);
   GPRTGeomOf<LSSGeomData> lssGeom = gprtGeomCreate<LSSGeomData>(context, lssGeomType);
   gprtLSSSetVertices(lssGeom, vertexBuffer, NUM_VERTICES);
   gprtLSSSetIndices(lssGeom, indexBuffer, NUM_INDICES);
@@ -138,6 +138,11 @@ main(int ac, char **av) {
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   rayGenData->world = gprtAccelGetHandle(world);
+
+  LSSGeomData lssParams;
+  lssParams.indices = gprtBufferGetDevicePointer(indexBuffer);
+  lssParams.vertices = gprtBufferGetDevicePointer(vertexBuffer);
+  gprtGeomSetParameters(lssGeom, &lssParams);
 
   gprtBuildShaderBindingTable(context);
 

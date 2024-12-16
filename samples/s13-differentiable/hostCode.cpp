@@ -50,8 +50,8 @@ using namespace generator;
 extern GPRTProgram s13_deviceCode;
 
 // initial image resolution
-// const uint2 fbSize = {1400, 460};
-const uint2 fbSize = {1024, 1024};
+const uint2 fbSize = {1400, 460};
+// const uint2 fbSize = {1024, 1024};
 
 // final image output
 const char *outFileName = "s12-imgui.png";

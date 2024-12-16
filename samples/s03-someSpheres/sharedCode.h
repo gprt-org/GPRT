@@ -24,9 +24,9 @@
 
 /* variables available to all programs */
 
-/* variables for the line-swept sphere geometry */
-struct LSSGeomData {
-  int tmp;   // unused for now
+/* variables for the sphere geometry */
+struct SphereGeomData {
+  float4 *posAndRadius;
 };
 
 struct RayGenData {

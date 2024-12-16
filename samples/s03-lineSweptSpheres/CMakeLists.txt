@@ -29,8 +29,8 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s03_singleLSS hostCode.cpp)
-target_link_libraries(s03_singleLSS
+add_executable(s03_lineSweptSpheres hostCode.cpp)
+target_link_libraries(s03_lineSweptSpheres
   PRIVATE
     s03_deviceCode_lss
     gprt::gprt

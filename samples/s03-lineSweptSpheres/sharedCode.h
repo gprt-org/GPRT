@@ -24,13 +24,10 @@
 
 /* variables available to all programs */
 
-struct AABBGeomData {
-  /*! array/buffer of vertex indices */
-  float3 *vertex;   // vec3f*
-  /*! array/buffer of vertex positions */
-  float *radius;   // float *
-  /*! array/buffer of AABBs */
-  float3 *aabbs;
+/* variables for the line-swept sphere geometry */
+struct LSSGeomData {
+  float4 *vertices;
+  uint2 *indices;
 };
 
 struct RayGenData {
@@ -52,8 +49,6 @@ struct PushConstants {
     float3 dir_du;
     float3 dir_dv;
   } camera;
-};
 
-struct Attribute {
-  float4 posrad;
+  float time;
 };

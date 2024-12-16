@@ -86,13 +86,13 @@ TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 
   payload.color = (.1f + .9f * abs(dot(rayDir, Ng))) * color;
 }
 
-// This miss program will be called when rays miss all primitives.
-// We often define some "default" ray payload behavior here,
-// for example, returning a background color.
+// A background with a vignette effect.
 [shader("miss")]
 void
 miss(uniform MissProgData record, inout Payload payload) {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
+  float2 resolution = DispatchRaysDimensions().xy;
+  float2 fragCoord = DispatchRaysIndex().xy;
+  float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
+  float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
+  payload.color = col;
 }

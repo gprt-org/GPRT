@@ -376,55 +376,37 @@ intersectBoundingBox(uniform BoundingBoxData record) {
 
 [shader("closesthit")]
 void
-hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BoundingBoxData attr) {
-  // Unfortunate driver bugs seem to cause "attr" here to be undefined / junk...
-
+hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BBoxAttributes attr) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
-  float tcur = payload.tHit;
-
-  // raytrace bounding box
-  float3 bbmin = record.aabbs[0];
-  float3 bbmax = record.aabbs[1];
-
-  float3 cen = 0.5 * (bbmin + bbmax);
-  float3 rad = 0.5 * (bbmax - bbmin);
-
-  float3 m = 1.0 / rd;
-  float3 n = m * (ro - cen);
-  float3 k = abs(m) * rad;
-
-  float3 t1 = -n - k;
-  float3 t2 = -n + k;
-
-  float tN = max(max(t1.x, t1.y), t1.z);
-  float tF = min(min(t2.x, t2.y), t2.z);
-
   int hitKind = HitKind();
 
   // front
   if (bool(hitKind & 1)) {
-    float3 pos = ro + rd * tN;
-    float3 e = smoothstep(rad - 0.03, rad - 0.02, abs(pos - cen));
+    float3 pos = ro + rd * attr.tN;
+    float3 e = smoothstep(attr.rad - 0.03, attr.rad - 0.02, abs(pos - attr.cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
     payload.color = lerp(payload.color, float3(1.0), 0.15 + 0.85 * al);
   }
 
   // back
   if (bool(hitKind & 2)) {
-    float3 pos = ro + rd * tF;
-    float3 e = smoothstep(rad - 0.03, rad - 0.02, abs(pos - cen));
+    float3 pos = ro + rd * attr.tF;
+    float3 e = smoothstep(attr.rad - 0.03, attr.rad - 0.02, abs(pos - attr.cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
     payload.color = lerp(payload.color, float3(1.0), 0.25 + 0.75 * al);
   }
 }
 
+// A background with a vignette effect.
 [shader("miss")]
 void
 triMiss(uniform MissProgData record, inout Payload payload) {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
+  float2 resolution = DispatchRaysDimensions().xy;
+  float2 fragCoord = DispatchRaysIndex().xy;
+  float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
+  float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
+  payload.color = col;
   payload.tHit = 1e38f;
 }
 

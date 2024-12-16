@@ -26,7 +26,7 @@
 
 /* variables for the triangle mesh geometry */
 struct AABBGeomData {
-  int tmp;   // unused for now
+  float3 *aabbs;
 };
 
 struct RayGenData {

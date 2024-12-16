@@ -74,11 +74,13 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload) {
   payload.color = (.2f + .8f * abs(dot(rayDir, Ng))) * record.color;
 }
 
+// A background with a vignette effect.
 [shader("miss")]
 void
 miss(uniform MissProgData record, inout Payload payload) {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  int pattern = (pixelID.x / 8) ^ (pixelID.y / 8);
-  float3 color = bool(pattern & 1) ? record.color1 : record.color0;
-  payload.color = color;
+  float2 resolution = DispatchRaysDimensions().xy;
+  float2 fragCoord = DispatchRaysIndex().xy;
+  float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
+  float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
+  payload.color = col;
 }

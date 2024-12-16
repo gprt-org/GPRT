@@ -63,6 +63,8 @@ main(int ac, char **av) {
   // primitive types.
   LOG("gprt example '" << av[0] << "' starting up");
 
+  gprtRequestMaxAttributeSize(2 * sizeof(float4));
+
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
   GPRTContext context = gprtContextCreate();
@@ -113,6 +115,8 @@ main(int ac, char **av) {
   GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
   GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
   gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
+  AABBGeomData *geomData = gprtGeomGetParameters(aabbGeom);
+  geomData->aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
 
   // Note, we must create an "AABB" accel rather than a triangles accel.
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);

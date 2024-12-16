@@ -2826,6 +2826,9 @@ struct SphereGeom : public Geom {
     std::vector<Buffer *> buffers;
   } vertex;
 
+  // false: return entry hits, true: return exit hits
+  bool exitTest = false;
+
   SphereGeom(SphereGeomType *_geomType) : Geom() {
     geomType = (GeomType *) _geomType;
 
@@ -3137,7 +3140,6 @@ struct Context {
   Module *radixSortModule = nullptr;
   // Module *scanModule = nullptr;
   Module *fallbacksModule = nullptr;
-  VkShaderModule fallbacksVKModule = VK_NULL_HANDLE;
 
   VkPipelineShaderStageCreateInfo LSSIntersectionShaderStage;
 
@@ -4826,22 +4828,8 @@ struct Context {
       Context *context = this;
       internalComputePrograms.insert({"LSSBounds", new Compute(context, context->logicalDevice, fallbacksModule,
                                                                "LSSBounds", sizeof(LSSParameters))});
-
-      std::vector<unsigned int, std::allocator<unsigned int>> binary;
-      binary = fallbacksModule->binary;
-
-      VkShaderModuleCreateInfo moduleCreateInfo{};
-      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-      moduleCreateInfo.pCode = binary.data();
-
-      VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fallbacksVKModule));
-
-      context->LSSIntersectionShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      context->LSSIntersectionShaderStage.stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
-      context->LSSIntersectionShaderStage.module = fallbacksVKModule;
-      context->LSSIntersectionShaderStage.pName = "LSSIntersection";
-      assert(context->LSSIntersectionShaderStage.module != VK_NULL_HANDLE);
+      internalComputePrograms.insert({"SphereBounds", new Compute(context, context->logicalDevice, fallbacksModule,
+                                                                  "SphereBounds", sizeof(SphereParameters))});
     }
     computePipelinesOutOfDate = true;
   }
@@ -4887,11 +4875,6 @@ struct Context {
       vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
 
       vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
-    }
-
-    // destroy fallback stages
-    {
-      vkDestroyShaderModule(logicalDevice, fallbacksVKModule, nullptr);
     }
 
     std::vector<std::string> progNames;
@@ -5193,11 +5176,12 @@ typedef enum {
   GPRT_UNKNOWN_ACCEL = 0x0,
   GPRT_INSTANCE_ACCEL = 0x1,
   GPRT_TRIANGLE_ACCEL = 0x2,
-  GPRT_LSS_ACCEL = 0x3,
-  GPRT_AABB_ACCEL = 0x4,
-  GPRT_NN_POINT_ACCEL = 0x5,
-  GPRT_NN_EDGE_ACCEL = 0x6,
-  GPRT_NN_TRIANGLE_ACCEL = 0x7,
+  GPRT_SPHERE_ACCEL = 0x3,
+  GPRT_LSS_ACCEL = 0x4,
+  GPRT_AABB_ACCEL = 0x5,
+  GPRT_NN_POINT_ACCEL = 0x6,
+  GPRT_NN_EDGE_ACCEL = 0x7,
+  GPRT_NN_TRIANGLE_ACCEL = 0x8,
 } AccelType;
 
 struct Accel {
@@ -5979,27 +5963,67 @@ struct SphereAccel : public Accel {
   std::vector<VkAccelerationStructureGeometrySpheresDataNV> accelerationStructureGeometrySpheres;
 #endif
 
+  // AABBs for when we need to fall back to a software implementation
+  GPRTBufferOf<float3> fallbackAABBs = nullptr;
+  std::vector<uint32_t> fallbackAABBOffsets;
+
   SphereAccel(Context *context, size_t numGeometries, SphereGeom *geometries) : Accel(context, true) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+
+    // If we don't have hardware acceleration for spheres, fall back to AABBs
+    if (!requestedFeatures.linearSweptSpheres) {
+      fallbackAABBOffsets.resize(numGeometries + 1);
+      // Placeholder. The actual allocation here will vary from build to build.
+      fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
+    }
   };
 
   ~SphereAccel() {};
 
-  AccelType getType() { return GPRT_LSS_ACCEL; }
+  AccelType getType() { return GPRT_SPHERE_ACCEL; }
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
+    maxPrimitiveCounts.resize(geometries.size());
     accelerationBuildStructureRangeInfos.resize(geometries.size());
     accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
     accelerationStructureGeometries.resize(geometries.size());
-
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
     accelerationStructureGeometrySpheres.resize(geometries.size());
 #endif
 
-    maxPrimitiveCounts.resize(geometries.size());
+    if (!requestedFeatures.linearSweptSpheres) {
+      // Do a prefix sum over the sphere counts
+      fallbackAABBOffsets[0] = 0;
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+        fallbackAABBOffsets[gid + 1] = sphereGeom->vertex.count + fallbackAABBOffsets[gid];
+      }
+
+      // Resize the AABB buffer if needed...
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+      }
+
+      // Now populate the AABB buffer using the fallback bounds kernel
+      auto SphereBounds = (GPRTComputeOf<SphereBoundsParameters>) context->internalComputePrograms["SphereBounds"];
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+
+        SphereBoundsParameters params;
+        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+        params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
+        params.offset = fallbackAABBOffsets[gid];
+        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
+        gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
+      }
+    }
+
     for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
       auto &geom = accelerationStructureGeometries[gid];
       SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
@@ -6014,38 +6038,62 @@ struct SphereAccel : public Accel {
       // build...
 
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
-      // Specify that the geometry type is LSS
-      geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+      // If we have hardware accelerated support for LSS, use the built-in type
+      if (requestedFeatures.linearSweptSpheres) {
+        // Specify that the geometry type is LSS
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
 
-      // Pass the sphere structure into the pNext of the geometry
-      VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
-      geom.pNext = &sphereData;
+        // Pass the sphere structure into the pNext of the geometry
+        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
+        geom.pNext = &sphereData;
 
-      // Fill out the LSS data
-      sphereData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_SPHERES_DATA_NV;
-      sphereData.pNext = nullptr;
+        // Fill out the LSS data
+        sphereData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_SPHERES_DATA_NV;
+        sphereData.pNext = nullptr;
 
-      // Vertex data (assuming an XYZR float4 format)
-      sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-      sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
-      sphereData.vertexStride = sizeof(float4);
-      sphereData.radiusStride = sizeof(float4);
-      sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
-      sphereData.radiusData.deviceAddress =
-          sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
+        // Vertex data (assuming an XYZR float4 format)
+        sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
+        sphereData.vertexStride = sizeof(float4);
+        sphereData.radiusStride = sizeof(float4);
+        sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
+        sphereData.radiusData.deviceAddress =
+            sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
 
-      // Index data
-      sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
+        // Index data
+        sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
+
+        maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = sphereGeom->vertex.count;
+        geomRange.primitiveOffset = sphereGeom->vertex.offset;
+        geomRange.firstVertex = 0;
+        geomRange.transformOffset = 0;
+      } else
+#endif
+      {
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
+
+        // aabb data
+        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
+        geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
+        geom.geometry.aabbs.stride = 2 * sizeof(float3);
+        geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
+        // ((VkDeviceAddress) ( + offsetInBytes));
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = sphereGeom->vertex.count;
+        // geomRange.primitiveOffset = lssGeom->aabb.offset;
+        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.firstVertex = 0;   // unused
+        geomRange.transformOffset = 0;
+      }
 
       maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
-
-      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
-      geomRange.primitiveCount = sphereGeom->vertex.count;
-      geomRange.primitiveOffset = sphereGeom->vertex.offset;
-      geomRange.firstVertex = 0;
-      geomRange.transformOffset = 0;
-#endif
     }
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
@@ -6068,14 +6116,8 @@ struct LSSAccel : public Accel {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
 
-#ifdef VK_NV_ray_tracing_linear_swept_spheres
-    useHWIntersector = requestedFeatures.linearSweptSpheres;
-#else
-    useHWIntersector = false;
-#endif
-
     // If we don't have hardware acceleration for LSS, fall back to AABBs
-    if (!useHWIntersector) {
+    if (!requestedFeatures.linearSweptSpheres) {
       fallbackAABBOffsets.resize(numGeometries + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
@@ -6089,6 +6131,7 @@ struct LSSAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
+    maxPrimitiveCounts.resize(geometries.size());
     accelerationBuildStructureRangeInfos.resize(geometries.size());
     accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
     accelerationStructureGeometries.resize(geometries.size());
@@ -6096,8 +6139,7 @@ struct LSSAccel : public Accel {
     accelerationStructureGeometryLinearSweptSpheres.resize(geometries.size());
 #endif
 
-    maxPrimitiveCounts.resize(geometries.size());
-    if (!useHWIntersector) {
+    if (!requestedFeatures.linearSweptSpheres) {
       // Do a prefix sum over the LSS counts
       fallbackAABBOffsets[0] = 0;
       for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
@@ -6143,7 +6185,7 @@ struct LSSAccel : public Accel {
 
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
       // If we have hardware accelerated support for LSS, use the built-in type
-      if (useHWIntersector) {
+      if (requestedFeatures.linearSweptSpheres) {
         // Specify that the geometry type is LSS
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
 
@@ -6611,6 +6653,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   memcpy(params, geom->SBTRecord, geom->recordSize);
 
                   // If implementing a software fallback, additionally memcpy data required for intersection testing
+                  uint8_t *internalParams = params + requestedFeatures.recordSize;
                   if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
                     LSSGeom *lss = (LSSGeom *) geom;
                     LSSParameters isectParams;
@@ -6620,9 +6663,15 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                     isectParams.endcap1 = lss->endcap1;
                     isectParams.exitTest = lss->exitTest;
                     isectParams.numLSS = lss->index.count;
-
-                    uint8_t *internalParams = params + requestedFeatures.recordSize;
                     memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+                  }
+
+                  if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+                    SphereGeom *s = (SphereGeom *) geom;
+                    SphereParameters isectParams;
+                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+                    isectParams.exitTest = s->exitTest;
+                    memcpy(internalParams, &isectParams, sizeof(SphereParameters));
                   }
                 }
               }
@@ -7355,6 +7404,13 @@ Context::buildPipeline() {
               // AABB fallback
               shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
             }
+          } else if (blas->getType() == GPRT_SPHERE_ACCEL) {
+            if (requestedFeatures.linearSweptSpheres) {
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            } else {
+              // AABB fallback
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            }
           } else {
             LOG_ERROR("Unsupported blas type found in TLAS.");
           }
@@ -7363,12 +7419,6 @@ Context::buildPipeline() {
           for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
             auto &geom = blas->geometries[geomID];
             for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-
-              // Supply a software fallback intersectors when hardware support is missing
-              if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
-                gprtGeomTypeSetIntersectionProg((GPRTGeomType) (geom->geomType), rayType, (GPRTModule) fallbacksModule,
-                                                "LSSIntersection");
-              }
 
               VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
               shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -7496,6 +7546,18 @@ GPRT_API void
 gprtRequestRayQueries() {
   LOG_API_CALL();
   requestedFeatures.rayQueries = true;
+}
+
+GPRT_API void
+gprtRequestMaxPayloadSize(uint32_t payloadSize) {
+  LOG_API_CALL();
+  requestedFeatures.maxRayPayloadSize = payloadSize;
+}
+
+GPRT_API void
+gprtRequestMaxAttributeSize(uint32_t attributeSize) {
+  LOG_API_CALL();
+  requestedFeatures.maxRayHitAttributeSize = attributeSize;
 }
 
 GPRT_API void
@@ -8075,7 +8137,7 @@ gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t num
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
 
   for (uint32_t i = 0; i < numGeometry; ++i) {
     GeomType *geomType = geometry[i]->geomType;
@@ -8210,6 +8272,14 @@ gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   Buffer *indices = (Buffer *) _indices;
   triangles->setIndices(indices, count, stride, offset);
+}
+
+GPRT_API void
+gprtSpheresSetVertices(GPRTGeom _sphereGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  SphereGeom *sphereGeom = (SphereGeom *) _sphereGeom;
+  Buffer *vertices = (Buffer *) _vertices;
+  sphereGeom->setVertices(vertices, count, stride, offset);
 }
 
 GPRT_API void
@@ -8450,7 +8520,23 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   case GPRT_LSS:
     geomType = new LSSGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
-    // Set built-in intersector here?
+    // Supply a software fallback intersectors when hardware support is missing
+    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+      if (!requestedFeatures.linearSweptSpheres) {
+        gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
+                                        "LSSIntersection");
+      }
+    }
+    break;
+  case GPRT_SPHERES:
+    geomType = new SphereGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    // Supply a software fallback intersectors when hardware support is missing
+    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+      if (!requestedFeatures.linearSweptSpheres) {
+        gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
+                                        "SphereIntersection");
+      }
+    }
     break;
   default:
     GPRT_NOTIMPLEMENTED;
@@ -9552,7 +9638,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
@@ -9661,7 +9747,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                                                  context->texture1DDescriptorSet, context->texture2DDescriptorSet,
                                                  context->texture3DDescriptorSet};
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
   uint32_t offset = (uint32_t) compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t) descriptorSets.size(), descriptorSets.data(), 1, &offset);

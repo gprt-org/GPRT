@@ -16,3 +16,15 @@ struct LSSParameters {
   uint32_t exitTest : 1;   // false: return entry hits, true: return exit hits
   uint32_t numLSS : 29;
 };
+
+struct SphereBoundsParameters {
+  float4 *vertices;
+  float3 *aabbs;
+  uint32_t offset;
+  uint32_t count;
+};
+
+struct SphereParameters {
+  float4 *vertices;
+  uint32_t exitTest;   // false: return entry hits, true: return exit hits
+};

@@ -346,6 +346,16 @@ gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint
   gprtTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 
+GPRT_API void gprtSpheresSetVertices(GPRTGeom sphereGeom, GPRTBuffer vertices, uint32_t count,
+                                     uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtSpheresSetVertices(GPRTGeomOf<T1> sphereGeom, GPRTBufferOf<T2> vertices, uint32_t count,
+                       uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtSpheresSetVertices((GPRTGeom) sphereGeom, (GPRTBuffer) vertices, count, stride, offset);
+}
+
 GPRT_API void gprtLSSSetVertices(GPRTGeom lssGeom, GPRTBuffer vertices, uint32_t count,
                                  uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0));
 
@@ -634,6 +644,10 @@ GPRT_API void gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth);
 
 /*! Requests that ray queries be enabled for inline ray tracing support. */
 GPRT_API void gprtRequestRayQueries();
+
+GPRT_API void gprtRequestMaxAttributeSize(uint32_t attributeSize);
+
+GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
 
 /** creates a new device context with the gives list of devices.
 

@@ -60,7 +60,7 @@ simpleRayGen(uniform RayGenData record) {
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void
-SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsData record) {
+ComputeBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform AABBGeomData record) {
   int primID = DispatchThreadID.x;
   float3 position = record.vertex[primID];
   float radius = record.radius[primID];
@@ -70,45 +70,98 @@ SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsDa
   record.aabbs[2 * primID + 1] = aabbMax;
 }
 
+struct BBoxAttributes {
+  float3 cen;
+  float tN;
+  float3 rad;
+  float tF;
+};
+
 [shader("intersection")]
 void
-SphereIntersection(uniform SphereGeomData record) {
-  uint primID = PrimitiveIndex();
-
-  float3 position = record.vertex[primID];
-  float radius = record.radius[primID];
-
+AABBIntersection(uniform AABBGeomData record) {
+  uint32_t primID = PrimitiveIndex();
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
+  float tcur = RayTCurrent();
 
-  float3 oc = ro - position;
-  float b = dot(oc, rd);
-  float c = dot(oc, oc) - radius * radius;
-  float h = b * b - c;
+  BBoxAttributes attr;
 
-  if (h < 0.0)
+  // raytrace bounding box
+  float3 bbmin = record.aabbs[primID * 2 + 0];
+  float3 bbmax = record.aabbs[primID * 2 + 1];
+
+  attr.cen = 0.5 * (bbmin + bbmax);
+  attr.rad = 0.5 * (bbmax - bbmin);
+
+  float3 m = 1.0 / rd;
+  float3 n = m * (ro - attr.cen);
+  float3 k = abs(m) * attr.rad;
+
+  float3 t1 = -n - k;
+  float3 t2 = -n + k;
+
+  attr.tN = max(max(t1.x, t1.y), t1.z);
+  attr.tF = min(min(t2.x, t2.y), t2.z);
+
+  if (attr.tN > attr.tF || attr.tF < 0.0)
     return;
-  float tHit = -b - sqrt(h);
 
-  Attribute attr;
-  attr.posrad.w = radius;
-  attr.posrad.xyz = position;
-  ReportHit(tHit, /*hitKind*/ 0, attr);
+  int hitKind = 0;
+  if (attr.tN > 0.0) {
+    // front face
+    if (attr.tN <= tcur)
+      hitKind |= 1;
+    // back face
+    if (attr.tF <= tcur)
+      hitKind |= 2;
+  }
+
+  if (hitKind != 0)
+    ReportHit(attr.tN, hitKind, attr);
 }
 
+// This closest hit program will be called when our intersection program
+// reports a hit between our ray and our custom primitives.
+// Here, we can fetch per-geometry data, process that data, and send
+// it back to our ray generation program.
+//
+// Note, since this is a custom AABB primitive, our intersection program
+// above defines what attributes are passed to our closest hit program.
+//
+// Also note, this program is also called after all ReportHit's have been
+// called and we can conclude which reported hit is closest.
 [shader("closesthit")]
 void
-SphereClosestHit(uniform SphereGeomData record, inout Payload payload, in Attribute attribute) {
-  float3 origin = attribute.posrad.xyz;
-  float3 hitPos = ObjectRayOrigin() + RayTCurrent() * ObjectRayDirection();
-  float3 normal = normalize(hitPos - origin);
-  payload.color = abs(normal);
+AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttributes attr) {
+  float3 ro = ObjectRayOrigin();
+  float3 rd = ObjectRayDirection();
+  int hitKind = HitKind();
+
+  // front
+  if (bool(hitKind & 1)) {
+    float3 pos = ro + rd * attr.tN;
+    float3 e = smoothstep(attr.rad - 0.003, attr.rad - 0.002, abs(pos - attr.cen));
+    float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
+    payload.color = lerp(float3(0.0), float3(1.0), 0.15 + 0.85 * al);
+  }
+
+  // back
+  if (bool(hitKind & 2)) {
+    float3 pos = ro + rd * attr.tF;
+    float3 e = smoothstep(attr.rad - 0.003, attr.rad - 0.002, abs(pos - attr.cen));
+    float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
+    payload.color = lerp(payload.color, float3(1.0), 0.25 + 0.75 * al);
+  }
 }
 
+// A background with a vignette effect.
 [shader("miss")]
 void
 miss(uniform MissProgData record, inout Payload payload) {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  payload.color = bool(pattern & 1) ? record.color1 : record.color0;
+  float2 resolution = DispatchRaysDimensions().xy;
+  float2 fragCoord = DispatchRaysIndex().xy;
+  float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
+  float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
+  payload.color = col;
 }
