@@ -158,5 +158,5 @@ miss(uniform MissProgData record, inout Payload payload) {
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
   float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
-  payload.color = col;
+  payload.color = float4(col, 0.0);
 }

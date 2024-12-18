@@ -14,164 +14,128 @@ flipsign(float v, bool flag) {
   return (flag) ? -v : v;
 }
 
+/**
+ * @brief Intersects a ray with a linearly swept sphere (LSS).
+ *
+ * This function calculates the intersection of a ray with a LSS defined by two endpoints and varying radii. 
+ * It supports optional end-cap intersection testing.
+ *
+ * @param rayOrigin     Origin of the ray.
+ * @param rayDirection  Direction of the ray (should be normalized for accurate results).
+ * @param curveStart    Starting point of the LSS.
+ * @param curveEnd      Ending point of the LSS.
+ * @param radiusStart   Radius of the LSS at the starting point.
+ * @param radiusEnd     Radius of the LSS at the ending point.
+ * @param enableCapStart Enable intersection testing with the starting cap.
+ * @param enableCapEnd   Enable intersection testing with the ending cap.
+ * @param rayMin         Minimum parameter value along the ray to consider for intersection.
+ * @param rayMax         Maximum parameter value along the ray to consider for intersection.
+ * @param returnExit     If true, returns the exit intersection; otherwise, returns the entry intersection.
+ * @param[out] rayParam  Parameter value (t) along the ray at the intersection point.
+ * @param[out] curveParam Parameter value (u) along the curve at the intersection point.
+ * @return True if an intersection is found, otherwise false.
+ */
 [ForceInline]
 bool
-intersect_ray_lss(float3 rayOrig, float3 rayDir,              // input ray
-                  float3 P0, float3 P1, float r0, float r1,   // input curve
-                  bool endcap0,                               // true: endcap0 enabled, false: endcap0 disabled
-                  bool endcap1,                               // true: endcap1 enabled, false: endcap1 disabled
-                  float rayTmin, float rayTmax,               // input interval
-                  bool exitTest,                              // false: return entry hits, true: return exit hits
-                  out float t, out float u                    // output ray param (t), curve param (u)
+intersectRayLSS(float3 rayOrigin, float3 rayDirection,    
+                 float3 curveStart, float3 curveEnd,      
+                 float radiusStart, float radiusEnd,      
+                 bool enableCapStart,                     
+                 bool enableCapEnd,                       
+                 float rayMin, float rayMax,              
+                 bool returnExit,                         
+                 out float rayParam, out float curveParam 
 ) {
-  t = 0.0;
-  u = 0.0;                   // initialize to 0 for now
-  const float3 D = rayDir;   // this is purely an alias name, optional
-                             // Use the midpoint to anchor everything - this gives the best precision balance
-  const float3 Pm = 0.5f * (P0 + P1);
-  const float rm = 0.5f * (r0 + r1);
-  // a is our first conic coefficient for the t^2 term
-  const float a = dot(D, D);   // This is 1 when ray is normalized
-  const float rcpA = 1.f / a;
-  // precision fix -- push the ray to be as close as possible to the curve.
-  const float dpa = dot(D, Pm - rayOrig) * rcpA;
-  rayOrig += dpa * D;
-  const float3 O = rayOrig - Pm;   // Recalculate since rayOrig moved
-  const float3 A = P1 - P0;        // curve axis
-  const float rd = r1 - r0;        // radius delta
-                                   // Compute the conic coefficients.
-                                   // curve: C = Pm + u A, r = rm + u rd
-                                   //
-                                   // We'll set:
-                                   // Pm = 1/2 (P0 + P1)
-                                   // rm = 1/2 (r0 + r1)
-                                   // O = rayOrig - Pm
-                                   //
-                                   // ray: P = rayOrig + t rayDir
-                                   //
-  // sphere: |P-C| = r
-  //
-  // So our cone equation is: | ray(t) - curve(u) | = radius(u)
-  //
-  // Expanding:
-  // | rayOrig + t V - Pm - u A |^2 = (rm + u rd)^2
-  // Gives us:
-  // ttV.V - 2tuA.V + uu(A.A - rd rd) - 2t(-O.V) - 2u (A.O + rd rm) + O.O - rm rm = 0
-  //
-  // Our canonical conic equation is at^2 - 2btu + cu^2 - 2dt - 2eu + f = 0
-  // The single letter variables a through f below are these coefficients
-  // a is already up top
-  const float b = dot(A, D);
-  const float c = dot(A, A) - rd * rd;
-  const float d = dot(D, O);
-  const float e = dot(A, O) + rm * rd;
-  const float f = dot(O, O) - rm * rm;
-  // Now solve our conic for u(t):
-  // att - 2but + cuu - 2dt - 2eu + f = 0
-  // Group the u terms
-  // + cuu - 2u(bt + e) + (att - 2dt + f) = 0
-  //
-  // Au = c
-  // Bu = bt + e
-  // Cu = att - 2dt + f
-  //
-  // u(t) = [ Bu +/- sqrt(BuBu - AuCu) ] / Au
-  //
-  // solve for discrim = 0 - we are looking for the extremmal values of u,
-  // which happen to coincide with the t values we're looking for!
-  // so, Bu Bu - Au Cu = 0
-  // tt(bb - ca) -2t(-be -cd) + (ee - cf) = 0
-  //
-  // At = bb-ca
-  // Bt = -be-cd
-  // Ct = ee-cf
-  // t = [ Bt +/- sqrt(BtBt-AtCt) ] / At
-  const float At = b * b - a * c;
-  const float Bt = b * e - c * d;
-  const float Ct = e * e - c * f;
-  const float BtBt = Bt * Bt;
-  const float AtCt = At * Ct;
-  // sphere-degenerate and shell-degenerate handling
-  const bool sphereDegenerate = (A.x == 0) && (A.y == 0) && (A.z == 0) && (rd == 0);
-  const bool useP0Sphere = !endcap1;
-  const bool cullSphere = sphereDegenerate && !endcap0 && !endcap1;
-  const bool shellDegenerate = (c <= 0) && (rd != 0);
-  const bool endcap0Valid = (r0 > 0) && endcap0;
-  const bool endcap1Valid = (r1 > 0) && endcap1;
-  const bool shellP0Outer = (rd < 0);
-  const bool shellP1Outer = (rd > 0);
-  const bool useP0Shell = endcap0Valid && (shellP0Outer || !endcap1Valid);
-  const bool useP1Shell = endcap1Valid && (shellP1Outer || !endcap0Valid);
-  const bool cullShell = shellDegenerate && !useP0Shell && !useP1Shell;
-  // Infinite cone MISS
-  const bool badCurve = ((r0 <= 0.f) && (r1 <= 0.f)) || cullShell || cullSphere || isnan(r0) || isnan(r1) ||
-                        isnan(P0.x) || isnan(P0.y) || isnan(P0.z) || isnan(P1.x) || isnan(P1.y) || isnan(P1.z) ||
-                        isinf(r0) || isinf(r1) || isinf(P0.x) || isinf(P0.y) || isinf(P0.z) || isinf(P1.x) ||
-                        isinf(P1.y) || isinf(P1.z);
+    rayParam = 0.0;
+    curveParam = 0.0;
 
-  if ((!sphereDegenerate && !shellDegenerate && BtBt < AtCt) || badCurve) {
-    return false;
-  }
-  // Used in distance pipe to override useP0
-  const bool isDegenerate = sphereDegenerate || shellDegenerate;
-  const bool useP0Degenerate = sphereDegenerate ? useP0Sphere : useP0Shell;
-  const float sqdiscrim = sqrt(BtBt - AtCt);
-  const float rcpAt = 1.f / At;
-  const float t0 = (-Bt + flipsign(sqdiscrim, exitTest)) * rcpAt;   // t0 == cone hit point, (exitTest) ? exit : entry
-  // Calculate u (parametric length along curve)
-  // u is in range [-.5, .5] when on the mid-section between endcaps
-  const float rcpC = 1.f / c;
-  float u0 = (b * t0 + e) * rcpC;
-  // Mid-section cone HIT
-  // NOTE: Below "if" is always FALSE for shells/spheres (i.e. midsection hit impossible)
-  bool radiusIsNegative = u0 * rd < -rm;
-  if (abs(u0) <= 0.5f && !radiusIsNegative && !isDegenerate) {
-    float hitt = t0 + dpa;
-    float hitu = u0 + 0.5f;
-    if (hitt <= rayTmin || hitt >= rayTmax)
-      return false;
-    t = hitt;
-    u = hitu;
+    const float3 direction = rayDirection;
+    const float3 curveMidpoint = 0.5f * (curveStart + curveEnd);
+    const float radiusMidpoint = 0.5f * (radiusStart + radiusEnd);
+
+    const float directionDot = dot(direction, direction);
+    const float inverseDirectionDot = 1.0f / directionDot;
+
+    const float alignmentOffset = dot(direction, curveMidpoint - rayOrigin) * inverseDirectionDot;
+    rayOrigin += alignmentOffset * direction;
+    
+    const float3 offset = rayOrigin - curveMidpoint;
+    const float3 curveAxis = curveEnd - curveStart;
+    const float radiusDelta = radiusEnd - radiusStart;
+
+    // Compute conic coefficients
+    const float a = directionDot;
+    const float b = dot(curveAxis, direction);
+    const float c = dot(curveAxis, curveAxis) - radiusDelta * radiusDelta;
+    const float d = dot(direction, offset);
+    const float e = dot(curveAxis, offset) + radiusMidpoint * radiusDelta;
+    const float f = dot(offset, offset) - radiusMidpoint * radiusMidpoint;
+
+    // Conic t-equation coefficients
+    const float At = b * b - a * c;
+    const float Bt = b * e - c * d;
+    const float Ct = e * e - c * f;
+    const float discriminant = Bt * Bt - At * Ct;
+
+    // Degeneracy checks
+    const bool isSphere = (curveAxis.x == 0 && curveAxis.y == 0 && curveAxis.z == 0 && radiusDelta == 0);
+    const bool useStartSphere = !enableCapEnd;
+    const bool isShellDegenerate = (c <= 0) && (radiusDelta != 0);
+    const bool isCurveInvalid = ((radiusStart <= 0 && radiusEnd <= 0) || isnan(radiusStart) || isnan(radiusEnd) || 
+                                  isnan(curveStart.x) || isnan(curveEnd.x) || isinf(radiusStart) || isinf(curveStart.x));
+
+    if ((!isSphere && !isShellDegenerate && discriminant < 0) || isCurveInvalid) {
+        return false;
+    }
+
+    const float sqrtDiscriminant = sqrt(discriminant);
+    const float inverseAt = 1.0f / At;
+    const float t0 = (-Bt + (returnExit ? -sqrtDiscriminant : sqrtDiscriminant)) * inverseAt;
+
+    const float inverseC = 1.0f / c;
+    float u0 = (b * t0 + e) * inverseC;
+
+    // Mid-section hit test
+    if (fabs(u0) <= 0.5f && (u0 * radiusDelta >= -radiusMidpoint) && !isSphere && !isShellDegenerate) {
+        float hitT = t0 + alignmentOffset;
+        float hitU = u0 + 0.5f;
+
+        if (hitT <= rayMin || hitT >= rayMax) {
+            return false;
+        }
+
+        rayParam = hitT;
+        curveParam = hitU;
+        return true;
+    }
+
+    // End-cap testing
+    bool useStartCap = isSphere ? useStartSphere : (u0 < 0.0f);
+
+    if ((useStartCap && !enableCapStart) || (!useStartCap && !enableCapEnd)) {
+        return false;
+    }
+
+    const float Bs = -d + (useStartCap ? -b : b) * 0.5f;
+    const float BsBs = Bs * Bs;
+    const float Cs = f + 0.25f * c - (useStartCap ? -e : e);
+    const float AsCs = a * Cs;
+
+    if (BsBs < AsCs) {
+        return false;
+    }
+
+    const float sqrtCapDiscriminant = sqrt(BsBs - AsCs);
+    const float capT = (Bs - (returnExit ? -sqrtCapDiscriminant : sqrtCapDiscriminant)) * inverseDirectionDot;
+
+    rayParam = capT + alignmentOffset;
+    curveParam = useStartCap ? 0.0f : 1.0f;
+
+    if (rayParam <= rayMin || rayParam >= rayMax) {
+        return false;
+    }
+
     return true;
-  }
-  // Determine which end-cap to test
-  bool useP0;
-  if (isDegenerate) {
-    useP0 = useP0Degenerate;
-  } else {
-    useP0 = ((u0 < 0.f) ^ radiusIsNegative);
-  }
-  // Skip endcap testing if they are disabled
-  if ((useP0 && !endcap0Valid) || (!useP0 && !endcap1Valid))
-    return false;
-  // What follows is a simple sphere intersection with the appropriate end-cap sphere,
-  // substituting values we already have anywhere possible.
-  const float Bs =
-      -d + flipsign(b, useP0) * 0.5f;   // Bs = dot(E, D) ==> dot(O,D) - dot(A, D) * endu, where E = O - A * endu;
-  const float BsBs = Bs * Bs;
-  const float Cs = f + 0.25f * c - flipsign(e, useP0);   // dot(E, E) - endr*endr;
-  const float AsCs = a * Cs;
-  // end-cap MISS
-  if (BsBs < AsCs) {
-    return false;
-  }
-  // end-cap Testing
-  const float sqSdiscrim = sqrt(BsBs - AsCs);
-  const float minEndt = (Bs - flipsign(sqSdiscrim, exitTest)) * rcpA;
-  // end-cap HIT
-  // The following u computation can be used by the shader to reconstruct the endcap
-  u = (useP0) ? 0.f : 1.f;
-  t = minEndt + dpa;
-  // Unordered LEU/GEU comparisons
-  if (t <= rayTmin || t >= rayTmax)
-    return false;
-  return true;
-  /*
-  Notes:
-  - u is in the range (0.0f, 1.0f) for midsection hits
-  - u is 0.0f for endcap 0 hits
-  - u is 1.0f for endcap 1 hits
-  */
 }
 
 [shader("intersection")]
@@ -186,7 +150,7 @@ LSSIntersection(uniform uint32_t userData[64], uniform LSSParameters lss) {
   bool exitTest = bool(lss.exitTest);
 
   float t, u;
-  if (intersect_ray_lss(ObjectRayOrigin(), ObjectRayDirection(),   // input ray
+  if (intersectRayLSS(ObjectRayOrigin(), ObjectRayDirection(),   // input ray
                         P0.xyz, P1.xyz, P0.w, P1.w,                // input curve
                         endcap0,                                   // true: endcap0 enabled, false: endcap0 disabled
                         endcap1, RayTMin(), RayTCurrent(),         // input interval
@@ -231,7 +195,7 @@ SphereIntersection(uniform uint32_t userData[64], uniform SphereParameters s) {
   bool exitTest = bool(s.exitTest);
 
   float t, u;
-  if (intersect_ray_lss(ObjectRayOrigin(), ObjectRayDirection(),   // input ray
+  if (intersectRayLSS(ObjectRayOrigin(), ObjectRayDirection(),   // input ray
                         P0.xyz, P0.xyz, P0.w, P0.w,                // input curve
                         true,                                      // true: endcap0 enabled, false: endcap0 disabled
                         true, RayTMin(), RayTCurrent(),            // input interval
