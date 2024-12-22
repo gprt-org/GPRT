@@ -20,23 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_subdirectory(s0-rayGenPrograms)
-add_subdirectory(s1-missPrograms)
+embed_devicecode(
+  OUTPUT_TARGET
+    s015_deviceCode
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
+)
 
-# add_subdirectory(s01-primitives)
-
-# add_subdirectory(s02-instances)
-# add_subdirectory(s03-singleAABB)
-# add_subdirectory(s03-someSpheres)
-# add_subdirectory(s03-lineSweptSpheres)
-# add_subdirectory(s04-computeAABBs)
-# add_subdirectory(s05-computeVertex)
-# add_subdirectory(s06-computeTransform)
-# add_subdirectory(s07-computeInstanceLOD)
-# add_subdirectory(s08-multipleGeometry)
-# add_subdirectory(s09-singleTexture)
-# add_subdirectory(s10-visibilityMasks)
-# add_subdirectory(s11-rasterization)
-# add_subdirectory(s12-imgui-raster)
-# add_subdirectory(s12-imgui-rt)
-# add_subdirectory(s13-differentiable)
+add_executable(s03_singleAABB hostCode.cpp)
+target_link_libraries(s03_singleAABB
+  PRIVATE
+    s015_deviceCode
+    gprt::gprt
+)

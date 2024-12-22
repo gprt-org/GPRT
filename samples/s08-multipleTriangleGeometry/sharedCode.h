@@ -22,8 +22,35 @@
 
 #include "gprt.h"
 
+/* variables available to all programs */
+
+/* variables for the triangle mesh geometry */
+struct TrianglesGeomData {
+  /*! array/buffer of vertex indices */
+  uint3 *index;   // vec3i*
+  /*! array/buffer of vertex positions */
+  float3 *vertex;   // vec3f *
+  /*! base color we use for the entire mesh */
+  float3 color;
+};
+
 struct RayGenData {
+  uint *frameBuffer;
+  gprt::Accel world;
+};
+
+/* variables for the miss program */
+struct MissProgData {
   float3 color0;
   float3 color1;
-  uint *frameBuffer;
+};
+
+/* Constants that change each frame */
+struct PushConstants {
+  struct Camera {
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
+  } camera;
 };

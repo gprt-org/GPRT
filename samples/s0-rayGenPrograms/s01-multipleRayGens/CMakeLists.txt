@@ -22,16 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s03_deviceCode_spheres
+    s01_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s03_someSpheres hostCode.cpp)
-target_link_libraries(s03_someSpheres
+add_executable(s01_multipleRayGens hostCode.cpp)
+
+target_link_libraries(s01_multipleRayGens
   PRIVATE
-    s03_deviceCode_spheres
+    s01_deviceCode
     gprt::gprt
 )

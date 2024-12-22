@@ -893,6 +893,14 @@ gprtMissSetParameters(GPRTMissOf<T> miss, T *parameters, int deviceID GPRT_IF_CP
   gprtMissSetParameters((GPRTMiss) miss, (void *) parameters, deviceID);
 }
 
+GPRT_API uint32_t gprtMissGetIndex(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
+
+template <typename T>
+uint32_t
+gprtMissGetIndex(GPRTMissOf<T> missProg, int deviceID GPRT_IF_CPP(= 0)) {
+  return gprtMissGetIndex((GPRTMiss) missProg, deviceID);
+}
+
 GPRT_API GPRTCallable gprtCallableCreate(GPRTContext context, GPRTModule module, const char *entrypoint,
                                          size_t recordSize);
 

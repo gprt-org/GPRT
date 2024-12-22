@@ -200,8 +200,7 @@ gprtRaise_impl(std::string str) {
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_PRINTF(message)                                                                                            \
-  if (RequestedFeatures::logging())                                                                                    \
-    std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
+  std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
   if (RequestedFeatures::logging())                                                                                    \
@@ -269,12 +268,16 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
     // Check to see if it's a GPU printf
     std::string message = std::string(pCallbackData->pMessage);
-    if (message.find("[ UNASSIGNED-DEBUG-PRINTF ]") != std::string::npos) {
-      // if so, remove all the junk at the front...
-      // This is currently very kludgy... we should use a regex...
-      message = message.substr(97);
-      LOG_PRINTF(message.c_str());
-    } else {
+    if (message.find("MessageID =") != std::string::npos) {
+      // Find the position of the first "|" after the MessageID
+      size_t pos = message.find("|", message.find("MessageID ="));
+      if (pos != std::string::npos) {
+          // Skip the prefix up to the second "|"
+          message = message.substr(pos + 2); // +2 to account for "| "
+      }
+      std::cout<<message; // Expect the user to include \n 
+    }
+    else {
       LOG_INFO(pCallbackData->pMessage);
     }
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
@@ -353,6 +356,9 @@ struct Stage {
 };
 
 struct Module {
+  static std::vector<Module *> modules;
+  int32_t virtualAddress = -1;
+
   spv_reflect::ShaderModule shaderModule;
   std::vector<uint32_t> binary;
 
@@ -379,6 +385,21 @@ struct Module {
   std::vector<std::string> EntryPointNames;
 
   Module(GPRTProgram program) {
+    // Hunt for an existing free virtual address
+    for (uint32_t i = 0; i < Module::modules.size(); ++i) {
+      if (Module::modules[i] == nullptr) {
+        Module::modules[i] = this;
+        virtualAddress = i;
+        break;
+      }
+    }
+    // If we cant find a free spot, allocate a new one
+    if (virtualAddress == -1) {
+      Module::modules.push_back(this);
+      virtualAddress = (uint32_t) modules.size() - 1;
+    }
+
+
     size_t sizeOfProgram = program.size();
     binary.resize(sizeOfProgram / 4);
     memcpy(binary.data(), program.data(), sizeOfProgram);
@@ -427,8 +448,14 @@ struct Module {
 
   bool checkForEntrypoint(const char *entrypoint) { return EntryPoints.find(entrypoint) != EntryPoints.end(); }
 
+  void destroy() {
+    // Free slot for subsequent use
+    Module::modules[virtualAddress] = nullptr;
+  }
   ~Module() {}
 };
+
+std::vector<Module *> Module::modules;
 
 struct Buffer {
   static std::vector<Buffer *> buffers;
@@ -3319,7 +3346,7 @@ struct Context {
           // | VK_DEBUG_REPORT_WARNING_BIT_EXT
           // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
           // | VK_DEBUG_REPORT_ERROR_BIT_EXT
-          VK_DEBUG_REPORT_DEBUG_BIT_EXT;
+          VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
       debugUtilsMessengerCI.messageType =
           VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
       debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
@@ -4410,6 +4437,27 @@ struct Context {
       }
     }
     Compute::computes.resize(0);
+
+    for (uint32_t i = 0; i < RayGen::raygens.size(); ++i) {
+      if (RayGen::raygens[i] != nullptr) {
+        RayGen::raygens[i]->destroy();
+      }
+    }
+    RayGen::raygens.resize(0);
+
+    for (uint32_t i = 0; i < Miss::misses.size(); ++i) {
+      if (Miss::misses[i] != nullptr) {
+        Miss::misses[i]->destroy();
+      }
+    }
+    Miss::misses.resize(0);
+
+    for (uint32_t i = 0; i < Module::modules.size(); ++i) {
+      if (Module::modules[i] != nullptr) {
+        Module::modules[i]->destroy();
+      }
+    }
+    Module::modules.resize(0);
 
     vmaDestroyAllocator(allocator);
 
@@ -7870,6 +7918,7 @@ GPRT_API void
 gprtModuleDestroy(GPRTModule _module) {
   LOG_API_CALL();
   Module *module = (Module *) _module;
+  module->destroy();
   delete module;
   module = nullptr;
 }
@@ -8334,6 +8383,15 @@ gprtMissSetParameters(GPRTMiss _miss, void *parameters, int deviceID) {
   if (miss->SBTRecord == nullptr)
     LOG_ERROR("Miss entry point \"" + miss->entryPoint + "\" does not have any uniform parameters.");
   memcpy(miss->SBTRecord, parameters, miss->recordSize);
+}
+
+GPRT_API uint32_t
+gprtMissGetIndex(GPRTMiss _miss, int deviceID) {
+  LOG_API_CALL();
+  Miss *miss = (Miss *) _miss;
+  if (miss->address == -1)
+    LOG_ERROR("Miss entry point \"" + miss->entryPoint + "\" is null.");
+  return miss->address;
 }
 
 GPRT_API GPRTCallable

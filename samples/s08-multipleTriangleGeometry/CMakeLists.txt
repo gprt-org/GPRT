@@ -22,16 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s03_deviceCode_lss
+    s08_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s03_lineSweptSpheres hostCode.cpp)
-target_link_libraries(s03_lineSweptSpheres
+add_executable(s08_multipleGeometry hostCode.cpp)
+target_link_libraries(s08_multipleGeometry
   PRIVATE
-    s03_deviceCode_lss
+    s08_deviceCode
     gprt::gprt
+    generator
 )

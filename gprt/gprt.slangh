@@ -173,6 +173,15 @@ getAccelHandle(Accel accel) {
   };
 }
 
+// Mainly used to teach how miss programs work, without involving closest hit or geometry complexity.
+RaytracingAccelerationStructure
+getNullAccelHandle() {
+  uint64_t address = 0;
+  return spirv_asm {
+    result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
+  };
+}
+
 // RWByteAddressBuffer
 // getBufferHandle(Buffer buffer) {
 //   return buffers[buffer.index];

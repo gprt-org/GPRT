@@ -22,7 +22,7 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s01_deviceCode
+    s010_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
@@ -32,6 +32,6 @@ embed_devicecode(
 add_executable(s01_singleTriangle hostCode.cpp)
 target_link_libraries(s01_singleTriangle
   PRIVATE
-    s01_deviceCode
+    s010_deviceCode
     gprt::gprt
 )
