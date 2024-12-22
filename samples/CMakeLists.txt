@@ -22,8 +22,7 @@
 
 add_subdirectory(s0-rayGenPrograms)
 add_subdirectory(s1-missPrograms)
-
-# add_subdirectory(s01-primitives)
+add_subdirectory(s2-hitPrograms)
 
 # add_subdirectory(s02-instances)
 # add_subdirectory(s03-singleAABB)

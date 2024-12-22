@@ -1,2 +1,2 @@
-add_subdirectory(s10-singleMissProgram)
-add_subdirectory(s11-multipleMissPrograms)
+add_subdirectory(s1-0-singleMissProgram)
+add_subdirectory(s1-1-multipleMissPrograms)

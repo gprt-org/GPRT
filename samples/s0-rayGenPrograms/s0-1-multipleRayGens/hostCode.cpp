@@ -1,13 +1,12 @@
 #include <gprt.h>      // Public GPRT API
 #include "sharedCode.h" // Shared data between host and device
-#include <iostream>    // For input/output
 
 // External reference to device code
-extern GPRTProgram s01_deviceCode;
+extern GPRTProgram s0_1_deviceCode;
 
 // Image resolution and output file name
 const int2 fbSize = {1400, 460};
-const char *outFileName = "s01-multipleRayGens.png";
+const char *outFileName = "s0-1-multipleRayGens.png";
 
 int main() {
   // Initialize a window for rendering
@@ -17,7 +16,7 @@ int main() {
   GPRTContext context = gprtContextCreate();
 
   // Compile device code into a module for GPU execution
-  GPRTModule module = gprtModuleCreate(context, s01_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s0_1_deviceCode);
 
   // Create two ray generation shaders using the module
   GPRTRayGenOf<RayGenData> firstRayGen = gprtRayGenCreate<RayGenData>(context, module, "firstRayGen");
@@ -42,7 +41,9 @@ int main() {
     gprtRayGenLaunch2D(context, firstRayGen, fbSize.x / 2, fbSize.y);
     gprtRayGenLaunch2D(context, secondRayGen, fbSize.x / 2, fbSize.y);
     gprtBufferPresent(context, frameBuffer); // Display to window if available
-  } while (!gprtWindowShouldClose(context));
+  }
+  // returns true if "X" pressed or if in "headless" mode
+  while (!gprtWindowShouldClose(context));
 
   // Save the final image to a file
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);

@@ -1,4 +1,4 @@
-add_subdirectory(s010-triangles)
-add_subdirectory(s011-spheres)
-add_subdirectory(s012-lss)
-add_subdirectory(s015-aabbs)
+add_subdirectory(s2-0-triangles)
+add_subdirectory(s2-1-spheres)
+add_subdirectory(s2-2-lss)
+add_subdirectory(s2-5-aabbs)

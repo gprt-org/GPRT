@@ -1,58 +1,31 @@
-// MIT License
-
-// Copyright (c) 2022 Nathan V. Morrical
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 // This program sets up a single geometric object, a mesh for a cube, and
 // its acceleration structure, then ray traces it.
 
-// public GPRT API
-#include <gprt.h>
+#include <gprt.h>      // Public GPRT API
+#include "sharedCode.h" // Shared data between host and device
 
-// our shared data structures between host and device
-#include "sharedCode.h"
+extern GPRTProgram s2_1_deviceCode;
 
-#define LOG(message)                                                                                                   \
-  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                                                                \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-
-extern GPRTProgram s03_deviceCode;
-
-// The extents of our bounding box
-float3 aabbPositions[2] = {{-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}};
+// The positions and radii of our spheres
+const int NUM_VERTICES = 11;
+float4 vertices[NUM_VERTICES] = {
+    float4(-4 + 0 * 0.8, sin(-4 + 0 * 0.8), 0.0, 0.1),  float4(-4 + 1 * 0.8, sin(-4 + 1 * 0.8), 0.0, 0.2),
+    float4(-4 + 2 * 0.8, sin(-4 + 2 * 0.8), 0.0, 0.3),  float4(-4 + 3 * 0.8, sin(-4 + 3 * 0.8), 0.0, 0.4),
+    float4(-4 + 4 * 0.8, sin(-4 + 4 * 0.8), 0.0, 0.5),  float4(-4 + 5 * 0.8, sin(-4 + 5 * 0.8), 0.0, 0.6),
+    float4(-4 + 6 * 0.8, sin(-4 + 6 * 0.8), 0.0, 0.5),  float4(-4 + 7 * 0.8, sin(-4 + 7 * 0.8), 0.0, 0.4),
+    float4(-4 + 8 * 0.8, sin(-4 + 8 * 0.8), 0.0, 0.3),  float4(-4 + 9 * 0.8, sin(-4 + 9 * 0.8), 0.0, 0.2),
+    float4(-4 + 10 * 0.8, sin(-4 + 10 * 0.8), 0.0, 0.1)};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s03-singleAABB.png";
+const char *outFileName = "s03-someSpheres.png";
 
 // Initial camera parameters
-float3 lookFrom = {3.5f, 3.5f, 3.5f};
+float3 lookFrom = {0.0f, 0.0f, 6.0f};
 float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, -1.f, 0.f};
+float3 lookUp = {0.f, 1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
@@ -61,14 +34,11 @@ main(int ac, char **av) {
   // In this example, we will create an axis aligned bounding box (AABB). These
   // are more general than triangle primitives, and can be used for custom
   // primitive types.
-  LOG("gprt example '" << av[0] << "' starting up");
-
-  gprtRequestMaxAttributeSize(2 * sizeof(float4));
-
+  
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Some Spheres");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s03_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s2_1_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -77,10 +47,9 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeOf<AABBGeomData> aabbGeomType =
-      gprtGeomTypeCreate<AABBGeomData>(context, GPRT_AABBS /* <- This is new! */);
-  gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
-  gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
+  GPRTGeomTypeOf<SphereGeomData> sphereGeomType =
+      gprtGeomTypeCreate<SphereGeomData>(context, GPRT_SPHERES /* <- This is new! */);
+  gprtGeomTypeSetClosestHitProg(sphereGeomType, 0, module, "SphereClosestHit");
 
   // -------------------------------------------------------
   // set up miss
@@ -90,7 +59,7 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
@@ -107,22 +76,15 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
+  // Create our sphere geometry. Every sphere is defined using a single float4.
+  // The "xyz" define the position and "w" defines the radius.
+  GPRTBufferOf<float4> vertexBuffer = gprtDeviceBufferCreate<float4>(context, NUM_VERTICES, vertices);
+  GPRTGeomOf<SphereGeomData> sphereGeom = gprtGeomCreate<SphereGeomData>(context, sphereGeomType);
+  gprtSpheresSetVertices(sphereGeom, vertexBuffer, NUM_VERTICES);
+  GPRTAccel sphereAccel = gprtSphereAccelCreate(context, 1, &sphereGeom);
+  gprtAccelBuild(context, sphereAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  // Create our AABB geometry. Every AABB is defined using two float3's. The
-  // first float3 defines the bottom lower left near corner, and the second
-  // float3 defines the upper far right corner.
-  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
-  GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
-  AABBGeomData *geomData = gprtGeomGetParameters(aabbGeom);
-  geomData->aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
-
-  // Note, we must create an "AABB" accel rather than a triangles accel.
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
-  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-  gprt::Instance instance = gprtAccelGetInstance(aabbAccel);
+  gprt::Instance instance = gprtAccelGetInstance(sphereAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
 
   // triangle and AABB accels can be combined in a top level tree
@@ -131,13 +93,15 @@ main(int ac, char **av) {
 
   rayGenData->world = gprtAccelGetHandle(world);
 
+  SphereGeomData sphereParams;
+  sphereParams.posAndRadius = gprtBufferGetDevicePointer(vertexBuffer);
+  gprtGeomSetParameters(sphereGeom, &sphereParams);
+
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
-
-  LOG("launching ...");
 
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
@@ -192,6 +156,8 @@ main(int ac, char **av) {
       pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
     }
 
+    pc.time = gprtGetTime(context);
+
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
@@ -202,26 +168,11 @@ main(int ac, char **av) {
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file " << outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
-  LOG("cleaning up ...");
-
-  gprtBufferDestroy(aabbPositionsBuffer);
-  gprtBufferDestroy(frameBuffer);
-  gprtRayGenDestroy(rayGen);
-  gprtMissDestroy(miss);
-  gprtAccelDestroy(aabbAccel);
-  gprtAccelDestroy(world);
-  gprtGeomDestroy(aabbGeom);
-  gprtGeomTypeDestroy(aabbGeomType);
-  gprtModuleDestroy(module);
   gprtContextDestroy(context);
-
-  LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

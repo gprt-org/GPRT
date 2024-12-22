@@ -1,44 +1,10 @@
-// MIT License
-
-// Copyright (c) 2022 Nathan V. Morrical
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 // This program sets up a single geometric object, a mesh for a cube, and
 // its acceleration structure, then ray traces it.
 
-// public GPRT API
-#include <gprt.h>
+#include <gprt.h>      // Public GPRT API
+#include "sharedCode.h" // Shared data between host and device
 
-// our shared data structures between host and device
-#include "sharedCode.h"
-
-#define LOG(message)                                                                                                   \
-  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                                                                \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-
-extern GPRTProgram s03_deviceCode_lss;
+extern GPRTProgram s2_2_deviceCode;
 
 // The positions and radii of our line-swept sphere primitive
 const int NUM_VERTICES = 11;
@@ -73,12 +39,11 @@ main(int ac, char **av) {
   // In this example, we will create an axis aligned bounding box (AABB). These
   // are more general than triangle primitives, and can be used for custom
   // primitive types.
-  LOG("gprt example '" << av[0] << "' starting up");
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S03 Line-Swept Spheres");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s03_deviceCode_lss);
+  GPRTModule module = gprtModuleCreate(context, s2_2_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -98,7 +63,7 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
@@ -115,7 +80,6 @@ main(int ac, char **av) {
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
 
   // Create our LSS geometry. Every LSS is defined using two float4's. The
   // first float4 defines a starting "xyz" position and starting radius "w", and then
@@ -150,7 +114,6 @@ main(int ac, char **av) {
   // now that everything is ready: launch it ....
   // ##################################################################
 
-  LOG("launching ...");
 
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
@@ -217,27 +180,11 @@ main(int ac, char **av) {
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file " << outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
-  LOG("cleaning up ...");
-
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
-  gprtBufferDestroy(frameBuffer);
-  gprtRayGenDestroy(rayGen);
-  gprtMissDestroy(miss);
-  gprtAccelDestroy(lssAccel);
-  gprtAccelDestroy(world);
-  gprtGeomDestroy(lssGeom);
-  gprtGeomTypeDestroy(lssGeomType);
-  gprtModuleDestroy(module);
   gprtContextDestroy(context);
-
-  LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

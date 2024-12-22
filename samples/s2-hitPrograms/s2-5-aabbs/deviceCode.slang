@@ -35,7 +35,7 @@ struct Payload {
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
 void
-simpleRayGen(uniform RayGenData record) {
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;

@@ -44,7 +44,7 @@ make_bgra(float3 color) {
 // can be thought of as the parameters passed to this kernel.
 [shader("raygeneration")]
 void
-simpleRayGen(uniform RayGenData record) {
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;

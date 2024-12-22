@@ -1,44 +1,10 @@
-// MIT License
-
-// Copyright (c) 2022 Nathan V. Morrical
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 // This program sets up a single geometric object, a mesh for a cube, and
 // its acceleration structure, then ray traces it.
 
-// public GPRT API
-#include <gprt.h>
+#include <gprt.h>      // Public GPRT API
+#include "sharedCode.h" // Shared data between host and device
 
-// our shared data structures between host and device
-#include "sharedCode.h"
-
-#define LOG(message)                                                                                                   \
-  std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                                                                \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                                                               \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-
-extern GPRTProgram s01_deviceCode;
+extern GPRTProgram s2_0_deviceCode;
 
 // Vertices are the points that define our triangles
 const int NUM_VERTICES = 3;
@@ -65,39 +31,18 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-#include <iostream>
-int
-main(int ac, char **av) {
-  LOG("gprt example '" << av[0] << "' starting up");
-
-  LOG("building module, programs, and pipeline");
-
-  // create a context on the first device:
+int main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "S01 Single Triangle");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s01_deviceCode);
-
-  // ##################################################################
-  // set up all the GPU kernels we want to run
-  // ##################################################################
+  GPRTModule module = gprtModuleCreate(context, s2_0_deviceCode);
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // First, we need to declare our geometry type.
   // This includes all GPU kernels tied to the geometry, as well as the
   // parameters passed to the geometry when hit by rays.
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
-
-  // We'll also need a ray generation program.
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
-
-  // Finally, we need a "miss" program, which will be called when
-  // a ray misses all triangles. Just like geometry declarations
-  // and ray tracing programs, miss programs have parameters
-  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
-
-  // ##################################################################
-  // set the parameters for those kernels
-  // ##################################################################
 
   // Setup pixel frame buffer
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
@@ -110,8 +55,6 @@ main(int ac, char **av) {
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
-
-  LOG("building geometries ...");
 
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
@@ -148,20 +91,7 @@ main(int ac, char **av) {
   // we go to trace our rays.
   rayGenData->world = gprtAccelGetHandle(world);
 
-  // ##################################################################
-  // build the shader binding table
-  // ##################################################################
-
-  // The shader binding table is used to assign parameters to our ray
-  // generation and miss programs. We also use the shader binding table to
-  // map parameters to geometry depending on the ray type and instance.
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-
-  // ##################################################################
-  // now that everything is ready: launch it ....
-  // ##################################################################
-
-  LOG("launching ...");
 
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
@@ -232,28 +162,10 @@ main(int ac, char **av) {
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file " << outFileName);
 
-  // ##################################################################
-  // and finally, clean up
-  // ##################################################################
-
-  LOG("cleaning up ...");
-
-  gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
-  gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(instanceBuffer);
-  gprtRayGenDestroy(rayGen);
-  gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
-  gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
-  gprtGeomTypeDestroy(trianglesGeomType);
-  gprtModuleDestroy(module);
+  // Clean up resources
   gprtContextDestroy(context);
 
-  LOG_OK("seems all went OK; app is done, this should be the last output ...");
+  return 0;
 }

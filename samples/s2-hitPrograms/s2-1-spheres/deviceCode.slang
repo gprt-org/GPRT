@@ -35,7 +35,7 @@ struct Payload {
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
 void
-simpleRayGen(uniform RayGenData record) {
+raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -45,7 +45,7 @@ simpleRayGen(uniform RayGenData record) {
 
   for (int m = 0; m < AA; m++) {
     for (int n = 0; n < AA; n++) {
-      // AA offset
+      // pixel coordinates
       float2 o = (float2(float(m), float(n)) / float(AA) - 0.5) / float2(fbSize);
 
       RayDesc rayDesc;
@@ -67,6 +67,7 @@ simpleRayGen(uniform RayGenData record) {
       tot += payload.color;
     }
   }
+
   tot /= float(AA * AA);
 
   // dither to remove banding in the background
@@ -77,8 +78,15 @@ simpleRayGen(uniform RayGenData record) {
 }
 
 float3
-pattern(in float2 uv) {
-  float3 col = float3(0.6);
+hsv2rgb(float3 input) {
+  float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  float3 p = abs(frac(input.xxx + K.xyz) * 6.0 - K.www);
+  return input.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), input.y);
+}
+
+float3
+pattern(in float2 uv, in float3 color) {
+  float3 col = color * .6;
   col += 0.4 * smoothstep(-0.01, 0.01, cos(uv.x * 0.5) * cos(uv.y * 0.5));
   col *= smoothstep(-1.0, -0.98, cos(uv.x)) * smoothstep(-1.0, -0.98, cos(uv.y));
   return col;
@@ -86,37 +94,24 @@ pattern(in float2 uv) {
 
 [shader("closesthit")]
 void
-LSSClosestHit(uniform LSSGeomData record, inout Payload payload, in float u) {
+SphereClosestHit(uniform SphereGeomData record, inout Payload payload) {
   uint primID = PrimitiveIndex();
-  uint2 indices = record.indices[primID];
-  float4 pa = record.vertices[indices.x];
-  float4 pb = record.vertices[indices.y];
-  float4 p = lerp(pa, pb, u);
+  float4 p = record.posAndRadius[primID];
 
   float t = RayTCurrent();
   float3 ro = WorldRayOrigin();
   float3 rd = WorldRayDirection();
   float3 pos = ro + t * rd;
   float3 nor = normalize(pos - p.xyz);
+  float occ = 0.5 + 0.5 * nor.y;
 
-  // shading/lighting
-  float3 w = normalize(pb.xyz - pa.xyz);
-  float3 u = normalize(cross(w, float3(0, 0, 1)));
-  float3 v = normalize(cross(u, w));
+  float3 q = normalize(pos - p.xyz);
+  float2 matuv = float2(16.0, 16.0) * float2(atan2(q.x, q.z), acos(q.y));
 
-  float3 q = mul(float3x3(u, v, w), (pos - pa.xyz));
-  float3 col = pattern(float2(8.0, 32.0) * float2(atan2(q.y, q.x), q.z));
-
-  float3 lig = normalize(float3(0.7, 0.6, 0.3));
-  float3 hal = normalize(-rd + lig);
-  float dif = clamp(dot(nor, lig), 0.0, 1.0);
-  float amb = clamp(0.5 + 0.5 * dot(nor, float3(0.0, 1.0, 0.0)), 0.0, 1.0);
-
-  col *= float3(0.2, 0.3, 0.4) * amb + float3(1.0, 0.9, 0.7) * dif;
-  col += 0.4 * pow(clamp(dot(hal, nor), 0.0, 1.0), 12.0) * dif;
-
-  // shading
-  payload.color = col;
+  float3 albedo = hsv2rgb(float3(float(primID) / 11.f, 1.0, 1.0));
+  float3 col = pattern(matuv, albedo);
+  float NDotV = dot(nor, -rd);
+  payload.color = NDotV * col;
 }
 
 // A background with a vignette effect.
