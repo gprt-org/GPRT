@@ -97,8 +97,6 @@ void AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxA
   }
 }
 
-#define AA 3
-
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
@@ -151,19 +149,11 @@ void raygen(uniform RayGenData record) {
 
   tot /= float(AA * AA);
 
-  // dither to remove banding in the background
-  tot += fract(sin(pixelID.x * float3(13, 1, 11) + pixelID.y * float3(1, 7, 5)) * 158.391832) / 255.0;
-
   const int fbOfs = pixelID.x + iResolution.x * pixelID.y;
   record.frameBuffer[fbOfs] = gprt::make_bgra(tot);
 }
 
-// A background with a vignette effect.
 [shader("miss")]
 void miss(inout Payload payload) {
-  float2 resolution = DispatchRaysDimensions().xy;
-  float2 fragCoord = DispatchRaysIndex().xy;
-  float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
-  float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
-  payload.color = col;
+  payload.color = float3(0.0);
 }
