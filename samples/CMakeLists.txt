@@ -1,41 +1,10 @@
-# MIT License
-
-# Copyright (c) 2022 Nathan V. Morrical
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 add_subdirectory(s0-rayGenPrograms)
 add_subdirectory(s1-missPrograms)
 add_subdirectory(s2-hitPrograms)
-
-# add_subdirectory(s02-instances)
-# add_subdirectory(s03-singleAABB)
-# add_subdirectory(s03-someSpheres)
-# add_subdirectory(s03-lineSweptSpheres)
-# add_subdirectory(s04-computeAABBs)
-# add_subdirectory(s05-computeVertex)
-# add_subdirectory(s06-computeTransform)
-# add_subdirectory(s07-computeInstanceLOD)
-# add_subdirectory(s08-multipleGeometry)
-# add_subdirectory(s09-singleTexture)
-# add_subdirectory(s10-visibilityMasks)
-# add_subdirectory(s11-rasterization)
-# add_subdirectory(s12-imgui-raster)
-# add_subdirectory(s12-imgui-rt)
-# add_subdirectory(s13-differentiable)
+add_subdirectory(s3-instancing)
+add_subdirectory(s4-callablePrograms)
+add_subdirectory(s5-computePrograms)
+add_subdirectory(s6-textures)
+add_subdirectory(s7-rasterization)
+add_subdirectory(s8-userInterface)
+add_subdirectory(s9-differentiable)
