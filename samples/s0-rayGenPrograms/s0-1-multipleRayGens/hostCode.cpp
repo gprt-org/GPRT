@@ -30,8 +30,8 @@ int main() {
   data.color0 = float3(0.1f, 0.1f, 0.1f); // Background color
   data.color1 = float3(0.0f, 0.0f, 0.0f); // Secondary color
   data.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
-  gprtRayGenSetParameters(firstRayGen, &data);
-  gprtRayGenSetParameters(secondRayGen, &data);
+  gprtRayGenSetParameters(firstRayGen, data);
+  gprtRayGenSetParameters(secondRayGen, data);
   
   // Build the Shader Binding Table (SBT)
   gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);

@@ -84,7 +84,7 @@ int main(int ac, char **av) {
   geomData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
   geomData.radius = gprtBufferGetDevicePointer(radiusBuffer);
   geomData.aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
-  gprtGeomSetParameters(aabbGeom, &geomData);
+  gprtGeomSetParameters(aabbGeom, geomData);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
   gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1, 1, 1}, geomData);

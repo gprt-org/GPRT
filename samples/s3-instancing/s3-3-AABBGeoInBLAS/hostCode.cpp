@@ -1,70 +1,32 @@
 #include <gprt.h>      // Public GPRT API
 #include "sharedCode.h" // Shared data between host and device
-#include <generator.hpp> // for generating meshes
-using namespace generator;
 
 extern GPRTProgram s3_3_deviceCode;
 
-template <typename T> struct Mesh {
-  std::vector<float3> vertices;
-  std::vector<uint3> indices;
-  GPRTBufferOf<float3> vertexBuffer;
-  GPRTBufferOf<uint3> indexBuffer;
-  GPRTGeomOf<TrianglesGeomData> geometry;
+// The extents of our bounding box
+float3 firstAabbPositions[2] = {float3(-0.5f) + float3(-2.f, 0.f, 0.f), float3(0.5f) + float3(-2.f, 0.f, 0.f)};
 
-  Mesh() {};
-  Mesh(GPRTContext context, GPRTGeomTypeOf<TrianglesGeomData> geomType, T generator, float3 color, float4x4 transform) {
-    auto vertGenerator = generator.vertices();
-    auto triGenerator = generator.triangles();
-    while (!vertGenerator.done()) {
-      auto vertex = vertGenerator.generate();
-      auto position = vertex.position;
-      float4 p = mul(transform, float4(vertex.position[0], vertex.position[1], vertex.position[2], 1.0));
-      vertices.push_back(p.xyz());
-      vertGenerator.next();
-    }
-    while (!triGenerator.done()) {
-      Triangle triangle = triGenerator.generate();
-      auto vertices = triangle.vertices;
-      indices.push_back(uint3(vertices[0], vertices[1], vertices[2]));
-      triGenerator.next();
-    }
+float3 secondAabbPositions[2] = {float3(-0.5f) + float3(0.f, 0.f, 0.f), float3(0.5f) + float3(0.f, 0.f, 0.f)};
 
-    vertexBuffer = gprtDeviceBufferCreate<float3>(context, vertices.size(), vertices.data());
-    indexBuffer = gprtDeviceBufferCreate<uint3>(context, indices.size(), indices.data());
-    geometry = gprtGeomCreate(context, geomType);
-    TrianglesGeomData *geomData = gprtGeomGetParameters(geometry);
-    gprtTrianglesSetVertices(geometry, vertexBuffer, (uint32_t) vertices.size());
-    gprtTrianglesSetIndices(geometry, indexBuffer, (uint32_t) indices.size());
-    geomData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
-    geomData->index = gprtBufferGetDevicePointer(indexBuffer);
-    geomData->color = color;
-  };
-
-  void cleanup() {
-    gprtGeomDestroy(geometry);
-    gprtBufferDestroy(vertexBuffer);
-    gprtBufferDestroy(indexBuffer);
-  };
-};
+float3 thirdAabbPositions[2] = {float3(-0.5f) + float3(2.f, 0.f, 0.f), float3(0.5f) + float3(2.f, 0.f, 0.f)};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
+// final image output
 const char *outFileName = "s3-3-AABBGeoInBLAS.png";
 
-float3 lookFrom = {10.f, 10.0f, 10.f};
-float3 lookAt = {0.f, 0.f, 1.f};
-float3 lookUp = {0.f, 0.f, -1.f};
-float cosFovy = 0.4f;
-
+#include <iostream>
 int main(int ac, char **av) {
-  // This example serves to demonstrate that multiple geometry can be placed
-  // in the same bottom level acceleration structure.
+  // In this example, we will create an axis aligned bounding box (AABB). These
+  // are more general than triangle primitives, and can be used for custom
+  // primitive types.
+
+  gprtRequestMaxAttributeSize(2 * sizeof(float4));
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S08 Multiple Geometry");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  gprtRequestWindow(fbSize.x, fbSize.y, "S3-3 Multiple AABB Geoetries in a Common BLAS");
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s3_3_deviceCode);
 
   // ##################################################################
@@ -72,50 +34,24 @@ int main(int ac, char **av) {
   // ##################################################################
 
   // -------------------------------------------------------
-  // Setup geometry types
+  // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
+  GPRTGeomTypeOf<AABBGeomData> aabbGeomType =
+      gprtGeomTypeCreate<AABBGeomData>(context, GPRT_AABBS /* <- This is new! */);
+  gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
+  gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
+
+  // -------------------------------------------------------
+  // set up miss
+  // -------------------------------------------------------
+  GPRTMissOf<void> miss = gprtMissCreate<void>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
   // -------------------------------------------------------
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
-
-  // -------------------------------------------------------
-  // set up miss prog
-  // -------------------------------------------------------
-  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
-
-// ------------------------------------------------------------------
-// Meshes
-// ------------------------------------------------------------------
-#ifndef M_PI
-#define M_PI 3.14
-#endif
-  Mesh<TorusKnotMesh> torusMesh1(
-      context, trianglesGeomType, TorusKnotMesh{2, 3, 32, 192}, float3(1, 0, 0),
-      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .33), 2 * cos(2 * M_PI * .33), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh2(
-      context, trianglesGeomType, TorusKnotMesh{2, 5, 32, 192}, float3(0, 1, 0),
-      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * .66), 2 * cos(2 * M_PI * .66), 1.5f)));
-  Mesh<TorusKnotMesh> torusMesh3(
-      context, trianglesGeomType, TorusKnotMesh{2, 7, 32, 192}, float3(0, 0, 1),
-      math::matrixFromTranslation(float3(2 * sin(2 * M_PI * 1.0), 2 * cos(2 * M_PI * 1.0), 1.5f)));
-  Mesh<CappedCylinderMesh> floorMesh(context, trianglesGeomType, CappedCylinderMesh{5, 4, 128}, float3(1, 1, 1),
-                                     math::matrixFromTranslation(float3(0.0f, 0.0f, -4.0f)));
-  std::vector<GPRTGeomOf<TrianglesGeomData>> geoms = {torusMesh1.geometry, torusMesh2.geometry, torusMesh3.geometry,
-                                                      floorMesh.geometry};
-  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, geoms.size(), geoms.data());
-  gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-  gprt::Instance instance = gprtAccelGetInstance(trianglesBLAS);
-  GPRTBufferOf<gprt::Instance> instances = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
-  GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, 1, instances);
-  gprtAccelBuild(context, trianglesTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
   // ##################################################################
-  // set the parameters for our kernels
+  // set the parameters for those kernels
   // ##################################################################
 
   // Setup pixel frame buffer
@@ -124,77 +60,59 @@ int main(int ac, char **av) {
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
-  rayGenData->world = gprtAccelGetHandle(trianglesTLAS);
 
-  // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetParameters(miss);
-  missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  missData->color1 = float3(0.0f, 0.0f, 0.0f);
+  // Create our AABB geometry. Every AABB is defined using two float3's. The
+  // first float3 defines the bottom lower left near corner, and the second
+  // float3 defines the upper far right corner.
+  GPRTBufferOf<float3> firstAabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, firstAabbPositions);
+  GPRTBufferOf<float3> secondAabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, secondAabbPositions);
+  GPRTBufferOf<float3> thirdAabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, thirdAabbPositions);  
+  GPRTGeomOf<AABBGeomData> firstAabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
+  GPRTGeomOf<AABBGeomData> secondAabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
+  GPRTGeomOf<AABBGeomData> thirdAabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
+  gprtAABBsSetPositions(firstAabbGeom, firstAabbPositionsBuffer, 1 /* just one aabb */);
+  gprtAABBsSetPositions(secondAabbGeom, secondAabbPositionsBuffer, 1 /* just one aabb */);
+  gprtAABBsSetPositions(thirdAabbGeom, thirdAabbPositionsBuffer, 1 /* just one aabb */);
 
-  // Upload our newly assigned parameters to the shader binding table.
+  AABBGeomData firstAABBGeomData, secondAABBGeomData, thirdAABBGeomData;
+  firstAABBGeomData.aabbs = gprtBufferGetDevicePointer(firstAabbPositionsBuffer);
+  secondAABBGeomData.aabbs = gprtBufferGetDevicePointer(secondAabbPositionsBuffer);
+  thirdAABBGeomData.aabbs = gprtBufferGetDevicePointer(thirdAabbPositionsBuffer);
+  gprtGeomSetParameters(firstAabbGeom, firstAABBGeomData);
+  gprtGeomSetParameters(secondAabbGeom, secondAABBGeomData);
+  gprtGeomSetParameters(thirdAabbGeom, thirdAABBGeomData);
+
+  // Note, we must create an "AABB" accel rather than a triangles accel.
+  std::vector<GPRTGeomOf<AABBGeomData>> geoms = {firstAabbGeom, secondAabbGeom, thirdAabbGeom};
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, geoms.size(), geoms.data());
+  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+  gprt::Instance instance = gprtAccelGetInstance(aabbAccel);
+  GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
+
+  // triangle and AABB accels can be combined in a top level tree
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+  rayGenData->world = gprtAccelGetHandle(world);
+
   gprtBuildShaderBindingTable(context);
 
   // ##################################################################
   // now that everything is ready: launch it ....
   // ##################################################################
 
+
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
-
-  bool firstFrame = true;
-  double xpos = 0.f, ypos = 0.f;
-  double lastxpos, lastypos;
   do {
-    float speed = .001f;
-    lastxpos = xpos;
-    lastypos = ypos;
-    gprtGetCursorPos(context, &xpos, &ypos);
-    if (firstFrame) {
-      lastxpos = xpos;
-      lastypos = ypos;
-    }
-    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
-
-    // If we click the mouse, we should rotate the camera
-    // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame) {
-      firstFrame = false;
-      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
-      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
-#ifndef M_PI
-#define M_PI 3.1415926f
-#endif
-
-      // step 1 : Calculate the amount of rotation given the mouse movement.
-      float deltaAngleX = float(2 * M_PI / fbSize.x);
-      float deltaAngleY = float(M_PI / fbSize.y);
-      float xAngle = float(lastxpos - xpos) * deltaAngleX;
-      float yAngle = float(lastypos - ypos) * deltaAngleY;
-
-      // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
-      position = (mul(rotationMatrixX, (position - pivot))) + pivot;
-
-      // step 3: Rotate the camera around the pivot point on the second axis.
-      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
-      lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
-
-      // ----------- compute variable values  ------------------
-      pc.camera.pos = lookFrom;
-      pc.camera.dir_00 = normalize(lookAt - lookFrom);
-      float aspect = float(fbSize.x) / float(fbSize.y);
-      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
-      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
-    }
+    pc.time = float(gprtGetTime(context));
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
 
-    // If a window exists, presents the framebuffer here to that window
+    // If a window exists, presents the frame buffer here to that window
     gprtBufferPresent(context, frameBuffer);
   }
   // returns true if "X" pressed or if in "headless" mode

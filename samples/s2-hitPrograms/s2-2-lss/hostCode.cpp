@@ -47,7 +47,7 @@ int main(int ac, char **av) {
   LSSGeomData lssParams;
   lssParams.indices = gprtBufferGetDevicePointer(indexBuffer);
   lssParams.vertices = gprtBufferGetDevicePointer(vertexBuffer);
-  gprtGeomSetParameters(lssGeom, &lssParams);
+  gprtGeomSetParameters(lssGeom, lssParams);
 
   // Create and build BLAS
   GPRTAccel lssAccel = gprtLSSAccelCreate(context, 1, &lssGeom);

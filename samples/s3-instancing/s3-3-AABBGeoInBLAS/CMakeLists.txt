@@ -7,8 +7,8 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s3_3_multipleGeometry hostCode.cpp)
-target_link_libraries(s3_3_multipleGeometry
+add_executable(s3_3_AABBGeoInBLAS hostCode.cpp)
+target_link_libraries(s3_3_AABBGeoInBLAS
   PRIVATE
     s3_3_deviceCode
     gprt::gprt

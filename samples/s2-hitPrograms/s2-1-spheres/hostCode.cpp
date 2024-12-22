@@ -43,7 +43,7 @@ int main(int ac, char **av) {
   // when rays hit spheres.
   SphereGeomData sphereParams;
   sphereParams.posAndRadius = gprtBufferGetDevicePointer(vertexBuffer);
-  gprtGeomSetParameters(sphereGeom, &sphereParams);
+  gprtGeomSetParameters(sphereGeom, sphereParams);
 
   // Create and build BLAS
   GPRTAccel sphereAccel = gprtSphereAccelCreate(context, 1, &sphereGeom);

@@ -305,8 +305,8 @@ GPRT_API void gprtGeomSetParameters(GPRTGeom geometry, void *parameters, int dev
  */
 template <typename T>
 void
-gprtGeomSetParameters(GPRTGeomOf<T> geometry, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtGeomSetParameters((GPRTGeom) geometry, (void *) parameters, deviceID);
+gprtGeomSetParameters(GPRTGeomOf<T> geometry, T &parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtGeomSetParameters((GPRTGeom) geometry, (void *) &parameters, deviceID);
 }
 
 // ==================================================================
@@ -791,8 +791,8 @@ GPRT_API void gprtRayGenSetParameters(GPRTRayGen rayGen, void *parameters, int d
  */
 template <typename T>
 void
-gprtRayGenSetParameters(GPRTRayGenOf<T> rayGen, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtRayGenSetParameters((GPRTRayGen) rayGen, (void *) parameters, deviceID);
+gprtRayGenSetParameters(GPRTRayGenOf<T> rayGen, T &parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtRayGenSetParameters((GPRTRayGen) rayGen, (void *) &parameters, deviceID);
 }
 
 /**
@@ -889,8 +889,8 @@ GPRT_API void gprtMissSetParameters(GPRTMiss miss, void *parameters, int deviceI
  */
 template <typename T>
 void
-gprtMissSetParameters(GPRTMissOf<T> miss, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtMissSetParameters((GPRTMiss) miss, (void *) parameters, deviceID);
+gprtMissSetParameters(GPRTMissOf<T> miss, T &parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtMissSetParameters((GPRTMiss) miss, (void *) &parameters, deviceID);
 }
 
 GPRT_API uint32_t gprtMissGetIndex(GPRTMiss missProg, int deviceID GPRT_IF_CPP(= 0));
@@ -934,8 +934,8 @@ GPRT_API void gprtCallableSetParameters(GPRTCallable callable, void *parameters,
 
 template <typename T>
 void
-gprtCallableSetParameters(GPRTCallableOf<T> callable, T *parameters, int deviceID GPRT_IF_CPP(= 0)) {
-  gprtCallableSetParameters((GPRTCallable) callable, (void *) parameters, deviceID);
+gprtCallableSetParameters(GPRTCallableOf<T> callable, T &parameters, int deviceID GPRT_IF_CPP(= 0)) {
+  gprtCallableSetParameters((GPRTCallable) callable, (void *) &parameters, deviceID);
 }
 
 // ------------------------------------------------------------------
