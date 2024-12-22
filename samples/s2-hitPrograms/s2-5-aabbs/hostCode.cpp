@@ -1,6 +1,3 @@
-// This program sets up a single geometric object, a mesh for a cube, and
-// its acceleration structure, then ray traces it.
-
 #include <gprt.h>      // Public GPRT API
 #include "sharedCode.h" // Shared data between host and device
 
@@ -15,15 +12,8 @@ const int2 fbSize = {1400, 460};
 // final image output
 const char *outFileName = "s03-singleAABB.png";
 
-// Initial camera parameters
-float3 lookFrom = {3.5f, 3.5f, 3.5f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, -1.f, 0.f};
-float cosFovy = 0.66f;
-
 #include <iostream>
-int
-main(int ac, char **av) {
+int main(int ac, char **av) {
   // In this example, we will create an axis aligned bounding box (AABB). These
   // are more general than triangle primitives, and can be used for custom
   // primitive types.
@@ -50,7 +40,7 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // set up miss
   // -------------------------------------------------------
-  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
+  GPRTMissOf<void> miss = gprtMissCreate<void>(context, module, "miss");
 
   // -------------------------------------------------------
   // set up ray gen program
@@ -66,12 +56,6 @@ main(int ac, char **av) {
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
-
-  // Miss program checkerboard background colors
-  MissProgData *missData = gprtMissGetParameters(miss);
-  missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  missData->color1 = float3(0.0f, 0.0f, 0.0f);
-
 
   // Create our AABB geometry. Every AABB is defined using two float3's. The
   // first float3 defines the bottom lower left near corner, and the second
@@ -105,55 +89,8 @@ main(int ac, char **av) {
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
   PushConstants pc;
-
-  bool firstFrame = true;
-  double xpos = 0.f, ypos = 0.f;
-  double lastxpos, lastypos;
   do {
-    float speed = .001f;
-    lastxpos = xpos;
-    lastypos = ypos;
-    gprtGetCursorPos(context, &xpos, &ypos);
-    if (firstFrame) {
-      lastxpos = xpos;
-      lastypos = ypos;
-    }
-    int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
-
-    // If we click the mouse, we should rotate the camera
-    // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame) {
-      firstFrame = false;
-      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
-      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
-#ifndef M_PI
-#define M_PI 3.1415926f
-#endif
-
-      // step 1 : Calculate the amount of rotation given the mouse movement.
-      float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = float(lastxpos - xpos) * deltaAngleX;
-      float yAngle = float(lastypos - ypos) * deltaAngleY;
-
-      // step 2: Rotate the camera around the pivot point on the first axis.
-      float4x4 rotationMatrixX = math::matrixFromRotation(xAngle, lookUp);
-      position = (mul(rotationMatrixX, (position - pivot))) + pivot;
-
-      // step 3: Rotate the camera around the pivot point on the second axis.
-      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
-      float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
-      lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
-
-      // ----------- compute variable values  ------------------
-      pc.camera.pos = lookFrom;
-      pc.camera.dir_00 = normalize(lookAt - lookFrom);
-      float aspect = float(fbSize.x) / float(fbSize.y);
-      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
-      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
-    }
+    pc.time = float(gprtGetTime(context));
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);

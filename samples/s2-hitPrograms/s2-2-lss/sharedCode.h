@@ -43,12 +43,14 @@ struct MissProgData {
 
 /* Constants that change each frame */
 struct PushConstants {
-  struct Camera {
-    float3 pos;
-    float3 dir_00;
-    float3 dir_du;
-    float3 dir_dv;
-  } camera;
-
   float time;
 };
+
+#if defined(__SLANG_COMPILER__) // <- causes code below to only be included in the device code.
+float3 pattern(in float2 uv) {
+  float3 col = float3(0.6);
+  col += 0.4 * smoothstep(-0.01, 0.01, cos(uv.x * 0.5) * cos(uv.y * 0.5));
+  col *= smoothstep(-1.0, -0.98, cos(uv.x)) * smoothstep(-1.0, -0.98, cos(uv.y));
+  return col;
+}
+#endif

@@ -1,25 +1,3 @@
-// MIT License
-
-// Copyright (c) 2022 Nathan V. Morrical
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 #include "sharedCode.h"
 
 [[vk::push_constant]]
@@ -28,47 +6,6 @@ PushConstants pc;
 struct Payload {
   float3 color;
 };
-
-inline uint32_t
-make_bgra(float3 color) {
-  color = saturate(pow(color, 1.0 / 2.2)) * 255.0;
-  return (uint32_t(color.z) << 0) + (uint32_t(color.y) << 8) + (uint32_t(color.x) << 16) + (0xffU << 24);
-}
-
-// This ray generation program will kick off the ray tracing process,
-// generating rays and tracing them into the world.
-//
-// The first parameter here is the name of our entry point.
-//
-// The second is the type and name of the shader record. A shader record
-// can be thought of as the parameters passed to this kernel.
-[shader("raygeneration")]
-void
-raygen(uniform RayGenData record) {
-  Payload payload;
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 fbSize = DispatchRaysDimensions().xy;
-  float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
-
-  RayDesc rayDesc;
-  rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
-  rayDesc.TMin = 0.001;
-  rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                   // the tree
-           RAY_FLAG_FORCE_OPAQUE,   // ray flags
-           0xff,                    // instance inclusion mask
-           0,                       // ray type
-           1,                       // number of ray types
-           0,                       // miss type
-           rayDesc,                 // the ray to trace
-           payload                  // the payload IO
-  );
-
-  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
-}
 
 // This closest hit program will be called when rays hit triangles.
 // Here, we can fetch per-geometry data, process that data, and send
@@ -87,15 +24,75 @@ raygen(uniform RayGenData record) {
 // called "barycentrics", which we use to interpolate per-vertex
 // values.
 [shader("closesthit")]
-void
-TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+}
+
+#define AA 3
+
+// This ray generation program will kick off the ray tracing process,
+// generating rays and tracing them into the world.
+//
+// The first parameter here is the name of our entry point.
+//
+// The second is the type and name of the shader record. A shader record
+// can be thought of as the parameters passed to this kernel.
+[shader("raygeneration")]
+void raygen(uniform RayGenData record) {
+  Payload payload;
+  uint2 pixelID = DispatchRaysIndex().xy;
+  uint2 iResolution = DispatchRaysDimensions().xy;
+  
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+
+  // camera movement
+  float an = pc.time;
+  float3 ro = float3(-4.0 * sin(an), 0.0, -4.0 * cos(an));
+  float3 ta = float3(0.0, 0.0, 0.0);
+
+  // camera matrix
+  float3 ww = normalize(ta - ro);
+  float3 uu = normalize(cross(ww, float3(0.0, -1.0, 0.0)));
+  float3 vv = normalize(cross(uu, ww)); 
+
+  float3 tot = float3(0.0);
+
+  for (int m = 0; m < AA; m++)
+  for (int n = 0; n < AA; n++)
+  {
+    // pixel coordinates
+    float2 o = float2(float(m), float(n)) / float(AA) - 0.5;
+    float2 p = (2.0 * (pixelID + o) - iResolution.xy) / iResolution.y;
+
+    // create view ray
+    float3 rd = normalize(p.x * uu + p.y * vv + 3.0 * ww);
+
+    RayDesc rayDesc;
+    rayDesc.Origin = ro;
+    rayDesc.Direction = rd;
+    rayDesc.TMin = 0.0;
+    rayDesc.TMax = 10000.0;
+    TraceRay(world,          // the tree
+             RAY_FLAG_NONE,  // ray flags
+             0xff,           // instance inclusion mask
+             0,              // ray type
+             1,              // number of ray types
+             0,              // miss index
+             rayDesc,        // the ray to trace
+             payload         // the payload IO
+    );
+
+    tot += payload.color;
+  }
+  tot /= float(AA * AA);
+
+  const int fbOfs = pixelID.x + iResolution.x * pixelID.y;
+  record.frameBuffer[fbOfs] = gprt::make_bgra(tot);
 }
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(inout Payload payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
