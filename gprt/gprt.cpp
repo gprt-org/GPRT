@@ -119,11 +119,7 @@ static struct RequestedFeatures {
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
-#ifdef NDEBUG
-    return false;
-#else
-    return false;
-#endif
+    return requestedFeatures.debugPrintf;
   }
 } requestedFeatures;
 
@@ -7368,12 +7364,12 @@ Context::buildPipeline() {
               shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
 
               // populate hit group programs using geometry type, recycling any previously referenced shader stages
-              if (geom->geomType->closestHitShaderUsed[rayType]) {
-                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
+              if (geom->geomType->intersectionShaderUsed[rayType]) {
+                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
                 }
-                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
+                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
               }
 
               if (geom->geomType->anyHitShaderUsed[rayType]) {
@@ -7384,13 +7380,20 @@ Context::buildPipeline() {
                 shaderGroup.anyHitShader = geom->geomType->anyHitShaderStageAddress[rayType];
               }
 
-              if (geom->geomType->intersectionShaderUsed[rayType]) {
-                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
+              if (geom->geomType->closestHitShaderUsed[rayType]) {
+                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
                 }
-                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
+                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
               }
+
+              // If no shaders specified, throw an error. We need at least one...
+              // if (shaderGroup.closestHitShader == VK_SHADER_UNUSED_KHR && shaderGroup.anyHitShader == VK_SHADER_UNUSED_KHR) 
+              // {
+              //   LOG_ERROR("Geometry type has no programs assigned for ray type " + std::to_string(rayType));
+              // }
+
               shaderGroups.push_back(shaderGroup);
             }
           }
@@ -7494,12 +7497,14 @@ gprtRequestMaxPayloadSize(uint32_t payloadSize) {
 GPRT_API void
 gprtRequestMaxAttributeSize(uint32_t attributeSize) {
   LOG_API_CALL();
+  if (attributeSize > 32) LOG_ERROR("Max attribute size is too large. Must be 32 bytes or smaller.");
   requestedFeatures.maxRayHitAttributeSize = attributeSize;
 }
 
 GPRT_API void
 gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth) {
   LOG_API_CALL();
+  if (rayRecursionDepth > 32) LOG_ERROR("Max recursion depth is too large. Must be 32 or smaller.");
   requestedFeatures.rayRecursionDepth = rayRecursionDepth;
 }
 

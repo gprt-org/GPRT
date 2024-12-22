@@ -639,7 +639,7 @@ GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
 GPRT_API void gprtRequestRayTypeCount(uint32_t numRayTypes);
 
 /*! set maximum recursion depth available in a ray tracing pipeline.
- Currently defaults to 31. */
+ Currently defaults to 1, ie no recursion. */
 GPRT_API void gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth);
 
 /*! Requests that ray queries be enabled for inline ray tracing support. */
