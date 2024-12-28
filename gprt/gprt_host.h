@@ -170,8 +170,6 @@ typedef enum {
   GPRT_SBT_RAYGEN = 2,
   GPRT_SBT_MISS = 4,
   GPRT_SBT_CALLABLE = 8,
-  GPRT_SBT_COMPUTE = 16,
-  GPRT_SBT_RASTER = 32,
   GPRT_SBT_ALL = 63
 } GPRTBuildSBTFlags;
 
@@ -191,7 +189,53 @@ typedef enum {
   GPRT_MATRIX_FORMAT_ROW_MAJOR
 } GPRTMatrixFormat;
 
-typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS } GPRTGeomKind;
+typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, GPRT_CELLS } GPRTGeomKind;
+
+// A subset of the cell types supported by VTK.
+// Keep in sync with https://github.com/Kitware/VTK/blob/master/Common/DataModel/vtkCellType.h
+typedef enum
+{
+  // Linear cells
+  GPRT_TETRA = 10,
+  GPRT_VOXEL = 11,
+  GPRT_HEXAHEDRON = 12,
+  GPRT_WEDGE = 13,
+  GPRT_PYRAMID = 14,
+  GPRT_PENTAGONAL_PRISM = 15,
+  GPRT_HEXAGONAL_PRISM = 16,
+
+  // // Quadratic, isoparametric cells
+  // GPRT_QUADRATIC_TETRA = 24,
+  // GPRT_QUADRATIC_HEXAHEDRON = 25,
+  // GPRT_QUADRATIC_WEDGE = 26,
+  // GPRT_QUADRATIC_PYRAMID = 27,
+  // GPRT_TRIQUADRATIC_HEXAHEDRON = 29,
+  // GPRT_TRIQUADRATIC_PYRAMID = 37,
+  // GPRT_QUADRATIC_LINEAR_WEDGE = 31,
+  // GPRT_BIQUADRATIC_QUADRATIC_WEDGE = 32,
+  // GPRT_BIQUADRATIC_QUADRATIC_HEXAHEDRON = 33,
+
+  // // Polyhedron cell (consisting of polygonal faces)
+  // GPRT_POLYHEDRON = 42,
+
+  // // Higher order cells
+  // GPRT_HIGHER_ORDER_TETRAHEDRON = 64,
+  // GPRT_HIGHER_ORDER_WEDGE = 65,
+  // GPRT_HIGHER_ORDER_PYRAMID = 66,
+  // GPRT_HIGHER_ORDER_HEXAHEDRON = 67,
+
+  // // Arbitrary order Lagrange elements (formulated separated from generic higher order cells)
+  // GPRT_LAGRANGE_TETRAHEDRON = 71,
+  // GPRT_LAGRANGE_HEXAHEDRON = 72,
+  // GPRT_LAGRANGE_WEDGE = 73,
+  // GPRT_LAGRANGE_PYRAMID = 74,
+
+  // // Arbitrary order Bezier elements (formulated separated from generic higher order cells)
+  // GPRT_BEZIER_TETRAHEDRON = 78,
+  // GPRT_BEZIER_HEXAHEDRON = 79,
+  // GPRT_BEZIER_WEDGE = 80,
+  // GPRT_BEZIER_PYRAMID = 81,
+} GPRTCellType;
 
 typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,
@@ -951,14 +995,12 @@ gprtCallableSetParameters(GPRTCallableOf<T> callable, T &parameters, int deviceI
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                       unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                    unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtAABBAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtAABBAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtAABBAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -974,14 +1016,12 @@ gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *ar
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                           unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                        unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtTriangleAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtTriangleAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -997,14 +1037,12 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                         unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                      unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtSphereAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtSphereAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1020,14 +1058,13 @@ gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom *geom,
                                       unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                   unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtLSSAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtLSSAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1145,7 +1182,7 @@ GPRT_API gprt::Instance gprtAccelGetInstance(GPRTAccel blas);
 
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during
- * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * intersection, and the parameters to pass into these device programs.
  *
  * @param context The GPRT context
  * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
@@ -1155,7 +1192,7 @@ GPRT_API GPRTGeomType gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind,
 
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during
- * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * intersection, and the parameters to pass into these device programs.
  * @tparam T The template type of the parameters structure that will be passed into the device programs
  * @param context The GPRT context
  * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
@@ -1200,69 +1237,6 @@ template <typename T>
 void
 gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
-                                               GPRTTexture depthAttachment);
-
-template <typename T1, typename T2, typename T3>
-void
-gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTextureOf<T2> colorAttachment,
-                                 GPRTTextureOf<T3> depthAttachment) {
-  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rasterType, (GPRTTexture) colorAttachment,
-                                   (GPRTTexture) depthAttachment);
-}
-
-/**
- * @brief Rasterize a list of GPRT geometry. (Currently assuming all geometry are GPRT_TRIANGLES)
- *
- * @param context The GPRT context used to rasterize the triangles
- * @param geomType The geometry type to fetch raster programs from
- * @param numGeometry The number of GPRTGeoms to rasterize
- * @param geometry A pointer to a list of GPRT geometry, to be rasterized in the order given
- * @param rasterType Controls which rasterization programs to use. Analogous to "Ray Type", in
- * that it indexes into the shader binding table.
- * @param instanceCounts How many instances of each geometry in the "geometry" list to rasterize.
- * Useful for rasterizing the same geometry in many different locations. If null pointer, this parameter is ignored.
- * Otherwise, we expect a list of length "numGeometry"
- * @param pushConstantsSize The size of the push constants structure to upload to the device.
- * If 0, no push constants are updated. Currently limited to 128 bytes or less.
- * @param pushConstants A pointer to a structure of push constants to upload to the device.
- */
-void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
-                           uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                           void *pushConstants GPRT_IF_CPP(= 0));
-
-template <typename RecordType>
-void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
-                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
-}
-
-template <typename RecordType, typename PushConstantsType>
-void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
-                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts,
-                      PushConstantsType pc) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts,
-                        sizeof(PushConstantsType), &pc);
 }
 
 /**

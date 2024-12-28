@@ -63,9 +63,6 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
-
   // ##################################################################
   // set the parameters for our compute kernel
   // ##################################################################
@@ -91,7 +88,7 @@ int main(int ac, char **av) {
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   gprt::Instance instance = gprtAccelGetInstance(aabbAccel);

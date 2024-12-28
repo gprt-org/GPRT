@@ -6,7 +6,8 @@ using namespace generator;
 extern GPRTProgram s5_2_deviceCode;
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+// const int2 fbSize = {1400, 460};
+const int2 fbSize = {1024, 1024};
 
 const char *outFileName = "s5-2-computeTransform.png";
 
@@ -54,7 +55,7 @@ template <typename T> struct Mesh {
     geomData->index = gprtBufferGetDevicePointer(indexBuffer);
 
     // Build the bottom level acceleration structure
-    accel = gprtTriangleAccelCreate(context, 1, &geometry);
+    accel = gprtTriangleAccelCreate(context, geometry);
     gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
     // gprtAccelCompact(context, accel);
   };
@@ -109,9 +110,6 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
-
   // ------------------------------------------------------------------
   // bottom level mesh instances
   // ------------------------------------------------------------------
@@ -125,11 +123,11 @@ int main(int ac, char **av) {
   // Next, we'll create a grid of references to the same bottom level
   // acceleration structure. This saves memory and improves performance over
   // creating duplicate meshes.
-  uint32_t numInstances = 256 * 256;
-  std::vector<gprt::Instance> instances(numInstances);
-  for (int i = 0; i < numInstances; ++i) {
-    instances[i] = gprtAccelGetInstance(instanceMesh.accel);
-  }
+  uint32_t numInstances = (1024 * 1024) * 2;
+  std::vector<gprt::Instance> instances(numInstances, gprtAccelGetInstance(instanceMesh.accel));
+  // for (int i = 0; i < numInstances; ++i) {
+  //   instances[i] = gprtAccelGetInstance(instanceMesh.accel);
+  // }
 
   // ------------------------------------------------------------------
   // the instance acceleration structure
@@ -147,7 +145,7 @@ int main(int ac, char **av) {
   pc.numInstances = numInstances;
 
   // Now, compute transforms in parallel with a transform compute shader
-  gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
+  gprtComputeLaunch(transformProgram, {int((numInstances + 511) / 512), 1, 1}, {512, 1, 1}, pc);
 
   // Now that the transforms are set, we can build our top level acceleration
   // structure
@@ -228,7 +226,7 @@ int main(int ac, char **av) {
     // update time to move instance transforms. Then, update only instance
     // accel.
     pc.now = float(gprtGetTime(context));
-    gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
+    gprtComputeLaunch(transformProgram, {int((numInstances + 511) / 512), 1, 1}, {512, 1, 1}, pc);
     gprtAccelUpdate(context, world);
 
     // Now, trace rays

@@ -102,7 +102,11 @@ static struct RequestedFeatures {
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
+  
+  uint32_t internalAdditionalSize = 32;
   uint32_t recordSize = 256;
+
+  uint32_t maxDescriptorCount = 256;
 
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
@@ -195,8 +199,7 @@ gprtRaise_impl(std::string str) {
   if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
-#define LOG_PRINTF(message)                                                                                            \
-  std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
+#define LOG_PRINTF(message) std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
   if (RequestedFeatures::logging())                                                                                    \
@@ -268,12 +271,11 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
       // Find the position of the first "|" after the MessageID
       size_t pos = message.find("|", message.find("MessageID ="));
       if (pos != std::string::npos) {
-          // Skip the prefix up to the second "|"
-          message = message.substr(pos + 2); // +2 to account for "| "
+        // Skip the prefix up to the second "|"
+        message = message.substr(pos + 2);   // +2 to account for "| "
       }
-      std::cout<<message; // Expect the user to include \n 
-    }
-    else {
+      std::cout << message;   // Expect the user to include \n
+    } else {
       LOG_INFO(pCallbackData->pMessage);
     }
   } else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
@@ -298,6 +300,15 @@ extern GPRTProgram fallbacksDeviceCode;
 // forward declarations...
 struct Context;
 struct Geom;
+struct Accel;
+struct Texture;
+struct RayGen;
+struct Miss;
+struct Callable;
+struct Compute;
+struct Module;
+struct ImageResource;
+struct Buffer;
 struct GeomType;
 struct TriangleGeom;
 struct TriangleGeomType;
@@ -351,8 +362,235 @@ struct Stage {
   VkPipeline pipeline;
 };
 
+struct Context {
+  // For convenience, an opaque handle to the context
+  GPRTContext context = (GPRTContext) this;
+
+  VkApplicationInfo appInfo;
+
+  // Vulkan instance, stores all per-application states
+  VkInstance instance;
+  std::vector<std::string> supportedInstanceExtensions;
+
+  // optional windowing features
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  GLFWwindow *window = nullptr;
+  VkExtent2D windowExtent;
+  VkPresentModeKHR presentMode;
+  VkSurfaceFormatKHR surfaceFormat;
+  VkSurfaceCapabilitiesKHR surfaceCapabilities;
+  uint32_t surfaceImageCount;
+  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+  std::vector<VkImage> swapchainImages;
+  uint32_t currentImageIndex;
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+  VkFence inFlightFence = VK_NULL_HANDLE;
+
+  struct ImGuiData {
+    uint32_t width = -1;
+    uint32_t height = -1;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
+    Texture *colorAttachment = nullptr;
+    Texture *depthAttachment = nullptr;
+  } imgui;
+
+  // Physical device (GPU) that Vulkan will use
+  VkPhysicalDevice physicalDevice;
+  // Stores physical device properties (for e.g. checking device limits)
+  VkPhysicalDeviceProperties deviceProperties;
+  VkPhysicalDeviceProperties2 deviceProperties2;
+  VkPhysicalDeviceSubgroupProperties subgroupProperties;
+  VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
+  // Stores the features available on the selected physical device (for e.g.
+  // checking if a feature is available)
+  VkPhysicalDeviceFeatures deviceFeatures;
+  VkPhysicalDeviceFeatures2 deviceFeatures2;
+  VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
+  VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
+  VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
+  VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutableDescriptorFeatures;
+
+  // Stores all available memory (type) properties for the physical device
+  VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
+
+  // For handling vulkan memory allocation
+  VmaAllocator allocator;
+
+  /** @brief Queue family properties of the chosen physical device */
+  std::vector<VkQueueFamilyProperties> queueFamilyProperties;
+
+  /** @brief Contains queue family indices */
+  struct {
+    uint32_t graphics;
+    uint32_t compute;
+    uint32_t transfer;
+  } queueFamilyIndices;
+
+  VkCommandBuffer graphicsCommandBuffer;
+  VkCommandBuffer computeCommandBuffer;
+  VkCommandBuffer transferCommandBuffer;
+
+  /** @brief List of extensions supported by the chosen physical device */
+  std::vector<std::string> supportedExtensions;
+
+  /** @brief Set of device extensions to be enabled for this example (must be
+   * set in the derived constructor) */
+  std::vector<const char *> enabledDeviceExtensions;
+  std::vector<const char *> enabledInstanceExtensions;
+  /** @brief Optional pNext structure for passing extension structures to device
+   * creation */
+  void *deviceCreatepNextChain = nullptr;
+  /** @brief Logical device, application's view of the physical device (GPU) */
+  VkDevice logicalDevice;
+
+  // Handle to the device graphics queue that command buffers are submitted to
+  VkQueue graphicsQueue;
+  VkQueue computeQueue;
+  VkQueue transferQueue;
+
+  // Depth buffer format (selected during Vulkan initialization)
+  VkFormat depthFormat;
+  // Command buffer pool
+  VkCommandPool graphicsCommandPool;
+  VkCommandPool computeCommandPool;
+  VkCommandPool transferCommandPool;
+  VkQueryPool queryPool;
+  VkQueryPool compactedSizeQueryPool;
+  bool queryRequested = false;
+
+  /** @brief Pipeline stages used to wait at for graphics queue submissions */
+  VkPipelineStageFlags submitPipelineStages =
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;   // not sure I need this one
+  // Contains command buffers and semaphores to be presented to the queue
+  VkSubmitInfo submitInfo{};
+  // Command buffers used for rendering
+  // std::vector<VkCommandBuffer> drawCmdBuffers;
+  // Global render pass for frame buffer writes
+  VkRenderPass renderPass = VK_NULL_HANDLE;
+  // List of available frame buffers (same as number of swap chain images)
+  std::vector<VkFramebuffer> frameBuffers;
+  // Active frame buffer index
+  uint32_t currentBuffer = 0;
+
+  // Pipeline cache object
+  VkPipelineCache pipelineCache;
+
+  // ray tracing pipeline and layout
+  bool raytracingPipelineOutOfDate = true;
+  bool computePipelinesOutOfDate = true;
+
+  VkPipeline raytracingPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
+
+  std::vector<Module *> modules;
+  std::vector<Compute *> computes;
+  std::vector<RayGen *> raygens;
+  std::vector<Miss *> misses;
+  std::vector<Callable *> callables;
+  std::vector<GeomType *> geomTypes;
+  std::vector<Buffer *> buffers;
+  std::vector<ImageResource *> imageResources;
+  std::vector<Geom *> geoms;
+  std::vector<Accel *> accels;
+
+  VkDescriptorPoolSize descriptorPoolSize = {};
+  VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+
+  VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+
+  VkDescriptorPool imguiPool = VK_NULL_HANDLE;
+
+  std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
+  Buffer *raygenTable = nullptr;
+  Buffer *missTable = nullptr;
+  Buffer *callableTable = nullptr;
+  Buffer *hitgroupTable = nullptr;
+
+  std::map<std::string, Compute *> internalComputePrograms;
+
+  Module *radixSortModule = nullptr;
+  // Module *scanModule = nullptr;
+  Module *fallbacksModule = nullptr;
+
+  VkPipelineShaderStageCreateInfo LSSIntersectionShaderStage;
+
+  // TODO, we can probably refactor this...
+  struct SortStages {
+    Stage Count;
+    Stage CountReduce;
+    Stage Scan;
+    Stage ScanAdd;
+    Stage Scatter;
+    Stage ScatterPayload;
+
+    // For now, copied over from sample
+    VkDescriptorSetLayout m_SortDescriptorSetLayoutInputOutputs;
+    VkDescriptorSetLayout m_SortDescriptorSetLayoutScan;
+    VkDescriptorSetLayout m_SortDescriptorSetLayoutScratch;
+
+    VkDescriptorSet m_SortDescriptorSetInputOutput[2];
+    VkDescriptorSet m_SortDescriptorSetScanSets[2];
+    VkDescriptorSet m_SortDescriptorSetScratch;
+
+    VkPipelineLayout layout;
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+  };
+  SortStages sortStages;
+
+  /*! returns whether validation is enabled */
+  inline static bool validation() {
+#ifdef NDEBUG
+    return false;
+#else
+    return false;
+#endif
+  }
+
+  void freeDebugCallback(VkInstance instance);
+
+  size_t getNumHitRecords();
+
+  Context(int32_t *requestedDeviceIDs, int numRequestedDevices);
+
+  void destroy();
+
+  ~Context() {};
+
+  void buildSBT(GPRTBuildSBTFlags flags);
+
+  // void buildPrograms()
+  // {
+  //   // At the moment, we don't actually build our programs here.
+  // }
+
+  // Todo, refactor this code...
+  void setupInternalPrograms();
+
+  void destroyInternalPrograms();
+
+  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool);
+
+  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue);
+
+  void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+
+  // For ImGui
+  void setRasterAttachments(Texture *colorTexture, Texture *depthTexture);
+
+  void rasterizeGui();
+};
+
 struct Module {
-  static std::vector<Module *> modules;
+  Context* context;
+
   int32_t virtualAddress = -1;
 
   spv_reflect::ShaderModule shaderModule;
@@ -380,21 +618,22 @@ struct Module {
   std::map<std::string, EntryPoint> EntryPoints;
   std::vector<std::string> EntryPointNames;
 
-  Module(GPRTProgram program) {
+  Module(Context* context, GPRTProgram program) {
+    this->context = context;
+
     // Hunt for an existing free virtual address
-    for (uint32_t i = 0; i < Module::modules.size(); ++i) {
-      if (Module::modules[i] == nullptr) {
-        Module::modules[i] = this;
+    for (uint32_t i = 0; i < context->modules.size(); ++i) {
+      if (context->modules[i] == nullptr) {
+        context->modules[i] = this;
         virtualAddress = i;
         break;
       }
     }
     // If we cant find a free spot, allocate a new one
     if (virtualAddress == -1) {
-      Module::modules.push_back(this);
-      virtualAddress = (uint32_t) modules.size() - 1;
+      context->modules.push_back(this);
+      virtualAddress = (uint32_t) context->modules.size() - 1;
     }
-
 
     size_t sizeOfProgram = program.size();
     binary.resize(sizeOfProgram / 4);
@@ -446,22 +685,16 @@ struct Module {
 
   void destroy() {
     // Free slot for subsequent use
-    Module::modules[virtualAddress] = nullptr;
+    context->modules[virtualAddress] = nullptr;
   }
   ~Module() {}
 };
 
-std::vector<Module *> Module::modules;
-
 struct Buffer {
-  static std::vector<Buffer *> buffers;
+  Context* context;
 
-  VkDevice device;
-  VmaAllocator allocator;
   VkPhysicalDeviceMemoryProperties memoryProperties;
-  VkCommandBuffer commandBuffer;
-  VkQueue queue;
-
+  
   /** @brief Usage flags to be filled by external source at buffer creation */
   VkBufferUsageFlags usageFlags;
 
@@ -489,13 +722,13 @@ struct Buffer {
       return VK_SUCCESS;
 
     if (hostVisible) {
-      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(allocator, allocation, &mapped);
+      vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(context->allocator, allocation, &mapped);
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
       if (err)
         LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
@@ -504,9 +737,9 @@ struct Buffer {
       region.srcOffset = offset;
       region.dstOffset = 0;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+      vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
-      err = vkEndCommandBuffer(commandBuffer);
+      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
@@ -517,20 +750,20 @@ struct Buffer {
       submitInfo.pWaitSemaphores = nullptr;
       submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
-      err = vkQueueWaitIdle(queue);
+      err = vkQueueWaitIdle(context->graphicsQueue);
       if (err)
         LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      vmaInvalidateAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(allocator, stagingBuffer.allocation, &mapped);
+      vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      return vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
     }
   }
 
@@ -540,15 +773,15 @@ struct Buffer {
 
     if (hostVisible) {
       if (mapped) {
-        vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-        vmaUnmapMemory(allocator, allocation);
+        vmaFlushAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaUnmapMemory(context->allocator, allocation);
         mapped = nullptr;
       }
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
       if (err)
         LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
@@ -557,9 +790,9 @@ struct Buffer {
       region.srcOffset = 0;
       region.dstOffset = offset;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+      vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
-      err = vkEndCommandBuffer(commandBuffer);
+      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
@@ -570,20 +803,20 @@ struct Buffer {
       submitInfo.pWaitSemaphores = nullptr;
       submitInfo.pWaitDstStageMask = nullptr;
       submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
-      err = vkQueueWaitIdle(queue);
+      err = vkQueueWaitIdle(context->graphicsQueue);
       if (err)
         LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
 
-      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-      vmaUnmapMemory(allocator, stagingBuffer.allocation);
+      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       mapped = nullptr;
     }
   }
@@ -591,40 +824,40 @@ struct Buffer {
   // flushes from host to device
   void flush() {
     if (hostVisible) {
-      vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+      vmaFlushAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
     } else {
-      vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
+      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
     }
   }
 
   // invalidates from device back to host
   void invalidate() {
     // device never directly writes to staging buffer
-    vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+    vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
   }
 
   VkDeviceAddress getDeviceAddress() {
     VkBufferDeviceAddressInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
     info.buffer = buffer;
-    VkDeviceAddress addr = gprt::vkGetBufferDeviceAddress(device, &info);
+    VkDeviceAddress addr = gprt::vkGetBufferDeviceAddress(context->logicalDevice, &info);
     return addr;
   }
 
   /*! Calls vkDestroy on the buffer, and frees underlying memory */
   void destroy() {
     // Free sampler slot for use by subsequently made buffers
-    Buffer::buffers[virtualAddress] = nullptr;
+    context->buffers[virtualAddress] = nullptr;
 
     unmap();
 
     if (buffer) {
-      vmaDestroyBuffer(allocator, buffer, allocation);
+      vmaDestroyBuffer(context->allocator, buffer, allocation);
       // vkDestroyBuffer(device, buffer, nullptr);
       buffer = VK_NULL_HANDLE;
     }
     if (stagingBuffer.buffer) {
-      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      vmaDestroyBuffer(context->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
@@ -666,13 +899,13 @@ struct Buffer {
 
         VkBuffer newBuffer;
         VmaAllocation newAllocation;
-        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
 
         // Copy contents from old to new
         VkResult err;
         VkCommandBufferBeginInfo cmdBufInfo{};
         cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
         if (err)
           LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
 
@@ -680,9 +913,9 @@ struct Buffer {
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
+        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, newBuffer, 1, &region);
 
-        err = vkEndCommandBuffer(commandBuffer);
+        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
@@ -693,35 +926,35 @@ struct Buffer {
         submitInfo.pWaitSemaphores = nullptr;
         submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
         submitInfo.signalSemaphoreCount = 0;
         submitInfo.pSignalSemaphores = nullptr;
 
-        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
         if (err)
           LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
 
-        err = vkQueueWaitIdle(queue);
+        err = vkQueueWaitIdle(context->graphicsQueue);
         if (err)
           LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
 
         // Free old buffer
-        vmaUnmapMemory(allocator, allocation);
-        vmaDestroyBuffer(allocator, buffer, allocation);
+        vmaUnmapMemory(context->allocator, allocation);
+        vmaDestroyBuffer(context->allocator, buffer, allocation);
 
         // Assign new buffer
         buffer = newBuffer;
         allocation = newAllocation;
         size = bytes;
         deviceAddress = getDeviceAddress();
-        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-        vmaMapMemory(allocator, allocation, &mapped);
+        vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
+        vmaMapMemory(context->allocator, allocation, &mapped);
       } else {
         // Not preserving contents, we can delete old host buffer before making new one
 
         // Free old buffer
-        vmaUnmapMemory(allocator, allocation);
-        vmaDestroyBuffer(allocator, buffer, allocation);
+        vmaUnmapMemory(context->allocator, allocation);
+        vmaDestroyBuffer(context->allocator, buffer, allocation);
 
         // Create the new buffer handle
         VkBufferCreateInfo bufferCreateInfo{};
@@ -733,8 +966,8 @@ struct Buffer {
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
 
-        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
-        vmaMapMemory(allocator, allocation, &mapped);
+        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        vmaMapMemory(context->allocator, allocation, &mapped);
         size = bytes;
         deviceAddress = getDeviceAddress();
       }
@@ -742,14 +975,14 @@ struct Buffer {
     } else {
       // if we are device visible, we can use the staging buffer to temporarily hold previous values, and free
       // the old buffer before creating a new buffer.
-      vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+      vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
 
       // Copy existing contents into staging buffer
       if (preserveContents) {
         VkResult err;
         VkCommandBufferBeginInfo cmdBufInfo{};
         cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
         if (err)
           LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
 
@@ -757,9 +990,9 @@ struct Buffer {
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
-        err = vkEndCommandBuffer(commandBuffer);
+        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
@@ -770,21 +1003,21 @@ struct Buffer {
         submitInfo.pWaitSemaphores = nullptr;
         submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
         submitInfo.signalSemaphoreCount = 0;
         submitInfo.pSignalSemaphores = nullptr;
 
-        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
         if (err)
           LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
 
-        err = vkQueueWaitIdle(queue);
+        err = vkQueueWaitIdle(context->graphicsQueue);
         if (err)
           LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
       }
 
       // Release old device buffer
-      vmaDestroyBuffer(allocator, buffer, allocation);
+      vmaDestroyBuffer(context->allocator, buffer, allocation);
 
       {
         // Create the new buffer handle
@@ -795,7 +1028,7 @@ struct Buffer {
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
       }
 
       if (preserveContents) {
@@ -803,7 +1036,7 @@ struct Buffer {
         VkResult err;
         VkCommandBufferBeginInfo cmdBufInfo{};
         cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
         if (err)
           LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
 
@@ -811,9 +1044,9 @@ struct Buffer {
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+        vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
-        err = vkEndCommandBuffer(commandBuffer);
+        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
         if (err)
           LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
 
@@ -824,15 +1057,15 @@ struct Buffer {
         submitInfo.pWaitSemaphores = nullptr;
         submitInfo.pWaitDstStageMask = nullptr;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
         submitInfo.signalSemaphoreCount = 0;
         submitInfo.pSignalSemaphores = nullptr;
 
-        err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
         if (err)
           LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
 
-        err = vkQueueWaitIdle(queue);
+        err = vkQueueWaitIdle(context->graphicsQueue);
         if (err)
           LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
       }
@@ -842,9 +1075,9 @@ struct Buffer {
 
       // Release old staging buffer
       if (mapped) {
-        vmaUnmapMemory(allocator, stagingBuffer.allocation);
+        vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       }
-      vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+      vmaDestroyBuffer(context->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
       {
         // Create the new staging buffer handle
         VkBufferCreateInfo bufferCreateInfo{};
@@ -855,7 +1088,7 @@ struct Buffer {
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-        VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
                                         &stagingBuffer.allocation, nullptr));
       }
 
@@ -874,15 +1107,14 @@ struct Buffer {
 
   ~Buffer() {};
 
-  Buffer(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VmaAllocator _allocator,
-         VkCommandBuffer _commandBuffer, VkQueue _queue, VkBufferUsageFlags _usageFlags,
-         VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
+  Buffer(Context* context, VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
          void *data = nullptr) {
+    this->context = context;
 
     // Hunt for an existing free virtual address for this buffer
-    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
-      if (Buffer::buffers[i] == nullptr) {
-        Buffer::buffers[i] = this;
+    for (uint32_t i = 0; i < context->buffers.size(); ++i) {
+      if (context->buffers[i] == nullptr) {
+        context->buffers[i] = this;
         virtualAddress = i;
         break;
       }
@@ -890,22 +1122,18 @@ struct Buffer {
     // If we cant find a free spot in the current buffer list, allocate a new
     // one
     if (virtualAddress == -1) {
-      Buffer::buffers.push_back(this);
-      virtualAddress = (uint32_t) buffers.size() - 1;
+      context->buffers.push_back(this);
+      virtualAddress = (uint32_t) context->buffers.size() - 1;
     }
 
     // For performance reasons, round the size up for vectorized/multiword reads
     uint32_t multiwordSize = 16;
     _size = (_size + (multiwordSize - 1) / multiwordSize);
 
-    device = logicalDevice;
-    allocator = _allocator;
     usageFlags = _usageFlags;
     size = _size;
     alignment = _alignment;
-    commandBuffer = _commandBuffer;
-    queue = _queue;
-
+    
     // Check if the buffer can be mapped to a host pointer.
     // If the buffer isn't host visible, this is buffer and requires
     // an additional staging buffer...
@@ -928,7 +1156,7 @@ struct Buffer {
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     }
 
-    VK_CHECK_RESULT(vmaCreateBufferWithAlignment(allocator, &bufferCreateInfo, &allocInfo, alignment, &buffer,
+    VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment, &buffer,
                                                  &allocation, nullptr));
 
     // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &buffer));
@@ -956,7 +1184,7 @@ struct Buffer {
       VmaAllocationCreateInfo allocInfo = {};
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
       allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-      VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
+      VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &stagingBuffer.buffer,
                                       &stagingBuffer.allocation, nullptr));
     }
 
@@ -973,8 +1201,6 @@ struct Buffer {
       deviceAddress = getDeviceAddress();
   }
 };
-
-std::vector<Buffer *> Buffer::buffers;
 
 inline size_t
 gprtFormatGetSize(GPRTFormat format) {
@@ -997,15 +1223,56 @@ gprtFormatGetSize(GPRTFormat format) {
   }
 }
 
-struct Texture {
-  static std::vector<Texture *> texture1Ds;
-  static std::vector<Texture *> texture2Ds;
-  static std::vector<Texture *> texture3Ds;
+typedef enum {
+  GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN = 0x0,
+  GPRT_IMAGE_RESOURCE_TYPE_SAMPLER = 0x1,
+  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_1D = 0x2,
+  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_2D = 0x3,
+  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_3D = 0x4
+} ImageResourceType;
 
-  VkDevice device;
+struct ImageResource {
+  Context *context;
+
+  // Unlike buffers, image resources in Vulkan don't (currently) support device addresses.
+  // Some vendors, like NVIDIA, use a separate hardware table for images and samplers.
+  // This table stores headers for where memory of textures reside (eg, multiple mip levels),
+  // alongside other information for the texture units on how to interpret that texture data.
+  //
+  // Still, we wish to access image resources in a "bindless" way. To do so, we will
+  // create our own "virtual" address space.
+  uint32_t address = -1;
+
+  ~ImageResource() {};
+
+  ImageResource(Context *context) {
+    this->context = context;
+
+    // Hunt for an existing free address for this image resource
+    for (uint32_t i = 0; i < context->imageResources.size(); ++i) {
+      if (context->imageResources[i] == nullptr) {
+        context->imageResources[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      context->imageResources.push_back(this);
+      address = (uint32_t) context->imageResources.size() - 1;
+    }
+  };
+
+  virtual void destroy() {
+    // Free slot for use by subsequently made image resource
+    context->imageResources[address] = nullptr;
+  }
+
+  virtual ImageResourceType getType() { return GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN; }
+};
+
+struct Texture : public ImageResource {
   VkPhysicalDeviceMemoryProperties memoryProperties;
-  VkCommandBuffer commandBuffer;
-  VkQueue queue;
 
   /** @brief Usage flags to be filled by external source at image creation */
   VkImageUsageFlags usageFlags;
@@ -1019,10 +1286,6 @@ struct Texture {
   VkImage image = VK_NULL_HANDLE;
   VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
   VkDeviceMemory memory = VK_NULL_HANDLE;
-
-  // Technically, textures in vulkan don't support addresses.
-  // Instead, we make our own virtual "texture address space".
-  uint32_t address = -1;
 
   VkImageView imageView = VK_NULL_HANDLE;
 
@@ -1046,9 +1309,6 @@ struct Texture {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
   } stagingBuffer;
-
-  /* Default Constructor */
-  Texture() {};
 
   ~Texture() {};
 
@@ -1172,7 +1432,7 @@ struct Texture {
       if (mapped)
         return VK_SUCCESS;
       else
-        return vkMapMemory(device, memory, offset, size, 0, &mapped);
+        return vkMapMemory(context->logicalDevice, memory, offset, size, 0, &mapped);
     } else {
       // Finding that this causes bugs on Intel ARC. It seems that
       // vkCmdCopyImageToBuffer doesn't respect vulkan fences. We don't need
@@ -1247,7 +1507,7 @@ struct Texture {
       // else return vkMapMemory(device, stagingImage.memory, offset, mapSize,
       // 0, &mapped);
       else
-        return vkMapMemory(device, stagingBuffer.memory, offset, mapSize, 0, &mapped);
+        return vkMapMemory(context->logicalDevice, stagingBuffer.memory, offset, mapSize, 0, &mapped);
     }
   }
 
@@ -1255,19 +1515,19 @@ struct Texture {
     if (hostVisible) {
       // assuming layout is general
       if (mapped) {
-        vkUnmapMemory(device, memory);
+        vkUnmapMemory(context->logicalDevice, memory);
         mapped = nullptr;
       }
     } else {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
       if (err)
         LOG_ERROR("failed to begin command buffer for texture map! : \n" + errorString(err));
 
       // transition device to a transfer destination format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1286,14 +1546,14 @@ struct Texture {
       copyRegion.imageSubresource.baseArrayLayer = 0;
       copyRegion.imageSubresource.layerCount = 1;
       copyRegion.imageSubresource.mipLevel = 0;
-      vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
+      vkCmdCopyBufferToImage(context->graphicsCommandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
 
       // transition device to an optimal device format
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-      err = vkEndCommandBuffer(commandBuffer);
+      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
 
@@ -1304,22 +1564,22 @@ struct Texture {
       submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
       submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
       submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for texture map! : \n" + errorString(err));
 
-      err = vkQueueWaitIdle(queue);
+      err = vkQueueWaitIdle(context->graphicsQueue);
       if (err)
         LOG_ERROR("failed to wait for queue idle for texture map! : \n" + errorString(err));
 
       // todo, transfer device data to device
       if (mapped) {
         // vkUnmapMemory(device, stagingImage.memory);
-        vkUnmapMemory(device, stagingBuffer.memory);
+        vkUnmapMemory(context->logicalDevice, stagingBuffer.memory);
         mapped = nullptr;
       }
     }
@@ -1329,12 +1589,12 @@ struct Texture {
     VkResult err;
     VkCommandBufferBeginInfo cmdBufInfo{};
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
     if (err)
       LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
 
     // Move to a destination optimal format
-    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
     // clear the image
@@ -1343,21 +1603,23 @@ struct Texture {
       val.depth = 1.f;
       val.stencil = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearDepthStencilImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1, &range);
+      vkCmdClearDepthStencilImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+                                  &range);
     } else {
       VkClearColorValue val;
       val.float32[0] = val.float32[1] = val.float32[2] = val.float32[3] = 0.f;
       val.int32[0] = val.int32[1] = val.int32[2] = val.int32[3] = 0;
       val.uint32[0] = val.uint32[1] = val.uint32[2] = val.uint32[3] = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1, &range);
+      vkCmdClearColorImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+                           &range);
     }
 
     // Now go back to the previous layout
-    setImageLayout(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
+    setImageLayout(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
-    err = vkEndCommandBuffer(commandBuffer);
+    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
@@ -1368,15 +1630,15 @@ struct Texture {
     submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
     submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
       LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
-    err = vkQueueWaitIdle(queue);
+    err = vkQueueWaitIdle(context->graphicsQueue);
     if (err)
       LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
   }
@@ -1399,12 +1661,12 @@ struct Texture {
     VkResult err;
     VkCommandBufferBeginInfo cmdBufInfo{};
     cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
     if (err)
       LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
 
     // transition device to a transfer destination format
-    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
     layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1433,8 +1695,8 @@ struct Texture {
 
       // this will wait for level i-1 to be filled from either a
       // vkCmdCopyBufferToImae call, or the previous blit command
-      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &barrier);
+      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // here, we specify the regions to use for the blit
       VkImageBlit blit{};
@@ -1454,7 +1716,7 @@ struct Texture {
 
       // This blit will downsample the current mip layer into the one above.
       // It also transitions the image
-      vkCmdBlitImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+      vkCmdBlitImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
       // Now, transition the layer to VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
@@ -1463,8 +1725,8 @@ struct Texture {
       barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                           nullptr, 0, nullptr, 1, &barrier);
+      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // now, divide the current mip dimensions by two.
       // mip levels can't be smaller than 1 though.
@@ -1483,13 +1745,13 @@ struct Texture {
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     // Now, all layers in the mip chan have this layout
     layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    err = vkEndCommandBuffer(commandBuffer);
+    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
     if (err)
       LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
 
@@ -1500,48 +1762,26 @@ struct Texture {
     submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
     submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-    err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     if (err)
       LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
 
-    err = vkQueueWaitIdle(queue);
+    err = vkQueueWaitIdle(context->graphicsQueue);
     if (err)
       LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
   }
 
-  Texture(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkCommandBuffer _commandBuffer, VkQueue _queue,
-          VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type, VkFormat _format,
-          uint32_t _width, uint32_t _height, uint32_t _depth, bool allocateMipmap, const void *data = nullptr) {
-
-    std::vector<Texture *> &textures = (type == VK_IMAGE_TYPE_1D)   ? texture1Ds
-                                       : (type == VK_IMAGE_TYPE_2D) ? texture2Ds
-                                                                    :
-                                                                    /*(type == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
-
-    // Hunt for an existing free address for this texture
-    for (uint32_t i = 0; i < textures.size(); ++i) {
-      if (textures[i] == nullptr) {
-        textures[i] = this;
-        address = i;
-        break;
-      }
-    }
-    // If we cant find a free spot in the current texture list, allocate a new
-    // one
-    if (address == -1) {
-      textures.push_back(this);
-      address = (uint32_t) textures.size() - 1;
-    }
-
-    device = logicalDevice;
+  Texture(Context *context, VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type,
+          VkFormat _format, uint32_t _width, uint32_t _height, uint32_t _depth, bool allocateMipmap,
+          const void *data = nullptr)
+      : ImageResource(context) {
+    this->context = context;
     memoryPropertyFlags = _memoryPropertyFlags;
     usageFlags = _usageFlags;
-    commandBuffer = _commandBuffer;
-    queue = _queue;
     width = _width;
     height = _height;
     depth = _depth;
@@ -1568,7 +1808,7 @@ struct Texture {
     else
       hostVisible = false;
 
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+    vkGetPhysicalDeviceMemoryProperties(context->physicalDevice, &memoryProperties);
 
     auto getMemoryType = [this](uint32_t typeBits, VkMemoryPropertyFlags properties,
                                 VkBool32 *memTypeFound = nullptr) -> uint32_t {
@@ -1643,7 +1883,7 @@ struct Texture {
     imageInfo.flags = 0;   // Optional, but some options here for sparse images,
                            // like volumes with large sections of just air values.
 
-    VK_CHECK_RESULT(vkCreateImage(logicalDevice, &imageInfo, nullptr, &image));
+    VK_CHECK_RESULT(vkCreateImage(context->logicalDevice, &imageInfo, nullptr, &image));
 
     if (!hostVisible) {
       const VkBufferUsageFlags bufferUsageFlags =
@@ -1657,23 +1897,23 @@ struct Texture {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
-      VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
+      VK_CHECK_RESULT(vkCreateBuffer(context->logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
     }
 
     // Create the memory backing up the image handle
     VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(logicalDevice, image, &memReqs);
+    vkGetImageMemoryRequirements(context->logicalDevice, image, &memReqs);
     VkMemoryAllocateInfo memAllocInfo{};
     memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     memAllocInfo.allocationSize = memReqs.size;
     // Find a memory type index that firts the properties of the image
     memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
 
-    VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &memory));
+    VK_CHECK_RESULT(vkAllocateMemory(context->logicalDevice, &memAllocInfo, nullptr, &memory));
     alignment = memReqs.alignment;
 
     // Attach the memory to the image object
-    VK_CHECK_RESULT(vkBindImageMemory(logicalDevice, image, memory, 0));
+    VK_CHECK_RESULT(vkBindImageMemory(context->logicalDevice, image, memory, 0));
 
     if (!hostVisible) {
       const VkMemoryPropertyFlags memoryPropertyFlags =
@@ -1684,17 +1924,18 @@ struct Texture {
 
       // Create the memory backing up the staging buffer handle
       VkMemoryRequirements memReqs;
-      vkGetBufferMemoryRequirements(logicalDevice, stagingBuffer.buffer, &memReqs);
+      vkGetBufferMemoryRequirements(context->logicalDevice, stagingBuffer.buffer, &memReqs);
       VkMemoryAllocateInfo memAllocInfo{};
       memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
       memAllocInfo.allocationSize = memReqs.size;
       // Find a memory type index that fits the properties of the buffer
       memAllocInfo.memoryTypeIndex = getMemoryType(memReqs.memoryTypeBits, memoryPropertyFlags);
 
-      VK_CHECK_RESULT(vkAllocateMemory(logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
+      VK_CHECK_RESULT(vkAllocateMemory(context->logicalDevice, &memAllocInfo, nullptr, &stagingBuffer.memory));
 
       // Attach the memory to the buffer object
-      VkResult err = vkBindBufferMemory(device, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
+      VkResult err =
+          vkBindBufferMemory(context->logicalDevice, stagingBuffer.buffer, stagingBuffer.memory, /* offset */ 0);
       if (err)
         LOG_ERROR("failed to bind staging buffer memory! : \n" + errorString(err));
     }
@@ -1704,15 +1945,15 @@ struct Texture {
       VkResult err;
       VkCommandBufferBeginInfo cmdBufInfo{};
       cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(commandBuffer, &cmdBufInfo);
+      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
       if (err)
         LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
 
-      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-      err = vkEndCommandBuffer(commandBuffer);
+      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
       if (err)
         LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
 
@@ -1723,15 +1964,15 @@ struct Texture {
       submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
       submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
       submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &commandBuffer;
+      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
       submitInfo.signalSemaphoreCount = 0;
       submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-      err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
       if (err)
         LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
 
-      err = vkQueueWaitIdle(queue);
+      err = vkQueueWaitIdle(context->graphicsQueue);
       if (err)
         LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
     }
@@ -1750,14 +1991,14 @@ struct Texture {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    VK_CHECK_RESULT(vkCreateImageView(logicalDevice, &viewInfo, nullptr, &imageView));
+    VK_CHECK_RESULT(vkCreateImageView(context->logicalDevice, &viewInfo, nullptr, &imageView));
 
     if (hostVisible) {
       VkImageSubresource subRes = {};
       subRes.aspectMask = aspectFlagBits;
       subRes.mipLevel = 0;
       subRes.arrayLayer = 0;
-      vkGetImageSubresourceLayout(logicalDevice, image, &subRes, &subresourceLayout);
+      vkGetImageSubresourceLayout(context->logicalDevice, image, &subRes, &subresourceLayout);
     }
 
     if (data != nullptr) {
@@ -1768,79 +2009,69 @@ struct Texture {
       if (mipLevels > 1)
         generateMipmap();
     }
+
+    // Write the image into the desscriptor array
+    VkDescriptorImageInfo imageDescriptor = {};
+    imageDescriptor.imageView = imageView;
+    imageDescriptor.imageLayout = layout;
+
+    VkWriteDescriptorSet writeDescriptorSet = {};
+    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.dstArrayElement = address;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.pBufferInfo = 0;
+    writeDescriptorSet.dstSet = context->descriptorSet;
+    writeDescriptorSet.pImageInfo = &imageDescriptor;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
   /*! Calls vkDestroy on the image, and frees underlying memory */
-  void destroy() {
-    // Free texture slot for use by subsequently made textures
-    std::vector<Texture *> &textures = (imageType == VK_IMAGE_TYPE_1D) ? texture1Ds
-                                       : (imageType == VK_IMAGE_TYPE_2D)
-                                           ? texture2Ds
-                                           :
-                                           /*(imageType == VK_IMAGE_TYPE_3D) ?*/ texture3Ds;
-
-    textures[address] = nullptr;
+  void destroy() override {
+    ImageResource::destroy();
 
     if (imageView) {
-      vkDestroyImageView(device, imageView, nullptr);
+      vkDestroyImageView(context->logicalDevice, imageView, nullptr);
       imageView = VK_NULL_HANDLE;
     }
     if (image) {
-      vkDestroyImage(device, image, nullptr);
+      vkDestroyImage(context->logicalDevice, image, nullptr);
       image = VK_NULL_HANDLE;
     }
     if (memory) {
-      vkFreeMemory(device, memory, nullptr);
+      vkFreeMemory(context->logicalDevice, memory, nullptr);
       memory = VK_NULL_HANDLE;
     }
     if (stagingBuffer.buffer) {
-      vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
+      vkDestroyBuffer(context->logicalDevice, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
     }
     if (stagingBuffer.memory) {
-      vkFreeMemory(device, stagingBuffer.memory, nullptr);
+      vkFreeMemory(context->logicalDevice, stagingBuffer.memory, nullptr);
       stagingBuffer.memory = VK_NULL_HANDLE;
     }
   }
+
+  virtual ImageResourceType getType() {
+    if (imageType == VK_IMAGE_TYPE_1D)
+      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_1D;
+    if (imageType == VK_IMAGE_TYPE_2D)
+      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_2D;
+    if (imageType == VK_IMAGE_TYPE_3D)
+      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_3D;
+    return GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN;
+  }
 };
 
-std::vector<Texture *> Texture::texture1Ds;
-std::vector<Texture *> Texture::texture2Ds;
-std::vector<Texture *> Texture::texture3Ds;
-
-struct Sampler {
-  static std::vector<Sampler *> samplers;
-
-  VkDevice device;
+struct Sampler : public ImageResource {
   VkSampler sampler;
-
-  // Technically, samplers in vulkan don't support addresses.
-  // Instead, we make our own virtual "sampler address space".
-  uint32_t address = -1;
-
-  Sampler() {};
 
   ~Sampler() {};
 
-  Sampler(VkPhysicalDevice physicalDevice, VkDevice logicalDevice, VkFilter magFilter, VkFilter minFilter,
-          VkSamplerMipmapMode mipFilter, uint32_t anisotropy, VkSamplerAddressMode addressMode,
-          VkBorderColor borderColor) {
-    // Hunt for an existing free address for this sampler
-    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
-      if (Sampler::samplers[i] == nullptr) {
-        Sampler::samplers[i] = this;
-        address = i;
-        break;
-      }
-    }
-    // If we cant find a free spot in the current sampler list, allocate a new
-    // one
-    if (address == -1) {
-      samplers.push_back(this);
-      address = (uint32_t) samplers.size() - 1;
-    }
-
-    device = logicalDevice;
+  Sampler(Context *context, VkFilter magFilter, VkFilter minFilter, VkSamplerMipmapMode mipFilter, uint32_t anisotropy,
+          VkSamplerAddressMode addressMode, VkBorderColor borderColor)
+      : ImageResource(context) {
 
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1852,7 +2083,7 @@ struct Sampler {
     samplerInfo.anisotropyEnable = (anisotropy == 1) ? VK_FALSE : VK_TRUE;
 
     VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+    vkGetPhysicalDeviceProperties(context->physicalDevice, &properties);
     samplerInfo.maxAnisotropy = std::min(properties.limits.maxSamplerAnisotropy, float(anisotropy));
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
@@ -1863,105 +2094,94 @@ struct Sampler {
     samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
     samplerInfo.borderColor = borderColor;
 
-    VK_CHECK_RESULT(vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &sampler));
+    VK_CHECK_RESULT(vkCreateSampler(context->logicalDevice, &samplerInfo, nullptr, &sampler));
+
+    // Write the image into the desscriptor array
+    VkDescriptorImageInfo imageDescriptor = {};
+    imageDescriptor.sampler = sampler;
+
+    VkWriteDescriptorSet writeDescriptorSet = {};
+    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.dstArrayElement = address;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.pBufferInfo = 0;
+    writeDescriptorSet.dstSet = context->descriptorSet;
+    writeDescriptorSet.pImageInfo = &imageDescriptor;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
-  void destroy() {
-    // Free sampler slot for use by subsequently made samplers
-    Sampler::samplers[address] = nullptr;
+  void destroy() override {
+    ImageResource::destroy();
 
     if (sampler) {
-      vkDestroySampler(device, sampler, nullptr);
+      vkDestroySampler(context->logicalDevice, sampler, nullptr);
     }
   }
+
+  virtual ImageResourceType getType() { return GPRT_IMAGE_RESOURCE_TYPE_SAMPLER; }
 };
 
-std::vector<Sampler *> Sampler::samplers;
+struct Compute {
+  Context *context;
 
-struct SBTEntry {
-  size_t recordSize = 0;
-  uint8_t *SBTRecord = nullptr;
-};
-
-// At the moment, we actually just use ray generation programs for compute
-// kernels. We do this instead of using actual Vulkan compute programs so that
-// we can recycle the SBT records mechanism for compute IO, without
-// introducing VK descriptor sets.
-struct Compute : public SBTEntry {
   // Our own virtual "compute address space".
   uint32_t address = -1;
-  static std::vector<Compute *> computes;
-
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
 
-  Context *context;
-  VkDevice logicalDevice;
   std::string entryPoint;
 
   VkShaderModule shaderModule = VK_NULL_HANDLE;
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
 
-  Compute(Context *_context, VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize)
-      : SBTEntry() {
+  Compute(Context *context, Module *module, const char *_entryPoint) {
+    this->context = context;
+
     // Hunt for an existing free address for this compute kernel
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      if (Compute::computes[i] == nullptr) {
-        Compute::computes[i] = this;
+    for (uint32_t i = 0; i < context->computes.size(); ++i) {
+      if (context->computes[i] == nullptr) {
+        context->computes[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      Compute::computes.push_back(this);
-      address = (uint32_t) Compute::computes.size() - 1;
+      context->computes.push_back(this);
+      address = (uint32_t) context->computes.size() - 1;
     }
 
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
     entryPoint = std::string(_entryPoint);
     binary = module->binary;
 
-    // store a reference to the logical device this module is made on
-    logicalDevice = _logicalDevice;
-
-    // store a reference to the compute device this program was made on
-    context = _context;
-
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
     moduleCreateInfo.pCode = binary.data();                         //(uint32_t*)binary->wordCount;//programBytes;
 
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-
-    this->recordSize = recordSize;
-    if (this->recordSize > 0)
-      this->SBTRecord = (uint8_t *) malloc(recordSize);
-    else
-      this->SBTRecord = nullptr;
   }
   ~Compute() {}
 
-  void buildPipeline(VkDescriptorSetLayout recordDescriptorSetLayout, VkDescriptorSetLayout samplerDescriptorSetLayout,
-                     VkDescriptorSetLayout texture1DDescriptorSetLayout,
-                     VkDescriptorSetLayout texture2DDescriptorSetLayout,
-                     VkDescriptorSetLayout texture3DDescriptorSetLayout) {
+  void buildPipeline(VkDescriptorSetLayout descriptorSetLayout) {
     // If we already have a pipeline layout, free it so that we can make a new one
     if (pipelineLayout) {
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+      vkDestroyPipelineLayout(context->logicalDevice, pipelineLayout, nullptr);
       pipelineLayout = VK_NULL_HANDLE;
     }
 
     // If we already have a pipeline, free it so that we can make a new one
     if (pipeline) {
-      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      vkDestroyPipeline(context->logicalDevice, pipeline, nullptr);
       pipeline = VK_NULL_HANDLE;
     }
 
@@ -1975,15 +2195,13 @@ struct Compute : public SBTEntry {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,
-                                                  texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                                  texture3DDescriptorSetLayout};
+    std::vector<VkDescriptorSetLayout> layouts = {descriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
     pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    if (vkCreatePipelineLayout(context->logicalDevice, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -1995,7 +2213,7 @@ struct Compute : public SBTEntry {
 
     // If the below function is crashing, double check that all parameters to the compute kernel are tagged as
     // "uniform".
-    VkResult err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
+    VkResult err = vkCreateComputePipelines(context->logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr, &pipeline);
     if (err) {
       LOG_ERROR("failed to create compute pipeline! Please verify that \"" + entryPoint +
                 "\" is an existing entrypoint name\n" + errorString(err));
@@ -2004,48 +2222,53 @@ struct Compute : public SBTEntry {
 
   void destroy() {
     // Free compute slot for use by subsequently made compute kernels
-    Compute::computes[address] = nullptr;
+    context->computes[address] = nullptr;
 
     if (pipelineLayout) {
-      vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+      vkDestroyPipelineLayout(context->logicalDevice, pipelineLayout, nullptr);
     }
 
     if (pipeline) {
-      vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+      vkDestroyPipeline(context->logicalDevice, pipeline, nullptr);
     }
 
     if (shaderModule) {
-      vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+      vkDestroyShaderModule(context->logicalDevice, shaderModule, nullptr);
     }
   }
 };
 
-std::vector<Compute *> Compute::computes;
+
+struct SBTEntry {
+  size_t recordSize = 0;
+  uint8_t *SBTRecord = nullptr;
+};
 
 struct RayGen : public SBTEntry {
+  Context* context;
+
   // Our own virtual "raygen address space".
   uint32_t address = -1;
-  static std::vector<RayGen *> raygens;
-
   VkShaderModule shaderModule;
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
-  VkDevice logicalDevice;
   std::string entryPoint;
 
-  RayGen(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+  RayGen(Context* context, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    this->context = context;
+
     // Hunt for an existing free address for this raygen kernel
-    for (uint32_t i = 0; i < RayGen::raygens.size(); ++i) {
-      if (RayGen::raygens[i] == nullptr) {
-        RayGen::raygens[i] = this;
+    for (uint32_t i = 0; i < context->raygens.size(); ++i) {
+      if (context->raygens[i] == nullptr) {
+        context->raygens[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      RayGen::raygens.push_back(this);
-      address = (uint32_t) RayGen::raygens.size() - 1;
+      context->raygens.push_back(this);
+      address = (uint32_t) context->raygens.size() - 1;
     }
 
     // Fetch the SPIRV
@@ -2053,14 +2276,11 @@ struct RayGen : public SBTEntry {
     entryPoint = std::string(_entryPoint);
     binary = module->binary;
 
-    // store a reference to the logical device this module is made on
-    logicalDevice = _logicalDevice;
-
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
     moduleCreateInfo.pCode = binary.data();                         //(uint32_t*)binary->wordCount;//programBytes;
 
-    VkResult err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule);
+    VkResult err = vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule);
     if (err)
       LOG_ERROR("failed to create shader module! : \n" + errorString(err));
 
@@ -2076,39 +2296,38 @@ struct RayGen : public SBTEntry {
   ~RayGen() {}
   void destroy() {
     // Free raygen slot for use by subsequently made raygen kernels
-    RayGen::raygens[address] = nullptr;
+    context->raygens[address] = nullptr;
 
-    vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    vkDestroyShaderModule(context->logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
 };
 
-std::vector<RayGen *> RayGen::raygens;
-
 struct Miss : public SBTEntry {
+  Context *context;
+
   // Our own virtual "miss address space".
   uint32_t address = -1;
-  static std::vector<Miss *> misses;
-
   VkShaderModule shaderModule;
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
-  VkDevice logicalDevice;
   std::string entryPoint;
 
-  Miss(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+  Miss(Context* context, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    this->context = context;
+
     // Hunt for an existing free address for this miss kernel
-    for (uint32_t i = 0; i < Miss::misses.size(); ++i) {
-      if (Miss::misses[i] == nullptr) {
-        Miss::misses[i] = this;
+    for (uint32_t i = 0; i < context->misses.size(); ++i) {
+      if (context->misses[i] == nullptr) {
+        context->misses[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      Miss::misses.push_back(this);
-      address = (uint32_t) Miss::misses.size() - 1;
+      context->misses.push_back(this);
+      address = (uint32_t) context->misses.size() - 1;
     }
 
     // Fetch the SPIRV
@@ -2117,14 +2336,11 @@ struct Miss : public SBTEntry {
     entryPoint = std::string(_entryPoint);
     binary = module->binary;
 
-    // store a reference to the logical device this module is made on
-    logicalDevice = _logicalDevice;
-
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
     moduleCreateInfo.pCode = binary.data();                         //(uint32_t*)binary->wordCount;//programBytes;
 
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_MISS_BIT_KHR;
@@ -2138,39 +2354,39 @@ struct Miss : public SBTEntry {
   ~Miss() {}
   void destroy() {
     // Free miss slot for use by subsequently made miss kernels
-    Miss::misses[address] = nullptr;
+    context->misses[address] = nullptr;
 
-    vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    vkDestroyShaderModule(context->logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
 };
 
-std::vector<Miss *> Miss::misses;
-
 struct Callable : public SBTEntry {
+  Context* context;
+
   // Our own virtual "callable address space".
   uint32_t address = -1;
-  static std::vector<Callable *> callables;
 
   VkShaderModule shaderModule;
   VkPipelineShaderStageCreateInfo shaderStage{};
   VkShaderModuleCreateInfo moduleCreateInfo{};
-  VkDevice logicalDevice;
   std::string entryPoint;
 
-  Callable(VkDevice _logicalDevice, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+  Callable(Context* context, Module *module, const char *_entryPoint, size_t recordSize) : SBTEntry() {
+    this->context = context;
+
     // Hunt for an existing free address for this callable kernel
-    for (uint32_t i = 0; i < Callable::callables.size(); ++i) {
-      if (Callable::callables[i] == nullptr) {
-        Callable::callables[i] = this;
+    for (uint32_t i = 0; i < context->callables.size(); ++i) {
+      if (context->callables[i] == nullptr) {
+        context->callables[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      Callable::callables.push_back(this);
-      address = (uint32_t) Callable::callables.size() - 1;
+      context->callables.push_back(this);
+      address = (uint32_t) context->callables.size() - 1;
     }
 
     // Fetch the SPIRV
@@ -2179,14 +2395,11 @@ struct Callable : public SBTEntry {
     entryPoint = std::string(_entryPoint);
     binary = module->binary;
 
-    // store a reference to the logical device this module is made on
-    logicalDevice = _logicalDevice;
-
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);   // sizeOfProgramBytes;
     moduleCreateInfo.pCode = binary.data();                         //(uint32_t*)binary->wordCount;//programBytes;
 
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR;
@@ -2200,14 +2413,12 @@ struct Callable : public SBTEntry {
   ~Callable() {}
   void destroy() {
     // Free callable slot for use by subsequently made callable kernels
-    Callable::callables[address] = nullptr;
+    context->callables[address] = nullptr;
 
-    vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+    vkDestroyShaderModule(context->logicalDevice, shaderModule, nullptr);
     free(this->SBTRecord);
   }
 };
-
-std::vector<Callable *> Callable::callables;
 
 /* An abstraction for any sort of geometry type - describes the
     programs to use, and structure of the SBT records, when building
@@ -2215,12 +2426,11 @@ std::vector<Callable *> Callable::callables;
     will later get subclassed into triangle geometries, user/custom
     primitive geometry types, etc */
 struct GeomType : public SBTEntry {
+  Context* context;
 
   // Our own virtual "geom types address space".
   uint32_t address = -1;
-  static std::vector<GeomType *> geomTypes;
 
-  VkDevice logicalDevice;
   uint32_t numRayTypes;
 
   std::vector<VkPipelineShaderStageCreateInfo> closestHitShaderStages;
@@ -2244,38 +2454,21 @@ struct GeomType : public SBTEntry {
   std::vector<bool> pixelShaderUsed;
   std::vector<bool> closestNeighborShaderUsed;
 
-  // During pipeline builds, these vectors cache the offsets of stages
-  // so that they can be referenced for each instance.
-  std::vector<int> closestHitShaderStageAddress;
-  std::vector<int> intersectionShaderStageAddress;
-  std::vector<int> anyHitShaderStageAddress;
+  GeomType(Context* context, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
+    this->context = context;
 
-  // Optional resources for rasterizing geometry
-  struct RasterData {
-    uint32_t width = -1;
-    uint32_t height = -1;
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
-    Texture *colorAttachment = nullptr;
-    Texture *depthAttachment = nullptr;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-  };
-  std::vector<RasterData> raster;
-
-  GeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
     // Hunt for an existing free address for this geom type
-    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
-      if (GeomType::geomTypes[i] == nullptr) {
-        GeomType::geomTypes[i] = this;
+    for (uint32_t i = 0; i < context->geomTypes.size(); ++i) {
+      if (context->geomTypes[i] == nullptr) {
+        context->geomTypes[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      GeomType::geomTypes.push_back(this);
-      address = (uint32_t) GeomType::geomTypes.size() - 1;
+      context->geomTypes.push_back(this);
+      address = (uint32_t) context->geomTypes.size() - 1;
     }
 
     this->numRayTypes = numRayTypes;
@@ -2300,15 +2493,6 @@ struct GeomType : public SBTEntry {
     pixelShaderUsed.resize(numRayTypes, false);
     closestNeighborShaderUsed.resize(numRayTypes, false);
 
-    closestHitShaderStageAddress.resize(numRayTypes, -1);
-    anyHitShaderStageAddress.resize(numRayTypes, -1);
-    intersectionShaderStageAddress.resize(numRayTypes, -1);
-
-    raster.resize(numRayTypes);
-
-    // store a reference to the logical device this module is made on
-    logicalDevice = _logicalDevice;
-
     // store size, but don't allocate. Will be done by geom instances.
     this->recordSize = recordSize;
   }
@@ -2319,6 +2503,8 @@ struct GeomType : public SBTEntry {
   virtual GPRTGeomKind getKind() { return GPRT_UNKNOWN; }
 
   void setClosestHit(int rayType, Module *module, const char *entryPoint) {
+    context->raytracingPipelineOutOfDate = true;
+
     closestHitShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
     closestHitShaderEntryPoints[rayType] = std::string(entryPoint);
@@ -2330,7 +2516,7 @@ struct GeomType : public SBTEntry {
     moduleCreateInfo.pCode = binary.data();
 
     VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     closestHitShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     closestHitShaderStages[rayType].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
@@ -2340,6 +2526,8 @@ struct GeomType : public SBTEntry {
   }
 
   void setAnyHit(int rayType, Module *module, const char *entryPoint) {
+    context->raytracingPipelineOutOfDate = true;
+
     anyHitShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
     anyHitShaderEntryPoints[rayType] = std::string(entryPoint);
@@ -2351,7 +2539,7 @@ struct GeomType : public SBTEntry {
     moduleCreateInfo.pCode = binary.data();
 
     VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     anyHitShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     anyHitShaderStages[rayType].stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
@@ -2361,6 +2549,8 @@ struct GeomType : public SBTEntry {
   }
 
   void setIntersection(int rayType, Module *module, const char *entryPoint) {
+    context->raytracingPipelineOutOfDate = true;
+
     intersectionShaderUsed[rayType] = true;
     std::vector<unsigned int, std::allocator<unsigned int>> binary;
     intersectionShaderEntryPoints[rayType] = std::string(entryPoint);
@@ -2372,7 +2562,7 @@ struct GeomType : public SBTEntry {
     moduleCreateInfo.pCode = binary.data();
 
     VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
+    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
 
     intersectionShaderStages[rayType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     intersectionShaderStages[rayType].stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
@@ -2381,405 +2571,71 @@ struct GeomType : public SBTEntry {
     assert(intersectionShaderStages[rayType].module != VK_NULL_HANDLE);
   }
 
-  void setVertex(int rasterType, Module *module, const char *entryPoint) {
-    vertexShaderUsed[rasterType] = true;
-    std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    vertexShaderEntryPoints[rasterType] = std::string(entryPoint);
-    binary = module->binary;
-
-    VkShaderModuleCreateInfo moduleCreateInfo{};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
-
-    vertexShaderStages[rasterType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertexShaderStages[rasterType].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertexShaderStages[rasterType].module = shaderModule;
-    vertexShaderStages[rasterType].pName = vertexShaderEntryPoints[rasterType].c_str();
-    assert(vertexShaderStages[rasterType].module != VK_NULL_HANDLE);
-  }
-
-  void setPixel(int rasterType, Module *module, const char *entryPoint) {
-    pixelShaderUsed[rasterType] = true;
-    std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    pixelShaderEntryPoints[rasterType] = std::string(entryPoint);
-    binary = module->binary;
-
-    VkShaderModuleCreateInfo moduleCreateInfo{};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
-
-    pixelShaderStages[rasterType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pixelShaderStages[rasterType].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    pixelShaderStages[rasterType].module = shaderModule;
-    pixelShaderStages[rasterType].pName = pixelShaderEntryPoints[rasterType].c_str();
-    assert(pixelShaderStages[rasterType].module != VK_NULL_HANDLE);
-  }
-
-  void setRasterAttachments(uint32_t rasterType, Texture *colorTexture, Texture *depthTexture) {
-    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
-      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
-    } else {
-      raster[rasterType].width = colorTexture->width;
-      raster[rasterType].height = colorTexture->height;
-    }
-
-    if (raster[rasterType].renderPass != VK_NULL_HANDLE)
-      vkDestroyRenderPass(logicalDevice, raster[rasterType].renderPass, nullptr);
-
-    raster[rasterType].colorAttachment = colorTexture;
-    raster[rasterType].depthAttachment = depthTexture;
-
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = colorTexture->format;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    // clear here says to clear the values to a constant at start.
-    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
-    // save rasterized fragments to memory
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    // not currently using a stencil
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    // Initial and final layouts of the texture
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = depthTexture->format;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
-
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    createInfo.pNext = nullptr;
-    createInfo.attachmentCount = (uint32_t) attachments.size();
-    createInfo.pAttachments = attachments.data();
-    createInfo.subpassCount = 1;
-    createInfo.pSubpasses = &subpass;
-    createInfo.dependencyCount = 1;
-    createInfo.pDependencies = &dependency;
-
-    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &raster[rasterType].renderPass);
-
-    VkImageView attachmentViews[] = {raster[rasterType].colorAttachment->imageView,
-                                     raster[rasterType].depthAttachment->imageView};
-
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = raster[rasterType].renderPass;
-    framebufferInfo.attachmentCount = 2;
-    framebufferInfo.pAttachments = attachmentViews;
-    framebufferInfo.width = raster[rasterType].width;
-    framebufferInfo.height = raster[rasterType].height;
-    framebufferInfo.layers = 1;
-
-    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &raster[rasterType].frameBuffer) != VK_SUCCESS) {
-      throw std::runtime_error("failed to create framebuffer!");
-    }
-  }
-
-  void buildRasterPipeline(uint32_t rasterType, VkDescriptorSetLayout recordDescriptorSetLayout,
-                           VkDescriptorSetLayout samplerDescriptorSetLayout,
-                           VkDescriptorSetLayout texture1DDescriptorSetLayout,
-                           VkDescriptorSetLayout texture2DDescriptorSetLayout,
-                           VkDescriptorSetLayout texture3DDescriptorSetLayout) {
-    // we need both of these to be set, otherwise we can't build a raster pipeline...
-    if (!vertexShaderUsed[rasterType] || !pixelShaderUsed[rasterType])
-      return;
-
-    // we also need a framebuffer...
-    if (!raster[rasterType].frameBuffer)
-      return;
-
-    // If we already have a pipeline layout, free it so that we can make a new one
-    if (raster[rasterType].pipelineLayout) {
-      vkDestroyPipelineLayout(logicalDevice, raster[rasterType].pipelineLayout, nullptr);
-      raster[rasterType].pipelineLayout = VK_NULL_HANDLE;
-    }
-
-    // If we already have a pipeline, free it so that we can make a new one
-    if (raster[rasterType].pipeline) {
-      vkDestroyPipeline(logicalDevice, raster[rasterType].pipeline, nullptr);
-      raster[rasterType].pipeline = VK_NULL_HANDLE;
-    }
-
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {vertexShaderStages[rasterType],
-                                                                 pixelShaderStages[rasterType]};
-
-    // describes format of the vertex data
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr;   // Optional
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr;   // Optional
-
-    // describes what kind of geometry will be drawn
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    // describes the region of the framebuffer that the output will be rendered to
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float) raster[rasterType].width;
-    viewport.height = (float) raster[rasterType].height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    // used to potentially crop the image
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent.width = raster[rasterType].width;
-    scissor.extent.height = raster[rasterType].height;
-
-    // Things that can change without needing to rebuild the pipeline...
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages.data();
-
-    // takes geometry and turns it into fragments
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
-    rasterizer.depthBiasConstantFactor = 0.0f;   // Optional
-    rasterizer.depthBiasClamp = 0.0f;            // Optional
-    rasterizer.depthBiasSlopeFactor = 0.0f;      // Optional
-
-    // for MSAA, one way to do antialiasing
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisampling.minSampleShading = 1.0f;            // Optional
-    multisampling.pSampleMask = nullptr;              // Optional
-    multisampling.alphaToCoverageEnable = VK_FALSE;   // Optional
-    multisampling.alphaToOneEnable = VK_FALSE;        // Optional
-
-    // compositing configuration
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;                              // Optional
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;                              // Optional
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.logicOp = VK_LOGIC_OP_COPY;   // Optional
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-    colorBlending.blendConstants[0] = 0.0f;   // Optional
-    colorBlending.blendConstants[1] = 0.0f;   // Optional
-    colorBlending.blendConstants[2] = 0.0f;   // Optional
-    colorBlending.blendConstants[3] = 0.0f;   // Optional
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.minDepthBounds = 0.0f;   // Optional
-    depthStencil.maxDepthBounds = 1.0f;   // Optional
-    depthStencil.stencilTestEnable = VK_FALSE;
-    depthStencil.front = {};   // Optional
-    depthStencil.back = {};    // Optional
-
-    // The layout here describes descriptor sets and push constants used
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, samplerDescriptorSetLayout,
-                                                  texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                                  texture3DDescriptorSetLayout};
-    pipelineLayoutInfo.setLayoutCount = (uint32_t) layouts.size();
-    pipelineLayoutInfo.pSetLayouts = layouts.data();
-
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &raster[rasterType].pipelineLayout) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("failed to create pipeline layout!");
-    }
-
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;   // Optional
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-
-    pipelineInfo.layout = raster[rasterType].pipelineLayout;
-
-    pipelineInfo.renderPass = raster[rasterType].renderPass;
-    pipelineInfo.subpass = 0;
-
-    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;   // Optional
-    pipelineInfo.basePipelineIndex = -1;                // Optional
-
-    if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr,
-                                  &raster[rasterType].pipeline) != VK_SUCCESS) {
-      throw std::runtime_error("failed to create graphics pipeline!");
-    }
-  }
-
   // This is a bit dumb. We shouldn't be creating all these shader modules...
   void destroy() {
     // Free geomtype slot for use by subsequently made geomtypes
-    GeomType::geomTypes[address] = nullptr;
+    context->geomTypes[address] = nullptr;
 
     for (uint32_t i = 0; i < closestHitShaderStages.size(); ++i) {
       if (closestHitShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, closestHitShaderStages[i].module, nullptr);
+        vkDestroyShaderModule(context->logicalDevice, closestHitShaderStages[i].module, nullptr);
     }
     for (uint32_t i = 0; i < anyHitShaderStages.size(); ++i) {
       if (anyHitShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, anyHitShaderStages[i].module, nullptr);
+        vkDestroyShaderModule(context->logicalDevice, anyHitShaderStages[i].module, nullptr);
     }
     for (uint32_t i = 0; i < intersectionShaderStages.size(); ++i) {
       if (intersectionShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, intersectionShaderStages[i].module, nullptr);
+        vkDestroyShaderModule(context->logicalDevice, intersectionShaderStages[i].module, nullptr);
     }
     for (uint32_t i = 0; i < vertexShaderStages.size(); ++i) {
       if (vertexShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, vertexShaderStages[i].module, nullptr);
+        vkDestroyShaderModule(context->logicalDevice, vertexShaderStages[i].module, nullptr);
     }
     for (uint32_t i = 0; i < pixelShaderStages.size(); ++i) {
       if (pixelShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, pixelShaderStages[i].module, nullptr);
+        vkDestroyShaderModule(context->logicalDevice, pixelShaderStages[i].module, nullptr);
     }
     for (uint32_t i = 0; i < closestNeighborShaderStages.size(); ++i) {
       if (closestNeighborShaderStages[i].module)
-        vkDestroyShaderModule(logicalDevice, closestNeighborShaderStages[i].module, nullptr);
-    }
-
-    for (uint32_t i = 0; i < raster.size(); ++i) {
-      if (raster[i].pipelineLayout) {
-        vkDestroyPipelineLayout(logicalDevice, raster[i].pipelineLayout, nullptr);
-      }
-
-      if (raster[i].pipeline) {
-        vkDestroyPipeline(logicalDevice, raster[i].pipeline, nullptr);
-      }
-
-      if (raster[i].renderPass) {
-        vkDestroyRenderPass(logicalDevice, raster[i].renderPass, nullptr);
-      }
-
-      if (raster[i].frameBuffer) {
-        vkDestroyFramebuffer(logicalDevice, raster[i].frameBuffer, nullptr);
-      }
+        vkDestroyShaderModule(context->logicalDevice, closestNeighborShaderStages[i].module, nullptr);
     }
   }
 
   virtual Geom *createGeom() { return nullptr; };
 };
 
-std::vector<GeomType *> GeomType::geomTypes;
-
 /*! An actual geometry object with primitives - this class is still
   abstract, and will get fleshed out in its derived classes
   (AABBGeom, TriangleGeom, ...) */
 struct Geom : public SBTEntry {
+  Context* context;
+
   // Our own virtual "geometry address space".
   VkDeviceAddress address = -1;
 
-  static std::vector<Geom *> geoms;
+  Geom(Context* context) : SBTEntry() {
+    this->context = context;
 
-  Geom() : SBTEntry() {
     // Hunt for an existing free address for this geometry
-    for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
-      if (Geom::geoms[i] == nullptr) {
-        Geom::geoms[i] = this;
+    for (uint32_t i = 0; i < context->geoms.size(); ++i) {
+      if (context->geoms[i] == nullptr) {
+        context->geoms[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      geoms.push_back(this);
-      address = geoms.size() - 1;
+      context->geoms.push_back(this);
+      address = context->geoms.size() - 1;
     }
   };
   ~Geom() {};
 
   void destroy() {
     // Free geometry slot for use by subsequently made geometries
-    Geom::geoms[address] = nullptr;
+    context->geoms[address] = nullptr;
   }
 
   /*! This acts as a template that describes this geometry's variables and
@@ -2787,7 +2643,15 @@ struct Geom : public SBTEntry {
   GeomType *geomType;
 };
 
-std::vector<Geom *> Geom::geoms;
+struct TriangleGeomType : public GeomType {
+  TriangleGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(context, numRayTypes, recordSize) {}
+  ~TriangleGeomType() {}
+
+  Geom *createGeom();
+
+  GPRTGeomKind getKind() { return GPRT_TRIANGLES; }
+};
 
 struct TriangleGeom : public Geom {
   struct {
@@ -2805,7 +2669,7 @@ struct TriangleGeom : public Geom {
     std::vector<Buffer *> buffers;
   } vertex;
 
-  TriangleGeom(TriangleGeomType *_geomType) : Geom() {
+  TriangleGeom(TriangleGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
     // Allocate the variables for this geometry
@@ -2831,14 +2695,18 @@ struct TriangleGeom : public Geom {
   }
 };
 
-struct TriangleGeomType : public GeomType {
-  TriangleGeomType(VkDevice logicalDevice, uint32_t numRayTypes, size_t recordSize)
-      : GeomType(logicalDevice, numRayTypes, recordSize) {}
-  ~TriangleGeomType() {}
+Geom *TriangleGeomType::createGeom() {
+  return new TriangleGeom(this);
+}
 
-  Geom *createGeom() { return new TriangleGeom(this); }
+struct SphereGeomType : public GeomType {
+  SphereGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(context, numRayTypes, recordSize) {}
+  ~SphereGeomType() {}
 
-  GPRTGeomKind getKind() { return GPRT_TRIANGLES; }
+  Geom *createGeom();
+
+  GPRTGeomKind getKind() { return GPRT_SPHERES; }
 };
 
 struct SphereGeom : public Geom {
@@ -2852,7 +2720,7 @@ struct SphereGeom : public Geom {
   // false: return entry hits, true: return exit hits
   bool exitTest = false;
 
-  SphereGeom(SphereGeomType *_geomType) : Geom() {
+  SphereGeom(SphereGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
     // Allocate the variables for this geometry
@@ -2871,14 +2739,18 @@ struct SphereGeom : public Geom {
   }
 };
 
-struct SphereGeomType : public GeomType {
-  SphereGeomType(VkDevice logicalDevice, uint32_t numRayTypes, size_t recordSize)
-      : GeomType(logicalDevice, numRayTypes, recordSize) {}
-  ~SphereGeomType() {}
+Geom *SphereGeomType::createGeom() {
+  return new SphereGeom(this);
+}
 
-  Geom *createGeom() { return new SphereGeom(this); }
+struct LSSGeomType : public GeomType {
+  LSSGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(context, numRayTypes, recordSize) {}
+  ~LSSGeomType() {}
 
-  GPRTGeomKind getKind() { return GPRT_SPHERES; }
+  Geom *createGeom();
+
+  GPRTGeomKind getKind() { return GPRT_LSS; }
 };
 
 struct LSSGeom : public Geom {
@@ -2904,7 +2776,7 @@ struct LSSGeom : public Geom {
   // false: return entry hits, true: return exit hits
   bool exitTest = false;
 
-  LSSGeom(LSSGeomType *_geomType) : Geom() {
+  LSSGeom(LSSGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
     // Allocate the variables for this geometry
@@ -2930,14 +2802,17 @@ struct LSSGeom : public Geom {
   }
 };
 
-struct LSSGeomType : public GeomType {
-  LSSGeomType(VkDevice logicalDevice, uint32_t numRayTypes, size_t recordSize)
-      : GeomType(logicalDevice, numRayTypes, recordSize) {}
-  ~LSSGeomType() {}
+Geom *LSSGeomType::createGeom() {
+  return new LSSGeom(this);
+}
 
-  Geom *createGeom() { return new LSSGeom(this); }
+struct AABBGeomType : public GeomType {
+  AABBGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(context, numRayTypes, recordSize) {}
+  ~AABBGeomType() {}
+  Geom *createGeom();
 
-  GPRTGeomKind getKind() { return GPRT_LSS; }
+  GPRTGeomKind getKind() { return GPRT_AABBS; }
 };
 
 struct AABBGeom : public Geom {
@@ -2948,7 +2823,7 @@ struct AABBGeom : public Geom {
     std::vector<Buffer *> buffers;
   } aabb;
 
-  AABBGeom(AABBGeomType *_geomType) : Geom() {
+  AABBGeom(AABBGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
     // Allocate the variables for this geometry
@@ -2967,2236 +2842,9 @@ struct AABBGeom : public Geom {
   }
 };
 
-struct AABBGeomType : public GeomType {
-  AABBGeomType(VkDevice _logicalDevice, uint32_t numRayTypes, size_t recordSize)
-      : GeomType(_logicalDevice, numRayTypes, recordSize) {}
-  ~AABBGeomType() {}
-  Geom *createGeom() { return new AABBGeom(this); }
-
-  GPRTGeomKind getKind() { return GPRT_AABBS; }
-};
-
-struct Accel;
-
-struct Context {
-  // For convenience, an opaque handle to the context
-  GPRTContext context = (GPRTContext) this;
-
-  VkApplicationInfo appInfo;
-
-  // Vulkan instance, stores all per-application states
-  VkInstance instance;
-  std::vector<std::string> supportedInstanceExtensions;
-
-  // optional windowing features
-  VkSurfaceKHR surface = VK_NULL_HANDLE;
-  GLFWwindow *window = nullptr;
-  VkExtent2D windowExtent;
-  VkPresentModeKHR presentMode;
-  VkSurfaceFormatKHR surfaceFormat;
-  VkSurfaceCapabilitiesKHR surfaceCapabilities;
-  uint32_t surfaceImageCount;
-  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-  std::vector<VkImage> swapchainImages;
-  uint32_t currentImageIndex;
-  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
-  VkFence inFlightFence = VK_NULL_HANDLE;
-
-  struct ImGuiData {
-    uint32_t width = -1;
-    uint32_t height = -1;
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
-    Texture *colorAttachment = nullptr;
-    Texture *depthAttachment = nullptr;
-  } imgui;
-
-  // Physical device (GPU) that Vulkan will use
-  VkPhysicalDevice physicalDevice;
-  // Stores physical device properties (for e.g. checking device limits)
-  VkPhysicalDeviceProperties deviceProperties;
-  VkPhysicalDeviceProperties2 deviceProperties2;
-  VkPhysicalDeviceSubgroupProperties subgroupProperties;
-  VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
-  VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
-  // Stores the features available on the selected physical device (for e.g.
-  // checking if a feature is available)
-  VkPhysicalDeviceFeatures deviceFeatures;
-  VkPhysicalDeviceFeatures2 deviceFeatures2;
-  VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
-  VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
-  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
-  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
-  VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
-  VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
-
-  // Stores all available memory (type) properties for the physical device
-  VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
-
-  // For handling vulkan memory allocation
-  VmaAllocator allocator;
-
-  /** @brief Queue family properties of the chosen physical device */
-  std::vector<VkQueueFamilyProperties> queueFamilyProperties;
-
-  /** @brief Contains queue family indices */
-  struct {
-    uint32_t graphics;
-    uint32_t compute;
-    uint32_t transfer;
-  } queueFamilyIndices;
-
-  VkCommandBuffer graphicsCommandBuffer;
-  VkCommandBuffer computeCommandBuffer;
-  VkCommandBuffer transferCommandBuffer;
-
-  /** @brief List of extensions supported by the chosen physical device */
-  std::vector<std::string> supportedExtensions;
-
-  /** @brief Set of device extensions to be enabled for this example (must be
-   * set in the derived constructor) */
-  std::vector<const char *> enabledDeviceExtensions;
-  std::vector<const char *> enabledInstanceExtensions;
-  /** @brief Optional pNext structure for passing extension structures to device
-   * creation */
-  void *deviceCreatepNextChain = nullptr;
-  /** @brief Logical device, application's view of the physical device (GPU) */
-  VkDevice logicalDevice;
-
-  // Handle to the device graphics queue that command buffers are submitted to
-  VkQueue graphicsQueue;
-  VkQueue computeQueue;
-  VkQueue transferQueue;
-
-  // Depth buffer format (selected during Vulkan initialization)
-  VkFormat depthFormat;
-  // Command buffer pool
-  VkCommandPool graphicsCommandPool;
-  VkCommandPool computeCommandPool;
-  VkCommandPool transferCommandPool;
-  VkQueryPool queryPool;
-  VkQueryPool compactedSizeQueryPool;
-  bool queryRequested = false;
-
-  /** @brief Pipeline stages used to wait at for graphics queue submissions */
-  VkPipelineStageFlags submitPipelineStages =
-      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;   // not sure I need this one
-  // Contains command buffers and semaphores to be presented to the queue
-  VkSubmitInfo submitInfo{};
-  // Command buffers used for rendering
-  // std::vector<VkCommandBuffer> drawCmdBuffers;
-  // Global render pass for frame buffer writes
-  VkRenderPass renderPass = VK_NULL_HANDLE;
-  // List of available frame buffers (same as number of swap chain images)
-  std::vector<VkFramebuffer> frameBuffers;
-  // Active frame buffer index
-  uint32_t currentBuffer = 0;
-
-  // Pipeline cache object
-  VkPipelineCache pipelineCache;
-
-  // ray tracing pipeline and layout
-  bool raytracingPipelineOutOfDate = true;
-  VkPipeline raytracingPipeline = VK_NULL_HANDLE;
-  VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
-
-  std::vector<RayGen *> raygenPrograms;
-  std::vector<Miss *> missPrograms;
-  std::vector<Callable *> callablePrograms;
-
-  bool computePipelinesOutOfDate = true;
-  bool rasterPipelinesOutOfDate = true;
-
-  Sampler *defaultSampler = nullptr;
-  Texture *defaultTexture1D = nullptr;
-  Texture *defaultTexture2D = nullptr;
-  Texture *defaultTexture3D = nullptr;
-  Buffer *defaultBuffer = nullptr;
-
-  Buffer *rasterRecordBuffer = nullptr;
-  Buffer *computeRecordBuffer = nullptr;
-
-  VkDescriptorPool samplerDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool texture1DDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool texture2DDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool texture3DDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
-
-  VkDescriptorPool imguiPool = VK_NULL_HANDLE;
-
-  // used to determine what descriptor sets need rebuilding
-  uint32_t previousNumSamplers = 0;
-  uint32_t previousNumTexture1Ds = 0;
-  uint32_t previousNumTexture2Ds = 0;
-  uint32_t previousNumTexture3Ds = 0;
-  uint32_t previousNumRasterRecords = 0;
-  uint32_t previousNumComputeRecords = 0;
-
-  VkDescriptorSetLayout samplerDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout texture1DDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout texture2DDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout texture3DDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout rasterRecordDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout computeRecordDescriptorSetLayout = VK_NULL_HANDLE;
-
-  VkDescriptorSet samplerDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet texture1DDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet texture2DDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet texture3DDescriptorSet = VK_NULL_HANDLE;
-
-  VkDescriptorSet rasterRecordDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
-
-  std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
-  Buffer *raygenTable = nullptr;
-  Buffer *missTable = nullptr;
-  Buffer *callableTable = nullptr;
-  Buffer *hitgroupTable = nullptr;
-
-  std::map<std::string, Compute *> internalComputePrograms;
-
-  Module *radixSortModule = nullptr;
-  // Module *scanModule = nullptr;
-  Module *fallbacksModule = nullptr;
-
-  VkPipelineShaderStageCreateInfo LSSIntersectionShaderStage;
-
-  // TODO, we can probably refactor this...
-  struct SortStages {
-    Stage Count;
-    Stage CountReduce;
-    Stage Scan;
-    Stage ScanAdd;
-    Stage Scatter;
-    Stage ScatterPayload;
-
-    // For now, copied over from sample
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutInputOutputs;
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutScan;
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutScratch;
-
-    VkDescriptorSet m_SortDescriptorSetInputOutput[2];
-    VkDescriptorSet m_SortDescriptorSetScanSets[2];
-    VkDescriptorSet m_SortDescriptorSetScratch;
-
-    VkPipelineLayout layout;
-
-    VkDescriptorPool pool = VK_NULL_HANDLE;
-  };
-  SortStages sortStages;
-
-  /*! returns whether validation is enabled */
-  inline static bool validation() {
-#ifdef NDEBUG
-    return false;
-#else
-    return false;
-#endif
-  }
-
-  void freeDebugCallback(VkInstance instance) {
-    if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
-      gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
-    }
-  }
-
-  size_t getNumHitRecords();
-
-  Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "GPRT";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "GPRT";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_2;
-    appInfo.pNext = VK_NULL_HANDLE;
-
-    /// 1. Create Instance
-    std::vector<const char *> instanceExtensions;   // = { VK_KHR_SURFACE_EXTENSION_NAME };
-#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-    instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-#endif
-
-    // Get extensions supported by the instance and store for later use
-    uint32_t instExtCount = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
-    if (instExtCount > 0) {
-      std::vector<VkExtensionProperties> extensions(instExtCount);
-      if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &extensions.front()) == VK_SUCCESS) {
-        for (VkExtensionProperties extension : extensions) {
-          supportedInstanceExtensions.push_back(extension.extensionName);
-        }
-      }
-    }
-
-    // Enabled requested instance extensions
-    if (enabledInstanceExtensions.size() > 0) {
-      for (const char *enabledExtension : enabledInstanceExtensions) {
-        // Output message if requested extension is not available
-        if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) ==
-            supportedInstanceExtensions.end()) {
-          std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
-        }
-        instanceExtensions.push_back(enabledExtension);
-      }
-    }
-
-    VkValidationFeatureEnableEXT enabled[] = {VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT};
-    VkValidationFeaturesEXT validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
-    validationFeatures.disabledValidationFeatureCount = 0;
-    validationFeatures.enabledValidationFeatureCount = 1;
-    validationFeatures.pDisabledValidationFeatures = nullptr;
-    validationFeatures.pEnabledValidationFeatures = enabled;
-
-    VkInstanceCreateInfo instanceCreateInfo{};
-    instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instanceCreateInfo.pApplicationInfo = &appInfo;
-    // instanceCreateInfo.pNext = VK_NULL_HANDLE;
-
-    if (requestedFeatures.debugPrintf) {
-      instanceCreateInfo.pNext = &validationFeatures;
-    } else {
-      LOG_WARNING("Debug printf disabled");
-      instanceCreateInfo.pNext = VK_NULL_HANDLE;
-    }
-
-    uint32_t glfwExtensionCount = 0;
-    const char **glfwExtensions;
-    if (requestedFeatures.window) {
-      if (!glfwInit()) {
-        LOG_WARNING("Unable to create window. Falling back to headless mode.");
-        requestedFeatures.window = false;
-      } else {
-        if (!glfwVulkanSupported()) {
-          LOG_ERROR("Window requested but unsupported!");
-        }
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-        for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
-          instanceExtensions.push_back(glfwExtensions[i]);
-        }
-      }
-    }
-
-#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-    instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
-    // Useful to disable, since some profiling tools don't support this.
-    if (requestedFeatures.debugPrintf) {
-      instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    }
-
-    if (instanceExtensions.size() > 0) {
-      instanceCreateInfo.enabledExtensionCount = (uint32_t) instanceExtensions.size();
-      instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
-    }
-
-    // need this for printf to work
-    const char *layerNames[1] = {"VK_LAYER_KHRONOS_validation"};
-    instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
-
-    if (requestedFeatures.debugPrintf) {
-      instanceCreateInfo.enabledLayerCount = 1;
-    } else {
-      instanceCreateInfo.enabledLayerCount = 0;
-    }
-
-    VkResult err;
-
-    err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
-    if (err) {
-      LOG_ERROR("failed to create instance! : \n" + errorString(err));
-    }
-
-    /// 1.5 - create a window and surface if requested
-    if (requestedFeatures.window) {
-      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-      // todo, allow the window to resize and recreate swapchain
-      glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-      window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
-                                requestedFeatures.windowProperties.initialHeight,
-                                requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
-
-      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to create window surface! : \n" + errorString(err));
-      }
-      // Poll some initial event values
-      glfwPollEvents();
-    }
-
-    // Setup debug printf callback
-    if (requestedFeatures.debugPrintf) {
-      gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-      gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
-
-      VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
-      debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-      debugUtilsMessengerCI.messageSeverity =
-          // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
-          // | VK_DEBUG_REPORT_WARNING_BIT_EXT
-          // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
-          // | VK_DEBUG_REPORT_ERROR_BIT_EXT
-          VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
-      debugUtilsMessengerCI.messageType =
-          VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-      debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
-      VkResult result =
-          gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
-      assert(result == VK_SUCCESS);
-    }
-
-    /// 2. Select a Physical Device
-
-    // Physical device
-    uint32_t gpuCount = 0;
-    // Get number of available physical devices
-    VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
-    if (gpuCount == 0) {
-      LOG_ERROR("No device with Vulkan support found : \n" + errorString(err));
-    }
-    // Enumerate devices
-    std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-    err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
-    if (err) {
-      LOG_ERROR("Could not enumerate physical devices : \n" + errorString(err));
-    }
-
-    // GPU selection
-
-    auto physicalDeviceTypeString = [](VkPhysicalDeviceType type) -> std::string {
-      switch (type) {
-#define STR(r)                                                                                                         \
-  case VK_PHYSICAL_DEVICE_TYPE_##r:                                                                                    \
-    return #r
-        STR(OTHER);
-        STR(INTEGRATED_GPU);
-        STR(DISCRETE_GPU);
-        STR(VIRTUAL_GPU);
-        STR(CPU);
-#undef STR
-      default:
-        return "UNKNOWN_DEVICE_TYPE";
-      }
-    };
-
-    auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
-      return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) !=
-              supportedExtensions.end());
-    };
-
-    /* function that checks if the selected physical device meets requirements
-     */
-    auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions) -> bool {
-      uint32_t extensionCount;
-      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-
-      std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-      vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
-      std::set<std::string> requiredExtensions;
-      for (auto &cstr : deviceExtensions) {
-        requiredExtensions.insert(std::string(cstr));
-      }
-
-      for (const auto &extension : availableExtensions) {
-        requiredExtensions.erase(extension.extensionName);
-      }
-
-      return requiredExtensions.empty();
-    };
-
-    // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
-    // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
-    // components, without additional requirements.
-    enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
-
-    // Ray tracing related extensions required
-    enabledDeviceExtensions.push_back(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
-
-    // Ray tracing related extensions required
-    enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-
-    // Required by VK_KHR_acceleration_structure
-    enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-    enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
-
-    // Required for VK_KHR_ray_tracing_pipeline
-    enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-
-    // required for vulkan memory model stuff
-    enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
-
-    // Required by VK_KHR_spirv_1_4
-    enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
-
-    // Required for floating point atomics
-    enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
-
-    if (requestedFeatures.window) {
-      // If the device will be used for presenting to a display via a swapchain
-      // we need to request the swapchain extension
-      enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    }
-
-    if (requestedFeatures.rayQueries) {
-      // If the device will be using ray queries for inline ray tracing,
-      // we need to explicitly request this.
-      enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-    }
-
-    if (requestedFeatures.invocationReordering) {
-      enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
-    }
-
-#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
-    enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-#endif
-
-    // Select physical device to be used
-    // Defaults to the first device unless specified by command line
-    uint32_t selectedDevice = -1;   // TODO
-
-    std::vector<uint32_t> usableDevices;
-
-    LOG_INFO("Searching for usable Vulkan physical device...");
-    for (uint32_t i = 0; i < gpuCount; i++) {
-      VkPhysicalDeviceProperties deviceProperties;
-      vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-      std::string message =
-          std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
-      message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
-      message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".") +
-                 std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".") +
-                 std::to_string(deviceProperties.apiVersion & 0xfff);
-      LOG_INFO(message);
-
-      if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
-        usableDevices.push_back(i);
-        LOG_INFO("\tFound usable device");
-      } else {
-        // Get list of supported extensions
-        uint32_t devExtCount = 0;
-        vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, nullptr);
-        std::vector<VkExtensionProperties> extensions(devExtCount);
-        std::vector<std::string> supportedExtensions;
-        if (vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, &extensions.front()) ==
-            VK_SUCCESS) {
-          for (auto ext : extensions) {
-            supportedExtensions.push_back(ext.extensionName);
-          }
-        }
-
-        for (const char *enabledExtension : enabledDeviceExtensions) {
-          if (!extensionSupported(enabledExtension, supportedExtensions)) {
-            LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension
-                                                                             << "\" is not present.");
-          }
-        }
-      }
-    }
-
-    if (usableDevices.size() == 0) {
-      LOG_ERROR("Unable to find physical device meeting requirements");
-    } else {
-      uint32_t requestedDevice = 0;
-
-      if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
-        LOG_INFO("Selecting first usable device");
-      } else if (numRequestedDevices > 1) {
-        LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
-      } else {
-        requestedDevice = requestedDeviceIDs[0];
-        if (requestedDevice > usableDevices.size()) {
-          LOG_ERROR("Requested device is out of range!");
-        }
-      }
-      selectedDevice = usableDevices[requestedDevice];
-    }
-
-    physicalDevice = physicalDevices[selectedDevice];
-
-    // Store properties (including limits), features and memory properties of
-    // the physical device Device properties also contain limits and sparse
-    // properties
-    vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
-
-    subgroupProperties = {};
-    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    subgroupProperties.pNext = NULL;
-
-    rayTracingPipelineProperties = {};
-    rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    rayTracingPipelineProperties.pNext = &subgroupProperties;
-
-    deviceProperties2 = {};
-    deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    deviceProperties2.pNext = &rayTracingPipelineProperties;
-    vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
-
-    // Features should be checked by the end application before using them
-    void *pNext = nullptr;
-    // VkPhysicalDeviceFloatControlsPropertiesKHR floatControlsProperties = {
-    //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR};
-    // floatControlsProperties.denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
-    // floatControlsProperties.pNext = pNext;
-    // pNext = &floatControlsProperties;
-
-    atomicFloatFeatures = {};
-    atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
-    atomicFloatFeatures.shaderBufferFloat32Atomics = true;
-    atomicFloatFeatures.shaderSharedFloat32Atomics = true;
-    atomicFloatFeatures.pNext = pNext;
-    pNext = &atomicFloatFeatures;
-
-    // VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT atomicFloat2Features = {};
-    // atomicFloat2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT;
-    // atomicFloat2Features.shaderBufferFloat32AtomicMinMax = true;
-    // atomicFloat2Features.shaderSharedFloat32AtomicMinMax = true;
-    // atomicFloat2Features.pNext = pNext;
-    // pNext = &atomicFloat2Features;
-
-    invocationReorderFeatures = {};
-    invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
-    if (requestedFeatures.rayQueries) {
-      // invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
-      invocationReorderFeatures.pNext = pNext;
-      pNext = &invocationReorderFeatures;
-    }
-
-    accelerationStructureFeatures = {};
-    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelerationStructureFeatures.pNext = pNext;
-    pNext = &accelerationStructureFeatures;
-
-    rtPipelineFeatures = {};
-    rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipelineFeatures.pNext = pNext;
-    pNext = &rtPipelineFeatures;
-
-    rtQueryFeatures = {};
-    rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    if (requestedFeatures.rayQueries) {
-      // rtQueryFeatures.rayQuery = requestedFeatures.rayQueries;
-      rtQueryFeatures.pNext = pNext;
-      pNext = &rtQueryFeatures;
-    }
-
-    deviceVulkan12Features = {};
-    deviceVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    deviceVulkan12Features.pNext = pNext;
-    pNext = &deviceVulkan12Features;
-
-    deviceVulkan11Features = {};
-    deviceVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    deviceVulkan11Features.pNext = pNext;
-    pNext = &deviceVulkan11Features;
-
-    deviceFeatures2 = {};
-    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures2.pNext = pNext;
-
-    // fill in above structs
-    vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
-
-    // Memory properties are used regularly for creating all kinds of buffers
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
-
-    // Queue family properties, used for setting up requested queues upon device
-    // creation
-    uint32_t queueFamilyCount;
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-    assert(queueFamilyCount > 0);
-    queueFamilyProperties.resize(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-    // Get list of supported extensions
-    uint32_t devExtCount = 0;
-    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &devExtCount, nullptr);
-    if (devExtCount > 0) {
-      std::vector<VkExtensionProperties> extensions(devExtCount);
-      if (vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &devExtCount, &extensions.front()) ==
-          VK_SUCCESS) {
-        for (auto ext : extensions) {
-          supportedExtensions.push_back(ext.extensionName);
-        }
-      }
-    }
-
-    // Now, create the logical device and all requested queues
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
-    // Get queue family indices for the requested queue family types
-    // Note that the indices may overlap depending on the implementation
-
-    auto getQueueFamilyIndex = [](VkQueueFlagBits queueFlags,
-                                  std::vector<VkQueueFamilyProperties> queueFamilyProperties) -> uint32_t {
-      // Dedicated queue for compute
-      // Try to find a queue family index that supports compute but not graphics
-      if (queueFlags & VK_QUEUE_COMPUTE_BIT)
-        for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
-          if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
-              ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0))
-            return i;
-
-      // Dedicated queue for transfer
-      // Try to find a queue family index that supports transfer but not
-      // graphics and compute
-      if (queueFlags & VK_QUEUE_TRANSFER_BIT)
-        for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
-          if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
-              ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) &&
-              ((queueFamilyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) == 0))
-            return i;
-
-      // For other queue types or if no separate compute queue is present,
-      // return the first one to support the requested flags
-      for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
-        if (queueFamilyProperties[i].queueFlags & queueFlags)
-          return i;
-      LOG_ERROR("Could not find a matching queue family index");
-      return -1;
-    };
-
-    const float defaultQueuePriority(0.0f);
-
-    // Graphics queue
-    // if (requestedQueueTypes & VK_QUEUE_GRAPHICS_BIT)
-    {
-      queueFamilyIndices.graphics = getQueueFamilyIndex(VK_QUEUE_GRAPHICS_BIT, queueFamilyProperties);
-      VkDeviceQueueCreateInfo queueInfo{};
-      queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-      queueInfo.queueFamilyIndex = queueFamilyIndices.graphics;
-      queueInfo.queueCount = 1;
-      queueInfo.pQueuePriorities = &defaultQueuePriority;
-      queueCreateInfos.push_back(queueInfo);
-    }
-    // else
-    // {
-    //   queueFamilyIndices.graphics = 0;
-    // }
-
-    // Dedicated compute queue
-    // if (requestedQueueTypes & VK_QUEUE_COMPUTE_BIT)
-    {
-      queueFamilyIndices.compute = getQueueFamilyIndex(VK_QUEUE_COMPUTE_BIT, queueFamilyProperties);
-      if (queueFamilyIndices.compute != queueFamilyIndices.graphics) {
-        // If compute family index differs, we need an additional queue create
-        // info for the compute queue
-        VkDeviceQueueCreateInfo queueInfo{};
-        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueInfo.queueFamilyIndex = queueFamilyIndices.compute;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &defaultQueuePriority;
-        queueCreateInfos.push_back(queueInfo);
-      }
-    }
-    // else
-    // {
-    //   // Else we use the same queue
-    //   queueFamilyIndices.compute = queueFamilyIndices.graphics;
-    // }
-
-    // Dedicated transfer queue
-    // if (requestedQueueTypes & VK_QUEUE_TRANSFER_BIT)
-    {
-      queueFamilyIndices.transfer = getQueueFamilyIndex(VK_QUEUE_TRANSFER_BIT, queueFamilyProperties);
-      if ((queueFamilyIndices.transfer != queueFamilyIndices.graphics) &&
-          (queueFamilyIndices.transfer != queueFamilyIndices.compute)) {
-        // If compute family index differs, we need an additional queue create
-        // info for the compute queue
-        VkDeviceQueueCreateInfo queueInfo{};
-        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueInfo.queueFamilyIndex = queueFamilyIndices.transfer;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &defaultQueuePriority;
-        queueCreateInfos.push_back(queueInfo);
-      }
-    }
-    // else
-    // {
-    //   // Else we use the same queue
-    //   queueFamilyIndices.transfer = queueFamilyIndices.graphics;
-    // }
-
-    /// 3. Create the logical device representation
-
-    VkDeviceCreateInfo deviceCreateInfo = {};
-    deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceCreateInfo.pEnabledFeatures = nullptr;   // Must be nullptr if deviceFeatures2 is used to request features
-    deviceCreateInfo.pNext = &deviceFeatures2;
-
-    // If a pNext(Chain) has been passed, we need to add it to the device
-    // creation info VkPhysicalDeviceFeatures2 physicalDeviceFeatures2{}; if
-    // (pNextChain) {
-    //   physicalDeviceFeatures2.sType =
-    //   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    //   physicalDeviceFeatures2.features = enabledFeatures;
-    //   physicalDeviceFeatures2.pNext = pNextChain;
-    //   deviceCreateInfo.pEnabledFeatures = nullptr;
-    //   deviceCreateInfo.pNext = &physicalDeviceFeatures2;
-    // }
-
-    // // Enable the debug marker extension if it is present (likely meaning a
-    // debugging tool is present) if
-    // (extensionSupported(VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
-    // {
-    //   enabledDeviceExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
-    //   enableDebugMarkers = true;
-    // }
-
-    if (enabledDeviceExtensions.size() > 0) {
-      deviceCreateInfo.enabledExtensionCount = (uint32_t) enabledDeviceExtensions.size();
-      deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
-    }
-
-    // this->enabledFeatures = enabledFeatures;
-    err = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
-    if (err) {
-      LOG_ERROR("Could not create logical devices : \n" + errorString(err));
-    }
-
-    // Create vulkan memory allocator
-    VmaVulkanFunctions vulkanFunctions = {};
-    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
-    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
-
-    VmaAllocatorCreateInfo allocatorCreateInfo = {};
-    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_2;
-    allocatorCreateInfo.physicalDevice = physicalDevice;
-    allocatorCreateInfo.device = logicalDevice;
-    allocatorCreateInfo.instance = instance;
-    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
-    allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-    err = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
-    if (err) {
-      LOG_ERROR("Could not create vulkan memory allocator : \n" + errorString(err));
-    }
-
-    // Get the ray tracing and acceleration structure related function pointers
-    // required by this sample
-    gprt::vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkGetBufferDeviceAddressKHR"));
-    gprt::vkCmdBuildAccelerationStructures = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkCmdBuildAccelerationStructuresKHR"));
-    gprt::vkCmdCopyAccelerationStructure = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkCmdCopyAccelerationStructureKHR"));
-    gprt::vkBuildAccelerationStructures = reinterpret_cast<PFN_vkBuildAccelerationStructuresKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkBuildAccelerationStructuresKHR"));
-    gprt::vkCopyAccelerationStructure = reinterpret_cast<PFN_vkCopyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkCopyAccelerationStructureKHR"));
-    gprt::vkCreateAccelerationStructure = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkCreateAccelerationStructureKHR"));
-    gprt::vkDestroyAccelerationStructure = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkDestroyAccelerationStructureKHR"));
-    gprt::vkGetAccelerationStructureBuildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureBuildSizesKHR"));
-    gprt::vkGetAccelerationStructureDeviceAddress = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureDeviceAddressKHR"));
-    gprt::vkCmdTraceRays =
-        reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdTraceRaysKHR"));
-    gprt::vkGetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
-    gprt::vkCreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
-        vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
-    gprt::vkCmdWriteAccelerationStructuresProperties =
-        reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
-            vkGetDeviceProcAddr(logicalDevice, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
-
-    auto createCommandPool = [&](uint32_t queueFamilyIndex,
-                                 VkCommandPoolCreateFlags createFlags =
-                                     VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT) -> VkCommandPool {
-      VkCommandPoolCreateInfo cmdPoolInfo = {};
-      cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-      cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
-      cmdPoolInfo.flags = createFlags;
-      VkCommandPool cmdPool;
-      VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
-      return cmdPool;
-    };
-
-    /// 4. Create Command Pools
-    graphicsCommandPool = createCommandPool(queueFamilyIndices.graphics);
-    computeCommandPool = createCommandPool(queueFamilyIndices.compute);
-    transferCommandPool = createCommandPool(queueFamilyIndices.transfer);
-
-    /// 4.5 Create a query pool to measure performance
-    VkQueryPoolCreateInfo queryPoolCreateInfo{};
-    queryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-    queryPoolCreateInfo.pNext = nullptr;   // Optional
-    queryPoolCreateInfo.flags = 0;         // Reserved for future use, must be 0!
-
-    queryPoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    queryPoolCreateInfo.queryCount = 2;   // for now, just two queries, a before and an after.
-
-    err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
-    if (err)
-      LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
-
-    // We also need a query pool to determine compacted tree sizes
-    VkQueryPoolCreateInfo compactedSizeQueryPoolCreateInfo{};
-    compactedSizeQueryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-    compactedSizeQueryPoolCreateInfo.pNext = nullptr;   // Optional
-    compactedSizeQueryPoolCreateInfo.flags = 0;         // Reserved for future use, must be 0!
-
-    compactedSizeQueryPoolCreateInfo.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
-    compactedSizeQueryPoolCreateInfo.queryCount = 1;   // for now, just one query
-
-    err = vkCreateQueryPool(logicalDevice, &compactedSizeQueryPoolCreateInfo, nullptr, &compactedSizeQueryPool);
-    if (err)
-      LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
-
-    /// 5. Allocate command buffers
-    VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
-    cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdBufAllocateInfo.commandBufferCount = 1;
-
-    cmdBufAllocateInfo.commandPool = graphicsCommandPool;
-    err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("Could not create graphics command buffer : \n" + errorString(err));
-
-    cmdBufAllocateInfo.commandPool = computeCommandPool;
-    err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
-    if (err)
-      LOG_ERROR("Could not create compute command buffer : \n" + errorString(err));
-
-    cmdBufAllocateInfo.commandPool = transferCommandPool;
-    err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
-    if (err)
-      LOG_ERROR("Could not create transfer command buffer : \n" + errorString(err));
-
-    /// 6. Get queue handles
-    vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
-    vkGetDeviceQueue(logicalDevice, queueFamilyIndices.compute, 0, &computeQueue);
-    vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
-
-    // 7. Create a module for internal device entry points
-    radixSortModule = new Module(sortDeviceCode);
-    // scanModule = new Module(scanDeviceCode);
-    fallbacksModule = new Module(fallbacksDeviceCode);
-
-    // Swapchain semaphores and fences
-    if (requestedFeatures.window) {
-      VkSemaphoreCreateInfo semaphoreInfo{};
-      semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-      VkFenceCreateInfo fenceInfo{};
-      fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-      if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-          vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
-          vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create swapchain semaphores");
-      }
-    }
-
-    // Swapchain setup
-    if (requestedFeatures.window) {
-      VkSurfaceCapabilitiesKHR surfaceCapabilities;
-      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
-
-      // SRGB is a commonly supported surface format. It's also efficient to
-      // write to, so we assume this format.
-      // Note, we don't use RGBA since NVIDIA doesn't support this...
-      surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
-      surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-      bool surfaceFormatFound = false;
-      std::vector<VkSurfaceFormatKHR> formats;
-      uint32_t formatCount;
-      vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
-      if (formatCount != 0) {
-        formats.resize(formatCount);
-        vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
-      }
-      for (uint32_t i = 0; i < formatCount; ++i)
-        if (formats[i].format == surfaceFormat.format && formats[i].colorSpace == surfaceFormat.colorSpace)
-          surfaceFormatFound = true;
-      if (!surfaceFormatFound)
-        LOG_ERROR("Error, unable to find RGBA8 SRGB surface format...");
-
-      // For now, we assume the user wants FIFO, which is similar to vsync.
-      // All vulkan implementations must support FIFO per-spec, so it's
-      // something we can depend on.
-      presentMode = VK_PRESENT_MODE_FIFO_KHR;
-      bool presentModeFound = false;
-      std::vector<VkPresentModeKHR> presentModes;
-      uint32_t presentModeCount;
-      vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
-      if (presentModeCount != 0) {
-        presentModes.resize(presentModeCount);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
-      }
-      for (uint32_t i = 0; i < presentModeCount; ++i)
-        if (presentModes[i] == presentMode)
-          presentModeFound = true;
-      if (!presentModeFound)
-        LOG_ERROR("Error, unable to find vsync present mode...");
-
-      // Window extent is the number of pixels truly used by the surface. For
-      // high dps displays (like on mac) the window extent might be larger
-      // than the screen coordinate size.
-      if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
-        windowExtent = surfaceCapabilities.currentExtent;
-      } else {
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-        VkExtent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
-        actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width,
-                                        surfaceCapabilities.maxImageExtent.width);
-        actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height,
-                                         surfaceCapabilities.maxImageExtent.height);
-        windowExtent = actualExtent;
-      }
-
-      // We request one more than the minimum number of images in the swapchain,
-      // since choosing exactly the minimum can cause stalls. We also make sure
-      // to not request more than the maximum number of images.
-      surfaceImageCount = surfaceCapabilities.minImageCount + 1;
-      if (surfaceCapabilities.maxImageCount > 0 && surfaceImageCount > surfaceCapabilities.maxImageCount) {
-        surfaceImageCount = surfaceCapabilities.maxImageCount;
-      }
-
-      // Now, we have enough information to create our swapchain.
-      VkSwapchainCreateInfoKHR createInfo{};
-      createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-      createInfo.surface = surface;
-      createInfo.minImageCount = surfaceImageCount;
-      createInfo.imageFormat = surfaceFormat.format;
-      createInfo.imageColorSpace = surfaceFormat.colorSpace;
-      createInfo.imageExtent = windowExtent;
-      createInfo.imageArrayLayers = 1;   // might be 2 for stereoscopic 3D images like VR
-      createInfo.imageUsage =
-          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;   // might need to change this...
-      // currently assuming graphics and present queue are the same...
-      createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-      createInfo.queueFamilyIndexCount = 0;       // optional if exclusive
-      createInfo.pQueueFamilyIndices = nullptr;   // optional if exclusive
-      // could use this to flip the image vertically if we want
-      createInfo.preTransform = surfaceCapabilities.currentTransform;
-      // means, we don't composite this window with other OS windows.
-      createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-      createInfo.presentMode = presentMode;
-      // clipped here means we don't care about color of obscured pixels, like
-      // those covered by other OS windows.
-      createInfo.clipped = VK_TRUE;
-      // Since the swapchain can go out of date, we need to supply the out of
-      // date swapchain here.
-      createInfo.oldSwapchain = swapchain;
-
-      // Create the swapchain
-      err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("Error, failed to create swap chain : \n" + errorString(err));
-      }
-
-      // Now, receive the swapchain images
-      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
-      swapchainImages.resize(surfaceImageCount);
-      vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
-
-      /* Transition all images to presentable */
-      for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
-        transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-      }
-
-      // And acquire the first image to use
-      vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE,
-                            &currentImageIndex);
-    }
-
-    // For texture / sampler arrays, we need some defaults
-    {
-      const VkImageUsageFlags imageUsageFlags =
-          // means we can make an image view required to assign this image to a
-          // descriptor
-          VK_IMAGE_USAGE_SAMPLED_BIT |
-          // means we can use this image to transfer into another
-          VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-          // means we can use this image to receive data transferred from
-          // another
-          VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-      const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                            // device access
-
-      defaultSampler =
-          new Sampler(physicalDevice, logicalDevice, VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR,
-                      1, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
-      defaultTexture1D =
-          new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
-                      memoryUsageFlags, VK_IMAGE_TYPE_1D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
-      defaultTexture2D =
-          new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
-                      memoryUsageFlags, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
-      defaultTexture3D =
-          new Texture(physicalDevice, logicalDevice, graphicsCommandBuffer, graphicsQueue, imageUsageFlags,
-                      memoryUsageFlags, VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
-
-      const VkBufferUsageFlags bufferUsageFlags =
-          // means we can get this buffer's address with vkGetBufferDeviceAddress
-          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-          // means we can use this buffer to transfer into another
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-          // means we can use this buffer to receive data transferred from another
-          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-          // means we can use this buffer as a storage buffer resource
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-      defaultBuffer = new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue,
-                                 bufferUsageFlags, memoryUsageFlags, 1, 16);
-    }
-
-    // For the SBT record descriptor for raster shaders
-    {
-      VkDescriptorSetLayoutBinding binding{};
-      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-      binding.descriptorCount = 1;   // we only have one of these bound at any point in time
-      binding.binding = 0;
-      binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-      descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-      descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-      descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-      descriptorSetLayoutCreateInfo.pNext = nullptr;
-      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                  &rasterRecordDescriptorSetLayout));
-
-      VkDescriptorPoolSize poolSize;
-      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-      poolSize.descriptorCount = 1;
-
-      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      descriptorPoolInfo.poolSizeCount = 1;
-      descriptorPoolInfo.pPoolSizes = &poolSize;
-      descriptorPoolInfo.maxSets = poolSize.descriptorCount;
-      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &rasterRecordDescriptorPool));
-
-      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = rasterRecordDescriptorPool;
-      descriptorSetAllocateInfo.pSetLayouts = &rasterRecordDescriptorSetLayout;
-      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
-      descriptorSetAllocateInfo.pNext = nullptr;
-
-      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &rasterRecordDescriptorSet));
-    }
-
-    // For the SBT record descriptor for compute shaders
-    {
-      VkDescriptorSetLayoutBinding binding{};
-      binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-      binding.descriptorCount = 1;   // we only have one of these bound at any point in time
-      binding.binding = 0;
-      binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-      std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-      VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-      descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-      descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-      descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-      descriptorSetLayoutCreateInfo.pNext = nullptr;
-      VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                  &computeRecordDescriptorSetLayout));
-
-      VkDescriptorPoolSize poolSize;
-      poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-      poolSize.descriptorCount = 1;
-
-      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      descriptorPoolInfo.poolSizeCount = 1;
-      descriptorPoolInfo.pPoolSizes = &poolSize;
-      descriptorPoolInfo.maxSets = poolSize.descriptorCount;
-      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      VK_CHECK_RESULT(
-          vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &computeRecordDescriptorPool));
-
-      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = computeRecordDescriptorPool;
-      descriptorSetAllocateInfo.pSetLayouts = &computeRecordDescriptorSetLayout;
-      descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
-      descriptorSetAllocateInfo.pNext = nullptr;
-
-      VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
-    }
-
-    // Init imgui
-    if (requestedFeatures.window) {
-      // 1: create descriptor pool for IMGUI
-      // the size of the pool is very oversize, but it's copied from imgui demo itself.
-      VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
-                                           {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
-                                           {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
-                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
-                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
-                                           {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
-
-      VkDescriptorPoolCreateInfo pool_info = {};
-      pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      pool_info.maxSets = 1000;
-      pool_info.poolSizeCount = (uint32_t) std::size(pool_sizes);
-      pool_info.pPoolSizes = pool_sizes;
-
-      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &pool_info, nullptr, &imguiPool));
-
-      // 2: initialize imgui library
-
-      // this initializes the core structures of imgui
-      ImGui::CreateContext();
-
-      // this initializes imgui for SDL
-      ImGui_ImplGlfw_InitForVulkan(window, true);
-
-      // Call new frame here to initialize some internal imgui data
-      ImGui_ImplGlfw_NewFrame();
-    }
-
-    // Finally, setup the internal shader stages and build an initial shader binding table
-    setupInternalPrograms();
-    buildPipeline();
-    buildSBT(GPRT_SBT_ALL);
-  };
-
-  void destroy() {
-
-    if (defaultSampler) {
-      defaultSampler->destroy();
-      delete defaultSampler;
-      defaultSampler = nullptr;
-    }
-    if (defaultTexture1D) {
-      defaultTexture1D->destroy();
-      delete defaultTexture1D;
-      defaultTexture1D = nullptr;
-    }
-    if (defaultTexture2D) {
-      defaultTexture2D->destroy();
-      delete defaultTexture2D;
-      defaultTexture2D = nullptr;
-    }
-    if (defaultTexture3D) {
-      defaultTexture3D->destroy();
-      delete defaultTexture3D;
-      defaultTexture3D = nullptr;
-    }
-    if (defaultBuffer) {
-      defaultBuffer->destroy();
-      delete defaultBuffer;
-      defaultBuffer = nullptr;
-    }
-
-    if (rasterRecordBuffer) {
-      rasterRecordBuffer->destroy();
-      delete rasterRecordBuffer;
-      rasterRecordBuffer = nullptr;
-    }
-
-    if (computeRecordBuffer) {
-      computeRecordBuffer->destroy();
-      delete computeRecordBuffer;
-      computeRecordBuffer = nullptr;
-    }
-
-    if (samplerDescriptorSet) {
-      vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
-      samplerDescriptorSet = nullptr;
-    }
-    if (texture1DDescriptorSet) {
-      vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
-      texture1DDescriptorSet = nullptr;
-    }
-    if (texture2DDescriptorSet) {
-      vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
-      texture2DDescriptorSet = nullptr;
-    }
-    if (texture3DDescriptorSet) {
-      vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
-      texture3DDescriptorSet = nullptr;
-    }
-
-    if (samplerDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
-      samplerDescriptorSetLayout = nullptr;
-    }
-    if (texture1DDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
-      texture1DDescriptorSetLayout = nullptr;
-    }
-    if (texture2DDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
-      texture2DDescriptorSetLayout = nullptr;
-    }
-    if (texture3DDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
-      texture3DDescriptorSetLayout = nullptr;
-    }
-    if (rasterRecordDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
-      rasterRecordDescriptorSetLayout = nullptr;
-    }
-    if (computeRecordDescriptorSetLayout) {
-      vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
-      computeRecordDescriptorSetLayout = nullptr;
-    }
-
-    if (samplerDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
-      samplerDescriptorPool = nullptr;
-    }
-    if (texture1DDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
-      texture1DDescriptorPool = nullptr;
-    }
-    if (texture2DDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
-      texture2DDescriptorPool = nullptr;
-    }
-    if (texture3DDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
-      texture3DDescriptorPool = nullptr;
-    }
-    if (rasterRecordDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
-      rasterRecordDescriptorPool = nullptr;
-    }
-    if (computeRecordDescriptorPool) {
-      vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
-      computeRecordDescriptorPool = nullptr;
-    }
-    if (imguiPool) {
-      vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
-      imguiPool = nullptr;
-    }
-    if (imgui.renderPass) {
-      ImGui_ImplVulkan_Shutdown();
-      vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
-      imgui.renderPass = nullptr;
-    }
-    if (imgui.frameBuffer) {
-      vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
-      imgui.frameBuffer = nullptr;
-    }
-
-    if (imageAvailableSemaphore) {
-      vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-      imageAvailableSemaphore = nullptr;
-    }
-    if (renderFinishedSemaphore) {
-      vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
-      renderFinishedSemaphore = nullptr;
-    }
-
-    if (inFlightFence) {
-      vkDestroyFence(logicalDevice, inFlightFence, nullptr);
-      inFlightFence = nullptr;
-    }
-
-    if (swapchain) {
-      vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
-      swapchain = nullptr;
-    }
-    if (window) {
-      glfwDestroyWindow(window);
-      glfwTerminate();
-      window = nullptr;
-    }
-    if (surface) {
-      vkDestroySurfaceKHR(instance, surface, nullptr);
-      surface = nullptr;
-    }
-
-    if (raytracingPipelineLayout) {
-      vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
-      raytracingPipelineLayout = nullptr;
-    }
-    if (raytracingPipeline) {
-      vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
-      raytracingPipeline = nullptr;
-    }
-
-    // if (fillInstanceDataStage.layout) {
-    //   vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
-    //   fillInstanceDataStage.layout = nullptr;
-    // }
-    // if (fillInstanceDataStage.pipeline) {
-    //   vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
-    //   fillInstanceDataStage.pipeline = nullptr;
-    // }
-    // if (fillInstanceDataStage.module) {
-    //   vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
-    //   fillInstanceDataStage.module = nullptr;
-    // }
-
-    destroyInternalPrograms();
-
-    if (raygenTable) {
-      raygenTable->destroy();
-      delete raygenTable;
-      raygenTable = nullptr;
-    }
-    if (missTable) {
-      missTable->destroy();
-      delete missTable;
-      missTable = nullptr;
-    }
-    if (hitgroupTable) {
-      hitgroupTable->destroy();
-      delete hitgroupTable;
-      hitgroupTable = nullptr;
-    }
-
-    previousNumSamplers = 0;
-    previousNumTexture1Ds = 0;
-    previousNumTexture2Ds = 0;
-    previousNumTexture3Ds = 0;
-    previousNumRasterRecords = 0;
-    previousNumComputeRecords = 0;
-
-    vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
-    vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
-    vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
-    vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
-    vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
-    vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
-
-    // verify these are all cleared.
-    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
-      if (GeomType::geomTypes[i] != nullptr) {
-        GeomType::geomTypes[i]->destroy();
-      }
-    }
-    GeomType::geomTypes.resize(0);
-
-    for (uint32_t i = 0; i < Buffer::buffers.size(); ++i) {
-      if (Buffer::buffers[i] != nullptr) {
-        Buffer::buffers[i]->destroy();
-      }
-    }
-    Buffer::buffers.resize(0);
-
-    for (uint32_t i = 0; i < Texture::texture1Ds.size(); ++i) {
-      if (Texture::texture1Ds[i] != nullptr) {
-        Texture::texture1Ds[i]->destroy();
-      }
-    }
-    Texture::texture1Ds.resize(0);
-
-    for (uint32_t i = 0; i < Texture::texture2Ds.size(); ++i) {
-      if (Texture::texture2Ds[i] != nullptr) {
-        Texture::texture2Ds[i]->destroy();
-      }
-    }
-    Texture::texture2Ds.resize(0);
-
-    for (uint32_t i = 0; i < Texture::texture3Ds.size(); ++i) {
-      if (Texture::texture3Ds[i] != nullptr) {
-        Texture::texture3Ds[i]->destroy();
-      }
-    }
-    Texture::texture3Ds.resize(0);
-
-    for (uint32_t i = 0; i < Sampler::samplers.size(); ++i) {
-      if (Sampler::samplers[i] != nullptr) {
-        Sampler::samplers[i]->destroy();
-      }
-    }
-    Sampler::samplers.resize(0);
-
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      if (Compute::computes[i] != nullptr) {
-        Compute::computes[i]->destroy();
-      }
-    }
-    Compute::computes.resize(0);
-
-    for (uint32_t i = 0; i < RayGen::raygens.size(); ++i) {
-      if (RayGen::raygens[i] != nullptr) {
-        RayGen::raygens[i]->destroy();
-      }
-    }
-    RayGen::raygens.resize(0);
-
-    for (uint32_t i = 0; i < Miss::misses.size(); ++i) {
-      if (Miss::misses[i] != nullptr) {
-        Miss::misses[i]->destroy();
-      }
-    }
-    Miss::misses.resize(0);
-
-    for (uint32_t i = 0; i < Module::modules.size(); ++i) {
-      if (Module::modules[i] != nullptr) {
-        Module::modules[i]->destroy();
-      }
-    }
-    Module::modules.resize(0);
-
-    vmaDestroyAllocator(allocator);
-
-    vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
-    vkDestroyQueryPool(logicalDevice, compactedSizeQueryPool, nullptr);
-    vkDestroyDevice(logicalDevice, nullptr);
-
-    if (requestedFeatures.debugPrintf)
-      freeDebugCallback(instance);
-    vkDestroyInstance(instance, nullptr);
-  }
-
-  ~Context() {};
-
-  void buildSBT(GPRTBuildSBTFlags flags);
-
-  // void buildPrograms()
-  // {
-  //   // At the moment, we don't actually build our programs here.
-  // }
-
-  void buildPipeline();
-
-  // Todo, refactor this code...
-  void setupInternalPrograms() {
-
-    // // For filling out instance data
-    // {
-    //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
-
-    //   // todo, consider refactoring this into a more official "Compute" shader
-    //   // object
-
-    //   VkResult err;
-    //   // currently not using cache.
-    //   VkPipelineCache cache = VK_NULL_HANDLE;
-
-    //   VkPushConstantRange pushConstantRange = {};
-    //   pushConstantRange.size = 128;
-    //   pushConstantRange.offset = 0;
-    //   pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    //   VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
-    //   pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    //   pipelineLayoutCreateInfo.setLayoutCount = 0;      // if ever we use descriptors
-    //   pipelineLayoutCreateInfo.pSetLayouts = nullptr;   // if ever we use descriptors
-    //   pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-    //   pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-    //   err = vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
-
-    //   std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
-    //   auto binary = internalModule->getBinary("COMPUTE");
-
-    //   VkShaderModuleCreateInfo moduleCreateInfo = {};
-    //   moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    //   moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    //   moduleCreateInfo.pCode = binary.data();
-
-    //   err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fillInstanceDataStage.module);
-
-    //   VkPipelineShaderStageCreateInfo shaderStage = {};
-    //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    //   shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    //   shaderStage.module = fillInstanceDataStage.module;
-    //   shaderStage.pName = entryPoint.c_str();
-
-    //   VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-    //   computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    //   computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
-    //   computePipelineCreateInfo.flags = 0;
-    //   computePipelineCreateInfo.stage = shaderStage;
-
-    //   // At this point, create all internal compute pipelines as well.
-    //   err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-    //                                 &fillInstanceDataStage.pipeline);
-    // }
-
-    // Radix sorter stages
-    {
-      // currently not using cache.
-      VkPipelineCache cache = VK_NULL_HANDLE;
-
-      VkDescriptorPoolSize poolSize;
-      poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-      poolSize.descriptorCount = 16;
-
-      VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-      descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      descriptorPoolInfo.poolSizeCount = 1;
-      descriptorPoolInfo.pPoolSizes = &poolSize;
-      descriptorPoolInfo.maxSets = 5;
-      descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
-
-      sortStages.Count.entryPoint = "Count";
-      sortStages.CountReduce.entryPoint = "CountReduce";
-      sortStages.Scan.entryPoint = "Scan";
-      sortStages.ScanAdd.entryPoint = "ScanAdd";
-      sortStages.Scatter.entryPoint = "Scatter";
-      sortStages.ScatterPayload.entryPoint = "ScatterPayload";
-
-      // Create binding for Radix sort passes
-      VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
-          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // SrcBuffer (sort)
-          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstBuffer (sort)
-          {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScrPayload (sort only)
-          {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstPayload (sort only)
-      };
-
-      VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
-          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanSrc
-          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanDst
-          {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanScratch
-      };
-
-      VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
-          {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (sort only)
-          {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (reduced)
-      };
-
-      auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
-        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-        descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        descriptorSetAllocateInfo.descriptorPool = pool;
-        descriptorSetAllocateInfo.pSetLayouts = &layout;
-        descriptorSetAllocateInfo.descriptorSetCount = 1;
-        descriptorSetAllocateInfo.pNext = nullptr;
-        VkResult err = vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to allocate descriptor! \n" + errorString(err));
-        }
-      };
-
-      VkResult vkResult;
-
-      VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
-          VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-      descriptor_set_layout_create_info.pNext = nullptr;
-      descriptor_set_layout_create_info.flags = 0;
-      descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
-      descriptor_set_layout_create_info.bindingCount = 4;
-      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                             &sortStages.m_SortDescriptorSetLayoutInputOutputs);
-      VK_CHECK_RESULT(vkResult);
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                      &sortStages.m_SortDescriptorSetInputOutput[0]);
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                      &sortStages.m_SortDescriptorSetInputOutput[1]);
-
-      descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
-      descriptor_set_layout_create_info.bindingCount = 3;
-      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                             &sortStages.m_SortDescriptorSetLayoutScan);
-      VK_CHECK_RESULT(vkResult);
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
-                      &sortStages.m_SortDescriptorSetScanSets[0]);
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
-                      &sortStages.m_SortDescriptorSetScanSets[1]);
-
-      descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
-      descriptor_set_layout_create_info.bindingCount = 2;
-      vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                             &sortStages.m_SortDescriptorSetLayoutScratch);
-      VK_CHECK_RESULT(vkResult);
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch,
-                      &sortStages.m_SortDescriptorSetScratch);
-
-      // Create constant range representing our static constant
-      VkPushConstantRange constant_range;
-      constant_range.stageFlags = VK_SHADER_STAGE_ALL;
-      constant_range.offset = 0;
-      constant_range.size = sizeof(ParallelSortCB);
-
-      // Create the pipeline layout (Root signature)
-      VkPipelineLayoutCreateInfo layout_create_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-      layout_create_info.pNext = nullptr;
-      layout_create_info.flags = 0;
-      layout_create_info.setLayoutCount = 3;
-      VkDescriptorSetLayout layouts[] = {sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                                         sortStages.m_SortDescriptorSetLayoutScan,
-                                         sortStages.m_SortDescriptorSetLayoutScratch};
-      layout_create_info.pSetLayouts = layouts;
-      layout_create_info.pushConstantRangeCount = 1;
-      layout_create_info.pPushConstantRanges = &constant_range;
-
-      VkResult bCreatePipelineLayout =
-          vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
-      assert(bCreatePipelineLayout == VK_SUCCESS);
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.Count.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Count.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.Count.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.Count.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.CountReduce.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.CountReduce.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.CountReduce.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.CountReduce.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.Scan.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scan.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.Scan.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.Scan.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.ScanAdd.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScanAdd.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.ScanAdd.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.ScanAdd.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.Scatter.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scatter.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.Scatter.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.Scatter.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      {
-        VkResult err = VK_SUCCESS;
-        std::string entryPoint = sortStages.ScatterPayload.entryPoint;
-        auto binary = radixSortModule->binary;
-
-        VkShaderModuleCreateInfo moduleCreateInfo = {};
-        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-        moduleCreateInfo.pCode = binary.data();
-
-        err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScatterPayload.module);
-
-        VkPipelineShaderStageCreateInfo shaderStage = {};
-        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        shaderStage.module = sortStages.ScatterPayload.module;
-        shaderStage.pName = entryPoint.c_str();
-
-        VkComputePipelineCreateInfo computePipelineCreateInfo = {};
-        computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        computePipelineCreateInfo.layout = sortStages.layout;
-        computePipelineCreateInfo.flags = 0;
-        computePipelineCreateInfo.stage = shaderStage;
-
-        // At this point, create all internal compute pipelines as well.
-        err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
-                                       &sortStages.ScatterPayload.pipeline);
-        if (err != VK_SUCCESS) {
-          LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
-        }
-      }
-
-      // todo, destroy the above stuff
-    }
-
-    // Scanning stages
-    // {
-    //   Context *context = this;
-    //   internalComputePrograms.insert(
-    //       {"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
-    //   internalComputePrograms.insert(
-    //       {"Scan", new Compute(context, context->logicalDevice, scanModule,
-    //                            ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
-    // }
-
-    // Fallback primitive programs
-    {
-      Context *context = this;
-      internalComputePrograms.insert({"LSSBounds", new Compute(context, context->logicalDevice, fallbacksModule,
-                                                               "LSSBounds", sizeof(LSSParameters))});
-      internalComputePrograms.insert({"SphereBounds", new Compute(context, context->logicalDevice, fallbacksModule,
-                                                                  "SphereBounds", sizeof(SphereParameters))});
-    }
-    computePipelinesOutOfDate = true;
-  }
-
-  void destroyInternalPrograms() {
-    // destroy sort stages
-    {
-      vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
-      vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
-      vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
-      vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
-      vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
-      vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
-      sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
-      sortStages.Scatter.pipeline = VK_NULL_HANDLE;
-      sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
-      sortStages.Scan.pipeline = VK_NULL_HANDLE;
-      sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
-      sortStages.Count.pipeline = VK_NULL_HANDLE;
-
-      vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
-      vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
-      vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
-      vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
-      vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
-      vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
-      sortStages.ScatterPayload.module = VK_NULL_HANDLE;
-      sortStages.Scatter.module = VK_NULL_HANDLE;
-      sortStages.ScanAdd.module = VK_NULL_HANDLE;
-      sortStages.Scan.module = VK_NULL_HANDLE;
-      sortStages.CountReduce.module = VK_NULL_HANDLE;
-      sortStages.Count.module = VK_NULL_HANDLE;
-
-      vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
-      sortStages.layout = VK_NULL_HANDLE;
-
-      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
-      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
-      vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
-
-      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
-      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
-      vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
-
-      vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
-    }
-
-    std::vector<std::string> progNames;
-    for (auto &program : internalComputePrograms) {
-      progNames.push_back(program.first);
-    }
-
-    for (auto &progName : progNames) {
-      internalComputePrograms[progName]->destroy();
-      delete internalComputePrograms[progName];
-      internalComputePrograms.erase(progName);
-    }
-  }
-
-  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = pool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    return commandBuffer;
-  }
-
-  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
-  }
-
-  void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-    VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
-
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
-    barrier.oldLayout = oldLayout;
-
-    // The new layout for the image
-    barrier.newLayout = newLayout;
-
-    // If we're transferring which queue owns this image, we need to set these.
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-    // specify the image that is affected and the specific parts of that image.
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    VkPipelineStageFlags sourceStage;
-    VkPipelineStageFlags destinationStage;
-
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-      sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-      barrier.srcAccessMask = 0;
-      destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-      sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-
-      destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-      barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    } else {
-      throw std::invalid_argument("unsupported layout transition!");
-    }
-
-    vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
-  }
-
-  // For ImGui
-  void setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
-    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
-      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
-    } else {
-      imgui.width = colorTexture->width;
-      imgui.height = colorTexture->height;
-    }
-
-    imgui.colorAttachment = colorTexture;
-    imgui.depthAttachment = depthTexture;
-
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = colorTexture->format;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    // clear here says to clear the values to a constant at start.
-    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
-    // save rasterized fragments to memory
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    // not currently using a stencil
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    // Initial and final layouts of the texture
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = depthTexture->format;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
-
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    createInfo.pNext = nullptr;
-    createInfo.attachmentCount = (uint32_t) attachments.size();
-    createInfo.pAttachments = attachments.data();
-    createInfo.subpassCount = 1;
-    createInfo.pSubpasses = &subpass;
-    createInfo.dependencyCount = 1;
-    createInfo.pDependencies = &dependency;
-
-    vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
-
-    VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
-
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = imgui.renderPass;
-    framebufferInfo.attachmentCount = 2;
-    framebufferInfo.pAttachments = attachmentViews;
-    framebufferInfo.width = imgui.width;
-    framebufferInfo.height = imgui.height;
-    framebufferInfo.layers = 1;
-
-    if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &imgui.frameBuffer) != VK_SUCCESS) {
-      throw std::runtime_error("failed to create framebuffer!");
-    }
-
-    // this initializes imgui for Vulkan
-    ImGui_ImplVulkan_InitInfo init_info = {};
-    init_info.Instance = instance;
-    init_info.PhysicalDevice = physicalDevice;
-    init_info.Device = logicalDevice;
-    init_info.Queue = graphicsQueue;
-    init_info.DescriptorPool = imguiPool;
-    init_info.MinImageCount = 2;
-    init_info.ImageCount = 2;
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-
-    ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
-
-    // execute a gpu command to upload imgui font textures
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
-    ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
-    VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;
-    submitInfo.pWaitDstStageMask = nullptr;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;
-
-    VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-    VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
-
-    // clear font textures from cpu data
-    ImGui_ImplVulkan_DestroyFontUploadObjects();
-  }
-
-  void rasterizeGui() {
-    ImGui::Render();
-    ImDrawData *draw_data = ImGui::GetDrawData();
-
-    VkResult err;
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    VkRenderPassBeginInfo renderPassBeginInfo = {};
-    renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassBeginInfo.pNext = nullptr;
-    renderPassBeginInfo.renderPass = imgui.renderPass;
-    renderPassBeginInfo.renderArea.offset.x = 0;
-    renderPassBeginInfo.renderArea.offset.y = 0;
-    renderPassBeginInfo.renderArea.extent.width = imgui.width;
-    renderPassBeginInfo.renderArea.extent.height = imgui.height;
-    renderPassBeginInfo.clearValueCount = 0;
-    renderPassBeginInfo.pClearValues = nullptr;
-    renderPassBeginInfo.framebuffer = imgui.frameBuffer;
-
-    err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
-
-    // Transition our attachments into optimal attachment formats
-    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
-                                          imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
-
-    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
-                                          imgui.depthAttachment->layout,
-                                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
-
-    // This will clear the color and depth attachment
-    vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    // Record dear imgui primitives into command buffer
-    ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
-
-    vkCmdEndRenderPass(graphicsCommandBuffer);
-
-    // At the end of the renderpass, we'll transition the layout back to it's previous layout
-    imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                          imgui.colorAttachment->layout,
-                                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
-
-    imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                          imgui.depthAttachment->layout,
-                                          {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
-
-    err = vkEndCommandBuffer(graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
-  }
-};
+Geom *AABBGeomType::createGeom() {
+  return new AABBGeom(this);
+}
 
 typedef enum {
   GPRT_UNKNOWN_ACCEL = 0x0,
@@ -5213,8 +2861,6 @@ typedef enum {
 struct Accel {
   // Our own virtual address space
   uint32_t address = -1;
-  static std::vector<Accel *> accels;
-
   Context *context;
   bool isBottomLevel;
 
@@ -5244,17 +2890,17 @@ private:
 public:
   Accel(Context *context, bool isBottomLevel) {
     // Hunt for an existing free address for this accel
-    for (uint32_t i = 0; i < Accel::accels.size(); ++i) {
-      if (Accel::accels[i] == nullptr) {
-        Accel::accels[i] = this;
+    for (uint32_t i = 0; i < context->accels.size(); ++i) {
+      if (context->accels[i] == nullptr) {
+        context->accels[i] = this;
         address = i;
         break;
       }
     }
     // If we cant find a free spot in the current list, allocate a new one
     if (address == -1) {
-      Accel::accels.push_back(this);
-      address = (uint32_t) Accel::accels.size() - 1;
+      context->accels.push_back(this);
+      address = (uint32_t) context->accels.size() - 1;
     }
 
     this->isBottomLevel = isBottomLevel;
@@ -5347,8 +2993,7 @@ public:
     }
 
     if (!scratchBuffer) {
-      scratchBuffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, VK_NULL_HANDLE,
-                                 VK_NULL_HANDLE,
+      scratchBuffer = new Buffer(context,
                                  // means that the buffer can be used in a VkDescriptorBufferInfo. //
                                  // Is this required? If not, remove this...
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -5375,8 +3020,7 @@ public:
     }
 
     if (!accelBuffer) {
-      accelBuffer = new Buffer(
-          context->physicalDevice, context->logicalDevice, context->allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
+      accelBuffer = new Buffer(context,
           // means we can use this buffer as a means of storing an acceleration
           // structure
           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -5474,8 +3118,7 @@ public:
     }
 
     if (!compactBuffer) {
-      compactBuffer = new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, VK_NULL_HANDLE,
-                                 VK_NULL_HANDLE,
+      compactBuffer = new Buffer(context,
                                  // means we can use this buffer as a means of storing an acceleration
                                  // structure
                                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
@@ -5903,7 +3546,7 @@ public:
     }
 
     // Free slot for use by subsequently made accels
-    Accel::accels[address] = nullptr;
+    context->accels[address] = nullptr;
   };
   virtual size_t getSize() {
     size_t size = 0;
@@ -5917,8 +3560,6 @@ public:
   };
   virtual AccelType getType() { return GPRT_UNKNOWN_ACCEL; }
 };
-
-std::vector<Accel *> Accel::accels;
 
 struct TriangleAccel : public Accel {
   TriangleAccel(Context *context, size_t numGeometries, TriangleGeom *geometries) : Accel(context, true) {
@@ -6278,35 +3919,36 @@ struct InstanceAccel : public Accel {
 
   void updateSBTOffsets() {
     instanceOffset = 0;
-    for (uint32_t i = 0; i < Accel::accels.size(); ++i) {
-      if (Accel::accels[i] == this)
-        break;
-      if (Accel::accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
-        InstanceAccel *instanceAccel = (InstanceAccel *) Accel::accels[i];
-        size_t numGeometry = instanceAccel->getNumGeometries();
-        instanceOffset += numGeometry * requestedFeatures.numRayTypes;
-      }
-    }
+    // for (uint32_t i = 0; i < context->accels.size(); ++i) {
+    //   if (context->accels[i] == this)
+    //     break;
+    //   if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+    //     InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
+    //     size_t numGeometry = instanceAccel->getNumGeometries();
+    //     instanceOffset += numGeometry * requestedFeatures.numRayTypes;
+    //   }
+    // }
 
-    instancesBuffer->map();
+    // instancesBuffer->map();
 
     // Populate SBT offsets one by one
-    int numGeometriesInTLAS = 0;
-    int blasOffsetWithinCurrentTLAS = 0;
-    for (uint32_t i = 0; i < numInstances; ++i) {
-      gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
-      instance->__gprtSBTOffset = instanceOffset + blasOffsetWithinCurrentTLAS;
-      if (instance->__gprtAccelAddress != 0) {
-        Accel *accel = Accel::accels[instance->__gprtInstanceIndex];
+    // int numGeometriesInTLAS = numInstances;
+    // int blasOffsetWithinCurrentTLAS = 0;
+    // for (uint32_t i = 0; i < numInstances; ++i) {
+    //   gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
+    //   instance->__gprtSBTOffset = i * requestedFeatures.numRayTypes;
+      // instanceOffset + blasOffsetWithinCurrentTLAS;
+      // if (instance->__gprtAccelAddress != 0) {
+      //   Accel *accel = context->accels[instance->__gprtInstanceIndex];
 
         // for now, this works. Eventually I'd like this to act more like a lookup / prefix sum...
-        int numGeometriesInAccel = accel->geometries.size();
-        numGeometriesInTLAS += accel->geometries.size();
-        blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
-      }
-    }
-    instancesBuffer->unmap();
-    setNumGeometries(numGeometriesInTLAS);
+        // int numGeometriesInAccel = accel->geometries.size();
+        // numGeometriesInTLAS += accel->geometries.size();
+        // blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
+      // }
+    // }
+    // instancesBuffer->unmap();
+    setNumGeometries(numInstances);
   }
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
@@ -6354,8 +3996,8 @@ Context::getNumHitRecords() {
   // The total number of geometries is the number of geometries referenced
   // by each top level acceleration structure.
   int totalGeometries = 0;
-  for (int accelID = 0; accelID < Accel::accels.size(); ++accelID) {
-    Accel *accel = Accel::accels[accelID];
+  for (int accelID = 0; accelID < accels.size(); ++accelID) {
+    Accel *accel = accels[accelID];
     if (!accel)
       continue;
     if (accel->getType() == GPRT_INSTANCE_ACCEL) {
@@ -6376,838 +4018,6 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
   auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
 
-  const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
-  const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-  const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-  const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
-
-  if ((requestedFeatures.recordSize * 2) > maxGroupSize) {
-    LOG_ERROR("Requested record size is too large! Max record size for this platform is " +
-              std::to_string(maxGroupSize) + " bytes.");
-  }
-
-  // Doubling the record size to allow GPRT to store internal facing data
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, (requestedFeatures.recordSize * 2)), groupAlignment);
-
-  // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
-  // we might only have raster programs, and no RT programs.
-  if (RayGen::raygens.size() > 0) {
-    const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
-    const uint32_t sbtSize = groupCount * handleSize;
-
-    std::vector<uint8_t> shaderHandleStorage(sbtSize);
-    VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
-                                                           shaderHandleStorage.data());
-    if (err)
-      LOG_ERROR("failed to get ray tracing shader group handles! : \n" + errorString(err));
-
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can use this buffer as a SBT
-        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        // means we can use this buffer as a storage buffer resource
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
-                                                                                           // vkMapMemory
-                                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
-                                                                                           // "invalidate" not needed
-
-    // std::cout<<"Todo, get some smarter memory allocation working..."
-    // <<std::endl;
-
-    // allocate / resize ray generation table
-    size_t numRayGens = raygenPrograms.size();
-    if (raygenTable && raygenTable->size != recordSize * numRayGens) {
-      raygenTable->destroy();
-      delete raygenTable;
-      raygenTable = nullptr;
-    }
-    if (!raygenTable && raygenPrograms.size() > 0) {
-      raygenTable =
-          new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-                     memoryUsageFlags, recordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
-    }
-
-    // allocate / resize miss table
-    size_t numMissProgs = missPrograms.size();
-    if (missTable && missTable->size != recordSize * numMissProgs) {
-      missTable->destroy();
-      delete missTable;
-      missTable = nullptr;
-    }
-    if (!missTable && missPrograms.size() > 0) {
-      missTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE, bufferUsageFlags,
-                             memoryUsageFlags, recordSize * numMissProgs,
-                             rayTracingPipelineProperties.shaderGroupBaseAlignment);
-    }
-
-    // allocate / resize callable table
-    size_t numCallableProgs = callablePrograms.size();
-    if (callableTable && callableTable->size != recordSize * numCallableProgs) {
-      callableTable->destroy();
-      delete callableTable;
-      callableTable = nullptr;
-    }
-    if (!callableTable && callablePrograms.size() > 0) {
-      callableTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                 bufferUsageFlags, memoryUsageFlags, recordSize * numCallableProgs,
-                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
-    }
-
-    // allocate / resize hit group table
-    size_t numHitRecords = getNumHitRecords();
-    if (hitgroupTable && hitgroupTable->size != recordSize * numHitRecords) {
-      hitgroupTable->destroy();
-      delete hitgroupTable;
-      hitgroupTable = nullptr;
-    }
-    if (!hitgroupTable && numHitRecords > 0) {
-      hitgroupTable = new Buffer(physicalDevice, logicalDevice, allocator, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                 bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords,
-                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
-    }
-
-    // Raygen records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygenPrograms.size() > 0) {
-      raygenTable->map();
-      uint8_t *mapped = ((uint8_t *) (raygenTable->mapped));
-
-      for (uint32_t idx = 0; idx < raygenPrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
-
-        // First, copy handle
-        size_t recordOffset = recordStride * idx;
-        size_t handleOffset = handleStride * idx;
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        RayGen *raygen = raygenPrograms[idx];
-        memcpy(params, raygen->SBTRecord, raygen->recordSize);
-      }
-      raygenTable->unmap();
-    }
-
-    // Miss records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && missPrograms.size() > 0) {
-      missTable->map();
-      uint8_t *mapped = ((uint8_t *) (missTable->mapped));
-
-      for (uint32_t idx = 0; idx < missPrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
-
-        // First, copy handle
-        size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
-        size_t handleOffset = handleStride * idx + handleStride * numRayGens;
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        Miss *miss = missPrograms[idx];
-        memcpy(params, miss->SBTRecord, miss->recordSize);
-      }
-
-      missTable->unmap();
-    }
-
-    // Callable records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_CALLABLE) != 0 && callablePrograms.size() > 0) {
-      callableTable->map();
-      uint8_t *mapped = ((uint8_t *) (callableTable->mapped));
-
-      for (uint32_t idx = 0; idx < callablePrograms.size(); ++idx) {
-        size_t recordStride = recordSize;
-        size_t handleStride = handleSize;
-
-        // First, copy handle
-        size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
-        size_t handleOffset = handleStride * idx + handleStride * (numRayGens + numMissProgs);
-        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-        // Then, copy params following handle
-        recordOffset = recordOffset + handleSize;
-        uint8_t *params = mapped + recordOffset;
-        Callable *callable = callablePrograms[idx];
-        memcpy(params, callable->SBTRecord, callable->recordSize);
-      }
-
-      callableTable->unmap();
-    }
-
-    // Hit records
-    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_HITGROUP) != 0 && numHitRecords > 0) {
-      hitgroupTable->map();
-      uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
-
-      for (int tlasID = 0; tlasID < Accel::accels.size(); ++tlasID) {
-        Accel *tlas = Accel::accels[tlasID];
-        if (!tlas)
-          continue;
-        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-          // this is an issue, because if instances can be set on device, we
-          // don't have a list of instances we can iterate through and copy the
-          // SBT data... So, if we have a bunch of instances set by reference on
-          // device, we need to eventually do something smarter here...
-          // Todo, move this setup to the device...
-          instanceAccel->instancesBuffer->map();
-          gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
-
-          for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-            gprt::Instance instance = instances[blasID];
-            uint64_t accelAddr = instance.__gprtAccelAddress;
-            Accel *blas = Accel::accels[instance.__gprtInstanceIndex];
-
-            // Accel *blas = instanceAccel->instances[blasID];
-            if (blas->getType() != GPRT_INSTANCE_ACCEL) {
-              for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-                auto &geom = blas->geometries[geomID];
-
-                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-                  size_t recordStride = recordSize;
-                  size_t handleStride = handleSize;
-
-                  // First, copy handle
-                  size_t recordOffset =
-                      recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
-                  size_t handleOffset =
-                      handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset) +
-                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
-                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-                  // Then, copy params following handle
-                  recordOffset = recordOffset + handleSize;
-                  uint8_t *params = mapped + recordOffset;
-                  memcpy(params, geom->SBTRecord, geom->recordSize);
-
-                  // If implementing a software fallback, additionally memcpy data required for intersection testing
-                  uint8_t *internalParams = params + requestedFeatures.recordSize;
-                  if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
-                    LSSGeom *lss = (LSSGeom *) geom;
-                    LSSParameters isectParams;
-                    isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
-                    isectParams.endcap0 = lss->endcap0;
-                    isectParams.endcap1 = lss->endcap1;
-                    isectParams.exitTest = lss->exitTest;
-                    isectParams.numLSS = lss->index.count;
-                    memcpy(internalParams, &isectParams, sizeof(LSSParameters));
-                  }
-
-                  if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
-                    SphereGeom *s = (SphereGeom *) geom;
-                    SphereParameters isectParams;
-                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.exitTest = s->exitTest;
-                    memcpy(internalParams, &isectParams, sizeof(SphereParameters));
-                  }
-                }
-              }
-            } else {
-              LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
-            }
-          }
-
-          instanceAccel->instancesBuffer->unmap();
-        }
-      }
-      hitgroupTable->unmap();
-    }
-  }
-
-  // Update geometry record data in the record buffer for raster programs
-  if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RASTER) != 0) {
-    rasterRecordBuffer->map();
-    uint8_t *mapped = ((uint8_t *) (rasterRecordBuffer->mapped));
-    for (uint32_t i = 0; i < Geom::geoms.size(); ++i) {
-      size_t offset = recordSize * i;
-      uint8_t *params = mapped + offset;
-      memcpy(params, Geom::geoms[i]->SBTRecord, Geom::geoms[i]->recordSize);
-    }
-    rasterRecordBuffer->unmap();
-  }
-
-  // Update compute record data in the record buffer for compute programs
-  if ((flags & GPRTBuildSBTFlags::GPRT_SBT_COMPUTE) != 0) {
-    computeRecordBuffer->map();
-    uint8_t *mapped = ((uint8_t *) (computeRecordBuffer->mapped));
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      size_t offset = recordSize * i;
-      uint8_t *params = mapped + offset;
-      memcpy(params, Compute::computes[i]->SBTRecord, Compute::computes[i]->recordSize);
-    }
-    computeRecordBuffer->unmap();
-  }
-}
-
-void
-Context::buildPipeline() {
-  // If the number of textures has changed, we need to make a new
-  // descriptor pool
-  if (samplerDescriptorPool && previousNumSamplers != Sampler::samplers.size()) {
-    vkFreeDescriptorSets(logicalDevice, samplerDescriptorPool, 1, &samplerDescriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, samplerDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, samplerDescriptorPool, nullptr);
-    samplerDescriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating texture sampler space");
-  }
-  if (!samplerDescriptorPool) {
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLER;
-    poolSize.descriptorCount = std::max(uint32_t(Sampler::samplers.size()), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &samplerDescriptorPool));
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    binding.descriptorCount = poolSize.descriptorCount;
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    setLayoutBindingFlags.bindingCount = 1;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &samplerDescriptorSetLayout));
-
-    // Now, making the descriptor sets
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = samplerDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &samplerDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &samplerDescriptorSet));
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
-
-    // Image descriptors for the sampler array
-    std::vector<VkDescriptorImageInfo> samplerDescriptors(poolSize.descriptorCount);
-    for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-      VkSampler sampler = defaultSampler->sampler;
-      if (Sampler::samplers.size() > 0 && Sampler::samplers[i])
-        sampler = Sampler::samplers[i]->sampler;
-      samplerDescriptors[i].sampler = sampler;
-      samplerDescriptors[i].imageView = VK_NULL_HANDLE;
-    }
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = 0;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(Sampler::samplers.size());
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = samplerDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = samplerDescriptors.data();
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-
-    // Finally, keep track of if the texture count here changes
-    previousNumSamplers = poolSize.descriptorCount;
-  }
-
-  // If the number of texture1ds has changed, we need to make a new
-  // descriptor pool
-  if (texture1DDescriptorPool && previousNumTexture1Ds != Texture::texture1Ds.size()) {
-    vkFreeDescriptorSets(logicalDevice, texture1DDescriptorPool, 1, &texture1DDescriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, texture1DDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, texture1DDescriptorPool, nullptr);
-    texture1DDescriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating texture1D space");
-  }
-  if (!texture1DDescriptorPool) {
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    poolSize.descriptorCount = std::max(uint32_t(Texture::texture1Ds.size()), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture1DDescriptorPool));
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    binding.descriptorCount = poolSize.descriptorCount;
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    setLayoutBindingFlags.bindingCount = 1;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &texture1DDescriptorSetLayout));
-
-    // Now, making the descriptor sets
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = texture1DDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &texture1DDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture1DDescriptorSet));
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
-
-    // Image descriptors for the texture array
-    std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
-    for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-      VkImageView imageView = defaultTexture1D->imageView;
-      VkImageLayout layout = defaultTexture1D->layout;
-
-      if (Texture::texture1Ds.size() > 0 && Texture::texture1Ds[i]) {
-        imageView = Texture::texture1Ds[i]->imageView;
-        layout = Texture::texture1Ds[i]->layout;
-      }
-
-      textureDescriptors[i].imageView = imageView;
-      textureDescriptors[i].imageLayout = layout;
-    }
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = 0;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = texture1DDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-
-    // Finally, keep track of if the texture count here changes
-    previousNumTexture1Ds = (uint32_t) Texture::texture1Ds.size();
-  }
-
-  // If the number of texture2ds has changed, we need to make a new
-  // descriptor pool
-  if (texture2DDescriptorPool && previousNumTexture2Ds != Texture::texture2Ds.size()) {
-    vkFreeDescriptorSets(logicalDevice, texture2DDescriptorPool, 1, &texture2DDescriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, texture2DDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, texture2DDescriptorPool, nullptr);
-    texture2DDescriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating texture2D space");
-  }
-  if (!texture2DDescriptorPool) {
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    poolSize.descriptorCount = std::max(uint32_t(Texture::texture2Ds.size()), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture2DDescriptorPool));
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    binding.descriptorCount = poolSize.descriptorCount;
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    setLayoutBindingFlags.bindingCount = 1;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &texture2DDescriptorSetLayout));
-
-    // Now, making the descriptor sets
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = texture2DDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &texture2DDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture2DDescriptorSet));
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
-
-    // Image descriptors for the texture array
-    std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
-    for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-      VkImageView imageView = defaultTexture2D->imageView;
-      VkImageLayout layout = defaultTexture2D->layout;
-
-      if (Texture::texture2Ds.size() > 0 && Texture::texture2Ds[i]) {
-        imageView = Texture::texture2Ds[i]->imageView;
-        layout = Texture::texture2Ds[i]->layout;
-      }
-
-      textureDescriptors[i].imageView = imageView;
-      textureDescriptors[i].imageLayout = layout;
-    }
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = 0;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = texture2DDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-
-    // Finally, keep track of if the texture count here changes
-    previousNumTexture2Ds = (uint32_t) Texture::texture2Ds.size();
-  }
-
-  // If the number of texture3ds has changed, we need to make a new
-  // descriptor pool
-  if (texture3DDescriptorPool && previousNumTexture3Ds != Texture::texture3Ds.size()) {
-    vkFreeDescriptorSets(logicalDevice, texture3DDescriptorPool, 1, &texture3DDescriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, texture3DDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, texture3DDescriptorPool, nullptr);
-    texture3DDescriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating texture3D space");
-  }
-  if (!texture3DDescriptorPool) {
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    poolSize.descriptorCount = std::max(uint32_t(Texture::texture3Ds.size()), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &texture3DDescriptorPool));
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    binding.descriptorCount = poolSize.descriptorCount;
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    setLayoutBindingFlags.bindingCount = 1;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT};
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &texture3DDescriptorSetLayout));
-
-    // Now, making the descriptor sets
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(poolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = texture3DDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &texture3DDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &texture3DDescriptorSet));
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(1);
-
-    // Image descriptors for the texture array
-    std::vector<VkDescriptorImageInfo> textureDescriptors(poolSize.descriptorCount);
-    for (size_t i = 0; i < poolSize.descriptorCount; i++) {
-      VkImageView imageView = defaultTexture3D->imageView;
-      VkImageLayout layout = defaultTexture3D->layout;
-
-      if (Texture::texture3Ds.size() > 0 && Texture::texture3Ds[i]) {
-        imageView = Texture::texture3Ds[i]->imageView;
-        layout = Texture::texture3Ds[i]->layout;
-      }
-
-      textureDescriptors[i].imageView = imageView;
-      textureDescriptors[i].imageLayout = layout;
-    }
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = 0;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[0].descriptorCount = static_cast<uint32_t>(poolSize.descriptorCount);
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = texture3DDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = textureDescriptors.data();
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-
-    // Finally, keep track of if the texture count here changes
-    previousNumTexture3Ds = (uint32_t) Texture::texture3Ds.size();
-  }
-
-  // If the number of raster records has changed, we need to make a new buffer of
-  // raster program records
-  if (rasterRecordBuffer && previousNumRasterRecords != Geom::geoms.size()) {
-    rasterRecordBuffer->destroy();
-    delete rasterRecordBuffer;
-    rasterRecordBuffer = nullptr;
-
-    LOG_INFO("Reallocating rasterizer record space");
-  }
-  if (!rasterRecordBuffer) {
-    // Create buffer to contain uniform buffer data
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        // means we can use this buffer to transfer into another
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-        // means we can use this buffer to receive data transferred from another
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        // means we can use this buffer as a uniform buffer
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-        // means we can use this buffer as a storage buffer
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                          // device access
-
-    auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-      return (value + alignment - 1) & ~(alignment - 1);
-    };
-
-    auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
-
-    const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-    rasterRecordBuffer =
-        new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                   memoryUsageFlags, recordSize * std::max(size_t(1), Geom::geoms.size()),
-                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
-
-    // Uniform buffer descriptors for each geometry's record
-    VkDescriptorBufferInfo uniformBufferDescriptor;
-    VkWriteDescriptorSet writeDescriptorSet;
-    uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
-    uniformBufferDescriptor.buffer = rasterRecordBuffer->buffer;
-    uniformBufferDescriptor.range = recordSize;
-
-    writeDescriptorSet = {};
-    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSet.dstBinding = 0;
-    writeDescriptorSet.dstArrayElement = 0;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
-    writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
-    writeDescriptorSet.pImageInfo = 0;
-    writeDescriptorSet.dstSet = rasterRecordDescriptorSet;
-
-    // We'll write these descriptors now, but the actual recordBuffer will be written to later.
-    vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
-
-    // We're only updating an existing descriptor set here, so we don't
-    // need to mark our raster pipelines as "outdated" from this.
-
-    // Finally, keep track of if the record count here changes
-    previousNumRasterRecords = (uint32_t) Geom::geoms.size();
-  }
-
-  // If the number of compute records has changed, we need to make a new buffer of
-  // compute records
-  if (computeRecordBuffer && previousNumComputeRecords != Compute::computes.size()) {
-    computeRecordBuffer->destroy();
-    delete computeRecordBuffer;
-    computeRecordBuffer = nullptr;
-
-    LOG_INFO("Reallocating compute record space");
-  }
-  if (!computeRecordBuffer) {
-    // Create buffer to contain uniform buffer data
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        // means we can use this buffer to transfer into another
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-        // means we can use this buffer to receive data transferred from another
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        // means we can use this buffer as a uniform buffer
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-        // means we can use this buffer as a storage buffer
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                          // device access
-
-    auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-      return (value + alignment - 1) & ~(alignment - 1);
-    };
-
-    auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
-
-    const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-    computeRecordBuffer =
-        new Buffer(physicalDevice, logicalDevice, allocator, graphicsCommandBuffer, graphicsQueue, bufferUsageFlags,
-                   memoryUsageFlags, recordSize * std::max(size_t(1), Compute::computes.size()),
-                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
-
-    // Uniform buffer descriptors for each geometry's record
-    VkDescriptorBufferInfo uniformBufferDescriptor;
-    VkWriteDescriptorSet writeDescriptorSet;
-    uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
-    uniformBufferDescriptor.buffer = computeRecordBuffer->buffer;
-    uniformBufferDescriptor.range = recordSize;
-
-    writeDescriptorSet = {};
-    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSet.dstBinding = 0;
-    writeDescriptorSet.dstArrayElement = 0;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
-    writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
-    writeDescriptorSet.pImageInfo = 0;
-    writeDescriptorSet.dstSet = computeRecordDescriptorSet;
-
-    // We'll write these descriptors now, but the actual recordBuffer will be written to later.
-    vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
-
-    // We're only updating an existing descriptor set here, so we don't
-    // need to mark our compute pipelines as "outdated" from this.
-
-    // Finally, keep track of if the record count here changes
-    previousNumComputeRecords = (uint32_t) Compute::computes.size();
-  }
-
   // Build / update the ray tracing pipeline if required
   if (raytracingPipelineOutOfDate) {
     LOG_INFO("Building ray tracing pipeline");
@@ -7221,10 +4031,9 @@ Context::buildPipeline() {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI{};
     pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {
-        computeRecordDescriptorSetLayout /* not actually using this one, but VK wants something valid...*/,
-        samplerDescriptorSetLayout, texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-        texture3DDescriptorSetLayout};
+
+    // testing new mutable descriptor setup
+    std::vector<VkDescriptorSetLayout> layouts = {descriptorSetLayout};
     pipelineLayoutCI.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCI.pSetLayouts = layouts.data();
 
@@ -7245,7 +4054,7 @@ Context::buildPipeline() {
 
     // Ray generation stages / groups
     {
-      for (auto raygen : raygenPrograms) {
+      for (auto raygen : raygens) {
         shaderStages.push_back(raygen->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -7260,7 +4069,7 @@ Context::buildPipeline() {
 
     // Miss stages / groups
     {
-      for (auto miss : missPrograms) {
+      for (auto miss : misses) {
         shaderStages.push_back(miss->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -7275,7 +4084,7 @@ Context::buildPipeline() {
 
     // Callable stages / groups
     {
-      for (auto callable : callablePrograms) {
+      for (auto callable : callables) {
         shaderStages.push_back(callable->shaderStage);
         VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
         shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
@@ -7289,121 +4098,65 @@ Context::buildPipeline() {
     }
 
     // Hit groups
-
-    // First, clear any previously assigned stage addresses
     {
-      for (auto geomType : GeomType::geomTypes) {
-        geomType->closestHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->anyHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->intersectionShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-      }
-    }
+      for (uint32_t i = 0; i < geomTypes.size(); ++i) {
+        auto &geomType = geomTypes[i];
+        VkRayTracingShaderGroupTypeKHR shaderGroupType;
 
-    // Go over all TLAS by order they were created
-    for (uint32_t tlasID = 0; tlasID < Accel::accels.size(); ++tlasID) {
-      Accel *tlas = Accel::accels[tlasID];
-      if (!tlas)
-        continue;
-      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-        // Iterate over all BLAS stored in the TLAS
-        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-
-        // Skip instances whose instance buffers have not yet been set.
-        if (!instanceAccel->instancesBuffer)
-          continue;
-
-        // Todo, move this setup to the device...
-        instanceAccel->instancesBuffer->map();
-        gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
-
-        for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-          // First, need to make a map from accel address back to gprt accel*...
-          uint64_t accelAddr = instances[blasID].__gprtAccelAddress;
-
-          // Uninitialized accel
-          if (accelAddr == 0)
-            continue;
-
-          Accel *blas = Accel::accels[instances[blasID].__gprtInstanceIndex];
-          VkRayTracingShaderGroupTypeKHR shaderGroupType;
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_AABB_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_LSS_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
-          } else if (blas->getType() == GPRT_SPHERE_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
+        if (geomType->getKind() == GPRT_TRIANGLES)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_AABBS)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_LSS) {
+          if (requestedFeatures.linearSweptSpheres) {
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
           } else {
-            LOG_ERROR("Unsupported blas type found in TLAS.");
+            // AABB fallback
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
-
-          // Add a record for every geometry-raytype permutation
-          for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-            auto &geom = blas->geometries[geomID];
-            for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-
-              VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-              shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-              shaderGroup.type = shaderGroupType;
-
-              // init all to unused
-              shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-              // populate hit group programs using geometry type, recycling any previously referenced shader stages
-              if (geom->geomType->intersectionShaderUsed[rayType]) {
-                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->anyHitShaderUsed[rayType]) {
-                if (geom->geomType->anyHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  geom->geomType->anyHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.anyHitShader = geom->geomType->anyHitShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->closestHitShaderUsed[rayType]) {
-                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
-              }
-
-              // If no shaders specified, throw an error. We need at least one...
-              // if (shaderGroup.closestHitShader == VK_SHADER_UNUSED_KHR && shaderGroup.anyHitShader == VK_SHADER_UNUSED_KHR) 
-              // {
-              //   LOG_ERROR("Geometry type has no programs assigned for ray type " + std::to_string(rayType));
-              // }
-
-              shaderGroups.push_back(shaderGroup);
-            }
+        } else if (geomType->getKind() == GPRT_SPHERES) {
+          if (requestedFeatures.linearSweptSpheres) {
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+          } else {
+            // AABB fallback
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
+        } else {
+          LOG_ERROR("Unsupported geometry type found.");
         }
 
-        instanceAccel->instancesBuffer->unmap();
+        for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = shaderGroupType;
+
+          // init all to unused
+          shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+          // populate hit group programs using geometry type, recycling any previously referenced shader stages
+          if (geomType->closestHitShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
+            shaderGroup.closestHitShader = int(shaderStages.size() - 1);
+          }
+
+          if (geomType->anyHitShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
+            shaderGroup.anyHitShader = int(shaderStages.size() - 1);
+          }
+
+          if (geomType->intersectionShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
+            shaderGroup.intersectionShader = int(shaderStages.size() - 1);
+          }
+          shaderGroups.push_back(shaderGroup);
+        }
       }
     }
 
-    if (RayGen::raygens.size() > 0) {
+    if (raygens.size() > 0) {
       /*
         Create the ray tracing pipeline
       */
@@ -7440,31 +4193,2103 @@ Context::buildPipeline() {
     raytracingPipelineOutOfDate = false;
   }
 
-  // Build / update the compute pipelines if required
-  if (computePipelinesOutOfDate) {
-    for (uint32_t i = 0; i < Compute::computes.size(); ++i) {
-      if (!Compute::computes[i])
-        continue;
-      Compute::computes[i]->buildPipeline(computeRecordDescriptorSetLayout, samplerDescriptorSetLayout,
-                                          texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-                                          texture3DDescriptorSetLayout);
-    }
-    computePipelinesOutOfDate = false;
+  const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
+  const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
+  const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
+  const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
+
+  if (requestedFeatures.recordSize > maxGroupSize) {
+    LOG_ERROR("Requested record size is too large! Max record size for this platform is " +
+              std::to_string(maxGroupSize) + " bytes.");
   }
 
-  // Build / update the raster pipelines if required
-  if (rasterPipelinesOutOfDate) {
-    for (uint32_t i = 0; i < GeomType::geomTypes.size(); ++i) {
-      if (!GeomType::geomTypes[i])
-        continue;
-      for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
-        GeomType::geomTypes[i]->buildRasterPipeline(rasterType, rasterRecordDescriptorSetLayout,
-                                                    samplerDescriptorSetLayout, texture1DDescriptorSetLayout,
-                                                    texture2DDescriptorSetLayout, texture3DDescriptorSetLayout);
+  // Doubling the record size to allow GPRT to store internal facing data
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+
+  // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
+  // we might only have raster programs, and no RT programs.
+  if (raygens.size() > 0) {
+    const uint32_t groupCount = static_cast<uint32_t>(shaderGroups.size());
+    const uint32_t sbtSize = groupCount * handleSize;
+
+    std::vector<uint8_t> shaderHandleStorage(sbtSize);
+    VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
+                                                           shaderHandleStorage.data());
+    if (err)
+      LOG_ERROR("failed to get ray tracing shader group handles! : \n" + errorString(err));
+
+    const VkBufferUsageFlags bufferUsageFlags =
+        // means we can use this buffer as a SBT
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+        // means we can get this buffer's address with vkGetBufferDeviceAddress
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        // means we can use this buffer as a storage buffer resource
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
+                                                                                           // vkMapMemory
+                                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
+                                                                                           // "invalidate" not needed
+
+    // std::cout<<"Todo, get some smarter memory allocation working..."
+    // <<std::endl;
+
+    // allocate / resize ray generation table
+    size_t numRayGens = raygens.size();
+    if (raygenTable && raygenTable->size != recordSize * numRayGens) {
+      raygenTable->destroy();
+      delete raygenTable;
+      raygenTable = nullptr;
+    }
+    if (!raygenTable && raygens.size() > 0) {
+      raygenTable =
+          new Buffer(this, bufferUsageFlags,
+                     memoryUsageFlags, recordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
+    }
+
+    // allocate / resize miss table
+    size_t numMissProgs = misses.size();
+    if (missTable && missTable->size != recordSize * numMissProgs) {
+      missTable->destroy();
+      delete missTable;
+      missTable = nullptr;
+    }
+    if (!missTable && misses.size() > 0) {
+      missTable = new Buffer(this, bufferUsageFlags,
+                             memoryUsageFlags, recordSize * numMissProgs,
+                             rayTracingPipelineProperties.shaderGroupBaseAlignment);
+    }
+
+    // allocate / resize callable table
+    size_t numCallableProgs = callables.size();
+    if (callableTable && callableTable->size != recordSize * numCallableProgs) {
+      callableTable->destroy();
+      delete callableTable;
+      callableTable = nullptr;
+    }
+    if (!callableTable && callables.size() > 0) {
+      callableTable = new Buffer(this,
+                                 bufferUsageFlags, memoryUsageFlags, recordSize * numCallableProgs,
+                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
+    }
+
+    // allocate / resize hit group table
+    size_t numHitRecords = getNumHitRecords();
+    if (hitgroupTable && hitgroupTable->size != recordSize * numHitRecords) {
+      hitgroupTable->destroy();
+      delete hitgroupTable;
+      hitgroupTable = nullptr;
+    }
+    if (!hitgroupTable && numHitRecords > 0) {
+      hitgroupTable = new Buffer(this,
+                                 bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords,
+                                 rayTracingPipelineProperties.shaderGroupBaseAlignment);
+    }
+
+    // Raygen records
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RAYGEN) != 0 && raygens.size() > 0) {
+      raygenTable->map();
+      uint8_t *mapped = ((uint8_t *) (raygenTable->mapped));
+
+      for (uint32_t idx = 0; idx < raygens.size(); ++idx) {
+        size_t recordStride = recordSize;
+        size_t handleStride = handleSize;
+
+        // First, copy handle
+        size_t recordOffset = recordStride * idx;
+        size_t handleOffset = handleStride * idx;
+        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+        // Then, copy params following handle
+        recordOffset = recordOffset + handleSize;
+        uint8_t *params = mapped + recordOffset;
+        RayGen *raygen = raygens[idx];
+        memcpy(params, raygen->SBTRecord, raygen->recordSize);
+      }
+      raygenTable->unmap();
+    }
+
+    // Miss records
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_MISS) != 0 && misses.size() > 0) {
+      missTable->map();
+      uint8_t *mapped = ((uint8_t *) (missTable->mapped));
+
+      for (uint32_t idx = 0; idx < misses.size(); ++idx) {
+        size_t recordStride = recordSize;
+        size_t handleStride = handleSize;
+
+        // First, copy handle
+        size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
+        size_t handleOffset = handleStride * idx + handleStride * numRayGens;
+        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+        // Then, copy params following handle
+        recordOffset = recordOffset + handleSize;
+        uint8_t *params = mapped + recordOffset;
+        Miss *miss = misses[idx];
+        memcpy(params, miss->SBTRecord, miss->recordSize);
+      }
+
+      missTable->unmap();
+    }
+
+    // Callable records
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_CALLABLE) != 0 && callables.size() > 0) {
+      callableTable->map();
+      uint8_t *mapped = ((uint8_t *) (callableTable->mapped));
+
+      for (uint32_t idx = 0; idx < callables.size(); ++idx) {
+        size_t recordStride = recordSize;
+        size_t handleStride = handleSize;
+
+        // First, copy handle
+        size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
+        size_t handleOffset = handleStride * idx + handleStride * (numRayGens + numMissProgs);
+        memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+        // Then, copy params following handle
+        recordOffset = recordOffset + handleSize;
+        uint8_t *params = mapped + recordOffset;
+        Callable *callable = callables[idx];
+        memcpy(params, callable->SBTRecord, callable->recordSize);
+      }
+
+      callableTable->unmap();
+    }
+
+    // Hit records
+    if ((flags & GPRTBuildSBTFlags::GPRT_SBT_HITGROUP) != 0 && numHitRecords > 0) {
+      hitgroupTable->map();
+      uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
+
+      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+        Accel *tlas = accels[tlasID];
+        if (!tlas)
+          continue;
+        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+          // this is an issue, because if instances can be set on device, we
+          // don't have a list of instances we can iterate through and copy the
+          // SBT data... So, if we have a bunch of instances set by reference on
+          // device, we need to eventually do something smarter here...
+          // Todo, move this setup to the device...
+          instanceAccel->instancesBuffer->map();
+          gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+
+          for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
+            gprt::Instance instance = instances[blasID];
+            uint64_t accelAddr = instance.__gprtAccelAddress;
+            Accel *blas = accels[instance.__gprtSBTOffset];
+
+            // Accel *blas = instanceAccel->instances[blasID];
+            if (blas->getType() != GPRT_INSTANCE_ACCEL) {
+              for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
+                auto &geom = blas->geometries[geomID];
+
+                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+                  size_t recordStride = recordSize;
+                  size_t handleStride = handleSize;
+
+                  // First, copy handle
+                  size_t recordOffset =
+                      recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
+                  size_t handleOffset =
+                      handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
+                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
+                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+                  // Then, copy params following handle
+                  recordOffset = recordOffset + handleSize;
+                  uint8_t *params = mapped + recordOffset;
+                  memcpy(params, geom->SBTRecord, geom->recordSize);
+
+                  // If implementing a software fallback, additionally memcpy data required for intersection testing
+                  uint8_t *internalParams = params + (requestedFeatures.recordSize);
+                  if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+                    LSSGeom *lss = (LSSGeom *) geom;
+                    LSSParameters isectParams;
+                    isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+                    isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+                    isectParams.endcap0 = lss->endcap0;
+                    isectParams.endcap1 = lss->endcap1;
+                    isectParams.exitTest = lss->exitTest;
+                    isectParams.numLSS = lss->index.count;
+                    memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+                  }
+
+                  if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+                    SphereGeom *s = (SphereGeom *) geom;
+                    SphereParameters isectParams;
+                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+                    isectParams.exitTest = s->exitTest;
+                    memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+                  }
+                }
+              }
+            } else {
+              LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
+            }
+          }
+
+          instanceAccel->instancesBuffer->unmap();
+        }
+      }
+      hitgroupTable->unmap();
+    }
+  }
+}
+
+void
+Context::destroy() {
+  if (descriptorSet) {
+    vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
+    descriptorSet = nullptr;
+  }
+
+  if (descriptorSetLayout) {
+    vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+    descriptorSetLayout = nullptr;
+  }
+
+  if (descriptorPool) {
+    vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+    descriptorPool = nullptr;
+  }
+  
+  if (imguiPool) {
+    vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
+    imguiPool = nullptr;
+  }
+  if (imgui.renderPass) {
+    ImGui_ImplVulkan_Shutdown();
+    vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+    imgui.renderPass = nullptr;
+  }
+  if (imgui.frameBuffer) {
+    vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+    imgui.frameBuffer = nullptr;
+  }
+
+  if (imageAvailableSemaphore) {
+    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+    imageAvailableSemaphore = nullptr;
+  }
+  if (renderFinishedSemaphore) {
+    vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+    renderFinishedSemaphore = nullptr;
+  }
+
+  if (inFlightFence) {
+    vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+    inFlightFence = nullptr;
+  }
+
+  if (swapchain) {
+    vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+    swapchain = nullptr;
+  }
+  if (window) {
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    window = nullptr;
+  }
+  if (surface) {
+    vkDestroySurfaceKHR(instance, surface, nullptr);
+    surface = nullptr;
+  }
+
+  if (raytracingPipelineLayout) {
+    vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+    raytracingPipelineLayout = nullptr;
+  }
+  if (raytracingPipeline) {
+    vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+    raytracingPipeline = nullptr;
+  }
+
+  // if (fillInstanceDataStage.layout) {
+  //   vkDestroyPipelineLayout(logicalDevice, fillInstanceDataStage.layout, nullptr);
+  //   fillInstanceDataStage.layout = nullptr;
+  // }
+  // if (fillInstanceDataStage.pipeline) {
+  //   vkDestroyPipeline(logicalDevice, fillInstanceDataStage.pipeline, nullptr);
+  //   fillInstanceDataStage.pipeline = nullptr;
+  // }
+  // if (fillInstanceDataStage.module) {
+  //   vkDestroyShaderModule(logicalDevice, fillInstanceDataStage.module, nullptr);
+  //   fillInstanceDataStage.module = nullptr;
+  // }
+
+  destroyInternalPrograms();
+
+  if (raygenTable) {
+    raygenTable->destroy();
+    delete raygenTable;
+    raygenTable = nullptr;
+  }
+  if (missTable) {
+    missTable->destroy();
+    delete missTable;
+    missTable = nullptr;
+  }
+  if (hitgroupTable) {
+    hitgroupTable->destroy();
+    delete hitgroupTable;
+    hitgroupTable = nullptr;
+  }
+
+  descriptorPoolSize = {};
+
+  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
+  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
+  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
+  vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
+  vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
+  vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+
+  // verify these are all cleared.
+  for (uint32_t i = 0; i < geomTypes.size(); ++i) {
+    if (geomTypes[i] != nullptr) {
+      geomTypes[i]->destroy();
+    }
+  }
+  geomTypes.resize(0);
+
+  for (uint32_t i = 0; i < accels.size(); ++i) {
+    if (accels[i] != nullptr) {
+      accels[i]->destroy();
+    }
+  }
+  accels.resize(0);
+
+  for (uint32_t i = 0; i < buffers.size(); ++i) {
+    if (buffers[i] != nullptr) {
+      buffers[i]->destroy();
+    }
+  }
+  buffers.resize(0);
+
+  for (uint32_t i = 0; i < imageResources.size(); ++i) {
+    if (imageResources[i] != nullptr) {
+      imageResources[i]->destroy();
+    }
+  }
+  imageResources.resize(0);
+
+  for (uint32_t i = 0; i < computes.size(); ++i) {
+    if (computes[i] != nullptr) {
+      computes[i]->destroy();
+    }
+  }
+  computes.resize(0);
+
+  for (uint32_t i = 0; i < raygens.size(); ++i) {
+    if (raygens[i] != nullptr) {
+      raygens[i]->destroy();
+    }
+  }
+  raygens.resize(0);
+
+  for (uint32_t i = 0; i < misses.size(); ++i) {
+    if (misses[i] != nullptr) {
+      misses[i]->destroy();
+    }
+  }
+  misses.resize(0);
+
+  for (uint32_t i = 0; i < modules.size(); ++i) {
+    if (modules[i] != nullptr) {
+      modules[i]->destroy();
+    }
+  }
+  modules.resize(0);
+
+  vmaDestroyAllocator(allocator);
+
+  vkDestroyQueryPool(logicalDevice, queryPool, nullptr);
+  vkDestroyQueryPool(logicalDevice, compactedSizeQueryPool, nullptr);
+  vkDestroyDevice(logicalDevice, nullptr);
+
+  if (requestedFeatures.debugPrintf)
+    freeDebugCallback(instance);
+  vkDestroyInstance(instance, nullptr);
+}
+
+void
+Context::freeDebugCallback(VkInstance instance) {
+  if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
+    gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
+  }
+}
+
+Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+  appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  appInfo.pApplicationName = "GPRT";
+  appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+  appInfo.pEngineName = "GPRT";
+  appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+  appInfo.apiVersion = VK_API_VERSION_1_2;
+  appInfo.pNext = VK_NULL_HANDLE;
+
+  /// 1. Create Instance
+  std::vector<const char *> instanceExtensions;   // = { VK_KHR_SURFACE_EXTENSION_NAME };
+#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+  instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#endif
+
+  // Get extensions supported by the instance and store for later use
+  uint32_t instExtCount = 0;
+  vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
+  if (instExtCount > 0) {
+    std::vector<VkExtensionProperties> extensions(instExtCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &extensions.front()) == VK_SUCCESS) {
+      for (VkExtensionProperties extension : extensions) {
+        supportedInstanceExtensions.push_back(extension.extensionName);
       }
     }
-    rasterPipelinesOutOfDate = false;
   }
+
+  // Enabled requested instance extensions
+  if (enabledInstanceExtensions.size() > 0) {
+    for (const char *enabledExtension : enabledInstanceExtensions) {
+      // Output message if requested extension is not available
+      if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) ==
+          supportedInstanceExtensions.end()) {
+        std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
+      }
+      instanceExtensions.push_back(enabledExtension);
+    }
+  }
+
+  VkValidationFeatureEnableEXT enabled[] = {VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT};
+  VkValidationFeaturesEXT validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
+  validationFeatures.disabledValidationFeatureCount = 0;
+  validationFeatures.enabledValidationFeatureCount = 1;
+  validationFeatures.pDisabledValidationFeatures = nullptr;
+  validationFeatures.pEnabledValidationFeatures = enabled;
+
+  VkInstanceCreateInfo instanceCreateInfo{};
+  instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  instanceCreateInfo.pApplicationInfo = &appInfo;
+  // instanceCreateInfo.pNext = VK_NULL_HANDLE;
+
+  if (requestedFeatures.debugPrintf) {
+    instanceCreateInfo.pNext = &validationFeatures;
+  } else {
+    LOG_WARNING("Debug printf disabled");
+    instanceCreateInfo.pNext = VK_NULL_HANDLE;
+  }
+
+  uint32_t glfwExtensionCount = 0;
+  const char **glfwExtensions;
+  if (requestedFeatures.window) {
+    if (!glfwInit()) {
+      LOG_WARNING("Unable to create window. Falling back to headless mode.");
+      requestedFeatures.window = false;
+    } else {
+      if (!glfwVulkanSupported()) {
+        LOG_ERROR("Window requested but unsupported!");
+      }
+      glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+      for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+        instanceExtensions.push_back(glfwExtensions[i]);
+      }
+    }
+  }
+
+#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+  instanceCreateInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+  // Useful to disable, since some profiling tools don't support this.
+  if (requestedFeatures.debugPrintf) {
+    instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  }
+
+  if (instanceExtensions.size() > 0) {
+    instanceCreateInfo.enabledExtensionCount = (uint32_t) instanceExtensions.size();
+    instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
+  }
+
+  // need this for printf to work
+  const char *layerNames[1] = {"VK_LAYER_KHRONOS_validation"};
+  instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
+
+  if (requestedFeatures.debugPrintf) {
+    instanceCreateInfo.enabledLayerCount = 1;
+  } else {
+    instanceCreateInfo.enabledLayerCount = 0;
+  }
+
+  VkResult err;
+
+  err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
+  if (err) {
+    LOG_ERROR("failed to create instance! : \n" + errorString(err));
+  }
+
+  /// 1.5 - create a window and surface if requested
+  if (requestedFeatures.window) {
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    // todo, allow the window to resize and recreate swapchain
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
+                              requestedFeatures.windowProperties.initialHeight,
+                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
+
+    VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+    if (err != VK_SUCCESS) {
+      LOG_ERROR("failed to create window surface! : \n" + errorString(err));
+    }
+    // Poll some initial event values
+    glfwPollEvents();
+  }
+
+  // Setup debug printf callback
+  if (requestedFeatures.debugPrintf) {
+    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debugUtilsMessengerCI.messageSeverity =
+        // VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+        // | VK_DEBUG_REPORT_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+        // | VK_DEBUG_REPORT_ERROR_BIT_EXT
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
+    debugUtilsMessengerCI.messageType =
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
+    VkResult result =
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+    assert(result == VK_SUCCESS);
+  }
+
+  /// 2. Select a Physical Device
+
+  // Physical device
+  uint32_t gpuCount = 0;
+  // Get number of available physical devices
+  VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
+  if (gpuCount == 0) {
+    LOG_ERROR("No device with Vulkan support found : \n" + errorString(err));
+  }
+  // Enumerate devices
+  std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
+  err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
+  if (err) {
+    LOG_ERROR("Could not enumerate physical devices : \n" + errorString(err));
+  }
+
+  // GPU selection
+
+  auto physicalDeviceTypeString = [](VkPhysicalDeviceType type) -> std::string {
+    switch (type) {
+#define STR(r)                                                                                                         \
+  case VK_PHYSICAL_DEVICE_TYPE_##r:                                                                                    \
+    return #r
+      STR(OTHER);
+      STR(INTEGRATED_GPU);
+      STR(DISCRETE_GPU);
+      STR(VIRTUAL_GPU);
+      STR(CPU);
+#undef STR
+    default:
+      return "UNKNOWN_DEVICE_TYPE";
+    }
+  };
+
+  auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
+    return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
+  };
+
+  /* function that checks if the selected physical device meets requirements
+   */
+  auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions) -> bool {
+    uint32_t extensionCount;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+    std::set<std::string> requiredExtensions;
+    for (auto &cstr : deviceExtensions) {
+      requiredExtensions.insert(std::string(cstr));
+    }
+
+    for (const auto &extension : availableExtensions) {
+      requiredExtensions.erase(extension.extensionName);
+    }
+
+    return requiredExtensions.empty();
+  };
+
+  // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
+  // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
+  // components, without additional requirements.
+  enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
+
+  // Allows storing different descriptor types in the same binding.
+  enabledDeviceExtensions.push_back(VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+
+  // Ray tracing related extensions required
+  enabledDeviceExtensions.push_back(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+
+  // Ray tracing related extensions required
+  enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+
+  // Required by VK_KHR_acceleration_structure
+  enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+
+  enabledDeviceExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+
+  // Required for VK_KHR_ray_tracing_pipeline
+  enabledDeviceExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+
+  // required for vulkan memory model stuff
+  enabledDeviceExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
+
+  // Required by VK_KHR_spirv_1_4
+  enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+
+  // Required for floating point atomics
+  enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+
+  if (requestedFeatures.window) {
+    // If the device will be used for presenting to a display via a swapchain
+    // we need to request the swapchain extension
+    enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+  }
+
+  if (requestedFeatures.rayQueries) {
+    // If the device will be using ray queries for inline ray tracing,
+    // we need to explicitly request this.
+    enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+  }
+
+  if (requestedFeatures.invocationReordering) {
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+  }
+
+#if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
+  enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
+
+  // Select physical device to be used
+  // Defaults to the first device unless specified by command line
+  uint32_t selectedDevice = -1;   // TODO
+
+  std::vector<uint32_t> usableDevices;
+
+  LOG_INFO("Searching for usable Vulkan physical device...");
+  for (uint32_t i = 0; i < gpuCount; i++) {
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+    std::string message =
+        std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
+    message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
+    message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".") +
+               std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".") +
+               std::to_string(deviceProperties.apiVersion & 0xfff);
+    LOG_INFO(message);
+
+    if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
+      usableDevices.push_back(i);
+      LOG_INFO("\tFound usable device");
+    } else {
+      // Get list of supported extensions
+      uint32_t devExtCount = 0;
+      vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, nullptr);
+      std::vector<VkExtensionProperties> extensions(devExtCount);
+      std::vector<std::string> supportedExtensions;
+      if (vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, &extensions.front()) ==
+          VK_SUCCESS) {
+        for (auto ext : extensions) {
+          supportedExtensions.push_back(ext.extensionName);
+        }
+      }
+
+      for (const char *enabledExtension : enabledDeviceExtensions) {
+        if (!extensionSupported(enabledExtension, supportedExtensions)) {
+          LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
+        }
+      }
+    }
+  }
+
+  if (usableDevices.size() == 0) {
+    LOG_ERROR("Unable to find physical device meeting requirements");
+  } else {
+    uint32_t requestedDevice = 0;
+
+    if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
+      LOG_INFO("Selecting first usable device");
+    } else if (numRequestedDevices > 1) {
+      LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
+    } else {
+      requestedDevice = requestedDeviceIDs[0];
+      if (requestedDevice > usableDevices.size()) {
+        LOG_ERROR("Requested device is out of range!");
+      }
+    }
+    selectedDevice = usableDevices[requestedDevice];
+  }
+
+  physicalDevice = physicalDevices[selectedDevice];
+
+  // Store properties (including limits), features and memory properties of
+  // the physical device Device properties also contain limits and sparse
+  // properties
+  vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+
+  subgroupProperties = {};
+  subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+  subgroupProperties.pNext = NULL;
+
+  rayTracingPipelineProperties = {};
+  rayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+  rayTracingPipelineProperties.pNext = &subgroupProperties;
+
+  deviceProperties2 = {};
+  deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  deviceProperties2.pNext = &rayTracingPipelineProperties;
+  vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
+
+  // Features should be checked by the end application before using them
+  void *pNext = nullptr;
+  // VkPhysicalDeviceFloatControlsPropertiesKHR floatControlsProperties = {
+  //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR};
+  // floatControlsProperties.denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
+  // floatControlsProperties.pNext = pNext;
+  // pNext = &floatControlsProperties;
+
+  mutableDescriptorFeatures = {};
+  mutableDescriptorFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT;
+  mutableDescriptorFeatures.mutableDescriptorType = true;
+  pNext = &mutableDescriptorFeatures;
+
+  atomicFloatFeatures = {};
+  atomicFloatFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+  atomicFloatFeatures.shaderBufferFloat32Atomics = true;
+  atomicFloatFeatures.shaderSharedFloat32Atomics = true;
+  atomicFloatFeatures.pNext = pNext;
+  pNext = &atomicFloatFeatures;
+
+  // VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT atomicFloat2Features = {};
+  // atomicFloat2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT;
+  // atomicFloat2Features.shaderBufferFloat32AtomicMinMax = true;
+  // atomicFloat2Features.shaderSharedFloat32AtomicMinMax = true;
+  // atomicFloat2Features.pNext = pNext;
+  // pNext = &atomicFloat2Features;
+
+  invocationReorderFeatures = {};
+  invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
+  if (requestedFeatures.rayQueries) {
+    // invocationReorderFeatures.rayTracingInvocationReorder = requestedFeatures.invocationReordering;
+    invocationReorderFeatures.pNext = pNext;
+    pNext = &invocationReorderFeatures;
+  }
+
+  accelerationStructureFeatures = {};
+  accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+  accelerationStructureFeatures.pNext = pNext;
+  pNext = &accelerationStructureFeatures;
+
+  rtPipelineFeatures = {};
+  rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+  rtPipelineFeatures.pNext = pNext;
+  pNext = &rtPipelineFeatures;
+
+  rtQueryFeatures = {};
+  rtQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+  if (requestedFeatures.rayQueries) {
+    // rtQueryFeatures.rayQuery = requestedFeatures.rayQueries;
+    rtQueryFeatures.pNext = pNext;
+    pNext = &rtQueryFeatures;
+  }
+
+  deviceVulkan12Features = {};
+  deviceVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+  deviceVulkan12Features.pNext = pNext;
+  pNext = &deviceVulkan12Features;
+
+  deviceVulkan11Features = {};
+  deviceVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+  deviceVulkan11Features.pNext = pNext;
+  pNext = &deviceVulkan11Features;
+
+  deviceFeatures2 = {};
+  deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+  deviceFeatures2.pNext = pNext;
+
+  // fill in above structs
+  vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+  vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+
+  // Memory properties are used regularly for creating all kinds of buffers
+  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
+
+  // Queue family properties, used for setting up requested queues upon device
+  // creation
+  uint32_t queueFamilyCount;
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+  assert(queueFamilyCount > 0);
+  queueFamilyProperties.resize(queueFamilyCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
+
+  // Get list of supported extensions
+  uint32_t devExtCount = 0;
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &devExtCount, nullptr);
+  if (devExtCount > 0) {
+    std::vector<VkExtensionProperties> extensions(devExtCount);
+    if (vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &devExtCount, &extensions.front()) ==
+        VK_SUCCESS) {
+      for (auto ext : extensions) {
+        supportedExtensions.push_back(ext.extensionName);
+      }
+    }
+  }
+
+  // Now, create the logical device and all requested queues
+  std::vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
+  // Get queue family indices for the requested queue family types
+  // Note that the indices may overlap depending on the implementation
+
+  auto getQueueFamilyIndex = [](VkQueueFlagBits queueFlags,
+                                std::vector<VkQueueFamilyProperties> queueFamilyProperties) -> uint32_t {
+    // Dedicated queue for compute
+    // Try to find a queue family index that supports compute but not graphics
+    if (queueFlags & VK_QUEUE_COMPUTE_BIT)
+      for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
+        if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
+            ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0))
+          return i;
+
+    // Dedicated queue for transfer
+    // Try to find a queue family index that supports transfer but not
+    // graphics and compute
+    if (queueFlags & VK_QUEUE_TRANSFER_BIT)
+      for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
+        if ((queueFamilyProperties[i].queueFlags & queueFlags) &&
+            ((queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) &&
+            ((queueFamilyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) == 0))
+          return i;
+
+    // For other queue types or if no separate compute queue is present,
+    // return the first one to support the requested flags
+    for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilyProperties.size()); i++)
+      if (queueFamilyProperties[i].queueFlags & queueFlags)
+        return i;
+    LOG_ERROR("Could not find a matching queue family index");
+    return -1;
+  };
+
+  const float defaultQueuePriority(0.0f);
+
+  // Graphics queue
+  // if (requestedQueueTypes & VK_QUEUE_GRAPHICS_BIT)
+  {
+    queueFamilyIndices.graphics = getQueueFamilyIndex(VK_QUEUE_GRAPHICS_BIT, queueFamilyProperties);
+    VkDeviceQueueCreateInfo queueInfo{};
+    queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueInfo.queueFamilyIndex = queueFamilyIndices.graphics;
+    queueInfo.queueCount = 1;
+    queueInfo.pQueuePriorities = &defaultQueuePriority;
+    queueCreateInfos.push_back(queueInfo);
+  }
+  // else
+  // {
+  //   queueFamilyIndices.graphics = 0;
+  // }
+
+  // Dedicated compute queue
+  // if (requestedQueueTypes & VK_QUEUE_COMPUTE_BIT)
+  {
+    queueFamilyIndices.compute = getQueueFamilyIndex(VK_QUEUE_COMPUTE_BIT, queueFamilyProperties);
+    if (queueFamilyIndices.compute != queueFamilyIndices.graphics) {
+      // If compute family index differs, we need an additional queue create
+      // info for the compute queue
+      VkDeviceQueueCreateInfo queueInfo{};
+      queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      queueInfo.queueFamilyIndex = queueFamilyIndices.compute;
+      queueInfo.queueCount = 1;
+      queueInfo.pQueuePriorities = &defaultQueuePriority;
+      queueCreateInfos.push_back(queueInfo);
+    }
+  }
+  // else
+  // {
+  //   // Else we use the same queue
+  //   queueFamilyIndices.compute = queueFamilyIndices.graphics;
+  // }
+
+  // Dedicated transfer queue
+  // if (requestedQueueTypes & VK_QUEUE_TRANSFER_BIT)
+  {
+    queueFamilyIndices.transfer = getQueueFamilyIndex(VK_QUEUE_TRANSFER_BIT, queueFamilyProperties);
+    if ((queueFamilyIndices.transfer != queueFamilyIndices.graphics) &&
+        (queueFamilyIndices.transfer != queueFamilyIndices.compute)) {
+      // If compute family index differs, we need an additional queue create
+      // info for the compute queue
+      VkDeviceQueueCreateInfo queueInfo{};
+      queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      queueInfo.queueFamilyIndex = queueFamilyIndices.transfer;
+      queueInfo.queueCount = 1;
+      queueInfo.pQueuePriorities = &defaultQueuePriority;
+      queueCreateInfos.push_back(queueInfo);
+    }
+  }
+  // else
+  // {
+  //   // Else we use the same queue
+  //   queueFamilyIndices.transfer = queueFamilyIndices.graphics;
+  // }
+
+  /// 3. Create the logical device representation
+
+  VkDeviceCreateInfo deviceCreateInfo = {};
+  deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+  deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+  deviceCreateInfo.pEnabledFeatures = nullptr;   // Must be nullptr if deviceFeatures2 is used to request features
+  deviceCreateInfo.pNext = &deviceFeatures2;
+
+  // If a pNext(Chain) has been passed, we need to add it to the device
+  // creation info VkPhysicalDeviceFeatures2 physicalDeviceFeatures2{}; if
+  // (pNextChain) {
+  //   physicalDeviceFeatures2.sType =
+  //   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+  //   physicalDeviceFeatures2.features = enabledFeatures;
+  //   physicalDeviceFeatures2.pNext = pNextChain;
+  //   deviceCreateInfo.pEnabledFeatures = nullptr;
+  //   deviceCreateInfo.pNext = &physicalDeviceFeatures2;
+  // }
+
+  // // Enable the debug marker extension if it is present (likely meaning a
+  // debugging tool is present) if
+  // (extensionSupported(VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
+  // {
+  //   enabledDeviceExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
+  //   enableDebugMarkers = true;
+  // }
+
+  if (enabledDeviceExtensions.size() > 0) {
+    deviceCreateInfo.enabledExtensionCount = (uint32_t) enabledDeviceExtensions.size();
+    deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
+  }
+
+  // this->enabledFeatures = enabledFeatures;
+  err = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice);
+  if (err) {
+    LOG_ERROR("Could not create logical devices : \n" + errorString(err));
+  }
+
+  // Create vulkan memory allocator
+  VmaVulkanFunctions vulkanFunctions = {};
+  vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+  vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+  VmaAllocatorCreateInfo allocatorCreateInfo = {};
+  allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+  allocatorCreateInfo.physicalDevice = physicalDevice;
+  allocatorCreateInfo.device = logicalDevice;
+  allocatorCreateInfo.instance = instance;
+  allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+  allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+  err = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
+  if (err) {
+    LOG_ERROR("Could not create vulkan memory allocator : \n" + errorString(err));
+  }
+
+  // Get the ray tracing and acceleration structure related function pointers
+  // required by this sample
+  gprt::vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkGetBufferDeviceAddressKHR"));
+  gprt::vkCmdBuildAccelerationStructures = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkCmdBuildAccelerationStructuresKHR"));
+  gprt::vkCmdCopyAccelerationStructure = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkCmdCopyAccelerationStructureKHR"));
+  gprt::vkBuildAccelerationStructures = reinterpret_cast<PFN_vkBuildAccelerationStructuresKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkBuildAccelerationStructuresKHR"));
+  gprt::vkCopyAccelerationStructure = reinterpret_cast<PFN_vkCopyAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkCopyAccelerationStructureKHR"));
+  gprt::vkCreateAccelerationStructure = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkCreateAccelerationStructureKHR"));
+  gprt::vkDestroyAccelerationStructure = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkDestroyAccelerationStructureKHR"));
+  gprt::vkGetAccelerationStructureBuildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureBuildSizesKHR"));
+  gprt::vkGetAccelerationStructureDeviceAddress = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkGetAccelerationStructureDeviceAddressKHR"));
+  gprt::vkCmdTraceRays =
+      reinterpret_cast<PFN_vkCmdTraceRaysKHR>(vkGetDeviceProcAddr(logicalDevice, "vkCmdTraceRaysKHR"));
+  gprt::vkGetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkGetRayTracingShaderGroupHandlesKHR"));
+  gprt::vkCreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+      vkGetDeviceProcAddr(logicalDevice, "vkCreateRayTracingPipelinesKHR"));
+  gprt::vkCmdWriteAccelerationStructuresProperties =
+      reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
+          vkGetDeviceProcAddr(logicalDevice, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
+
+  auto createCommandPool = [&](uint32_t queueFamilyIndex,
+                               VkCommandPoolCreateFlags createFlags =
+                                   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT) -> VkCommandPool {
+    VkCommandPoolCreateInfo cmdPoolInfo = {};
+    cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
+    cmdPoolInfo.flags = createFlags;
+    VkCommandPool cmdPool;
+    VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
+    return cmdPool;
+  };
+
+  /// 4. Create Command Pools
+  graphicsCommandPool = createCommandPool(queueFamilyIndices.graphics);
+  computeCommandPool = createCommandPool(queueFamilyIndices.compute);
+  transferCommandPool = createCommandPool(queueFamilyIndices.transfer);
+
+  /// 4.5 Create a query pool to measure performance
+  VkQueryPoolCreateInfo queryPoolCreateInfo{};
+  queryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+  queryPoolCreateInfo.pNext = nullptr;   // Optional
+  queryPoolCreateInfo.flags = 0;         // Reserved for future use, must be 0!
+
+  queryPoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+  queryPoolCreateInfo.queryCount = 2;   // for now, just two queries, a before and an after.
+
+  err = vkCreateQueryPool(logicalDevice, &queryPoolCreateInfo, nullptr, &queryPool);
+  if (err)
+    LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
+
+  // We also need a query pool to determine compacted tree sizes
+  VkQueryPoolCreateInfo compactedSizeQueryPoolCreateInfo{};
+  compactedSizeQueryPoolCreateInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+  compactedSizeQueryPoolCreateInfo.pNext = nullptr;   // Optional
+  compactedSizeQueryPoolCreateInfo.flags = 0;         // Reserved for future use, must be 0!
+
+  compactedSizeQueryPoolCreateInfo.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+  compactedSizeQueryPoolCreateInfo.queryCount = 1;   // for now, just one query
+
+  err = vkCreateQueryPool(logicalDevice, &compactedSizeQueryPoolCreateInfo, nullptr, &compactedSizeQueryPool);
+  if (err)
+    LOG_ERROR("Failed to create time query pool!\n" + errorString(err));
+
+  /// 5. Allocate command buffers
+  VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
+  cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdBufAllocateInfo.commandBufferCount = 1;
+
+  cmdBufAllocateInfo.commandPool = graphicsCommandPool;
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
+  if (err)
+    LOG_ERROR("Could not create graphics command buffer : \n" + errorString(err));
+
+  cmdBufAllocateInfo.commandPool = computeCommandPool;
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
+  if (err)
+    LOG_ERROR("Could not create compute command buffer : \n" + errorString(err));
+
+  cmdBufAllocateInfo.commandPool = transferCommandPool;
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
+  if (err)
+    LOG_ERROR("Could not create transfer command buffer : \n" + errorString(err));
+
+  /// 6. Get queue handles
+  vkGetDeviceQueue(logicalDevice, queueFamilyIndices.graphics, 0, &graphicsQueue);
+  vkGetDeviceQueue(logicalDevice, queueFamilyIndices.compute, 0, &computeQueue);
+  vkGetDeviceQueue(logicalDevice, queueFamilyIndices.transfer, 0, &transferQueue);
+
+  // 7. Create a module for internal device entry points
+  radixSortModule = new Module(this, sortDeviceCode);
+  // scanModule = new Module(scanDeviceCode);
+  fallbacksModule = new Module(this, fallbacksDeviceCode);
+
+  // Swapchain semaphores and fences
+  if (requestedFeatures.window) {
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+      LOG_ERROR("Failed to create swapchain semaphores");
+    }
+  }
+
+  // Swapchain setup
+  if (requestedFeatures.window) {
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
+
+    // SRGB is a commonly supported surface format. It's also efficient to
+    // write to, so we assume this format.
+    // Note, we don't use RGBA since NVIDIA doesn't support this...
+    surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+    surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    bool surfaceFormatFound = false;
+    std::vector<VkSurfaceFormatKHR> formats;
+    uint32_t formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
+    if (formatCount != 0) {
+      formats.resize(formatCount);
+      vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, formats.data());
+    }
+    for (uint32_t i = 0; i < formatCount; ++i)
+      if (formats[i].format == surfaceFormat.format && formats[i].colorSpace == surfaceFormat.colorSpace)
+        surfaceFormatFound = true;
+    if (!surfaceFormatFound)
+      LOG_ERROR("Error, unable to find RGBA8 SRGB surface format...");
+
+    // For now, we assume the user wants FIFO, which is similar to vsync.
+    // All vulkan implementations must support FIFO per-spec, so it's
+    // something we can depend on.
+    presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    bool presentModeFound = false;
+    std::vector<VkPresentModeKHR> presentModes;
+    uint32_t presentModeCount;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+    if (presentModeCount != 0) {
+      presentModes.resize(presentModeCount);
+      vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+    }
+    for (uint32_t i = 0; i < presentModeCount; ++i)
+      if (presentModes[i] == presentMode)
+        presentModeFound = true;
+    if (!presentModeFound)
+      LOG_ERROR("Error, unable to find vsync present mode...");
+
+    // Window extent is the number of pixels truly used by the surface. For
+    // high dps displays (like on mac) the window extent might be larger
+    // than the screen coordinate size.
+    if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+      windowExtent = surfaceCapabilities.currentExtent;
+    } else {
+      int width, height;
+      glfwGetFramebufferSize(window, &width, &height);
+      VkExtent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+      actualExtent.width = std::clamp(actualExtent.width, surfaceCapabilities.minImageExtent.width,
+                                      surfaceCapabilities.maxImageExtent.width);
+      actualExtent.height = std::clamp(actualExtent.height, surfaceCapabilities.minImageExtent.height,
+                                       surfaceCapabilities.maxImageExtent.height);
+      windowExtent = actualExtent;
+    }
+
+    // We request one more than the minimum number of images in the swapchain,
+    // since choosing exactly the minimum can cause stalls. We also make sure
+    // to not request more than the maximum number of images.
+    surfaceImageCount = surfaceCapabilities.minImageCount + 1;
+    if (surfaceCapabilities.maxImageCount > 0 && surfaceImageCount > surfaceCapabilities.maxImageCount) {
+      surfaceImageCount = surfaceCapabilities.maxImageCount;
+    }
+
+    // Now, we have enough information to create our swapchain.
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = surface;
+    createInfo.minImageCount = surfaceImageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = windowExtent;
+    createInfo.imageArrayLayers = 1;   // might be 2 for stereoscopic 3D images like VR
+    createInfo.imageUsage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;   // might need to change this...
+    // currently assuming graphics and present queue are the same...
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.queueFamilyIndexCount = 0;       // optional if exclusive
+    createInfo.pQueueFamilyIndices = nullptr;   // optional if exclusive
+    // could use this to flip the image vertically if we want
+    createInfo.preTransform = surfaceCapabilities.currentTransform;
+    // means, we don't composite this window with other OS windows.
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode = presentMode;
+    // clipped here means we don't care about color of obscured pixels, like
+    // those covered by other OS windows.
+    createInfo.clipped = VK_TRUE;
+    // Since the swapchain can go out of date, we need to supply the out of
+    // date swapchain here.
+    createInfo.oldSwapchain = swapchain;
+
+    // Create the swapchain
+    err = vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapchain);
+    if (err != VK_SUCCESS) {
+      LOG_ERROR("Error, failed to create swap chain : \n" + errorString(err));
+    }
+
+    // Now, receive the swapchain images
+    vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
+    swapchainImages.resize(surfaceImageCount);
+    vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
+
+    /* Transition all images to presentable */
+    for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
+      transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    }
+
+    // And acquire the first image to use
+    vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE,
+                          &currentImageIndex);
+  }
+
+  // Allocate resource heap
+  {
+    descriptorPoolSize.type = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
+    descriptorPoolSize.descriptorCount = requestedFeatures.maxDescriptorCount;
+
+    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolInfo.poolSizeCount = 1;
+    descriptorPoolInfo.pPoolSizes = &descriptorPoolSize;
+    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
+    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    // "If [below] does not exist, the descriptor pool allocates enough memory to be able to allocate a [mutable
+    // descriptor]
+    //  with any supported VkDescriptorType as a mutable descriptor."
+    // descriptorPoolInfo.pNext = &mutableTypeInfo;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
+
+    VkDescriptorType cbvSrvUavTypes[] = {VK_DESCRIPTOR_TYPE_SAMPLER,
+                                         VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                         VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
+
+    VkMutableDescriptorTypeListEXT cbvSrvUavTypeList = {};
+    cbvSrvUavTypeList.descriptorTypeCount = sizeof(cbvSrvUavTypes) / sizeof(VkDescriptorType);
+    cbvSrvUavTypeList.pDescriptorTypes = cbvSrvUavTypes;
+
+    VkMutableDescriptorTypeCreateInfoEXT mutableTypeInfo = {};
+    mutableTypeInfo.sType = VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+    mutableTypeInfo.pNext = NULL;
+    mutableTypeInfo.mutableDescriptorTypeListCount = 1;
+    mutableTypeInfo.pMutableDescriptorTypeLists = &cbvSrvUavTypeList;
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT};
+    setLayoutBindingFlags.bindingCount = 1;
+    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+    setLayoutBindingFlags.pNext = &mutableTypeInfo;
+
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
+    binding.descriptorCount = descriptorPoolSize.descriptorCount;
+    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    binding.pImmutableSamplers = NULL;
+
+    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
+    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+    VK_CHECK_RESULT(
+        vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout));
+
+    // Now, making the descriptor sets (for now, just putting samplers here...)
+    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
+
+    uint32_t variableDescCounts[] = {static_cast<uint32_t>(descriptorPoolSize.descriptorCount)};
+
+    variableDescriptorCountAllocInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+    descriptorSetAllocateInfo.descriptorSetCount = 1;
+    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
+
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &descriptorSet));
+  }
+
+  // Init imgui
+  if (requestedFeatures.window) {
+    // 1: create descriptor pool for IMGUI
+    // the size of the pool is very oversize, but it's copied from imgui demo itself.
+    VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+                                         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+                                         {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+                                         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+                                         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+                                         {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pool_info.maxSets = 1000;
+    pool_info.poolSizeCount = (uint32_t) std::size(pool_sizes);
+    pool_info.pPoolSizes = pool_sizes;
+
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &pool_info, nullptr, &imguiPool));
+
+    // 2: initialize imgui library
+
+    // this initializes the core structures of imgui
+    ImGui::CreateContext();
+
+    // this initializes imgui for SDL
+    ImGui_ImplGlfw_InitForVulkan(window, true);
+
+    // Call new frame here to initialize some internal imgui data
+    ImGui_ImplGlfw_NewFrame();
+  }
+
+  // Finally, setup the internal shader stages and build an initial shader binding table
+  setupInternalPrograms();
+  buildSBT(GPRT_SBT_ALL);
+};
+
+// void buildPrograms()
+// {
+//   // At the moment, we don't actually build our programs here.
+// }
+
+// Todo, refactor this code...
+void
+Context::setupInternalPrograms() {
+
+  // // For filling out instance data
+  // {
+  //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
+
+  //   // todo, consider refactoring this into a more official "Compute" shader
+  //   // object
+
+  //   VkResult err;
+  //   // currently not using cache.
+  //   VkPipelineCache cache = VK_NULL_HANDLE;
+
+  //   VkPushConstantRange pushConstantRange = {};
+  //   pushConstantRange.size = 128;
+  //   pushConstantRange.offset = 0;
+  //   pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  //   VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
+  //   pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  //   pipelineLayoutCreateInfo.setLayoutCount = 0;      // if ever we use descriptors
+  //   pipelineLayoutCreateInfo.pSetLayouts = nullptr;   // if ever we use descriptors
+  //   pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+  //   pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
+  //   err = vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCreateInfo, nullptr, &fillInstanceDataStage.layout);
+
+  //   std::string entryPoint = std::string("__compute__") + std::string(fillInstanceDataStage.entryPoint);
+  //   auto binary = internalModule->getBinary("COMPUTE");
+
+  //   VkShaderModuleCreateInfo moduleCreateInfo = {};
+  //   moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  //   moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+  //   moduleCreateInfo.pCode = binary.data();
+
+  //   err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &fillInstanceDataStage.module);
+
+  //   VkPipelineShaderStageCreateInfo shaderStage = {};
+  //   shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  //   shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  //   shaderStage.module = fillInstanceDataStage.module;
+  //   shaderStage.pName = entryPoint.c_str();
+
+  //   VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+  //   computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  //   computePipelineCreateInfo.layout = fillInstanceDataStage.layout;
+  //   computePipelineCreateInfo.flags = 0;
+  //   computePipelineCreateInfo.stage = shaderStage;
+
+  //   // At this point, create all internal compute pipelines as well.
+  //   err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+  //                                 &fillInstanceDataStage.pipeline);
+  // }
+
+  // Radix sorter stages
+  {
+    // currently not using cache.
+    VkPipelineCache cache = VK_NULL_HANDLE;
+
+    VkDescriptorPoolSize poolSize;
+    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSize.descriptorCount = 16;
+
+    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
+    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolInfo.poolSizeCount = 1;
+    descriptorPoolInfo.pPoolSizes = &poolSize;
+    descriptorPoolInfo.maxSets = 5;
+    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
+
+    sortStages.Count.entryPoint = "Count";
+    sortStages.CountReduce.entryPoint = "CountReduce";
+    sortStages.Scan.entryPoint = "Scan";
+    sortStages.ScanAdd.entryPoint = "ScanAdd";
+    sortStages.Scatter.entryPoint = "Scatter";
+    sortStages.ScatterPayload.entryPoint = "ScatterPayload";
+
+    // Create binding for Radix sort passes
+    VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // SrcBuffer (sort)
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstBuffer (sort)
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScrPayload (sort only)
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstPayload (sort only)
+    };
+
+    VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanSrc
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanDst
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanScratch
+    };
+
+    VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (sort only)
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (reduced)
+    };
+
+    auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
+      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptorSetAllocateInfo.descriptorPool = pool;
+      descriptorSetAllocateInfo.pSetLayouts = &layout;
+      descriptorSetAllocateInfo.descriptorSetCount = 1;
+      descriptorSetAllocateInfo.pNext = nullptr;
+      VkResult err = vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to allocate descriptor! \n" + errorString(err));
+      }
+    };
+
+    VkResult vkResult;
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    descriptor_set_layout_create_info.pNext = nullptr;
+    descriptor_set_layout_create_info.flags = 0;
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
+    descriptor_set_layout_create_info.bindingCount = 4;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                           &sortStages.m_SortDescriptorSetLayoutInputOutputs);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                    &sortStages.m_SortDescriptorSetInputOutput[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                    &sortStages.m_SortDescriptorSetInputOutput[1]);
+
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
+    descriptor_set_layout_create_info.bindingCount = 3;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                           &sortStages.m_SortDescriptorSetLayoutScan);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
+                    &sortStages.m_SortDescriptorSetScanSets[0]);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan,
+                    &sortStages.m_SortDescriptorSetScanSets[1]);
+
+    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
+    descriptor_set_layout_create_info.bindingCount = 2;
+    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
+                                           &sortStages.m_SortDescriptorSetLayoutScratch);
+    VK_CHECK_RESULT(vkResult);
+    AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch,
+                    &sortStages.m_SortDescriptorSetScratch);
+
+    // Create constant range representing our static constant
+    VkPushConstantRange constant_range;
+    constant_range.stageFlags = VK_SHADER_STAGE_ALL;
+    constant_range.offset = 0;
+    constant_range.size = sizeof(ParallelSortCB);
+
+    // Create the pipeline layout (Root signature)
+    VkPipelineLayoutCreateInfo layout_create_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout_create_info.pNext = nullptr;
+    layout_create_info.flags = 0;
+    layout_create_info.setLayoutCount = 3;
+    VkDescriptorSetLayout layouts[] = {sortStages.m_SortDescriptorSetLayoutInputOutputs,
+                                       sortStages.m_SortDescriptorSetLayoutScan,
+                                       sortStages.m_SortDescriptorSetLayoutScratch};
+    layout_create_info.pSetLayouts = layouts;
+    layout_create_info.pushConstantRangeCount = 1;
+    layout_create_info.pPushConstantRanges = &constant_range;
+
+    VkResult bCreatePipelineLayout =
+        vkCreatePipelineLayout(logicalDevice, &layout_create_info, nullptr, &sortStages.layout);
+    assert(bCreatePipelineLayout == VK_SUCCESS);
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.Count.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Count.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Count.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.Count.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.CountReduce.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.CountReduce.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.CountReduce.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.CountReduce.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.Scan.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scan.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Scan.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.Scan.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.ScanAdd.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScanAdd.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.ScanAdd.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.ScanAdd.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.Scatter.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.Scatter.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.Scatter.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.Scatter.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    {
+      VkResult err = VK_SUCCESS;
+      std::string entryPoint = sortStages.ScatterPayload.entryPoint;
+      auto binary = radixSortModule->binary;
+
+      VkShaderModuleCreateInfo moduleCreateInfo = {};
+      moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
+      moduleCreateInfo.pCode = binary.data();
+
+      err = vkCreateShaderModule(logicalDevice, &moduleCreateInfo, NULL, &sortStages.ScatterPayload.module);
+
+      VkPipelineShaderStageCreateInfo shaderStage = {};
+      shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      shaderStage.module = sortStages.ScatterPayload.module;
+      shaderStage.pName = entryPoint.c_str();
+
+      VkComputePipelineCreateInfo computePipelineCreateInfo = {};
+      computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      computePipelineCreateInfo.layout = sortStages.layout;
+      computePipelineCreateInfo.flags = 0;
+      computePipelineCreateInfo.stage = shaderStage;
+
+      // At this point, create all internal compute pipelines as well.
+      err = vkCreateComputePipelines(logicalDevice, cache, 1, &computePipelineCreateInfo, nullptr,
+                                     &sortStages.ScatterPayload.pipeline);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create sort pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    // todo, destroy the above stuff
+  }
+
+  // Scanning stages
+  // {
+  //   Context *context = this;
+  //   internalComputePrograms.insert(
+  //       {"InitScan", new Compute(context, context->logicalDevice, scanModule, "InitScan", 0)});
+  //   internalComputePrograms.insert(
+  //       {"Scan", new Compute(context, context->logicalDevice, scanModule,
+  //                            ("Scan_" + std::to_string(subgroupProperties.subgroupSize)).c_str(), 0)});
+  // }
+
+  // Fallback primitive programs
+  {
+    Context *context = this;
+    internalComputePrograms.insert({"LSSBounds", new Compute(context, fallbacksModule, "LSSBounds")});
+    internalComputePrograms.insert({"SphereBounds", new Compute(context, fallbacksModule, "SphereBounds")});
+  }
+  computePipelinesOutOfDate = true;
+}
+
+void
+Context::destroyInternalPrograms() {
+  // destroy sort stages
+  {
+    vkDestroyPipeline(logicalDevice, sortStages.ScatterPayload.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scatter.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.ScanAdd.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Scan.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.CountReduce.pipeline, nullptr);
+    vkDestroyPipeline(logicalDevice, sortStages.Count.pipeline, nullptr);
+    sortStages.ScatterPayload.pipeline = VK_NULL_HANDLE;
+    sortStages.Scatter.pipeline = VK_NULL_HANDLE;
+    sortStages.ScanAdd.pipeline = VK_NULL_HANDLE;
+    sortStages.Scan.pipeline = VK_NULL_HANDLE;
+    sortStages.CountReduce.pipeline = VK_NULL_HANDLE;
+    sortStages.Count.pipeline = VK_NULL_HANDLE;
+
+    vkDestroyShaderModule(logicalDevice, sortStages.ScatterPayload.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scatter.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.ScanAdd.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Scan.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.CountReduce.module, nullptr);
+    vkDestroyShaderModule(logicalDevice, sortStages.Count.module, nullptr);
+    sortStages.ScatterPayload.module = VK_NULL_HANDLE;
+    sortStages.Scatter.module = VK_NULL_HANDLE;
+    sortStages.ScanAdd.module = VK_NULL_HANDLE;
+    sortStages.Scan.module = VK_NULL_HANDLE;
+    sortStages.CountReduce.module = VK_NULL_HANDLE;
+    sortStages.Count.module = VK_NULL_HANDLE;
+
+    vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
+    sortStages.layout = VK_NULL_HANDLE;
+
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 1, &sortStages.m_SortDescriptorSetScratch);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetScanSets);
+    vkFreeDescriptorSets(logicalDevice, sortStages.pool, 2, sortStages.m_SortDescriptorSetInputOutput);
+
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
+    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
+
+    vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
+  }
+
+  std::vector<std::string> progNames;
+  for (auto &program : internalComputePrograms) {
+    progNames.push_back(program.first);
+  }
+
+  for (auto &progName : progNames) {
+    internalComputePrograms[progName]->destroy();
+    delete internalComputePrograms[progName];
+    internalComputePrograms.erase(progName);
+  }
+}
+
+VkCommandBuffer
+Context::beginSingleTimeCommands(VkCommandPool pool) {
+  VkCommandBufferAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandPool = pool;
+  allocInfo.commandBufferCount = 1;
+
+  VkCommandBuffer commandBuffer;
+  vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+  vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+  return commandBuffer;
+}
+
+void
+Context::endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+  vkEndCommandBuffer(commandBuffer);
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+
+  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+  vkQueueWaitIdle(queue);
+
+  vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+}
+
+void
+Context::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+  VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+
+  VkImageMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+
+  // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
+  // of the original image. I'm assuming this is ok.
+  barrier.oldLayout = oldLayout;
+
+  // The new layout for the image
+  barrier.newLayout = newLayout;
+
+  // If we're transferring which queue owns this image, we need to set these.
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+  // specify the image that is affected and the specific parts of that image.
+  barrier.image = image;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.baseMipLevel = 0;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount = 1;
+
+  VkPipelineStageFlags sourceStage;
+  VkPipelineStageFlags destinationStage;
+
+  if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = 0;
+    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+  } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+  } else {
+    throw std::invalid_argument("unsupported layout transition!");
+  }
+
+  vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+  endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
+}
+
+// For ImGui
+void
+Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
+  if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
+    throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
+  } else {
+    imgui.width = colorTexture->width;
+    imgui.height = colorTexture->height;
+  }
+
+  imgui.colorAttachment = colorTexture;
+  imgui.depthAttachment = depthTexture;
+
+  VkAttachmentDescription colorAttachment{};
+  colorAttachment.format = colorTexture->format;
+  colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+  // clear here says to clear the values to a constant at start.
+  // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
+  // save rasterized fragments to memory
+  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  // not currently using a stencil
+  colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  // Initial and final layouts of the texture
+  colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+  VkAttachmentDescription depthAttachment{};
+  depthAttachment.format = depthTexture->format;
+  depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+  std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
+
+  VkAttachmentReference colorAttachmentRef{};
+  colorAttachmentRef.attachment = 0;
+  colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+  VkAttachmentReference depthAttachmentRef{};
+  depthAttachmentRef.attachment = 1;
+  depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+  VkSubpassDescription subpass{};
+  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  subpass.colorAttachmentCount = 1;
+  subpass.pColorAttachments = &colorAttachmentRef;
+  subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+  VkSubpassDependency dependency{};
+  dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dependency.dstSubpass = 0;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  dependency.srcAccessMask = 0;
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+  VkRenderPassCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  createInfo.pNext = nullptr;
+  createInfo.attachmentCount = (uint32_t) attachments.size();
+  createInfo.pAttachments = attachments.data();
+  createInfo.subpassCount = 1;
+  createInfo.pSubpasses = &subpass;
+  createInfo.dependencyCount = 1;
+  createInfo.pDependencies = &dependency;
+
+  vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
+
+  VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
+
+  VkFramebufferCreateInfo framebufferInfo{};
+  framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  framebufferInfo.renderPass = imgui.renderPass;
+  framebufferInfo.attachmentCount = 2;
+  framebufferInfo.pAttachments = attachmentViews;
+  framebufferInfo.width = imgui.width;
+  framebufferInfo.height = imgui.height;
+  framebufferInfo.layers = 1;
+
+  if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &imgui.frameBuffer) != VK_SUCCESS) {
+    throw std::runtime_error("failed to create framebuffer!");
+  }
+
+  // this initializes imgui for Vulkan
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.Instance = instance;
+  init_info.PhysicalDevice = physicalDevice;
+  init_info.Device = logicalDevice;
+  init_info.Queue = graphicsQueue;
+  init_info.DescriptorPool = imguiPool;
+  init_info.MinImageCount = 2;
+  init_info.ImageCount = 2;
+  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+  ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
+
+  // execute a gpu command to upload imgui font textures
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
+  ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
+  VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.pWaitDstStageMask = nullptr;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;
+
+  VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+  VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
+
+  // clear font textures from cpu data
+  ImGui_ImplVulkan_DestroyFontUploadObjects();
+}
+
+void
+Context::rasterizeGui() {
+  ImGui::Render();
+  ImDrawData *draw_data = ImGui::GetDrawData();
+
+  VkResult err;
+  VkCommandBufferBeginInfo cmdBufInfo{};
+  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+  VkRenderPassBeginInfo renderPassBeginInfo = {};
+  renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  renderPassBeginInfo.pNext = nullptr;
+  renderPassBeginInfo.renderPass = imgui.renderPass;
+  renderPassBeginInfo.renderArea.offset.x = 0;
+  renderPassBeginInfo.renderArea.offset.y = 0;
+  renderPassBeginInfo.renderArea.extent.width = imgui.width;
+  renderPassBeginInfo.renderArea.extent.height = imgui.height;
+  renderPassBeginInfo.clearValueCount = 0;
+  renderPassBeginInfo.pClearValues = nullptr;
+  renderPassBeginInfo.framebuffer = imgui.frameBuffer;
+
+  err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
+
+  // Transition our attachments into optimal attachment formats
+  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
+                                        imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
+                                        imgui.depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                        {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+  // This will clear the color and depth attachment
+  vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  // Record dear imgui primitives into command buffer
+  ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
+
+  vkCmdEndRenderPass(graphicsCommandBuffer);
+
+  // At the end of the renderpass, we'll transition the layout back to it's previous layout
+  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                        imgui.colorAttachment->layout,
+                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
+
+  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+                                        imgui.depthAttachment->layout,
+                                        {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+
+  err = vkEndCommandBuffer(graphicsCommandBuffer);
+  if (err)
+    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.pNext = NULL;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
+  submitInfo.signalSemaphoreCount = 0;
+  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+
+  err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err)
+    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+  err = vkQueueWaitIdle(graphicsQueue);
+  if (err)
+    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 }
 
 GPRT_API void
@@ -7915,7 +6740,7 @@ GPRT_API GPRTModule
 gprtModuleCreate(GPRTContext _context, GPRTProgram spvCode) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  Module *module = new Module(spvCode);
+  Module *module = new Module(context, spvCode);
   return (GPRTModule) module;
 }
 
@@ -7965,221 +6790,6 @@ gprtGeomSetParameters(GPRTGeom _geometry, void *parameters, int deviceID) {
   if (geometry->SBTRecord == nullptr)
     LOG_ERROR("Associated hit record for geometry type does not have any uniform parameters.");
   memcpy(geometry->SBTRecord, parameters, geometry->recordSize);
-}
-
-void
-gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry,
-                      uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize, void *pushConstants) {
-  LOG_API_CALL();
-
-  Context *context = (Context *) _context;
-  GeomType *geometryType = (GeomType *) _geomType;
-  Geom **geometry = (Geom **) _geometry;
-
-  // Before we rasterize any geometry, we need to temporarily remove our framebuffer attachments from
-  // the list of textures in our texture array.
-  {
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
-    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
-    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
-
-    VkDescriptorImageInfo placeholder;
-    placeholder.imageView = context->defaultTexture2D->imageView;
-    placeholder.imageLayout = context->defaultTexture2D->layout;
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = (uint32_t) colorAttachmentAddress;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[0].descriptorCount = 1;
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = &placeholder;
-
-    writeDescriptorSets[1] = {};
-    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[1].dstBinding = 0;
-    writeDescriptorSets[1].dstArrayElement = (uint32_t) depthAttachmentAddress;
-    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[1].descriptorCount = 1;
-    writeDescriptorSets[1].pBufferInfo = 0;
-    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
-    writeDescriptorSets[1].pImageInfo = &placeholder;
-
-    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
-                           writeDescriptorSets.data(), 0, nullptr);
-  }
-
-  VkResult err;
-
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  VkRenderPassBeginInfo renderPassBeginInfo = {};
-  renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  renderPassBeginInfo.pNext = nullptr;
-  renderPassBeginInfo.renderPass = geometryType->raster[rasterType].renderPass;
-  renderPassBeginInfo.renderArea.offset.x = 0;
-  renderPassBeginInfo.renderArea.offset.y = 0;
-  renderPassBeginInfo.renderArea.extent.width = geometryType->raster[rasterType].width;
-  renderPassBeginInfo.renderArea.extent.height = geometryType->raster[rasterType].height;
-  renderPassBeginInfo.clearValueCount = 0;
-  renderPassBeginInfo.pClearValues = nullptr;
-  renderPassBeginInfo.framebuffer = geometryType->raster[rasterType].frameBuffer;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-
-  if (pushConstantsSize > 0) {
-    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT)
-      LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
-    vkCmdPushConstants(context->graphicsCommandBuffer, geometryType->raster[rasterType].pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushConstantsSize, pushConstants);
-  }
-
-  // Transition our attachments into optimal attachment formats
-  geometryType->raster[rasterType].colorAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].colorAttachment->image,
-      geometryType->raster[rasterType].colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster[rasterType].colorAttachment->mipLevels, 0, 1});
-
-  geometryType->raster[rasterType].depthAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].depthAttachment->image,
-      geometryType->raster[rasterType].depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster[rasterType].depthAttachment->mipLevels, 0, 1});
-
-  // This will clear the color and depth attachment
-  vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-  // Bind the rendering pipeline
-  // todo, if pipeline doesn't exist, create it.
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    geometryType->raster[rasterType].pipeline);
-
-  VkViewport viewport{};
-  viewport.x = 0.0f;
-  viewport.y = 0.0f;
-  viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
-  viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
-  vkCmdSetViewport(context->graphicsCommandBuffer, 0, 1, &viewport);
-
-  VkRect2D scissor{};
-  scissor.offset = {0, 0};
-  scissor.extent.width = geometryType->raster[rasterType].width;
-  scissor.extent.height = geometryType->raster[rasterType].height;
-  vkCmdSetScissor(context->graphicsCommandBuffer, 0, 1, &scissor);
-
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    return (value + alignment - 1) & ~(alignment - 1);
-  };
-
-  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
-  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
-  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
-  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
-
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-  for (uint32_t i = 0; i < numGeometry; ++i) {
-    GeomType *geomType = geometry[i]->geomType;
-
-    if (geomType->getKind() == GPRT_TRIANGLES) {
-      TriangleGeom *geom = (TriangleGeom *) geometry[i];
-      VkDeviceSize offsets[1] = {0};
-
-      uint32_t instanceCount = 1;
-      if (instanceCounts != nullptr) {
-        instanceCount = instanceCounts[i];
-      }
-
-      std::vector<VkDescriptorSet> descriptorSets = {context->rasterRecordDescriptorSet, context->samplerDescriptorSet,
-                                                     context->texture1DDescriptorSet, context->texture2DDescriptorSet,
-                                                     context->texture3DDescriptorSet};
-
-      uint32_t offset = (uint32_t) geom->address * recordSize;
-      vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              geomType->raster[rasterType].pipelineLayout, 0, (uint32_t) descriptorSets.size(),
-                              descriptorSets.data(), 1, &offset);
-      vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
-    }
-  }
-
-  vkCmdEndRenderPass(context->graphicsCommandBuffer);
-
-  // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  geometryType->raster[rasterType].colorAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-      geometryType->raster[rasterType].colorAttachment->layout,
-      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster[rasterType].colorAttachment->mipLevels, 0, 1});
-
-  geometryType->raster[rasterType].depthAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-      geometryType->raster[rasterType].depthAttachment->layout,
-      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster[rasterType].depthAttachment->mipLevels, 0, 1});
-
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
-
-  // Now, add the attachment textures back to our list of textures
-  {
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
-    VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
-    VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
-
-    VkDescriptorImageInfo colorAttachment;
-    colorAttachment.imageView = geometryType->raster[rasterType].colorAttachment->imageView;
-    colorAttachment.imageLayout = geometryType->raster[rasterType].colorAttachment->layout;
-
-    writeDescriptorSets[0] = {};
-    writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[0].dstBinding = 0;
-    writeDescriptorSets[0].dstArrayElement = (uint32_t) colorAttachmentAddress;
-    writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[0].descriptorCount = 1;
-    writeDescriptorSets[0].pBufferInfo = 0;
-    writeDescriptorSets[0].dstSet = context->texture2DDescriptorSet;
-    writeDescriptorSets[0].pImageInfo = &colorAttachment;
-
-    VkDescriptorImageInfo depthAttachment;
-    depthAttachment.imageView = geometryType->raster[rasterType].depthAttachment->imageView;
-    depthAttachment.imageLayout = geometryType->raster[rasterType].depthAttachment->layout;
-
-    writeDescriptorSets[1] = {};
-    writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSets[1].dstBinding = 0;
-    writeDescriptorSets[1].dstArrayElement = (uint32_t) depthAttachmentAddress;
-    writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writeDescriptorSets[1].descriptorCount = 1;
-    writeDescriptorSets[1].pBufferInfo = 0;
-    writeDescriptorSets[1].dstSet = context->texture2DDescriptorSet;
-    writeDescriptorSets[1].pImageInfo = &depthAttachment;
-
-    vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
-                           writeDescriptorSets.data(), 0, nullptr);
-  }
 }
 
 // ==================================================================
@@ -8259,9 +6869,7 @@ gprtRayGenCreate(GPRTContext _context, GPRTModule _module, const char *programNa
     LOG_ERROR("RayGen program " + std::string(programName) + " not found in module!");
   }
 
-  RayGen *raygen = new RayGen(context->logicalDevice, module, programName, recordSize);
-
-  context->raygenPrograms.push_back(raygen);
+  RayGen *raygen = new RayGen(context, module, programName, recordSize);
 
   // Creating a raygen program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -8311,7 +6919,7 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
     LOG_ERROR("Compute program " + std::string(programName) + " not found in module!");
   }
 
-  Compute *compute = new Compute(context, context->logicalDevice, module, programName, 0);
+  Compute *compute = new Compute(context, module, programName);
 
   // Notify context that we need to build this compute pipeline
   context->computePipelinesOutOfDate = true;
@@ -8339,9 +6947,7 @@ gprtMissCreate(GPRTContext _context, GPRTModule _module, const char *programName
     LOG_ERROR("Miss program " + std::string(programName) + " not found in module!");
   }
 
-  Miss *missProg = new Miss(context->logicalDevice, module, programName, recordSize);
-
-  context->missPrograms.push_back(missProg);
+  Miss *missProg = new Miss(context, module, programName, recordSize);
 
   // Creating a miss program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -8409,9 +7015,7 @@ gprtCallableCreate(GPRTContext _context, GPRTModule _module, const char *program
     LOG_ERROR("Callable program " + std::string(programName) + " not found in module!");
   }
 
-  Callable *callableProg = new Callable(context->logicalDevice, module, programName, recordSize);
-
-  context->callablePrograms.push_back(callableProg);
+  Callable *callableProg = new Callable(context, module, programName, recordSize);
 
   // Creating a callable program requires rebuilding a RT pipeline.
   context->raytracingPipelineOutOfDate = true;
@@ -8465,13 +7069,13 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
 
   switch (kind) {
   case GPRT_TRIANGLES:
-    geomType = new TriangleGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    geomType = new TriangleGeomType(context, requestedFeatures.numRayTypes, recordSize);
     break;
   case GPRT_AABBS:
-    geomType = new AABBGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
     break;
   case GPRT_LSS:
-    geomType = new LSSGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    geomType = new LSSGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
     for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
       if (!requestedFeatures.linearSweptSpheres) {
@@ -8481,7 +7085,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     }
     break;
   case GPRT_SPHERES:
-    geomType = new SphereGeomType(context->logicalDevice, requestedFeatures.numRayTypes, recordSize);
+    geomType = new SphereGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
     for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
       if (!requestedFeatures.linearSweptSpheres) {
@@ -8552,51 +7156,14 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
   geomType->setIntersection(rayType, module, progName);
 }
 
-GPRT_API void
-gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rasterType, GPRTModule _module, const char *progName) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Module *module = (Module *) _module;
-
-  if (!module->checkForEntrypoint(progName)) {
-    LOG_ERROR("Vertex program " + std::string(progName) + " not found in module!");
-  }
-
-  geomType->setVertex(rasterType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _module, const char *progName) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Module *module = (Module *) _module;
-
-  if (!module->checkForEntrypoint(progName)) {
-    LOG_ERROR("Pixel program " + std::string(progName) + " not found in module!");
-  }
-
-  geomType->setPixel(rasterType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetRasterAttachments(GPRTGeomType _geomType, int rasterType, GPRTTexture _colorAttachment,
-                                 GPRTTexture _depthAttachment) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Texture *colorAttachment = (Texture *) _colorAttachment;
-  Texture *depthAttachment = (Texture *) _depthAttachment;
-  geomType->setRasterAttachments(rasterType, colorAttachment, depthAttachment);
-}
-
 GPRT_API GPRTSampler
 gprtSamplerCreate(GPRTContext _context, GPRTFilter magFilter, GPRTFilter minFilter, GPRTFilter mipFilter,
                   uint32_t anisotropy, GPRTSamplerAddressMode addressMode, GPRTBorderColor borderColor) {
   LOG_API_CALL();
 
   Context *context = (Context *) _context;
-  Sampler *sampler = new Sampler(context->physicalDevice, context->logicalDevice, (VkFilter) magFilter,
-                                 (VkFilter) minFilter, (VkSamplerMipmapMode) mipFilter, anisotropy,
-                                 (VkSamplerAddressMode) addressMode, (VkBorderColor) borderColor);
+  Sampler *sampler = new Sampler(context, (VkFilter) magFilter, (VkFilter) minFilter, (VkSamplerMipmapMode) mipFilter,
+                                 anisotropy, (VkSamplerAddressMode) addressMode, (VkBorderColor) borderColor);
 
   return (GPRTSampler) sampler;
 }
@@ -8616,7 +7183,7 @@ GPRT_API gprt::Sampler
 gprtSamplerGetHandle(GPRTSampler _sampler) {
   LOG_API_CALL();
   Sampler *sampler = (Sampler *) _sampler;
-  gprt::Sampler samplerHandle = sampler->address;
+  gprt::Sampler samplerHandle = {sampler->address};
   return samplerHandle;
 }
 
@@ -8639,9 +7206,8 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
                                               // not needed
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                                 context->graphicsQueue, imageUsageFlags, memoryUsageFlags, (VkImageType) type,
-                                 (VkFormat) format, width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
+                                 width, height, depth, allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -8666,9 +7232,8 @@ gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                                 context->graphicsQueue, imageUsageFlags, memoryUsageFlags, (VkImageType) type,
-                                 (VkFormat) format, width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
+                                 width, height, depth, allocateMipmaps, init);
 
   return (GPRTTexture) texture;
 }
@@ -8694,9 +7259,8 @@ gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                // access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context->physicalDevice, context->logicalDevice, context->graphicsCommandBuffer,
-                                 context->graphicsQueue, imageUsageFlags, memoryUsageFlags, (VkImageType) type,
-                                 (VkFormat) format, width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
+                                 width, height, depth, allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -8734,7 +7298,7 @@ gprtTextureGetHandle(GPRTTexture _texture, int deviceID) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
   gprt::Texture texHandle;
-  texHandle = texture->address;
+  texHandle = {texture->address};
   return texHandle;
 }
 
@@ -8791,8 +7355,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
   buffer->map();
@@ -8825,8 +7388,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   if (init) {
     buffer->map();
@@ -8862,8 +7424,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context->physicalDevice, context->logicalDevice, context->allocator, context->graphicsCommandBuffer,
-                 context->graphicsQueue, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
   buffer->map();
@@ -9407,34 +7968,34 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
 }
 
 GPRT_API GPRTAccel
-gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtAABBAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  AABBAccel *accel = new AABBAccel(context, numGeometries, (AABBGeom *) arrayOfChildGeoms);
+  AABBAccel *accel = new AABBAccel(context, 1, (AABBGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  TriangleAccel *accel = new TriangleAccel(context, numGeometries, (TriangleGeom *) arrayOfChildGeoms);
+  TriangleAccel *accel = new TriangleAccel(context, 1, (TriangleGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtSphereAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtSphereAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  SphereAccel *accel = new SphereAccel(context, numGeometries, (SphereGeom *) arrayOfChildGeoms);
+  SphereAccel *accel = new SphereAccel(context, 1, (SphereGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtLSSAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  LSSAccel *accel = new LSSAccel(context, numGeometries, (LSSGeom *) arrayOfChildGeoms);
+  LSSAccel *accel = new LSSAccel(context, 1, (LSSGeom *) geom);
   return (GPRTAccel) accel;
 }
 
@@ -9443,11 +8004,6 @@ gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferO
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
-
-  // Creating an instance acceleration structure will introduce geom records into
-  // the SBT. Therefore, we need to rebuild the pipeline after this.
-
-  context->raytracingPipelineOutOfDate = true;
 
   return (GPRTAccel) accel;
 }
@@ -9504,8 +8060,8 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   gprt::Instance newInstance = gprt::Instance();
   gprt::Accel handle = accel->getAccelHandle();
   newInstance.__gprtAccelAddress = handle.address;
-  newInstance.__gprtInstanceIndex = handle.index;
-  newInstance.__gprtSBTOffset = 0;   // This will get set later...
+  newInstance.instanceCustomIndex = handle.index;
+  newInstance.__gprtSBTOffset = handle.index;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =
@@ -9517,7 +8073,6 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->buildPipeline();
   context->buildSBT(flags);
 }
 
@@ -9550,10 +8105,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
 
-  std::vector<VkDescriptorSet> descriptorSets = {context->samplerDescriptorSet, context->texture1DDescriptorSet,
-                                                 context->texture2DDescriptorSet, context->texture3DDescriptorSet};
+  std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->raytracingPipelineLayout, 1, (uint32_t) descriptorSets.size(), descriptorSets.data(),
+                          context->raytracingPipelineLayout, 0, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
 
   if (context->queryRequested) {
@@ -9590,7 +8144,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
@@ -9601,8 +8155,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   // find raygen in current list of raygens
   int raygenOffset = 0;
-  for (int i = 0; i < context->raygenPrograms.size(); ++i) {
-    if (context->raygenPrograms[i] == raygen) {
+  for (int i = 0; i < context->raygens.size(); ++i) {
+    if (context->raygens[i] == raygen) {
       raygenOffset = i * recordSize;
       break;
     }
@@ -9616,17 +8170,17 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   // * context->raygenPrograms.size();
 
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
-  if (context->missPrograms.size() > 0) {
+  if (context->misses.size() > 0) {
     missShaderSbtEntry.deviceAddress = missBaseAddr;
     missShaderSbtEntry.stride = recordSize;
-    missShaderSbtEntry.size = missShaderSbtEntry.stride * context->missPrograms.size();
+    missShaderSbtEntry.size = missShaderSbtEntry.stride * context->misses.size();
   }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
-  if (context->callablePrograms.size() > 0) {
+  if (context->callables.size() > 0) {
     callableShaderSbtEntry.deviceAddress = callableBaseAddr;
     callableShaderSbtEntry.stride = recordSize;
-    callableShaderSbtEntry.size = callableShaderSbtEntry.stride * context->callablePrograms.size();
+    callableShaderSbtEntry.size = callableShaderSbtEntry.stride * context->callables.size();
   }
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
@@ -9672,6 +8226,12 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
+  
+  // Build / update the compute pipeline if required
+  if (compute->pipeline == VK_NULL_HANDLE) {
+    compute->buildPipeline(context->descriptorSetLayout);
+  }
+
   VkResult err;
 
   VkCommandBufferBeginInfo cmdBufInfo{};
@@ -9686,23 +8246,10 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    return (value + alignment - 1) & ~(alignment - 1);
-  };
+  std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
 
-  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
-  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
-  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
-  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
-
-  std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->samplerDescriptorSet,
-                                                 context->texture1DDescriptorSet, context->texture2DDescriptorSet,
-                                                 context->texture3DDescriptorSet};
-
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-  uint32_t offset = (uint32_t) compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
-                          (uint32_t) descriptorSets.size(), descriptorSets.data(), 1, &offset);
+                          (uint32_t) descriptorSets.size(), descriptorSets.data(), 0, nullptr);
 
   if (pushConstants.size() > 0) {
     vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,

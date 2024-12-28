@@ -120,7 +120,7 @@ int main(int ac, char **av) {
   GPRTGeomOf<TrianglesGeomData> floorGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(floorGeom, floorVertexBuffer, NUM_FLOOR_VERTICES);
   gprtTrianglesSetIndices(floorGeom, floorIndexBuffer, NUM_FLOOR_INDICES);
-  GPRTAccel floorAccel = gprtTriangleAccelCreate(context, 1, &floorGeom);
+  GPRTAccel floorAccel = gprtTriangleAccelCreate(context, floorGeom);
   gprtAccelBuild(context, floorAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *floorData = gprtGeomGetParameters(floorGeom);
 
@@ -135,7 +135,7 @@ int main(int ac, char **av) {
   GPRTGeomOf<TrianglesGeomData> wallGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(wallGeom, wallVertexBuffer, NUM_WALL_VERTICES);
   gprtTrianglesSetIndices(wallGeom, wallIndexBuffer, NUM_WALL_INDICES);
-  GPRTAccel wallAccel = gprtTriangleAccelCreate(context, 1, &wallGeom);
+  GPRTAccel wallAccel = gprtTriangleAccelCreate(context, wallGeom);
   gprtAccelBuild(context, wallAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *wallData = gprtGeomGetParameters(wallGeom);
 
@@ -151,7 +151,7 @@ int main(int ac, char **av) {
   GPRTGeomOf<TrianglesGeomData> windowGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(windowGeom, windowVertexBuffer, NUM_WINDOW_VERTICES);
   gprtTrianglesSetIndices(windowGeom, windowIndexBuffer, NUM_WINDOW_INDICES);
-  GPRTAccel windowAccel = gprtTriangleAccelCreate(context, 1, &windowGeom);
+  GPRTAccel windowAccel = gprtTriangleAccelCreate(context, windowGeom);
   gprtAccelBuild(context, windowAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   TrianglesGeomData *windowData = gprtGeomGetParameters(windowGeom);
 

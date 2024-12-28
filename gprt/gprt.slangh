@@ -86,20 +86,13 @@
 
 #include "gprt_shared.h"
 
-// Descriptor binding, then set number.
-// Currently, 0, N is used for textures
-// Then, 1, N is used for record data passed
-// to compute and raster programs.
-//
-// Note, it's assumed that at address 0 into all these descriptors, we will have some "default"
-[[vk::binding(0, 1)]]
-SamplerState samplers[];
-[[vk::binding(0, 2)]]
-Texture1D texture1Ds[];
-[[vk::binding(0, 3)]]
-Texture2D texture2Ds[];
-[[vk::binding(0, 4)]]
-Texture3D texture3Ds[];
+// [[vk::binding(0, 0)]] is reserved for global "uniform" descriptor data.
+[[vk::binding(0, 0)]] SamplerState samplers[];
+[[vk::binding(0, 0)]] Texture1D texture1Ds[];
+[[vk::binding(0, 0)]] Texture2D texture2Ds[];
+[[vk::binding(0, 0)]] Texture3D texture3Ds[];
+
+// Perhaps reserve binding 1 for SBT values?
 
 // Update, we now use buffer pointers for all buffer data. This helps avoid the need for
 // indirect buffer accessses through the below binding.
@@ -189,22 +182,22 @@ getNullAccelHandle() {
 
 Texture1D
 getTexture1DHandle(gprt::Texture texture) {
-  return texture1Ds[texture];
+  return texture1Ds[texture.index];
 }
 
 Texture2D
 getTexture2DHandle(gprt::Texture texture) {
-  return texture2Ds[texture];
+  return texture2Ds[texture.index];
 }
 
 Texture3D
 getTexture3DHandle(gprt::Texture texture) {
-  return texture3Ds[texture];
+  return texture3Ds[texture.index];
 }
 
 SamplerState
 getSamplerHandle(gprt::Sampler sampler) {
-  return samplers[sampler];
+  return samplers[sampler.index];
 }
 
 SamplerState

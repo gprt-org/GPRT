@@ -157,7 +157,7 @@ int main(int ac, char **av) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
 
-  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, 1, &plane);
+  GPRTAccel trianglesBLAS = gprtTriangleAccelCreate(context, plane);
   gprtAccelBuild(context, trianglesBLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   std::vector<gprt::Instance> instances(samplers.size(), gprtAccelGetInstance(trianglesBLAS));
@@ -168,7 +168,6 @@ int main(int ac, char **av) {
 
   pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = (uint32_t) instances.size();
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch(transformProgram, {samplers.size(), 1, 1}, {1, 1, 1}, pc);
 
   // gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);

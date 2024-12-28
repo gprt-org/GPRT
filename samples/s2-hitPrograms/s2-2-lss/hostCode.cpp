@@ -50,7 +50,7 @@ int main(int ac, char **av) {
   gprtGeomSetParameters(lssGeom, lssParams);
 
   // Create and build BLAS
-  GPRTAccel lssAccel = gprtLSSAccelCreate(context, 1, &lssGeom);
+  GPRTAccel lssAccel = gprtLSSAccelCreate(context, lssGeom);
   gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Create and build TLAS

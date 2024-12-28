@@ -58,7 +58,7 @@ template <typename T> struct Mesh {
     geomData->lvlOfDetail = lvlOfDetail;
 
     // Build the bottom level acceleration structure
-    accel = gprtTriangleAccelCreate(context, 1, &geometry);
+    accel = gprtTriangleAccelCreate(context, geometry);
     gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
     // gprtAccelCompact(context, accel);
   };
@@ -111,9 +111,6 @@ int main(int ac, char **av) {
   // set up miss
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
-
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
 
   // ------------------------------------------------------------------
   // bottom level mesh instances

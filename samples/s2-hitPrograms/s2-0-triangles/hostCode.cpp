@@ -46,7 +46,7 @@ int main(int ac, char **av) {
   // A BLAS organizes triangles into a data structure that allows rays to quickly
   // determine potential intersections, significantly speeding up ray tracing by narrowing down
   // the search to relevant geometry instead of testing every triangle.
-  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Create a single instance of the BLAS in a top-level acceleration structure (TLAS), required for ray tracing.

@@ -32,54 +32,23 @@
 // The framework we'll use to create a user interface
 #include "imgui.h"
 
-extern GPRTProgram s8_1_deviceCode;
+extern GPRTProgram s8_0_deviceCode;
 
 // Vertices are the points that define our triangles
-const int NUM_TRI_VERTICES = 3;
-float3 triVertices[NUM_TRI_VERTICES] = {
+const int NUM_VERTICES = 3;
+float3 vertices[NUM_VERTICES] = {
     {-1.f, -.5f, 0.f},
     {+1.f, -.5f, 0.f},
     {0.f, +.5f, 0.f},
 };
 
-float3 triColors[NUM_TRI_VERTICES] = {
-    {1.f, 0.f, 0.f},
-    {0.f, 1.f, 0.f},
-    {0.f, 0.f, 1.f},
-};
-
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
-const int NUM_TRI_INDICES = 1;
-uint3 triIndices[NUM_TRI_INDICES] = {{0, 1, 2}};
+const int NUM_INDICES = 1;
+int3 indices[NUM_INDICES] = {{0, 1, 2}};
 
-// These vertices and indices are used to define two triangles
-// that will act as a backdrop
-const int NUM_BACKDROP_VERTICES = 4;
-float3 backdropVertices[NUM_BACKDROP_VERTICES] = {
-    {-1.f, -1.f, 0.5f},
-    {+1.f, -1.f, 0.5f},
-    {-1.f, +1.f, 0.5f},
-    {+1.f, +1.f, 0.5f},
-};
-
-const int NUM_BACKDROP_INDICES = 2;
-uint3 backdropIndices[NUM_BACKDROP_INDICES] = {{0, 1, 2}, {1, 3, 2}};
-
-// These vertices and indices are used to define two triangles
-// that will act as our overlaying GUI
-const int NUM_GUI_VERTICES = 4;
-float3 guiVertices[NUM_GUI_VERTICES] = {
-    {-1.f, -1.f, 0.f},
-    {+1.f, -1.f, 0.f},
-    {-1.f, +1.f, 0.f},
-    {+1.f, +1.f, 0.f},
-};
-
-const int NUM_GUI_INDICES = 2;
-uint3 guiIndices[NUM_GUI_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const uint2 fbSize = {1400, 460};
 
 // final image output
 const char *outFileName = "s12-imgui.png";
@@ -92,38 +61,44 @@ float cosFovy = 0.66f;
 
 int main(int ac, char **av) {
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S12 ImGui Rasterization");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S12 ImGui Ray Tracing");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s8_1_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s8_0_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
   // ##################################################################
 
+  // A kernel for compositing imgui and handling temporal antialiasing
+  GPRTComputeOf<CompositeGuiConstants> CompositeGui =
+      gprtComputeCreate<CompositeGuiConstants>(context, module, "CompositeGui");
+
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetVertexProg(trianglesGeomType, 0, module, "simpleVertex");
-  gprtGeomTypeSetPixelProg(trianglesGeomType, 0, module, "simplePixel");
+  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  GPRTGeomTypeOf<BackgroundData> backdropGeomType = gprtGeomTypeCreate<BackgroundData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetVertexProg(backdropGeomType, 0, module, "backgroundVertex");
-  gprtGeomTypeSetPixelProg(backdropGeomType, 0, module, "backgroundPixel");
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
-  GPRTGeomTypeOf<GUIData> guiGeomType = gprtGeomTypeCreate<GUIData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetVertexProg(guiGeomType, 0, module, "GUIVertex");
-  gprtGeomTypeSetPixelProg(guiGeomType, 0, module, "GUIPixel");
+  GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
   // ##################################################################
   // set the parameters for those kernels
   // ##################################################################
 
-  // Setup pixel frame buffer
-  GPRTTextureOf<uint32_t> colorAttachment = gprtDeviceTextureCreate<uint32_t>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
-  GPRTTextureOf<float> depthAttachment = gprtDeviceTextureCreate<float>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
-  gprtGeomTypeSetRasterAttachments(backdropGeomType, 0, colorAttachment, depthAttachment);
-  gprtGeomTypeSetRasterAttachments(trianglesGeomType, 0, colorAttachment, depthAttachment);
-  gprtGeomTypeSetRasterAttachments(guiGeomType, 0, colorAttachment, depthAttachment);
+  auto imageBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+
+  auto imageTexture = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT,
+                                                      fbSize.x, fbSize.y, 1, false, nullptr);
+
+  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+
+  // Raygen program frame buffer
+  RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
+  rayGenData->imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
+
+  // Miss program checkerboard background colors
+  MissProgData *missData = gprtMissGetParameters(miss);
+  missData->color0 = float3(0.1f, 0.1f, 0.1f);
+  missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   // This is new, setup GUI frame buffer. We'll rasterize the GUI to this texture, then composite the GUI on top of the
   // rendered scene.
@@ -133,40 +108,33 @@ int main(int ac, char **av) {
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
-  GPRTBufferOf<float3> triVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triVertices);
-  GPRTBufferOf<float3> triColorBuffer = gprtDeviceBufferCreate<float3>(context, NUM_TRI_VERTICES, triColors);
-  GPRTBufferOf<uint3> triIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_TRI_INDICES, triIndices);
+
+  // The vertex and index buffers here define the triangle vertices
+  // and how those vertices are connected together.
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+
+  // Next, we will create an instantiation of our geometry declaration.
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  gprtTrianglesSetVertices(trianglesGeom, triVertexBuffer, NUM_TRI_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, triIndexBuffer, NUM_TRI_INDICES);
-  TrianglesGeomData *tridata = gprtGeomGetParameters(trianglesGeom);
-  tridata->color = gprtBufferGetDevicePointer(triColorBuffer);
-  tridata->vertex = gprtBufferGetDevicePointer(triVertexBuffer);
-  tridata->index = gprtBufferGetDevicePointer(triIndexBuffer);
 
-  GPRTBufferOf<float3> backdropVertexBuffer =
-      gprtDeviceBufferCreate<float3>(context, NUM_BACKDROP_VERTICES, backdropVertices);
-  GPRTBufferOf<uint3> backdropIndexBuffer =
-      gprtDeviceBufferCreate<uint3>(context, NUM_BACKDROP_INDICES, backdropIndices);
-  GPRTGeomOf<BackgroundData> bgGeom = gprtGeomCreate<BackgroundData>(context, backdropGeomType);
-  gprtTrianglesSetVertices(bgGeom, backdropVertexBuffer, NUM_BACKDROP_VERTICES);
-  gprtTrianglesSetIndices(bgGeom, backdropIndexBuffer, NUM_BACKDROP_INDICES);
-  BackgroundData *bgdata = gprtGeomGetParameters(bgGeom);
-  bgdata->vertex = gprtBufferGetDevicePointer(backdropVertexBuffer);
-  bgdata->index = gprtBufferGetDevicePointer(backdropIndexBuffer);
-  bgdata->color0 = float3(0.1f, 0.1f, 0.1f);
-  bgdata->color1 = float3(0.0f, 0.0f, 0.0f);
+  // We use these calls to tell the geometry what buffers store triangle
+  // indices and vertices
+  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
+  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
-  GPRTBufferOf<float3> guiVertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_GUI_VERTICES, guiVertices);
-  GPRTBufferOf<uint3> guiIndexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_GUI_INDICES, guiIndices);
-  GPRTGeomOf<GUIData> guiGeom = gprtGeomCreate<GUIData>(context, guiGeomType);
-  gprtTrianglesSetVertices(guiGeom, guiVertexBuffer, NUM_GUI_VERTICES);
-  gprtTrianglesSetIndices(guiGeom, guiIndexBuffer, NUM_GUI_INDICES);
-  GUIData *guiData = gprtGeomGetParameters(guiGeom);
-  guiData->vertex = gprtBufferGetDevicePointer(guiVertexBuffer);
-  guiData->index = gprtBufferGetDevicePointer(guiIndexBuffer);
-  guiData->texture = gprtTextureGetHandle(guiColorAttachment);
-  guiData->resolution = float2((float) fbSize.x, (float) fbSize.y);
+  // Placing that geometry into a BLAS.
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
+  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+  // Placing that BLAS into a TLAS.
+  gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
+  GPRTBufferOf<gprt::Instance> instancesBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, instancesBuffer);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+  // Here, we place a reference to our TLAS in the ray generation
+  // kernel's parameters
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // Upload our newly assigned parameters to the shader binding table.
   gprtBuildShaderBindingTable(context);
@@ -175,7 +143,14 @@ int main(int ac, char **av) {
   // now that everything is ready: launch it ....
   // ##################################################################
 
-  PushConstants pc;
+
+  CompositeGuiConstants guiPC;
+  guiPC.fbSize = fbSize;
+  guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
+  guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
+  guiPC.guiTexture = gprtTextureGetHandle(guiColorAttachment);
+
+  RTPushConstants rtPC;
 
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
@@ -219,22 +194,24 @@ int main(int ac, char **av) {
       float4x4 rotationMatrixY = math::matrixFromRotation(yAngle, lookRight);
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
+      // ----------- compute variable values  ------------------
+      float3 camera_pos = lookFrom;
+      float3 camera_d00 = normalize(lookAt - lookFrom);
       float aspect = float(fbSize.x) / float(fbSize.y);
-      pc.view = math::matrixFromLookAt(position.xyz(), pivot.xyz(), lookUp);
-      pc.proj = math::perspective(cosFovy, aspect, 0.1f, 1000.f);
+      float3 camera_ddu = cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
+      camera_d00 -= 0.5f * camera_ddu;
+      camera_d00 -= 0.5f * camera_ddv;
+
+      // ----------- set variables  ----------------------------
+      rtPC.camera.pos = camera_pos;
+      rtPC.camera.dir_00 = camera_d00;
+      rtPC.camera.dir_du = camera_ddu;
+      rtPC.camera.dir_dv = camera_ddv;
     }
 
-    // Draw our background and triangle
-    gprtTextureClear(depthAttachment);
-    gprtTextureClear(colorAttachment);
-
-    std::vector<GPRTGeomOf<BackgroundData>> drawList1 = {bgGeom};
-    gprtGeomTypeRasterize(context, backdropGeomType, drawList1.size(), drawList1.data(), 0, nullptr, pc);
-    gprtTextureClear(depthAttachment);
-
-    std::vector<GPRTGeomOf<TrianglesGeomData>> drawList2 = {trianglesGeom};
-    gprtGeomTypeRasterize(context, trianglesGeomType, drawList2.size(), drawList2.data(), 0, nullptr, pc);
-    gprtTextureClear(depthAttachment);
+    // Call the GPU raygen kernel function
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, rtPC);
 
     // Set our ImGui state
     bool show_demo_window = true;
@@ -247,22 +224,32 @@ int main(int ac, char **av) {
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
 
-    // Finally, composite the gui onto the screen.
-    std::vector<GPRTGeomOf<GUIData>> drawList3 = {guiGeom};
-    gprtGeomTypeRasterize(context, guiGeomType, drawList3.size(), drawList3.data(), 0, nullptr, pc);
+    // Finally, composite the gui onto the screen using a compute shader.
+    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0, fbSize.x, fbSize.y, 1);
+
+    gprtComputeLaunch(CompositeGui, {fbSize.x, fbSize.y, 1}, {1, 1, 1}, guiPC);
 
     // If a window exists, presents the framebuffer here to that window
-    gprtTexturePresent(context, colorAttachment);
+    gprtBufferPresent(context, frameBuffer);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  gprtTextureSaveImage(colorAttachment, outFileName);
+  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
+
+  gprtTextureDestroy(guiColorAttachment);
+  gprtTextureDestroy(guiDepthAttachment);
+
+  gprtGeomDestroy(trianglesGeom);
+  gprtGeomTypeDestroy(trianglesGeomType);
+  gprtModuleDestroy(module);
   gprtContextDestroy(context);
+
+  return 0;
 }

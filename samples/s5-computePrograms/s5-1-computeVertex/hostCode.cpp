@@ -56,9 +56,6 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
-
   // ##################################################################
   // set the parameters for our triangle mesh and compute kernel
   // ##################################################################
@@ -95,7 +92,7 @@ int main(int ac, char **av) {
 
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
-  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);

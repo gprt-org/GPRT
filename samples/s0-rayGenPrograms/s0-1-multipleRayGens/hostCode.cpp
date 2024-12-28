@@ -34,7 +34,7 @@ int main() {
   gprtRayGenSetParameters(secondRayGen, data);
   
   // Build the Shader Binding Table (SBT)
-  gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+  gprtBuildShaderBindingTable(context);
 
   // Render loop: repeatedly launch both ray generation shaders, one after the other.
   do {

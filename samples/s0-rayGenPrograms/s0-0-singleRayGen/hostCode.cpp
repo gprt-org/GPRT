@@ -31,7 +31,7 @@ int main() {
   data->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
 
   // Build the Shader Binding Table (SBT)
-  gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+  gprtBuildShaderBindingTable(context);
 
   // Render loop: repeatedly launch the ray generation shader
   do {

@@ -34,7 +34,7 @@ void simpleRayGen(uniform RayGenData record) {
   // Trace our primary visibility ray
   TraceRay(world,                   // the tree
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
-           0b111111111,             // instance inclusion mask
+           0b11111111,              // instance inclusion mask
            0,                       // ray type
            1,                       // number of ray types
            0,                       // miss type
@@ -56,7 +56,7 @@ void simpleRayGen(uniform RayGenData record) {
     // Trace another ray to get color of what's behind
     TraceRay(world,                   // the tree
              RAY_FLAG_FORCE_OPAQUE,   // ray flags
-             0b111111111,             // instance inclusion mask
+             0b11111111,             // instance inclusion mask
              0,                       // ray type
              1,                       // number of ray types
              0,                       // miss type
@@ -129,5 +129,6 @@ TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
 
 [shader("miss")]
 void miss(inout Payload payload) {
+  payload.hitT = -1.0;
   payload.color = float4(0.0);
 }
