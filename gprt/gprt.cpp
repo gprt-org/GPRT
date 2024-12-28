@@ -102,10 +102,11 @@ static struct RequestedFeatures {
 
   uint32_t maxRayPayloadSize = 32;
   uint32_t maxRayHitAttributeSize = 2;
+  
+  uint32_t internalAdditionalSize = 32;
   uint32_t recordSize = 256;
 
   uint32_t maxDescriptorCount = 256;
-  uint32_t maxComputePrograms = 32;
 
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
@@ -2457,12 +2458,6 @@ struct GeomType : public SBTEntry {
   std::vector<bool> pixelShaderUsed;
   std::vector<bool> closestNeighborShaderUsed;
 
-  // During pipeline builds, these vectors cache the offsets of stages
-  // so that they can be referenced for each instance.
-  std::vector<int> closestHitShaderStageAddress;
-  std::vector<int> intersectionShaderStageAddress;
-  std::vector<int> anyHitShaderStageAddress;
-
   GeomType(Context* context, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
     this->context = context;
 
@@ -2501,10 +2496,6 @@ struct GeomType : public SBTEntry {
     vertexShaderUsed.resize(numRayTypes, false);
     pixelShaderUsed.resize(numRayTypes, false);
     closestNeighborShaderUsed.resize(numRayTypes, false);
-
-    closestHitShaderStageAddress.resize(numRayTypes, -1);
-    anyHitShaderStageAddress.resize(numRayTypes, -1);
-    intersectionShaderStageAddress.resize(numRayTypes, -1);
 
     // store size, but don't allocate. Will be done by geom instances.
     this->recordSize = recordSize;
@@ -3932,35 +3923,36 @@ struct InstanceAccel : public Accel {
 
   void updateSBTOffsets() {
     instanceOffset = 0;
-    for (uint32_t i = 0; i < context->accels.size(); ++i) {
-      if (context->accels[i] == this)
-        break;
-      if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
-        InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
-        size_t numGeometry = instanceAccel->getNumGeometries();
-        instanceOffset += numGeometry * requestedFeatures.numRayTypes;
-      }
-    }
+    // for (uint32_t i = 0; i < context->accels.size(); ++i) {
+    //   if (context->accels[i] == this)
+    //     break;
+    //   if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
+    //     InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
+    //     size_t numGeometry = instanceAccel->getNumGeometries();
+    //     instanceOffset += numGeometry * requestedFeatures.numRayTypes;
+    //   }
+    // }
 
-    instancesBuffer->map();
+    // instancesBuffer->map();
 
     // Populate SBT offsets one by one
-    int numGeometriesInTLAS = 0;
-    int blasOffsetWithinCurrentTLAS = 0;
-    for (uint32_t i = 0; i < numInstances; ++i) {
-      gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
-      instance->__gprtSBTOffset = instanceOffset + blasOffsetWithinCurrentTLAS;
-      if (instance->__gprtAccelAddress != 0) {
-        Accel *accel = context->accels[instance->__gprtInstanceIndex];
+    // int numGeometriesInTLAS = numInstances;
+    // int blasOffsetWithinCurrentTLAS = 0;
+    // for (uint32_t i = 0; i < numInstances; ++i) {
+    //   gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
+    //   instance->__gprtSBTOffset = i * requestedFeatures.numRayTypes;
+      // instanceOffset + blasOffsetWithinCurrentTLAS;
+      // if (instance->__gprtAccelAddress != 0) {
+      //   Accel *accel = context->accels[instance->__gprtInstanceIndex];
 
         // for now, this works. Eventually I'd like this to act more like a lookup / prefix sum...
-        int numGeometriesInAccel = accel->geometries.size();
-        numGeometriesInTLAS += accel->geometries.size();
-        blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
-      }
-    }
-    instancesBuffer->unmap();
-    setNumGeometries(numGeometriesInTLAS);
+        // int numGeometriesInAccel = accel->geometries.size();
+        // numGeometriesInTLAS += accel->geometries.size();
+        // blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
+      // }
+    // }
+    // instancesBuffer->unmap();
+    setNumGeometries(numInstances);
   }
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
@@ -4110,110 +4102,61 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
     }
 
     // Hit groups
-
-    // First, clear any previously assigned stage addresses
     {
-      for (auto geomType : geomTypes) {
-        geomType->closestHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->anyHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->intersectionShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-      }
-    }
+      for (uint32_t i = 0; i < geomTypes.size(); ++i) {
+        auto &geomType = geomTypes[i];
+        VkRayTracingShaderGroupTypeKHR shaderGroupType;
 
-    // Go over all TLAS by order they were created
-    for (uint32_t tlasID = 0; tlasID < accels.size(); ++tlasID) {
-      Accel *tlas = accels[tlasID];
-      if (!tlas)
-        continue;
-      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-        // Iterate over all BLAS stored in the TLAS
-        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-
-        // Skip instances whose instance buffers have not yet been set.
-        if (!instanceAccel->instancesBuffer)
-          continue;
-
-        // Todo, move this setup to the device...
-        instanceAccel->instancesBuffer->map();
-        gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
-
-        for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-          // First, need to make a map from accel address back to gprt accel*...
-          uint64_t accelAddr = instances[blasID].__gprtAccelAddress;
-
-          // Uninitialized accel
-          if (accelAddr == 0)
-            continue;
-
-          Accel *blas = accels[instances[blasID].__gprtInstanceIndex];
-          VkRayTracingShaderGroupTypeKHR shaderGroupType;
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_AABB_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_LSS_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
-          } else if (blas->getType() == GPRT_SPHERE_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
+        if (geomType->getKind() == GPRT_TRIANGLES)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_AABBS)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_LSS) {
+          if (requestedFeatures.linearSweptSpheres) {
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
           } else {
-            LOG_ERROR("Unsupported blas type found in TLAS.");
+            // AABB fallback
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
-
-          // Add a record for every geometry-raytype permutation
-          for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-            auto &geom = blas->geometries[geomID];
-            for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-
-              VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-              shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-              shaderGroup.type = shaderGroupType;
-
-              // init all to unused
-              shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-              // populate hit group programs using geometry type, recycling any previously referenced shader stages
-              if (geom->geomType->closestHitShaderUsed[rayType]) {
-                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->anyHitShaderUsed[rayType]) {
-                if (geom->geomType->anyHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  geom->geomType->anyHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.anyHitShader = geom->geomType->anyHitShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->intersectionShaderUsed[rayType]) {
-                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
-              }
-              shaderGroups.push_back(shaderGroup);
-            }
+        } else if (geomType->getKind() == GPRT_SPHERES) {
+          if (requestedFeatures.linearSweptSpheres) {
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+          } else {
+            // AABB fallback
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
+        } else {
+          LOG_ERROR("Unsupported geometry type found.");
         }
 
-        instanceAccel->instancesBuffer->unmap();
+        for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+          VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+          shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+          shaderGroup.type = shaderGroupType;
+
+          // init all to unused
+          shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+          shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+          // populate hit group programs using geometry type, recycling any previously referenced shader stages
+          if (geomType->closestHitShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->closestHitShaderStages[rayType]);
+            shaderGroup.closestHitShader = int(shaderStages.size() - 1);
+          }
+
+          if (geomType->anyHitShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->anyHitShaderStages[rayType]);
+            shaderGroup.anyHitShader = int(shaderStages.size() - 1);
+          }
+
+          if (geomType->intersectionShaderUsed[rayType]) {
+            shaderStages.push_back(geomType->intersectionShaderStages[rayType]);
+            shaderGroup.intersectionShader = int(shaderStages.size() - 1);
+          }
+          shaderGroups.push_back(shaderGroup);
+        }
       }
     }
 
@@ -4259,13 +4202,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
   const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
-  if ((requestedFeatures.recordSize * 2) > maxGroupSize) {
+  if (requestedFeatures.recordSize > maxGroupSize) {
     LOG_ERROR("Requested record size is too large! Max record size for this platform is " +
               std::to_string(maxGroupSize) + " bytes.");
   }
 
   // Doubling the record size to allow GPRT to store internal facing data
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, (requestedFeatures.recordSize * 2)), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
@@ -4439,7 +4382,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
             gprt::Instance instance = instances[blasID];
             uint64_t accelAddr = instance.__gprtAccelAddress;
-            Accel *blas = accels[instance.__gprtInstanceIndex];
+            Accel *blas = accels[instance.__gprtSBTOffset];
 
             // Accel *blas = instanceAccel->instances[blasID];
             if (blas->getType() != GPRT_INSTANCE_ACCEL) {
@@ -4454,7 +4397,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   size_t recordOffset =
                       recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
                   size_t handleOffset =
-                      handleStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset) +
+                      handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
                       handleStride * (numRayGens + numMissProgs + numCallableProgs);
                   memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
@@ -4464,7 +4407,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   memcpy(params, geom->SBTRecord, geom->recordSize);
 
                   // If implementing a software fallback, additionally memcpy data required for intersection testing
-                  uint8_t *internalParams = params + requestedFeatures.recordSize;
+                  uint8_t *internalParams = params + (requestedFeatures.recordSize);
                   if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
                     LSSGeom *lss = (LSSGeom *) geom;
                     LSSParameters isectParams;
@@ -8027,34 +7970,34 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
 }
 
 GPRT_API GPRTAccel
-gprtAABBAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtAABBAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  AABBAccel *accel = new AABBAccel(context, numGeometries, (AABBGeom *) arrayOfChildGeoms);
+  AABBAccel *accel = new AABBAccel(context, 1, (AABBGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtTriangleAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  TriangleAccel *accel = new TriangleAccel(context, numGeometries, (TriangleGeom *) arrayOfChildGeoms);
+  TriangleAccel *accel = new TriangleAccel(context, 1, (TriangleGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtSphereAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtSphereAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  SphereAccel *accel = new SphereAccel(context, numGeometries, (SphereGeom *) arrayOfChildGeoms);
+  SphereAccel *accel = new SphereAccel(context, 1, (SphereGeom *) geom);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtLSSAccelCreate(GPRTContext _context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms, unsigned int flags) {
+gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  LSSAccel *accel = new LSSAccel(context, numGeometries, (LSSGeom *) arrayOfChildGeoms);
+  LSSAccel *accel = new LSSAccel(context, 1, (LSSGeom *) geom);
   return (GPRTAccel) accel;
 }
 
@@ -8063,11 +8006,6 @@ gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferO
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
-
-  // Creating an instance acceleration structure will introduce geom records into
-  // the SBT. Therefore, we need to rebuild the pipeline after this.
-
-  context->raytracingPipelineOutOfDate = true;
 
   return (GPRTAccel) accel;
 }
@@ -8124,8 +8062,8 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   gprt::Instance newInstance = gprt::Instance();
   gprt::Accel handle = accel->getAccelHandle();
   newInstance.__gprtAccelAddress = handle.address;
-  newInstance.__gprtInstanceIndex = handle.index;
-  newInstance.__gprtSBTOffset = 0;   // This will get set later...
+  newInstance.instanceCustomIndex = handle.index;
+  newInstance.__gprtSBTOffset = handle.index;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =
@@ -8208,7 +8146,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
+  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;

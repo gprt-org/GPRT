@@ -46,7 +46,7 @@ int main(int ac, char **av) {
   gprtGeomSetParameters(sphereGeom, sphereParams);
 
   // Create and build BLAS
-  GPRTAccel sphereAccel = gprtSphereAccelCreate(context, 1, &sphereGeom);
+  GPRTAccel sphereAccel = gprtSphereAccelCreate(context, sphereGeom);
   gprtAccelBuild(context, sphereAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Create and build TLAS

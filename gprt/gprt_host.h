@@ -995,14 +995,12 @@ gprtCallableSetParameters(GPRTCallableOf<T> callable, T &parameters, int deviceI
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                       unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                    unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtAABBAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtAABBAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtAABBAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1018,14 +1016,12 @@ gprtAABBAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *ar
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                           unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                        unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtTriangleAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtTriangleAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtTriangleAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1041,14 +1037,12 @@ gprtTriangleAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T>
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
-                                         unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                      unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtSphereAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtSphereAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1064,14 +1058,13 @@ gprtSphereAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeom *arrayOfChildGeoms,
+GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom *geom,
                                       unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
-gprtLSSAccelCreate(GPRTContext context, size_t numGeometries, GPRTGeomOf<T> *arrayOfChildGeoms,
-                   unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtLSSAccelCreate(context, numGeometries, (GPRTGeom *) arrayOfChildGeoms, flags);
+gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtLSSAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 
 // ------------------------------------------------------------------

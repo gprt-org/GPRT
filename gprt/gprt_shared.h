@@ -119,7 +119,7 @@ struct Accel {
 struct Instance {
   float3x4 transform;
 
-  uint32_t __gprtInstanceIndex : 24;
+  uint32_t instanceCustomIndex : 24;
   uint32_t mask : 8;
   uint32_t __gprtSBTOffset : 24;
   uint32_t flags : 8;

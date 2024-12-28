@@ -26,7 +26,7 @@
 PushConstants pc;
 
 [shader("compute")]
-[numthreads(128, 1, 1)]
+[numthreads(512, 1, 1)]
 void
 Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   int instanceID = DispatchThreadID.x;
@@ -50,7 +50,7 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   float z = sin(pc.now + k * x) * cos(pc.now + k * y);
   float zoffset = x + y;
 
-  float scale = .005;
+  float scale = .001;
   instance.transform = float3x4(float4(scale, 0.0, 0.0, x * width), float4(0.0, scale, 0.0, y * depth),
                                 float4(0.0, 0.0, scale, z * height + zoffset));
   pc.instances[instanceID] = instance;

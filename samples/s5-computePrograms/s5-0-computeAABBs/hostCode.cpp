@@ -88,7 +88,7 @@ int main(int ac, char **av) {
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   gprt::Instance instance = gprtAccelGetInstance(aabbAccel);

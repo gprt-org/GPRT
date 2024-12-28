@@ -67,7 +67,7 @@ int main(int ac, char **av) {
   geomData->aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
 
   // Note, we must create an "AABB" accel rather than a triangles accel.
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   gprt::Instance instance = gprtAccelGetInstance(aabbAccel);

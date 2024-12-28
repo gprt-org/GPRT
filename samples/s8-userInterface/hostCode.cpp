@@ -123,7 +123,7 @@ int main(int ac, char **av) {
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
 
   // Placing that geometry into a BLAS.
-  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Placing that BLAS into a TLAS.

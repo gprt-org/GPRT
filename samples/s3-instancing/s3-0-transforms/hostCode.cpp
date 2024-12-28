@@ -95,7 +95,7 @@ main(int ac, char **av) {
   triangleData->index = gprtBufferGetDevicePointer(indexBuffer);
 
   // Place that single cube mesh in a bottom level acceleration structure
-  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, 1, &trianglesGeom);
+  GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // We will now create three instances of that cube mesh. On the gpu,

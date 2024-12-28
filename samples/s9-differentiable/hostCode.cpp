@@ -107,7 +107,7 @@ template <typename T> struct Mesh {
     geomData->index = gprtBufferGetDevicePointer(indexBuffer);
 
     // Build the bottom level acceleration structure
-    accel = gprtTriangleAccelCreate(context, 1, &geometry);
+    accel = gprtTriangleAccelCreate(context, geometry);
     gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
     // gprtAccelCompact(context, accel);
   };
@@ -242,7 +242,7 @@ main(int ac, char **av) {
   gprtAABBsSetPositions(aabbGeom, aabbPositions, 1);
 
   // Place that geometry into an AABB BLAS.
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
   gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
 
   // Placing that AABB BLAS into a TLAS.
