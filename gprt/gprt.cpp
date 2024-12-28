@@ -105,6 +105,7 @@ static struct RequestedFeatures {
   uint32_t recordSize = 256;
 
   uint32_t maxDescriptorCount = 256;
+  uint32_t maxComputePrograms = 32;
 
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
@@ -485,6 +486,8 @@ struct Context {
 
   // ray tracing pipeline and layout
   bool raytracingPipelineOutOfDate = true;
+  bool computePipelinesOutOfDate = true;
+
   VkPipeline raytracingPipeline = VK_NULL_HANDLE;
   VkPipelineLayout raytracingPipelineLayout = VK_NULL_HANDLE;
 
@@ -499,36 +502,13 @@ struct Context {
   std::vector<Geom *> geoms;
   std::vector<Accel *> accels;
 
-  bool computePipelinesOutOfDate = true;
-  bool rasterPipelinesOutOfDate = true;
-
-  // For rasterization, we need to temporarily remove the depth/color textures
-  // from the list of descriptors.
-  Texture *defaultTexture2D = nullptr;
-
-  Buffer *rasterRecordBuffer = nullptr;
-  Buffer *computeRecordBuffer = nullptr;
-
   VkDescriptorPoolSize descriptorPoolSize = {};
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
   VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
   VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
-  VkDescriptorPool rasterRecordDescriptorPool = VK_NULL_HANDLE;
-  VkDescriptorPool computeRecordDescriptorPool = VK_NULL_HANDLE;
-
   VkDescriptorPool imguiPool = VK_NULL_HANDLE;
-
-  // used to determine what descriptor sets need rebuilding
-  uint32_t previousNumRasterRecords = 0;
-  uint32_t previousNumComputeRecords = 0;
-
-  VkDescriptorSetLayout rasterRecordDescriptorSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSetLayout computeRecordDescriptorSetLayout = VK_NULL_HANDLE;
-
-  VkDescriptorSet rasterRecordDescriptorSet = VK_NULL_HANDLE;
-  VkDescriptorSet computeRecordDescriptorSet = VK_NULL_HANDLE;
 
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups{};
   Buffer *raygenTable = nullptr;
@@ -593,8 +573,6 @@ struct Context {
   // {
   //   // At the moment, we don't actually build our programs here.
   // }
-
-  void buildPipeline();
 
   // Todo, refactor this code...
   void setupInternalPrograms();
@@ -2034,6 +2012,22 @@ struct Texture : public ImageResource {
       if (mipLevels > 1)
         generateMipmap();
     }
+
+    // Write the image into the desscriptor array
+    VkDescriptorImageInfo imageDescriptor = {};
+    imageDescriptor.imageView = imageView;
+    imageDescriptor.imageLayout = layout;
+
+    VkWriteDescriptorSet writeDescriptorSet = {};
+    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.dstArrayElement = address;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.pBufferInfo = 0;
+    writeDescriptorSet.dstSet = context->descriptorSet;
+    writeDescriptorSet.pImageInfo = &imageDescriptor;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
   /*! Calls vkDestroy on the image, and frees underlying memory */
@@ -2104,6 +2098,21 @@ struct Sampler : public ImageResource {
     samplerInfo.borderColor = borderColor;
 
     VK_CHECK_RESULT(vkCreateSampler(context->logicalDevice, &samplerInfo, nullptr, &sampler));
+
+    // Write the image into the desscriptor array
+    VkDescriptorImageInfo imageDescriptor = {};
+    imageDescriptor.sampler = sampler;
+
+    VkWriteDescriptorSet writeDescriptorSet = {};
+    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.dstArrayElement = address;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.pBufferInfo = 0;
+    writeDescriptorSet.dstSet = context->descriptorSet;
+    writeDescriptorSet.pImageInfo = &imageDescriptor;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
   void destroy() override {
@@ -2117,16 +2126,7 @@ struct Sampler : public ImageResource {
   virtual ImageResourceType getType() { return GPRT_IMAGE_RESOURCE_TYPE_SAMPLER; }
 };
 
-struct SBTEntry {
-  size_t recordSize = 0;
-  uint8_t *SBTRecord = nullptr;
-};
-
-// At the moment, we actually just use ray generation programs for compute
-// kernels. We do this instead of using actual Vulkan compute programs so that
-// we can recycle the SBT records mechanism for compute IO, without
-// introducing VK descriptor sets.
-struct Compute : public SBTEntry {
+struct Compute {
   Context *context;
 
   // Our own virtual "compute address space".
@@ -2140,8 +2140,7 @@ struct Compute : public SBTEntry {
   VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
 
-  Compute(Context *context, Module *module, const char *_entryPoint, size_t recordSize)
-      : SBTEntry() {
+  Compute(Context *context, Module *module, const char *_entryPoint) {
     this->context = context;
 
     // Hunt for an existing free address for this compute kernel
@@ -2173,16 +2172,10 @@ struct Compute : public SBTEntry {
     shaderStage.module = shaderModule;
     shaderStage.pName = entryPoint.c_str();
     assert(shaderStage.module != VK_NULL_HANDLE);
-
-    this->recordSize = recordSize;
-    if (this->recordSize > 0)
-      this->SBTRecord = (uint8_t *) malloc(recordSize);
-    else
-      this->SBTRecord = nullptr;
   }
   ~Compute() {}
 
-  void buildPipeline(VkDescriptorSetLayout recordDescriptorSetLayout, VkDescriptorSetLayout descriptorSetLayout) {
+  void buildPipeline(VkDescriptorSetLayout descriptorSetLayout) {
     // If we already have a pipeline layout, free it so that we can make a new one
     if (pipelineLayout) {
       vkDestroyPipelineLayout(context->logicalDevice, pipelineLayout, nullptr);
@@ -2205,7 +2198,7 @@ struct Compute : public SBTEntry {
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, descriptorSetLayout};
+    std::vector<VkDescriptorSetLayout> layouts = {descriptorSetLayout};
     pipelineLayoutCreateInfo.setLayoutCount = (uint32_t) layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
@@ -2246,6 +2239,12 @@ struct Compute : public SBTEntry {
       vkDestroyShaderModule(context->logicalDevice, shaderModule, nullptr);
     }
   }
+};
+
+
+struct SBTEntry {
+  size_t recordSize = 0;
+  uint8_t *SBTRecord = nullptr;
 };
 
 struct RayGen : public SBTEntry {
@@ -2464,19 +2463,6 @@ struct GeomType : public SBTEntry {
   std::vector<int> intersectionShaderStageAddress;
   std::vector<int> anyHitShaderStageAddress;
 
-  // Optional resources for rasterizing geometry
-  struct RasterData {
-    uint32_t width = -1;
-    uint32_t height = -1;
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer frameBuffer = VK_NULL_HANDLE;
-    Texture *colorAttachment = nullptr;
-    Texture *depthAttachment = nullptr;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-  };
-  std::vector<RasterData> raster;
-
   GeomType(Context* context, uint32_t numRayTypes, size_t recordSize) : SBTEntry() {
     this->context = context;
 
@@ -2519,8 +2505,6 @@ struct GeomType : public SBTEntry {
     closestHitShaderStageAddress.resize(numRayTypes, -1);
     anyHitShaderStageAddress.resize(numRayTypes, -1);
     intersectionShaderStageAddress.resize(numRayTypes, -1);
-
-    raster.resize(numRayTypes);
 
     // store size, but don't allocate. Will be done by geom instances.
     this->recordSize = recordSize;
@@ -2600,321 +2584,6 @@ struct GeomType : public SBTEntry {
     assert(intersectionShaderStages[rayType].module != VK_NULL_HANDLE);
   }
 
-  void setVertex(int rasterType, Module *module, const char *entryPoint) {
-    context->rasterPipelinesOutOfDate = true;
-
-    vertexShaderUsed[rasterType] = true;
-    std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    vertexShaderEntryPoints[rasterType] = std::string(entryPoint);
-    binary = module->binary;
-
-    VkShaderModuleCreateInfo moduleCreateInfo{};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
-
-    vertexShaderStages[rasterType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertexShaderStages[rasterType].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertexShaderStages[rasterType].module = shaderModule;
-    vertexShaderStages[rasterType].pName = vertexShaderEntryPoints[rasterType].c_str();
-    assert(vertexShaderStages[rasterType].module != VK_NULL_HANDLE);
-  }
-
-  void setPixel(int rasterType, Module *module, const char *entryPoint) {
-    context->rasterPipelinesOutOfDate = true;
-
-    pixelShaderUsed[rasterType] = true;
-    std::vector<unsigned int, std::allocator<unsigned int>> binary;
-    pixelShaderEntryPoints[rasterType] = std::string(entryPoint);
-    binary = module->binary;
-
-    VkShaderModuleCreateInfo moduleCreateInfo{};
-    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleCreateInfo.codeSize = binary.size() * sizeof(uint32_t);
-    moduleCreateInfo.pCode = binary.data();
-
-    VkShaderModule shaderModule;
-    VK_CHECK_RESULT(vkCreateShaderModule(context->logicalDevice, &moduleCreateInfo, NULL, &shaderModule));
-
-    pixelShaderStages[rasterType].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pixelShaderStages[rasterType].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    pixelShaderStages[rasterType].module = shaderModule;
-    pixelShaderStages[rasterType].pName = pixelShaderEntryPoints[rasterType].c_str();
-    assert(pixelShaderStages[rasterType].module != VK_NULL_HANDLE);
-  }
-
-  void setRasterAttachments(uint32_t rasterType, Texture *colorTexture, Texture *depthTexture) {
-    if (colorTexture->width != depthTexture->width || colorTexture->height != depthTexture->height) {
-      throw std::runtime_error("Error, color and depth attachment textures must have equal dimensions!");
-    } else {
-      raster[rasterType].width = colorTexture->width;
-      raster[rasterType].height = colorTexture->height;
-    }
-
-    if (raster[rasterType].renderPass != VK_NULL_HANDLE)
-      vkDestroyRenderPass(context->logicalDevice, raster[rasterType].renderPass, nullptr);
-
-    raster[rasterType].colorAttachment = colorTexture;
-    raster[rasterType].depthAttachment = depthTexture;
-
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = colorTexture->format;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    // clear here says to clear the values to a constant at start.
-    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
-    // save rasterized fragments to memory
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    // not currently using a stencil
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    // Initial and final layouts of the texture
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = depthTexture->format;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
-
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    createInfo.pNext = nullptr;
-    createInfo.attachmentCount = (uint32_t) attachments.size();
-    createInfo.pAttachments = attachments.data();
-    createInfo.subpassCount = 1;
-    createInfo.pSubpasses = &subpass;
-    createInfo.dependencyCount = 1;
-    createInfo.pDependencies = &dependency;
-
-    vkCreateRenderPass(context->logicalDevice, &createInfo, nullptr, &raster[rasterType].renderPass);
-
-    VkImageView attachmentViews[] = {raster[rasterType].colorAttachment->imageView,
-                                     raster[rasterType].depthAttachment->imageView};
-
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = raster[rasterType].renderPass;
-    framebufferInfo.attachmentCount = 2;
-    framebufferInfo.pAttachments = attachmentViews;
-    framebufferInfo.width = raster[rasterType].width;
-    framebufferInfo.height = raster[rasterType].height;
-    framebufferInfo.layers = 1;
-
-    if (vkCreateFramebuffer(context->logicalDevice, &framebufferInfo, nullptr, &raster[rasterType].frameBuffer) != VK_SUCCESS) {
-      throw std::runtime_error("failed to create framebuffer!");
-    }
-  }
-
-  void buildRasterPipeline(uint32_t rasterType, VkDescriptorSetLayout recordDescriptorSetLayout,
-                           VkDescriptorSetLayout descriptorSetLayout) {
-    // we need both of these to be set, otherwise we can't build a raster pipeline...
-    if (!vertexShaderUsed[rasterType] || !pixelShaderUsed[rasterType])
-      return;
-
-    // we also need a framebuffer...
-    if (!raster[rasterType].frameBuffer)
-      return;
-
-    // If we already have a pipeline layout, free it so that we can make a new one
-    if (raster[rasterType].pipelineLayout) {
-      vkDestroyPipelineLayout(context->logicalDevice, raster[rasterType].pipelineLayout, nullptr);
-      raster[rasterType].pipelineLayout = VK_NULL_HANDLE;
-    }
-
-    // If we already have a pipeline, free it so that we can make a new one
-    if (raster[rasterType].pipeline) {
-      vkDestroyPipeline(context->logicalDevice, raster[rasterType].pipeline, nullptr);
-      raster[rasterType].pipeline = VK_NULL_HANDLE;
-    }
-
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {vertexShaderStages[rasterType],
-                                                                 pixelShaderStages[rasterType]};
-
-    // describes format of the vertex data
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr;   // Optional
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr;   // Optional
-
-    // describes what kind of geometry will be drawn
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    // describes the region of the framebuffer that the output will be rendered to
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float) raster[rasterType].width;
-    viewport.height = (float) raster[rasterType].height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    // used to potentially crop the image
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent.width = raster[rasterType].width;
-    scissor.extent.height = raster[rasterType].height;
-
-    // Things that can change without needing to rebuild the pipeline...
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages.data();
-
-    // takes geometry and turns it into fragments
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
-    rasterizer.depthBiasConstantFactor = 0.0f;   // Optional
-    rasterizer.depthBiasClamp = 0.0f;            // Optional
-    rasterizer.depthBiasSlopeFactor = 0.0f;      // Optional
-
-    // for MSAA, one way to do antialiasing
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisampling.minSampleShading = 1.0f;            // Optional
-    multisampling.pSampleMask = nullptr;              // Optional
-    multisampling.alphaToCoverageEnable = VK_FALSE;   // Optional
-    multisampling.alphaToOneEnable = VK_FALSE;        // Optional
-
-    // compositing configuration
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;                              // Optional
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;                   // Optional
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;   // Optional
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;                              // Optional
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.logicOp = VK_LOGIC_OP_COPY;   // Optional
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-    colorBlending.blendConstants[0] = 0.0f;   // Optional
-    colorBlending.blendConstants[1] = 0.0f;   // Optional
-    colorBlending.blendConstants[2] = 0.0f;   // Optional
-    colorBlending.blendConstants[3] = 0.0f;   // Optional
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.minDepthBounds = 0.0f;   // Optional
-    depthStencil.maxDepthBounds = 1.0f;   // Optional
-    depthStencil.stencilTestEnable = VK_FALSE;
-    depthStencil.front = {};   // Optional
-    depthStencil.back = {};    // Optional
-
-    // The layout here describes descriptor sets and push constants used
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    std::vector<VkDescriptorSetLayout> layouts = {recordDescriptorSetLayout, descriptorSetLayout};
-    pipelineLayoutInfo.setLayoutCount = (uint32_t) layouts.size();
-    pipelineLayoutInfo.pSetLayouts = layouts.data();
-
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(context->logicalDevice, &pipelineLayoutInfo, nullptr, &raster[rasterType].pipelineLayout) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("failed to create pipeline layout!");
-    }
-
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;   // Optional
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-
-    pipelineInfo.layout = raster[rasterType].pipelineLayout;
-
-    pipelineInfo.renderPass = raster[rasterType].renderPass;
-    pipelineInfo.subpass = 0;
-
-    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;   // Optional
-    pipelineInfo.basePipelineIndex = -1;                // Optional
-
-    if (vkCreateGraphicsPipelines(context->logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr,
-                                  &raster[rasterType].pipeline) != VK_SUCCESS) {
-      throw std::runtime_error("failed to create graphics pipeline!");
-    }
-  }
-
   // This is a bit dumb. We shouldn't be creating all these shader modules...
   void destroy() {
     // Free geomtype slot for use by subsequently made geomtypes
@@ -2943,24 +2612,6 @@ struct GeomType : public SBTEntry {
     for (uint32_t i = 0; i < closestNeighborShaderStages.size(); ++i) {
       if (closestNeighborShaderStages[i].module)
         vkDestroyShaderModule(context->logicalDevice, closestNeighborShaderStages[i].module, nullptr);
-    }
-
-    for (uint32_t i = 0; i < raster.size(); ++i) {
-      if (raster[i].pipelineLayout) {
-        vkDestroyPipelineLayout(context->logicalDevice, raster[i].pipelineLayout, nullptr);
-      }
-
-      if (raster[i].pipeline) {
-        vkDestroyPipeline(context->logicalDevice, raster[i].pipeline, nullptr);
-      }
-
-      if (raster[i].renderPass) {
-        vkDestroyRenderPass(context->logicalDevice, raster[i].renderPass, nullptr);
-      }
-
-      if (raster[i].frameBuffer) {
-        vkDestroyFramebuffer(context->logicalDevice, raster[i].frameBuffer, nullptr);
-      }
     }
   }
 
@@ -4373,82 +4024,235 @@ Context::getNumHitRecords() {
 
 void
 Context::buildSBT(GPRTBuildSBTFlags flags) {
-  // Common resource pool
-  {
-    // Might need to chang this to be a vector of many VkWriteDescriptorSets...
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets(imageResources.size());
-
-    // For now, assuming all that we have are image descriptors
-    // Todo, consider recycling this array from one build to the next.
-    std::vector<VkDescriptorImageInfo> imageDescriptors(imageResources.size());
-
-    // Some default value to store...
-    for (size_t i = 0; i < imageResources.size(); i++) {
-      writeDescriptorSets[i] = {};
-      writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      writeDescriptorSets[i].dstBinding = 0;
-      writeDescriptorSets[i].dstArrayElement = i;
-      writeDescriptorSets[i].descriptorCount = 1;
-      writeDescriptorSets[i].pBufferInfo = 0;
-      writeDescriptorSets[i].dstSet = descriptorSet;
-      writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
-
-      // If the dstBinding has fewer than descriptorCount array elements remaining starting from dstArrayElement,
-      // then the remainder will be used to update the subsequent binding - dstBinding+1 starting at array element zero.
-      // If a binding has a descriptorCount of zero, it is skipped. This behavior applies recursively, with the update
-      // affecting consecutive bindings as needed to update all descriptorCount descriptors. Consecutive bindings must
-      // have identical VkDescriptorType, VkShaderStageFlags, VkDescriptorBindingFlagBits, and immutable samplers
-      // references. In addition, if the VkDescriptorType is VK_DESCRIPTOR_TYPE_MUTABLE_EXT, the supported descriptor
-      // types in VkMutableDescriptorTypeCreateInfoEXT must be equally defined.
-      if (imageResources[i]) {
-        ImageResource *imageResource = imageResources[i];
-        ImageResourceType type = imageResource->getType();
-        if (type == GPRT_IMAGE_RESOURCE_TYPE_SAMPLER) {
-          Sampler *s = (Sampler *) imageResource;
-          imageDescriptors[i].sampler = s->sampler;
-          imageDescriptors[i].imageView = VK_NULL_HANDLE;
-          writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        }
-
-        else if (type == GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_1D) {
-          Texture *t = (Texture *) imageResource;
-          imageDescriptors[i].imageView = t->imageView;
-          imageDescriptors[i].imageLayout = t->layout;
-          writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        }
-
-        else if (type == GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_2D) {
-          Texture *t = (Texture *) imageResource;
-          imageDescriptors[i].imageView = t->imageView;
-          imageDescriptors[i].imageLayout = t->layout;
-          writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        }
-
-        else if (type == GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_3D) {
-          Texture *t = (Texture *) imageResource;
-          imageDescriptors[i].imageView = t->imageView;
-          imageDescriptors[i].imageLayout = t->layout;
-          writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        } else {
-          LOG_ERROR("Unknown image resource type");
-        }
-      }
-
-      // Leave write descriptor set blank.
-      else {
-        writeDescriptorSets[i].descriptorCount = 0;
-      }
-    }
-
-    vkUpdateDescriptorSets(logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(),
-                           0, nullptr);
-  }
-
   auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
     return (value + alignment - 1) & ~(alignment - 1);
   };
 
   auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
+
+  // Build / update the ray tracing pipeline if required
+  if (raytracingPipelineOutOfDate) {
+    LOG_INFO("Building ray tracing pipeline");
+
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                   VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                                   VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+
+    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
+    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+    // testing new mutable descriptor setup
+    std::vector<VkDescriptorSetLayout> layouts = {descriptorSetLayout};
+    pipelineLayoutCI.setLayoutCount = (uint32_t) layouts.size();
+    pipelineLayoutCI.pSetLayouts = layouts.data();
+
+    pipelineLayoutCI.pushConstantRangeCount = 1;
+    pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
+
+    if (raytracingPipelineLayout != VK_NULL_HANDLE) {
+      vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
+      raytracingPipelineLayout = VK_NULL_HANDLE;
+    }
+    VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &raytracingPipelineLayout));
+
+    /*
+      Setup ray tracing shader groups
+    */
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+    shaderGroups.clear();
+
+    // Ray generation stages / groups
+    {
+      for (auto raygen : raygens) {
+        shaderStages.push_back(raygen->shaderStage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+      }
+    }
+
+    // Miss stages / groups
+    {
+      for (auto miss : misses) {
+        shaderStages.push_back(miss->shaderStage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+      }
+    }
+
+    // Callable stages / groups
+    {
+      for (auto callable : callables) {
+        shaderStages.push_back(callable->shaderStage);
+        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
+        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+        shaderGroups.push_back(shaderGroup);
+      }
+    }
+
+    // Hit groups
+
+    // First, clear any previously assigned stage addresses
+    {
+      for (auto geomType : geomTypes) {
+        geomType->closestHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
+        geomType->anyHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
+        geomType->intersectionShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
+      }
+    }
+
+    // Go over all TLAS by order they were created
+    for (uint32_t tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      Accel *tlas = accels[tlasID];
+      if (!tlas)
+        continue;
+      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+        // Iterate over all BLAS stored in the TLAS
+        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+
+        // Skip instances whose instance buffers have not yet been set.
+        if (!instanceAccel->instancesBuffer)
+          continue;
+
+        // Todo, move this setup to the device...
+        instanceAccel->instancesBuffer->map();
+        gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+
+        for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
+          // First, need to make a map from accel address back to gprt accel*...
+          uint64_t accelAddr = instances[blasID].__gprtAccelAddress;
+
+          // Uninitialized accel
+          if (accelAddr == 0)
+            continue;
+
+          Accel *blas = accels[instances[blasID].__gprtInstanceIndex];
+          VkRayTracingShaderGroupTypeKHR shaderGroupType;
+          if (blas->getType() == GPRT_TRIANGLE_ACCEL)
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+          else if (blas->getType() == GPRT_AABB_ACCEL)
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+          else if (blas->getType() == GPRT_LSS_ACCEL) {
+            if (requestedFeatures.linearSweptSpheres) {
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            } else {
+              // AABB fallback
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            }
+          } else if (blas->getType() == GPRT_SPHERE_ACCEL) {
+            if (requestedFeatures.linearSweptSpheres) {
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            } else {
+              // AABB fallback
+              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+            }
+          } else {
+            LOG_ERROR("Unsupported blas type found in TLAS.");
+          }
+
+          // Add a record for every geometry-raytype permutation
+          for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
+            auto &geom = blas->geometries[geomID];
+            for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+
+              VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
+              shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+              shaderGroup.type = shaderGroupType;
+
+              // init all to unused
+              shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
+              shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
+              shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
+              shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
+
+              // populate hit group programs using geometry type, recycling any previously referenced shader stages
+              if (geom->geomType->closestHitShaderUsed[rayType]) {
+                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
+                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
+                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
+                }
+                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
+              }
+
+              if (geom->geomType->anyHitShaderUsed[rayType]) {
+                if (geom->geomType->anyHitShaderStageAddress[rayType] == -1) {
+                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
+                  geom->geomType->anyHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
+                }
+                shaderGroup.anyHitShader = geom->geomType->anyHitShaderStageAddress[rayType];
+              }
+
+              if (geom->geomType->intersectionShaderUsed[rayType]) {
+                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
+                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
+                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
+                }
+                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
+              }
+              shaderGroups.push_back(shaderGroup);
+            }
+          }
+        }
+
+        instanceAccel->instancesBuffer->unmap();
+      }
+    }
+
+    if (raygens.size() > 0) {
+      /*
+        Create the ray tracing pipeline
+      */
+      VkRayTracingPipelineInterfaceCreateInfoKHR pipelineInterfaceCreateInfo{};
+      pipelineInterfaceCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
+      pipelineInterfaceCreateInfo.maxPipelineRayPayloadSize = requestedFeatures.maxRayPayloadSize;
+      pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
+
+      VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
+      rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+      rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+      rayTracingPipelineCI.pStages = shaderStages.data();
+      rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
+      rayTracingPipelineCI.pGroups = shaderGroups.data();
+      rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
+      rayTracingPipelineCI.layout = raytracingPipelineLayout;
+      rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
+
+      LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " +
+               std::to_string(requestedFeatures.rayRecursionDepth) + ".");
+
+      if (raytracingPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
+        raytracingPipeline = VK_NULL_HANDLE;
+      }
+      VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
+                                                       &rayTracingPipelineCI, nullptr, &raytracingPipeline);
+      if (err) {
+        LOG_ERROR("failed to create ray tracing pipeline! Are all entrypoint names correct? \n" + errorString(err));
+      }
+    }
+
+    // Mark our ray tracing pipeline as "updated".
+    raytracingPipelineOutOfDate = false;
+  }
 
   const uint32_t handleSize = rayTracingPipelineProperties.shaderGroupHandleSize;
   const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
@@ -4693,538 +4497,10 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable->unmap();
     }
   }
-
-  // Update geometry record data in the record buffer for raster programs
-  if ((flags & GPRTBuildSBTFlags::GPRT_SBT_RASTER) != 0) {
-    rasterRecordBuffer->map();
-    uint8_t *mapped = ((uint8_t *) (rasterRecordBuffer->mapped));
-    for (uint32_t i = 0; i < geoms.size(); ++i) {
-      size_t offset = recordSize * i;
-      uint8_t *params = mapped + offset;
-      memcpy(params, geoms[i]->SBTRecord, geoms[i]->recordSize);
-    }
-    rasterRecordBuffer->unmap();
-  }
-
-  // Update compute record data in the record buffer for compute programs
-  if ((flags & GPRTBuildSBTFlags::GPRT_SBT_COMPUTE) != 0) {
-    computeRecordBuffer->map();
-    uint8_t *mapped = ((uint8_t *) (computeRecordBuffer->mapped));
-    for (uint32_t i = 0; i < computes.size(); ++i) {
-      size_t offset = recordSize * i;
-      uint8_t *params = mapped + offset;
-      memcpy(params, computes[i]->SBTRecord, computes[i]->recordSize);
-    }
-    computeRecordBuffer->unmap();
-  }
-}
-
-void
-Context::buildPipeline() {
-  // If the number of descriptors has changed, we need to make a new descriptor pool
-  if (descriptorPool && descriptorPoolSize.descriptorCount != requestedFeatures.maxDescriptorCount) {
-    vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
-    vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
-    descriptorPool = VK_NULL_HANDLE;
-
-    LOG_INFO("Reallocating descriptor pool");
-  }
-  if (!descriptorPool) {
-    descriptorPoolSize.type = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
-    descriptorPoolSize.descriptorCount = std::max(uint32_t(requestedFeatures.maxDescriptorCount), uint32_t(1));
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &descriptorPoolSize;
-    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    // "If [below] does not exist, the descriptor pool allocates enough memory to be able to allocate a [mutable
-    // descriptor]
-    //  with any supported VkDescriptorType as a mutable descriptor."
-    // descriptorPoolInfo.pNext = &mutableTypeInfo;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
-
-    VkDescriptorType cbvSrvUavTypes[] = {VK_DESCRIPTOR_TYPE_SAMPLER,
-                                         VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                         VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-                                         VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
-
-    VkMutableDescriptorTypeListEXT cbvSrvUavTypeList = {};
-    cbvSrvUavTypeList.descriptorTypeCount = sizeof(cbvSrvUavTypes) / sizeof(VkDescriptorType);
-    cbvSrvUavTypeList.pDescriptorTypes = cbvSrvUavTypes;
-
-    VkMutableDescriptorTypeCreateInfoEXT mutableTypeInfo = {};
-    mutableTypeInfo.sType = VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
-    mutableTypeInfo.pNext = NULL;
-    mutableTypeInfo.mutableDescriptorTypeListCount = 1;
-    mutableTypeInfo.pMutableDescriptorTypeLists = &cbvSrvUavTypeList;
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
-    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT};
-    setLayoutBindingFlags.bindingCount = 1;
-    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
-    setLayoutBindingFlags.pNext = &mutableTypeInfo;
-
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
-    binding.descriptorCount = descriptorPoolSize.descriptorCount;
-    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-    binding.pImmutableSamplers = NULL;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
-    VK_CHECK_RESULT(
-        vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout));
-
-    // Now, making the descriptor sets (for now, just putting samplers here...)
-    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
-
-    uint32_t variableDescCounts[] = {static_cast<uint32_t>(descriptorPoolSize.descriptorCount)};
-
-    variableDescriptorCountAllocInfo.sType =
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
-    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
-    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = 1;
-    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
-
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &descriptorSet));
-
-    // After this, we'll need to rebuild our pipelines since our descriptor
-    // set layouts changed.
-    raytracingPipelineOutOfDate = true;
-    computePipelinesOutOfDate = true;
-    rasterPipelinesOutOfDate = true;
-  }
-
-  // If the number of raster records has changed, we need to make a new buffer of
-  // raster program records
-  if (rasterRecordBuffer && previousNumRasterRecords != geoms.size()) {
-    rasterRecordBuffer->destroy();
-    delete rasterRecordBuffer;
-    rasterRecordBuffer = nullptr;
-
-    LOG_INFO("Reallocating rasterizer record space");
-  }
-  if (!rasterRecordBuffer) {
-    // Create buffer to contain uniform buffer data
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        // means we can use this buffer to transfer into another
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-        // means we can use this buffer to receive data transferred from another
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        // means we can use this buffer as a uniform buffer
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-        // means we can use this buffer as a storage buffer
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                          // device access
-
-    auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-      return (value + alignment - 1) & ~(alignment - 1);
-    };
-
-    auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
-
-    const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-    rasterRecordBuffer =
-        new Buffer(this, bufferUsageFlags,
-                   memoryUsageFlags, recordSize * std::max(size_t(1), geoms.size()),
-                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
-
-    // Uniform buffer descriptors for each geometry's record
-    VkDescriptorBufferInfo uniformBufferDescriptor;
-    VkWriteDescriptorSet writeDescriptorSet;
-    uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
-    uniformBufferDescriptor.buffer = rasterRecordBuffer->buffer;
-    uniformBufferDescriptor.range = recordSize;
-
-    writeDescriptorSet = {};
-    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSet.dstBinding = 0;
-    writeDescriptorSet.dstArrayElement = 0;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
-    writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
-    writeDescriptorSet.pImageInfo = 0;
-    writeDescriptorSet.dstSet = rasterRecordDescriptorSet;
-
-    // We'll write these descriptors now, but the actual recordBuffer will be written to later.
-    vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
-
-    // We're only updating an existing descriptor set here, so we don't
-    // need to mark our raster pipelines as "outdated" from this.
-
-    // Finally, keep track of if the record count here changes
-    previousNumRasterRecords = (uint32_t) geoms.size();
-  }
-
-  // If the number of compute records has changed, we need to make a new buffer of
-  // compute records
-  if (computeRecordBuffer && previousNumComputeRecords != computes.size()) {
-    computeRecordBuffer->destroy();
-    delete computeRecordBuffer;
-    computeRecordBuffer = nullptr;
-
-    LOG_INFO("Reallocating compute record space");
-  }
-  if (!computeRecordBuffer) {
-    // Create buffer to contain uniform buffer data
-    const VkBufferUsageFlags bufferUsageFlags =
-        // means we can get this buffer's address with vkGetBufferDeviceAddress
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        // means we can use this buffer to transfer into another
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-        // means we can use this buffer to receive data transferred from another
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        // means we can use this buffer as a uniform buffer
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-        // means we can use this buffer as a storage buffer
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                          // device access
-
-    auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-      return (value + alignment - 1) & ~(alignment - 1);
-    };
-
-    auto align_to = [](uint64_t val, uint64_t align) -> uint64_t { return ((val + align - 1) / align) * align; };
-
-    const uint32_t maxGroupSize = rayTracingPipelineProperties.maxShaderGroupStride;
-    const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
-    const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-    computeRecordBuffer =
-        new Buffer(this, bufferUsageFlags,
-                   memoryUsageFlags, recordSize * std::max(size_t(1), computes.size()),
-                   rayTracingPipelineProperties.shaderGroupBaseAlignment);
-
-    // Uniform buffer descriptors for each geometry's record
-    VkDescriptorBufferInfo uniformBufferDescriptor;
-    VkWriteDescriptorSet writeDescriptorSet;
-    uniformBufferDescriptor.offset = 0;   // this is handled dynamically during draw
-    uniformBufferDescriptor.buffer = computeRecordBuffer->buffer;
-    uniformBufferDescriptor.range = recordSize;
-
-    writeDescriptorSet = {};
-    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeDescriptorSet.dstBinding = 0;
-    writeDescriptorSet.dstArrayElement = 0;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    writeDescriptorSet.descriptorCount = 1;   // one UBO per descriptor here
-    writeDescriptorSet.pBufferInfo = &uniformBufferDescriptor;
-    writeDescriptorSet.pImageInfo = 0;
-    writeDescriptorSet.dstSet = computeRecordDescriptorSet;
-
-    // We'll write these descriptors now, but the actual recordBuffer will be written to later.
-    vkUpdateDescriptorSets(logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
-
-    // We're only updating an existing descriptor set here, so we don't
-    // need to mark our compute pipelines as "outdated" from this.
-
-    // Finally, keep track of if the record count here changes
-    previousNumComputeRecords = (uint32_t) computes.size();
-  }
-
-  // Build / update the ray tracing pipeline if required
-  if (raytracingPipelineOutOfDate) {
-    LOG_INFO("Building ray tracing pipeline");
-
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.size = PUSH_CONSTANTS_LIMIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                                   VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                                   VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-
-    VkPipelineLayoutCreateInfo pipelineLayoutCI{};
-    pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-
-    // testing new mutable descriptor setup
-    std::vector<VkDescriptorSetLayout> layouts = {
-        computeRecordDescriptorSetLayout /* not actually using this one, but VK wants something valid...*/,
-        descriptorSetLayout};
-
-    // std::vector<VkDescriptorSetLayout> layouts = {
-    //     computeRecordDescriptorSetLayout /* not actually using this one, but VK wants something valid...*/,
-    //     samplerDescriptorSetLayout, texture1DDescriptorSetLayout, texture2DDescriptorSetLayout,
-    //     texture3DDescriptorSetLayout};
-    pipelineLayoutCI.setLayoutCount = (uint32_t) layouts.size();
-    pipelineLayoutCI.pSetLayouts = layouts.data();
-
-    pipelineLayoutCI.pushConstantRangeCount = 1;
-    pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
-
-    if (raytracingPipelineLayout != VK_NULL_HANDLE) {
-      vkDestroyPipelineLayout(logicalDevice, raytracingPipelineLayout, nullptr);
-      raytracingPipelineLayout = VK_NULL_HANDLE;
-    }
-    VK_CHECK_RESULT(vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &raytracingPipelineLayout));
-
-    /*
-      Setup ray tracing shader groups
-    */
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    shaderGroups.clear();
-
-    // Ray generation stages / groups
-    {
-      for (auto raygen : raygens) {
-        shaderStages.push_back(raygen->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
-      }
-    }
-
-    // Miss stages / groups
-    {
-      for (auto miss : misses) {
-        shaderStages.push_back(miss->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
-      }
-    }
-
-    // Callable stages / groups
-    {
-      for (auto callable : callables) {
-        shaderStages.push_back(callable->shaderStage);
-        VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-        shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        shaderGroup.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        shaderGroup.generalShader = static_cast<uint32_t>(shaderStages.size()) - 1;
-        shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-        shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-        shaderGroups.push_back(shaderGroup);
-      }
-    }
-
-    // Hit groups
-
-    // First, clear any previously assigned stage addresses
-    {
-      for (auto geomType : geomTypes) {
-        geomType->closestHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->anyHitShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-        geomType->intersectionShaderStageAddress = std::vector<int>(requestedFeatures.numRayTypes, -1);
-      }
-    }
-
-    // Go over all TLAS by order they were created
-    for (uint32_t tlasID = 0; tlasID < accels.size(); ++tlasID) {
-      Accel *tlas = accels[tlasID];
-      if (!tlas)
-        continue;
-      if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-        // Iterate over all BLAS stored in the TLAS
-        InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-
-        // Skip instances whose instance buffers have not yet been set.
-        if (!instanceAccel->instancesBuffer)
-          continue;
-
-        // Todo, move this setup to the device...
-        instanceAccel->instancesBuffer->map();
-        gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
-
-        for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-          // First, need to make a map from accel address back to gprt accel*...
-          uint64_t accelAddr = instances[blasID].__gprtAccelAddress;
-
-          // Uninitialized accel
-          if (accelAddr == 0)
-            continue;
-
-          Accel *blas = accels[instances[blasID].__gprtInstanceIndex];
-          VkRayTracingShaderGroupTypeKHR shaderGroupType;
-          if (blas->getType() == GPRT_TRIANGLE_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_AABB_ACCEL)
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-          else if (blas->getType() == GPRT_LSS_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
-          } else if (blas->getType() == GPRT_SPHERE_ACCEL) {
-            if (requestedFeatures.linearSweptSpheres) {
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
-            } else {
-              // AABB fallback
-              shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-            }
-          } else {
-            LOG_ERROR("Unsupported blas type found in TLAS.");
-          }
-
-          // Add a record for every geometry-raytype permutation
-          for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-            auto &geom = blas->geometries[geomID];
-            for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-
-              VkRayTracingShaderGroupCreateInfoKHR shaderGroup{};
-              shaderGroup.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-              shaderGroup.type = shaderGroupType;
-
-              // init all to unused
-              shaderGroup.generalShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.closestHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.anyHitShader = VK_SHADER_UNUSED_KHR;
-              shaderGroup.intersectionShader = VK_SHADER_UNUSED_KHR;
-
-              // populate hit group programs using geometry type, recycling any previously referenced shader stages
-              if (geom->geomType->closestHitShaderUsed[rayType]) {
-                if (geom->geomType->closestHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->closestHitShaderStages[rayType]);
-                  geom->geomType->closestHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.closestHitShader = geom->geomType->closestHitShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->anyHitShaderUsed[rayType]) {
-                if (geom->geomType->anyHitShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->anyHitShaderStages[rayType]);
-                  geom->geomType->anyHitShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.anyHitShader = geom->geomType->anyHitShaderStageAddress[rayType];
-              }
-
-              if (geom->geomType->intersectionShaderUsed[rayType]) {
-                if (geom->geomType->intersectionShaderStageAddress[rayType] == -1) {
-                  shaderStages.push_back(geom->geomType->intersectionShaderStages[rayType]);
-                  geom->geomType->intersectionShaderStageAddress[rayType] = int(shaderStages.size() - 1);
-                }
-                shaderGroup.intersectionShader = geom->geomType->intersectionShaderStageAddress[rayType];
-              }
-              shaderGroups.push_back(shaderGroup);
-            }
-          }
-        }
-
-        instanceAccel->instancesBuffer->unmap();
-      }
-    }
-
-    if (raygens.size() > 0) {
-      /*
-        Create the ray tracing pipeline
-      */
-      VkRayTracingPipelineInterfaceCreateInfoKHR pipelineInterfaceCreateInfo{};
-      pipelineInterfaceCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
-      pipelineInterfaceCreateInfo.maxPipelineRayPayloadSize = requestedFeatures.maxRayPayloadSize;
-      pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
-
-      VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
-      rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-      rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
-      rayTracingPipelineCI.pStages = shaderStages.data();
-      rayTracingPipelineCI.groupCount = static_cast<uint32_t>(shaderGroups.size());
-      rayTracingPipelineCI.pGroups = shaderGroups.data();
-      rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
-      rayTracingPipelineCI.layout = raytracingPipelineLayout;
-      rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
-
-      LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " +
-               std::to_string(requestedFeatures.rayRecursionDepth) + ".");
-
-      if (raytracingPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
-        raytracingPipeline = VK_NULL_HANDLE;
-      }
-      VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
-                                                       &rayTracingPipelineCI, nullptr, &raytracingPipeline);
-      if (err) {
-        LOG_ERROR("failed to create ray tracing pipeline! Are all entrypoint names correct? \n" + errorString(err));
-      }
-    }
-
-    // Mark our ray tracing pipeline as "updated".
-    raytracingPipelineOutOfDate = false;
-  }
-
-  // Build / update the compute pipelines if required
-  if (computePipelinesOutOfDate) {
-    for (uint32_t i = 0; i < computes.size(); ++i) {
-      if (!computes[i])
-        continue;
-      computes[i]->buildPipeline(computeRecordDescriptorSetLayout, descriptorSetLayout);
-    }
-    computePipelinesOutOfDate = false;
-  }
-
-  // Build / update the raster pipelines if required
-  if (rasterPipelinesOutOfDate) {
-    for (uint32_t i = 0; i < geomTypes.size(); ++i) {
-      if (!geomTypes[i])
-        continue;
-      for (uint32_t rasterType = 0; rasterType < requestedFeatures.numRayTypes; ++rasterType) {
-        geomTypes[i]->buildRasterPipeline(rasterType, rasterRecordDescriptorSetLayout, descriptorSetLayout);
-      }
-    }
-    rasterPipelinesOutOfDate = false;
-  }
 }
 
 void
 Context::destroy() {
-  if (defaultTexture2D) {
-    defaultTexture2D->destroy();
-    delete defaultTexture2D;
-    defaultTexture2D = nullptr;
-  }
-
-  if (rasterRecordBuffer) {
-    rasterRecordBuffer->destroy();
-    delete rasterRecordBuffer;
-    rasterRecordBuffer = nullptr;
-  }
-
-  if (computeRecordBuffer) {
-    computeRecordBuffer->destroy();
-    delete computeRecordBuffer;
-    computeRecordBuffer = nullptr;
-  }
-
   if (descriptorSet) {
     vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
     descriptorSet = nullptr;
@@ -5235,27 +4511,11 @@ Context::destroy() {
     descriptorSetLayout = nullptr;
   }
 
-  if (rasterRecordDescriptorSetLayout) {
-    vkDestroyDescriptorSetLayout(logicalDevice, rasterRecordDescriptorSetLayout, nullptr);
-    rasterRecordDescriptorSetLayout = nullptr;
-  }
-  if (computeRecordDescriptorSetLayout) {
-    vkDestroyDescriptorSetLayout(logicalDevice, computeRecordDescriptorSetLayout, nullptr);
-    computeRecordDescriptorSetLayout = nullptr;
-  }
-
   if (descriptorPool) {
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     descriptorPool = nullptr;
   }
-  if (rasterRecordDescriptorPool) {
-    vkDestroyDescriptorPool(logicalDevice, rasterRecordDescriptorPool, nullptr);
-    rasterRecordDescriptorPool = nullptr;
-  }
-  if (computeRecordDescriptorPool) {
-    vkDestroyDescriptorPool(logicalDevice, computeRecordDescriptorPool, nullptr);
-    computeRecordDescriptorPool = nullptr;
-  }
+  
   if (imguiPool) {
     vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
     imguiPool = nullptr;
@@ -5339,9 +4599,6 @@ Context::destroy() {
   }
 
   descriptorPoolSize = {};
-
-  previousNumRasterRecords = 0;
-  previousNumComputeRecords = 0;
 
   vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
   vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
@@ -6245,102 +5502,86 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
                           &currentImageIndex);
   }
 
-  // For texture / sampler arrays, we need some defaults
+  // Allocate resource heap
   {
-    const VkImageUsageFlags imageUsageFlags =
-        // means we can make an image view required to assign this image to a
-        // descriptor
-        VK_IMAGE_USAGE_SAMPLED_BIT |
-        // means we can use this image to transfer into another
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-        // means we can use this image to receive data transferred from
-        // another
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
-                                                                                          // device access
-    // Todo, try to remove this...
-    defaultTexture2D =
-        new Texture(this, imageUsageFlags, memoryUsageFlags, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, false);
-  }
-
-  // For the SBT record descriptor for raster shaders
-  {
-    VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    binding.descriptorCount = 1;   // we only have one of these bound at any point in time
-    binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
-    descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = nullptr;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &rasterRecordDescriptorSetLayout));
-
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    poolSize.descriptorCount = 1;
+    descriptorPoolSize.type = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
+    descriptorPoolSize.descriptorCount = requestedFeatures.maxDescriptorCount;
 
     VkDescriptorPoolCreateInfo descriptorPoolInfo{};
     descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = poolSize.descriptorCount;
+    descriptorPoolInfo.pPoolSizes = &descriptorPoolSize;
+    descriptorPoolInfo.maxSets = 1;   // just one descriptor set for now.
     descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &rasterRecordDescriptorPool));
+    // "If [below] does not exist, the descriptor pool allocates enough memory to be able to allocate a [mutable
+    // descriptor]
+    //  with any supported VkDescriptorType as a mutable descriptor."
+    // descriptorPoolInfo.pNext = &mutableTypeInfo;
+    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = rasterRecordDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &rasterRecordDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
-    descriptorSetAllocateInfo.pNext = nullptr;
+    VkDescriptorType cbvSrvUavTypes[] = {VK_DESCRIPTOR_TYPE_SAMPLER,
+                                         VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                         VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
 
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &rasterRecordDescriptorSet));
-  }
+    VkMutableDescriptorTypeListEXT cbvSrvUavTypeList = {};
+    cbvSrvUavTypeList.descriptorTypeCount = sizeof(cbvSrvUavTypes) / sizeof(VkDescriptorType);
+    cbvSrvUavTypeList.pDescriptorTypes = cbvSrvUavTypes;
 
-  // For the SBT record descriptor for compute shaders
-  {
+    VkMutableDescriptorTypeCreateInfoEXT mutableTypeInfo = {};
+    mutableTypeInfo.sType = VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+    mutableTypeInfo.pNext = NULL;
+    mutableTypeInfo.mutableDescriptorTypeListCount = 1;
+    mutableTypeInfo.pMutableDescriptorTypeLists = &cbvSrvUavTypeList;
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT setLayoutBindingFlags{};
+    setLayoutBindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    std::vector<VkDescriptorBindingFlagsEXT> descriptorBindingFlags = {
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT};
+    setLayoutBindingFlags.bindingCount = 1;
+    setLayoutBindingFlags.pBindingFlags = descriptorBindingFlags.data();
+    setLayoutBindingFlags.pNext = &mutableTypeInfo;
+
     VkDescriptorSetLayoutBinding binding{};
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    binding.descriptorCount = 1;   // we only have one of these bound at any point in time
     binding.binding = 0;
-    binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
+    binding.descriptorCount = descriptorPoolSize.descriptorCount;
+    binding.stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                         VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    binding.pImmutableSamplers = NULL;
 
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {binding};
-
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
     descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descriptorSetLayoutCreateInfo.pBindings = setLayoutBindings.data();
     descriptorSetLayoutCreateInfo.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
-    descriptorSetLayoutCreateInfo.pNext = nullptr;
-    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr,
-                                                &computeRecordDescriptorSetLayout));
+    descriptorSetLayoutCreateInfo.pNext = &setLayoutBindingFlags;
+    VK_CHECK_RESULT(
+        vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout));
 
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    poolSize.descriptorCount = 1;
+    // Now, making the descriptor sets (for now, just putting samplers here...)
+    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variableDescriptorCountAllocInfo{};
 
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = poolSize.descriptorCount;
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &computeRecordDescriptorPool));
+    uint32_t variableDescCounts[] = {static_cast<uint32_t>(descriptorPoolSize.descriptorCount)};
+
+    variableDescriptorCountAllocInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+    variableDescriptorCountAllocInfo.descriptorSetCount = 1;
+    variableDescriptorCountAllocInfo.pDescriptorCounts = variableDescCounts;
 
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = computeRecordDescriptorPool;
-    descriptorSetAllocateInfo.pSetLayouts = &computeRecordDescriptorSetLayout;
-    descriptorSetAllocateInfo.descriptorSetCount = poolSize.descriptorCount;
-    descriptorSetAllocateInfo.pNext = nullptr;
+    descriptorSetAllocateInfo.descriptorPool = descriptorPool;
+    descriptorSetAllocateInfo.pSetLayouts = &descriptorSetLayout;
+    descriptorSetAllocateInfo.descriptorSetCount = 1;
+    descriptorSetAllocateInfo.pNext = &variableDescriptorCountAllocInfo;
 
-    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &computeRecordDescriptorSet));
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, &descriptorSet));
   }
 
   // Init imgui
@@ -6382,7 +5623,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
   // Finally, setup the internal shader stages and build an initial shader binding table
   setupInternalPrograms();
-  buildPipeline();
   buildSBT(GPRT_SBT_ALL);
 };
 
@@ -6767,10 +6007,8 @@ Context::setupInternalPrograms() {
   // Fallback primitive programs
   {
     Context *context = this;
-    internalComputePrograms.insert({"LSSBounds", new Compute(context, fallbacksModule,
-                                                             "LSSBounds", sizeof(LSSParameters))});
-    internalComputePrograms.insert({"SphereBounds", new Compute(context, fallbacksModule,
-                                                                "SphereBounds", sizeof(SphereParameters))});
+    internalComputePrograms.insert({"LSSBounds", new Compute(context, fallbacksModule, "LSSBounds")});
+    internalComputePrograms.insert({"SphereBounds", new Compute(context, fallbacksModule, "SphereBounds")});
   }
   computePipelinesOutOfDate = true;
 }
@@ -7613,219 +6851,6 @@ gprtGeomSetParameters(GPRTGeom _geometry, void *parameters, int deviceID) {
   memcpy(geometry->SBTRecord, parameters, geometry->recordSize);
 }
 
-void
-gprtGeomTypeRasterize(GPRTContext _context, GPRTGeomType _geomType, uint32_t numGeometry, GPRTGeom *_geometry,
-                      uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize, void *pushConstants) {
-  LOG_API_CALL();
-
-  Context *context = (Context *) _context;
-  GeomType *geometryType = (GeomType *) _geomType;
-  Geom **geometry = (Geom **) _geometry;
-
-  // Before we rasterize any geometry, we need to temporarily remove our framebuffer attachments from
-  // the list of textures in our texture array.
-  // {
-  //   std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
-  //   VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
-  //   VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
-
-  //   VkDescriptorImageInfo placeholder;
-  //   placeholder.imageView = context->defaultTexture2D->imageView;
-  //   placeholder.imageLayout = context->defaultTexture2D->layout;
-
-  //   writeDescriptorSets[0] = {};
-  //   writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  //   writeDescriptorSets[0].dstBinding = 0;
-  //   writeDescriptorSets[0].dstArrayElement = (uint32_t) colorAttachmentAddress;
-  //   writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  //   writeDescriptorSets[0].descriptorCount = 1;
-  //   writeDescriptorSets[0].pBufferInfo = 0;
-  //   writeDescriptorSets[0].dstSet = context->descriptorSet;
-  //   writeDescriptorSets[0].pImageInfo = &placeholder;
-
-  //   writeDescriptorSets[1] = {};
-  //   writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  //   writeDescriptorSets[1].dstBinding = 0;
-  //   writeDescriptorSets[1].dstArrayElement = (uint32_t) depthAttachmentAddress;
-  //   writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  //   writeDescriptorSets[1].descriptorCount = 1;
-  //   writeDescriptorSets[1].pBufferInfo = 0;
-  //   writeDescriptorSets[1].dstSet = context->descriptorSet;
-  //   writeDescriptorSets[1].pImageInfo = &placeholder;
-
-  //   vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
-  //                          writeDescriptorSets.data(), 0, nullptr);
-  // }
-
-  VkResult err;
-
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  VkRenderPassBeginInfo renderPassBeginInfo = {};
-  renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  renderPassBeginInfo.pNext = nullptr;
-  renderPassBeginInfo.renderPass = geometryType->raster[rasterType].renderPass;
-  renderPassBeginInfo.renderArea.offset.x = 0;
-  renderPassBeginInfo.renderArea.offset.y = 0;
-  renderPassBeginInfo.renderArea.extent.width = geometryType->raster[rasterType].width;
-  renderPassBeginInfo.renderArea.extent.height = geometryType->raster[rasterType].height;
-  renderPassBeginInfo.clearValueCount = 0;
-  renderPassBeginInfo.pClearValues = nullptr;
-  renderPassBeginInfo.framebuffer = geometryType->raster[rasterType].frameBuffer;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-
-  if (pushConstantsSize > 0) {
-    if (pushConstantsSize > PUSH_CONSTANTS_LIMIT)
-      LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
-    vkCmdPushConstants(context->graphicsCommandBuffer, geometryType->raster[rasterType].pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushConstantsSize, pushConstants);
-  }
-
-  // Transition our attachments into optimal attachment formats
-  geometryType->raster[rasterType].colorAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].colorAttachment->image,
-      geometryType->raster[rasterType].colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster[rasterType].colorAttachment->mipLevels, 0, 1});
-
-  geometryType->raster[rasterType].depthAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].depthAttachment->image,
-      geometryType->raster[rasterType].depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster[rasterType].depthAttachment->mipLevels, 0, 1});
-
-  // This will clear the color and depth attachment
-  vkCmdBeginRenderPass(context->graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-  // Bind the rendering pipeline
-  // todo, if pipeline doesn't exist, create it.
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    geometryType->raster[rasterType].pipeline);
-
-  VkViewport viewport{};
-  viewport.x = 0.0f;
-  viewport.y = 0.0f;
-  viewport.width = static_cast<float>(geometryType->raster[rasterType].width);
-  viewport.height = static_cast<float>(geometryType->raster[rasterType].height);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
-  vkCmdSetViewport(context->graphicsCommandBuffer, 0, 1, &viewport);
-
-  VkRect2D scissor{};
-  scissor.offset = {0, 0};
-  scissor.extent.width = geometryType->raster[rasterType].width;
-  scissor.extent.height = geometryType->raster[rasterType].height;
-  vkCmdSetScissor(context->graphicsCommandBuffer, 0, 1, &scissor);
-
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    return (value + alignment - 1) & ~(alignment - 1);
-  };
-
-  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
-  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
-  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
-  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
-
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-
-  for (uint32_t i = 0; i < numGeometry; ++i) {
-    GeomType *geomType = geometry[i]->geomType;
-
-    if (geomType->getKind() == GPRT_TRIANGLES) {
-      TriangleGeom *geom = (TriangleGeom *) geometry[i];
-      VkDeviceSize offsets[1] = {0};
-
-      uint32_t instanceCount = 1;
-      if (instanceCounts != nullptr) {
-        instanceCount = instanceCounts[i];
-      }
-
-      std::vector<VkDescriptorSet> descriptorSets = {context->rasterRecordDescriptorSet, context->descriptorSet};
-
-      uint32_t offset = (uint32_t) geom->address * recordSize;
-      vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              geomType->raster[rasterType].pipelineLayout, 0, (uint32_t) descriptorSets.size(),
-                              descriptorSets.data(), 1, &offset);
-      vkCmdBindIndexBuffer(context->graphicsCommandBuffer, geom->index.buffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(context->graphicsCommandBuffer, geom->index.count * 3, instanceCount, 0, 0, 0);
-    }
-  }
-
-  vkCmdEndRenderPass(context->graphicsCommandBuffer);
-
-  // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  geometryType->raster[rasterType].colorAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-      geometryType->raster[rasterType].colorAttachment->layout,
-      {VK_IMAGE_ASPECT_COLOR_BIT, 0, geometryType->raster[rasterType].colorAttachment->mipLevels, 0, 1});
-
-  geometryType->raster[rasterType].depthAttachment->setImageLayout(
-      context->graphicsCommandBuffer, geometryType->raster[rasterType].depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-      geometryType->raster[rasterType].depthAttachment->layout,
-      {VK_IMAGE_ASPECT_DEPTH_BIT, 0, geometryType->raster[rasterType].depthAttachment->mipLevels, 0, 1});
-
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
-
-  // // Now, add the attachment textures back to our list of textures
-  // {
-  //   std::vector<VkWriteDescriptorSet> writeDescriptorSets(2);
-  //   VkDeviceAddress colorAttachmentAddress = geometryType->raster[rasterType].colorAttachment->address;
-  //   VkDeviceAddress depthAttachmentAddress = geometryType->raster[rasterType].depthAttachment->address;
-
-  //   VkDescriptorImageInfo colorAttachment;
-  //   colorAttachment.imageView = geometryType->raster[rasterType].colorAttachment->imageView;
-  //   colorAttachment.imageLayout = geometryType->raster[rasterType].colorAttachment->layout;
-
-  //   writeDescriptorSets[0] = {};
-  //   writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  //   writeDescriptorSets[0].dstBinding = 0;
-  //   writeDescriptorSets[0].dstArrayElement = (uint32_t) colorAttachmentAddress;
-  //   writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  //   writeDescriptorSets[0].descriptorCount = 1;
-  //   writeDescriptorSets[0].pBufferInfo = 0;
-  //   writeDescriptorSets[0].dstSet = context->descriptorSet;
-  //   writeDescriptorSets[0].pImageInfo = &colorAttachment;
-
-  //   VkDescriptorImageInfo depthAttachment;
-  //   depthAttachment.imageView = geometryType->raster[rasterType].depthAttachment->imageView;
-  //   depthAttachment.imageLayout = geometryType->raster[rasterType].depthAttachment->layout;
-
-  //   writeDescriptorSets[1] = {};
-  //   writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  //   writeDescriptorSets[1].dstBinding = 0;
-  //   writeDescriptorSets[1].dstArrayElement = (uint32_t) depthAttachmentAddress;
-  //   writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-  //   writeDescriptorSets[1].descriptorCount = 1;
-  //   writeDescriptorSets[1].pBufferInfo = 0;
-  //   writeDescriptorSets[1].dstSet = context->descriptorSet;
-  //   writeDescriptorSets[1].pImageInfo = &depthAttachment;
-
-  //   vkUpdateDescriptorSets(context->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()),
-  //                          writeDescriptorSets.data(), 0, nullptr);
-  // }
-}
-
 // ==================================================================
 // "Triangles" functions
 // ==================================================================
@@ -7953,7 +6978,7 @@ gprtComputeCreate(GPRTContext _context, GPRTModule _module, const char *programN
     LOG_ERROR("Compute program " + std::string(programName) + " not found in module!");
   }
 
-  Compute *compute = new Compute(context, module, programName, 0);
+  Compute *compute = new Compute(context, module, programName);
 
   // Notify context that we need to build this compute pipeline
   context->computePipelinesOutOfDate = true;
@@ -8188,42 +7213,6 @@ gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule 
   }
 
   geomType->setIntersection(rayType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetVertexProg(GPRTGeomType _geomType, int rasterType, GPRTModule _module, const char *progName) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Module *module = (Module *) _module;
-
-  if (!module->checkForEntrypoint(progName)) {
-    LOG_ERROR("Vertex program " + std::string(progName) + " not found in module!");
-  }
-
-  geomType->setVertex(rasterType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetPixelProg(GPRTGeomType _geomType, int rasterType, GPRTModule _module, const char *progName) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Module *module = (Module *) _module;
-
-  if (!module->checkForEntrypoint(progName)) {
-    LOG_ERROR("Pixel program " + std::string(progName) + " not found in module!");
-  }
-
-  geomType->setPixel(rasterType, module, progName);
-}
-
-GPRT_API void
-gprtGeomTypeSetRasterAttachments(GPRTGeomType _geomType, int rasterType, GPRTTexture _colorAttachment,
-                                 GPRTTexture _depthAttachment) {
-  LOG_API_CALL();
-  GeomType *geomType = (GeomType *) _geomType;
-  Texture *colorAttachment = (Texture *) _colorAttachment;
-  Texture *depthAttachment = (Texture *) _depthAttachment;
-  geomType->setRasterAttachments(rasterType, colorAttachment, depthAttachment);
 }
 
 GPRT_API GPRTSampler
@@ -9148,7 +8137,6 @@ GPRT_API void
 gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  context->buildPipeline();
   context->buildSBT(flags);
 }
 
@@ -9183,7 +8171,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                          context->raytracingPipelineLayout, 1, (uint32_t) descriptorSets.size(), descriptorSets.data(),
+                          context->raytracingPipelineLayout, 0, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
 
   if (context->queryRequested) {
@@ -9302,6 +8290,12 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
+  
+  // Build / update the compute pipeline if required
+  if (compute->pipeline == VK_NULL_HANDLE) {
+    compute->buildPipeline(context->descriptorSetLayout);
+  }
+
   VkResult err;
 
   VkCommandBufferBeginInfo cmdBufInfo{};
@@ -9316,21 +8310,10 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
-  auto alignedSize = [](uint32_t value, uint32_t alignment) -> uint32_t {
-    return (value + alignment - 1) & ~(alignment - 1);
-  };
+  std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
 
-  const uint32_t handleSize = context->rayTracingPipelineProperties.shaderGroupHandleSize;
-  const uint32_t maxGroupSize = context->rayTracingPipelineProperties.maxShaderGroupStride;
-  const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
-  const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
-
-  std::vector<VkDescriptorSet> descriptorSets = {context->computeRecordDescriptorSet, context->descriptorSet};
-
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, 2 * requestedFeatures.recordSize), groupAlignment);
-  uint32_t offset = (uint32_t) compute->address * recordSize;
   vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
-                          (uint32_t) descriptorSets.size(), descriptorSets.data(), 1, &offset);
+                          (uint32_t) descriptorSets.size(), descriptorSets.data(), 0, nullptr);
 
   if (pushConstants.size() > 0) {
     vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,

@@ -109,9 +109,6 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
-
   // ------------------------------------------------------------------
   // bottom level mesh instances
   // ------------------------------------------------------------------

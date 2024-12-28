@@ -168,7 +168,6 @@ int main(int ac, char **av) {
 
   pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = (uint32_t) instances.size();
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
   gprtComputeLaunch(transformProgram, {samplers.size(), 1, 1}, {1, 1, 1}, pc);
 
   // gprtInstanceAccelSet4x4Transforms(trianglesTLAS, transformBuffer);

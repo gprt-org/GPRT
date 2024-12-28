@@ -26,8 +26,8 @@ int main() {
   MissProgData *missRecord = gprtMissGetParameters(miss);
   missRecord->maxIterations = 100;
 
-  // Build the Shader Binding Table (SBT), updating both ray generation and miss parameters.
-  gprtBuildShaderBindingTable(context, (GPRTBuildSBTFlags)(GPRT_SBT_RAYGEN | GPRT_SBT_MISS));
+  // Build the Shader Binding Table (SBT).
+  gprtBuildShaderBindingTable(context);
 
   // Render loop: repeatedly launch the ray generation shader
   do {

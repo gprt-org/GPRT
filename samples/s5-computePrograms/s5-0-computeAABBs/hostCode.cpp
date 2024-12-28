@@ -63,9 +63,6 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
-  // Calling an SBT build here to compile our newly made programs.
-  gprtBuildShaderBindingTable(context);
-
   // ##################################################################
   // set the parameters for our compute kernel
   // ##################################################################

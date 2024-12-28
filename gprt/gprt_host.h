@@ -171,7 +171,6 @@ typedef enum {
   GPRT_SBT_MISS = 4,
   GPRT_SBT_CALLABLE = 8,
   GPRT_SBT_COMPUTE = 16,
-  GPRT_SBT_RASTER = 32,
   GPRT_SBT_ALL = 63
 } GPRTBuildSBTFlags;
 
@@ -1191,7 +1190,7 @@ GPRT_API gprt::Instance gprtAccelGetInstance(GPRTAccel blas);
 
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during
- * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * intersection, and the parameters to pass into these device programs.
  *
  * @param context The GPRT context
  * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
@@ -1201,7 +1200,7 @@ GPRT_API GPRTGeomType gprtGeomTypeCreate(GPRTContext context, GPRTGeomKind kind,
 
 /**
  * @brief Creates a "geometry type", which describes the base primitive kind, device programs to call during
- * intersection and/or rasterization, and the parameters to pass into these device programs.
+ * intersection, and the parameters to pass into these device programs.
  * @tparam T The template type of the parameters structure that will be passed into the device programs
  * @param context The GPRT context
  * @param kind The base primitive kind, (triangles, AABBs, curves, etc)
@@ -1246,69 +1245,6 @@ template <typename T>
 void
 gprtGeomTypeSetIntersectionProg(GPRTGeomTypeOf<T> type, int rayType, GPRTModule module, const char *entrypoint) {
   gprtGeomTypeSetIntersectionProg((GPRTGeomType) type, rayType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetVertexProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetVertexProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetVertexProg((GPRTGeomType) type, rasterType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetPixelProg(GPRTGeomType type, int rasterType, GPRTModule module, const char *entrypoint);
-
-template <typename T>
-void
-gprtGeomTypeSetPixelProg(GPRTGeomTypeOf<T> type, int rasterType, GPRTModule module, const char *entrypoint) {
-  gprtGeomTypeSetPixelProg((GPRTGeomType) type, rasterType, module, entrypoint);
-}
-
-GPRT_API void gprtGeomTypeSetRasterAttachments(GPRTGeomType type, int rasterType, GPRTTexture colorAttachment,
-                                               GPRTTexture depthAttachment);
-
-template <typename T1, typename T2, typename T3>
-void
-gprtGeomTypeSetRasterAttachments(GPRTGeomTypeOf<T1> type, int rasterType, GPRTTextureOf<T2> colorAttachment,
-                                 GPRTTextureOf<T3> depthAttachment) {
-  gprtGeomTypeSetRasterAttachments((GPRTGeomType) type, rasterType, (GPRTTexture) colorAttachment,
-                                   (GPRTTexture) depthAttachment);
-}
-
-/**
- * @brief Rasterize a list of GPRT geometry. (Currently assuming all geometry are GPRT_TRIANGLES)
- *
- * @param context The GPRT context used to rasterize the triangles
- * @param geomType The geometry type to fetch raster programs from
- * @param numGeometry The number of GPRTGeoms to rasterize
- * @param geometry A pointer to a list of GPRT geometry, to be rasterized in the order given
- * @param rasterType Controls which rasterization programs to use. Analogous to "Ray Type", in
- * that it indexes into the shader binding table.
- * @param instanceCounts How many instances of each geometry in the "geometry" list to rasterize.
- * Useful for rasterizing the same geometry in many different locations. If null pointer, this parameter is ignored.
- * Otherwise, we expect a list of length "numGeometry"
- * @param pushConstantsSize The size of the push constants structure to upload to the device.
- * If 0, no push constants are updated. Currently limited to 128 bytes or less.
- * @param pushConstants A pointer to a structure of push constants to upload to the device.
- */
-void gprtGeomTypeRasterize(GPRTContext context, GPRTGeomType geomType, uint32_t numGeometry, GPRTGeom *geometry,
-                           uint32_t rasterType, uint32_t *instanceCounts, size_t pushConstantsSize GPRT_IF_CPP(= 0),
-                           void *pushConstants GPRT_IF_CPP(= 0));
-
-template <typename RecordType>
-void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
-                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts);
-}
-
-template <typename RecordType, typename PushConstantsType>
-void
-gprtGeomTypeRasterize(GPRTContext context, GPRTGeomTypeOf<RecordType> geomType, uint32_t numGeometry,
-                      GPRTGeomOf<RecordType> *geometry, uint32_t rayType, uint32_t *instanceCounts,
-                      PushConstantsType pc) {
-  gprtGeomTypeRasterize(context, (GPRTGeomType) geomType, numGeometry, (GPRTGeom *) geometry, rayType, instanceCounts,
-                        sizeof(PushConstantsType), &pc);
 }
 
 /**
