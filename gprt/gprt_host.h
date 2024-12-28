@@ -170,7 +170,6 @@ typedef enum {
   GPRT_SBT_RAYGEN = 2,
   GPRT_SBT_MISS = 4,
   GPRT_SBT_CALLABLE = 8,
-  GPRT_SBT_COMPUTE = 16,
   GPRT_SBT_ALL = 63
 } GPRTBuildSBTFlags;
 
