@@ -44,6 +44,7 @@ function(embed_devicecode)
     -matrix-layout-row-major
     -ignore-capabilities
     -zero-initialize # zero-initialize all variables
+    -Wno-39001 # for VK_EXT_mutable_descriptor_type, allows overlapping bindings
     -g
     -O0
     -I ${GPRT_INCLUDE_DIR}
