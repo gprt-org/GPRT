@@ -28,3 +28,13 @@ struct SphereParameters {
   float4 *vertices;
   uint32_t exitTest;   // false: return entry hits, true: return exit hits
 };
+
+struct CellParameters {
+  uint32_t *indices;
+  float3* vertices;
+  uint32_t count;
+  // Todo... support the below...
+  // uint32_t offset; // 
+  // uint32_t stride;
+  uint32_t type;
+};

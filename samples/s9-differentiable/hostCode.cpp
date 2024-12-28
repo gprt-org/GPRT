@@ -47,14 +47,14 @@ using namespace generator;
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s13_deviceCode;
+extern GPRTProgram s9_0_deviceCode;
 
 // initial image resolution
 const uint2 fbSize = {1400, 460};
 // const uint2 fbSize = {1024, 1024};
 
 // final image output
-const char *outFileName = "s12-imgui.png";
+const char *outFileName = "s9_0_differentiable.png";
 
 // Initial camera parameters
 float3 lookFrom = {0.f, -8.f, 0.0f};
@@ -147,9 +147,9 @@ main(int ac, char **av) {
   LOG("building module, programs, and pipeline");
 
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S13 Differentiable");
+  gprtRequestWindow(fbSize.x, fbSize.y, "S9_0 Differentiable");
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s13_deviceCode);
+  GPRTModule module = gprtModuleCreate(context, s9_0_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run

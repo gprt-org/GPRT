@@ -87,8 +87,14 @@
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt {
 
-typedef uint32_t Texture;
-typedef uint32_t Sampler;
+
+struct Texture {
+  uint32_t index;
+};
+
+struct Sampler {
+  uint32_t index;
+};
 
 // Update: now, we simply use Slang's pointer type for buffers
 // Shared between Slang and C++

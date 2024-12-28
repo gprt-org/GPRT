@@ -191,7 +191,53 @@ typedef enum {
   GPRT_MATRIX_FORMAT_ROW_MAJOR
 } GPRTMatrixFormat;
 
-typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS } GPRTGeomKind;
+typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, GPRT_CELLS } GPRTGeomKind;
+
+// A subset of the cell types supported by VTK.
+// Keep in sync with https://github.com/Kitware/VTK/blob/master/Common/DataModel/vtkCellType.h
+typedef enum
+{
+  // Linear cells
+  GPRT_TETRA = 10,
+  GPRT_VOXEL = 11,
+  GPRT_HEXAHEDRON = 12,
+  GPRT_WEDGE = 13,
+  GPRT_PYRAMID = 14,
+  GPRT_PENTAGONAL_PRISM = 15,
+  GPRT_HEXAGONAL_PRISM = 16,
+
+  // // Quadratic, isoparametric cells
+  // GPRT_QUADRATIC_TETRA = 24,
+  // GPRT_QUADRATIC_HEXAHEDRON = 25,
+  // GPRT_QUADRATIC_WEDGE = 26,
+  // GPRT_QUADRATIC_PYRAMID = 27,
+  // GPRT_TRIQUADRATIC_HEXAHEDRON = 29,
+  // GPRT_TRIQUADRATIC_PYRAMID = 37,
+  // GPRT_QUADRATIC_LINEAR_WEDGE = 31,
+  // GPRT_BIQUADRATIC_QUADRATIC_WEDGE = 32,
+  // GPRT_BIQUADRATIC_QUADRATIC_HEXAHEDRON = 33,
+
+  // // Polyhedron cell (consisting of polygonal faces)
+  // GPRT_POLYHEDRON = 42,
+
+  // // Higher order cells
+  // GPRT_HIGHER_ORDER_TETRAHEDRON = 64,
+  // GPRT_HIGHER_ORDER_WEDGE = 65,
+  // GPRT_HIGHER_ORDER_PYRAMID = 66,
+  // GPRT_HIGHER_ORDER_HEXAHEDRON = 67,
+
+  // // Arbitrary order Lagrange elements (formulated separated from generic higher order cells)
+  // GPRT_LAGRANGE_TETRAHEDRON = 71,
+  // GPRT_LAGRANGE_HEXAHEDRON = 72,
+  // GPRT_LAGRANGE_WEDGE = 73,
+  // GPRT_LAGRANGE_PYRAMID = 74,
+
+  // // Arbitrary order Bezier elements (formulated separated from generic higher order cells)
+  // GPRT_BEZIER_TETRAHEDRON = 78,
+  // GPRT_BEZIER_HEXAHEDRON = 79,
+  // GPRT_BEZIER_WEDGE = 80,
+  // GPRT_BEZIER_PYRAMID = 81,
+} GPRTCellType;
 
 typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,

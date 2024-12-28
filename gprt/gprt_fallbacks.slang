@@ -8,11 +8,9 @@ LoadAligned<int alignment, T>(T *ptr) {
   };
 }
 
-[ForceInline]
-float
-flipsign(float v, bool flag) {
-  return (flag) ? -v : v;
-}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// LINE SWEPT SPHERES
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
  * @brief Intersects a ray with a linearly swept sphere (LSS).
@@ -187,6 +185,9 @@ LSSBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform LSSBoundsParamete
   lss.aabbs[(offset * 2) + 2 * primID + 1] = aabbMax;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// SPHERES
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
 [shader("intersection")]
 void
 SphereIntersection(uniform uint32_t userData[64], uniform SphereParameters s) {
@@ -208,8 +209,7 @@ SphereIntersection(uniform uint32_t userData[64], uniform SphereParameters s) {
 
 [shader("compute")]
 [numthreads(256, 1, 1)]
-void
-SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsParameters s) {
+void SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsParameters s) {
   int primID = DispatchThreadID.x;
   if (primID >= s.count)
     return;
@@ -225,3 +225,119 @@ SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBoundsPa
   s.aabbs[(offset * 2) + 2 * primID] = aabbMin;
   s.aabbs[(offset * 2) + 2 * primID + 1] = aabbMax;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// LINEAR CELLS
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define GPRT_TETRA 10
+#define GPRT_VOXEL 11
+#define GPRT_HEXAHEDRON 12
+#define GPRT_WEDGE 13
+#define GPRT_PYRAMID 14
+#define GPRT_PENTAGONAL_PRISM 15
+#define GPRT_HEXAGONAL_PRISM 16
+
+int getVertexCount(uint32_t cellType) {
+  switch (cellType) {
+    case GPRT_TETRA: return 4;
+    case GPRT_VOXEL: return 8;
+    case GPRT_HEXAHEDRON: return 8;
+    case GPRT_WEDGE: return 6;
+    case GPRT_PYRAMID: return 14;
+    case GPRT_PENTAGONAL_PRISM: return 10;
+    case GPRT_HEXAGONAL_PRISM: return 12;
+    default: return 0;
+  }
+}
+
+// Not particularly efficient at the moment, meant to be general and easy to maintain.
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void LinearCellBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CellParameters record) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.count)
+    return;
+
+  float3 *vertices = record.vertices;
+  uint32_t *indices = record.indices;
+
+  uint32_t numVertices = getVertexCount(record.count);
+  float3 aabbMin = +float3(FLT_MAX);
+  float3 aabbMax = -float3(FLT_MAX);
+
+  // TODO: Try to load indices by groups of four.
+  // TODO: Use aligned loads...
+  // TODO: Add some validation and report an error if indices are invalid.
+  for (int i = 0; i < numVertices; ++i) {
+    int index = indices[i];
+    float3 vert = vertices[index];
+    aabbMin = min(aabbMin, vert);
+    aabbMax = max(aabbMin, vert);
+  }
+}
+
+// Quadratic, isoparametric cells
+// GPRT_QUADRATIC_EDGE = 21,
+// GPRT_QUADRATIC_TRIANGLE = 22,
+// GPRT_QUADRATIC_QUAD = 23,
+// GPRT_QUADRATIC_POLYGON = 36,
+// #define GPRT_QUADRATIC_TETRA                  24
+// #define GPRT_QUADRATIC_HEXAHEDRON             25
+// #define GPRT_QUADRATIC_WEDGE                  26
+// #define GPRT_QUADRATIC_PYRAMID                27
+// #define GPRT_BIQUADRATIC_QUAD                 28
+// #define GPRT_TRIQUADRATIC_HEXAHEDRON          29
+// #define GPRT_TRIQUADRATIC_PYRAMID             37
+// #define GPRT_QUADRATIC_LINEAR_QUAD            30
+// #define GPRT_QUADRATIC_LINEAR_WEDGE           31
+// #define GPRT_BIQUADRATIC_QUADRATIC_WEDGE      32
+// #define GPRT_BIQUADRATIC_QUADRATIC_HEXAHEDRON 33
+// #define GPRT_BIQUADRATIC_TRIANGLE             34
+
+// // Cubic, isoparametric cell
+// GPRT_CUBIC_LINE = 35,
+
+// // Special class of cells formed by convex group of points
+// GPRT_CONVEX_POINT_SET = 41,
+
+// // Polyhedron cell (consisting of polygonal faces)
+// GPRT_POLYHEDRON = 42,
+
+// // Higher order cells in parametric form
+// GPRT_PARAMETRIC_CURVE = 51,
+// GPRT_PARAMETRIC_SURFACE = 52,
+// GPRT_PARAMETRIC_TRI_SURFACE = 53,
+// GPRT_PARAMETRIC_QUAD_SURFACE = 54,
+// GPRT_PARAMETRIC_TETRA_REGION = 55,
+// GPRT_PARAMETRIC_HEX_REGION = 56,
+
+// // Higher order cells
+// GPRT_HIGHER_ORDER_EDGE = 60,
+// GPRT_HIGHER_ORDER_TRIANGLE = 61,
+// GPRT_HIGHER_ORDER_QUAD = 62,
+// GPRT_HIGHER_ORDER_POLYGON = 63,
+// GPRT_HIGHER_ORDER_TETRAHEDRON = 64,
+// GPRT_HIGHER_ORDER_WEDGE = 65,
+// GPRT_HIGHER_ORDER_PYRAMID = 66,
+// GPRT_HIGHER_ORDER_HEXAHEDRON = 67,
+
+// // Arbitrary order Lagrange elements (formulated separated from generic higher order cells)
+// GPRT_LAGRANGE_CURVE = 68,
+// GPRT_LAGRANGE_TRIANGLE = 69,
+// GPRT_LAGRANGE_QUADRILATERAL = 70,
+// GPRT_LAGRANGE_TETRAHEDRON = 71,
+// GPRT_LAGRANGE_HEXAHEDRON = 72,
+// GPRT_LAGRANGE_WEDGE = 73,
+// GPRT_LAGRANGE_PYRAMID = 74,
+
+// // Arbitrary order Bezier elements (formulated separated from generic higher order cells)
+// GPRT_BEZIER_CURVE = 75,
+// GPRT_BEZIER_TRIANGLE = 76,
+// GPRT_BEZIER_QUADRILATERAL = 77,
+// GPRT_BEZIER_TETRAHEDRON = 78,
+// GPRT_BEZIER_HEXAHEDRON = 79,
+// GPRT_BEZIER_WEDGE = 80,
+// GPRT_BEZIER_PYRAMID = 81,
+
+// GPRT_NUMBER_OF_CELL_TYPES

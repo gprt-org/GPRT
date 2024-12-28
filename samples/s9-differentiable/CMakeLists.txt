@@ -22,17 +22,17 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s13_deviceCode
+    s9_0_deviceCode
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.slang
 )
 
-add_executable(s13_differentiable hostCode.cpp)
-target_link_libraries(s13_differentiable
+add_executable(s9_0_differentiable hostCode.cpp)
+target_link_libraries(s9_0_differentiable
   PRIVATE
-    s13_deviceCode
+    s9_0_deviceCode
     gprt::gprt
     generator
 )
