@@ -1207,6 +1207,8 @@ gprtFormatGetSize(GPRTFormat format) {
   switch (format) {
   case GPRT_FORMAT_R8_UINT:
     return 1;
+  case GPRT_FORMAT_R16_UNORM:
+    return 2;
   case GPRT_FORMAT_R8G8B8A8_UNORM:
     return 4;
   case GPRT_FORMAT_R8G8B8A8_SRGB:
