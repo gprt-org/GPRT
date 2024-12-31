@@ -33,8 +33,8 @@ struct BoundingBoxData {
 
 struct RayGenData {
   float4 *imageBuffer;
-  gprt::Accel triangleTLAS;
-  gprt::Accel obbAccel;
+  SurfaceAccelerationStructure triangleTLAS;
+  SurfaceAccelerationStructure obbAccel;
 };
 
 /* variables for the miss program */

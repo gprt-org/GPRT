@@ -35,7 +35,7 @@ struct AABBGeomData {
 
 struct RayGenData {
   uint *frameBuffer;
-  gprt::Accel world;
+  SurfaceAccelerationStructure world;
 };
 
 /* variables for the miss program */

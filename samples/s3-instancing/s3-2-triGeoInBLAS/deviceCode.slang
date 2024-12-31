@@ -22,8 +22,7 @@ void raygen(uniform RayGenData record) {
   rayDesc.TMax = 1e38f;
 
   // Trace ray against surface
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                   // the tree
+  TraceRay(record.world,            // the tree
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
            0xff,                    // instance inclusion mask
            0,                       // ray type

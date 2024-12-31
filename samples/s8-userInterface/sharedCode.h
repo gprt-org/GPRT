@@ -28,7 +28,7 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   float4 *imageBuffer;
-  gprt::Accel world;
+  SurfaceAccelerationStructure world;
 };
 
 /* variables for the miss program */

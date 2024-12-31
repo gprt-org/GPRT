@@ -29,10 +29,9 @@ void simpleRayGen(uniform RayGenData record) {
   rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
 
   // Trace our primary visibility ray
-  TraceRay(world,                   // the tree
+  TraceRay(record.world,            // the tree
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
            0b11111111,              // instance inclusion mask
            0,                       // ray type
@@ -54,7 +53,7 @@ void simpleRayGen(uniform RayGenData record) {
     rayDesc.Origin = rayDesc.Origin + payload.hitT * rayDesc.Direction;
 
     // Trace another ray to get color of what's behind
-    TraceRay(world,                   // the tree
+    TraceRay(record.world,            // the tree
              RAY_FLAG_FORCE_OPAQUE,   // ray flags
              0b11111111,             // instance inclusion mask
              0,                       // ray type
@@ -83,7 +82,7 @@ void simpleRayGen(uniform RayGenData record) {
     rayDesc.Direction = normalize(pc.lightPos);
 
     // Trace our primary visibility ray
-    TraceRay(world,                   // the tree
+    TraceRay(record.world,            // the tree
              RAY_FLAG_FORCE_OPAQUE,   // ray flags
              0b00000001,              // instance inclusion mask
              0,                       // ray type

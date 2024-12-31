@@ -123,7 +123,7 @@ main(int ac, char **av) {
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when
   // we go to trace our rays.
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   gprtBuildShaderBindingTable(context);
 

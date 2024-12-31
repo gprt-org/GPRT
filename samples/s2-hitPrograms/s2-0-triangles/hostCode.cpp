@@ -64,7 +64,7 @@ int main(int ac, char **av) {
   // kernel's parameters, so that we can access that tree when
   // we go to trace our rays.
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);

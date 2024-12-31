@@ -113,7 +113,7 @@ int main(int ac, char **av) {
   rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
 
   // Assign the tree handle to our ray generation program's record
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);

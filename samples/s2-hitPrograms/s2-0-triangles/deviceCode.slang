@@ -26,8 +26,6 @@ void raygen(uniform RayGenData record) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
 
-  RaytracingAccelerationStructure world = getAccelFromAddress(record.world.address); //;gprt::getAccelHandle(record.world);
-
   // camera movement
   float an = pc.time;
   float3 ro = float3(-4.0 * sin(an), 0.0, -4.0 * cos(an));
@@ -56,7 +54,7 @@ void raygen(uniform RayGenData record) {
     rayDesc.Direction = rd;
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
-    TraceRay(world, RAY_FLAG_NONE, 0xff, 0, 1, 0, rayDesc, payload);
+    TraceRay(record.world, RAY_FLAG_NONE, 0xff, 0, 1, 0, rayDesc, payload);
 
     // Accumulate the color
     tot += payload.color;

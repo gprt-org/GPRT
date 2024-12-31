@@ -253,8 +253,8 @@ main(int ac, char **av) {
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters
-  rayGenData->triangleTLAS = gprtAccelGetHandle(triangleTLAS);
-  rayGenData->obbAccel = gprtAccelGetHandle(obbAccel);
+  rayGenData->triangleTLAS = gprtAccelGetDeviceAddress(triangleTLAS);
+  rayGenData->obbAccel = gprtAccelGetDeviceAddress(obbAccel);
 
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
@@ -386,7 +386,7 @@ main(int ac, char **av) {
     gprtTrianglesSetIndices(mesh.geometry, mesh.indexBuffer, obbPC.numTrisToInclude);
     gprtAccelBuild(context, mesh.accel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE);
     gprtAccelBuild(context, triangleTLAS, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE);
-    rayGenData->triangleTLAS = gprtAccelGetHandle(triangleTLAS);
+    rayGenData->triangleTLAS = gprtAccelGetDeviceAddress(triangleTLAS);
 
     // Call the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, rtPC);

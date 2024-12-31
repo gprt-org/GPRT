@@ -105,8 +105,6 @@ void raygen(uniform RayGenData record) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
 
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-
   // camera movement
   float an = pc.time;
   float3 ro = float3(-6.0 * sin(an), 0.0, -6.0 * cos(an));
@@ -133,7 +131,7 @@ void raygen(uniform RayGenData record) {
     rayDesc.Direction = rd;
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
-    TraceRay(world,           // the tree
+    TraceRay(record.world,     // the tree
               RAY_FLAG_NONE,   // ray flags
               0xff,            // instance inclusion mask
               0,               // ray type

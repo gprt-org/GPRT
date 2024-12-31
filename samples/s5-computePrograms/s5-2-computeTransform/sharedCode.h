@@ -31,7 +31,7 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   uint *frameBuffer;
-  gprt::Accel world;
+  SurfaceAccelerationStructure world;
 };
 
 /* variables for the miss program */

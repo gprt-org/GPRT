@@ -77,7 +77,7 @@ int main(int ac, char **av) {
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   gprtBuildShaderBindingTable(context);
 

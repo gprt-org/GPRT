@@ -134,7 +134,7 @@ int main(int ac, char **av) {
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   // Upload our newly assigned parameters to the shader binding table.
   gprtBuildShaderBindingTable(context);

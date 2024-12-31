@@ -67,7 +67,7 @@ int main(int ac, char **av) {
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   // Build the Shader Binding Table
   gprtBuildShaderBindingTable(context);

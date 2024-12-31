@@ -200,7 +200,7 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Set the accel handle
-  rayGenData->world = gprtAccelGetHandle(world);
+  rayGenData->world = gprtAccelGetDeviceAddress(world);
 
   // Upload our newly assigned parameters to the shader binding table.
   gprtBuildShaderBindingTable(context);

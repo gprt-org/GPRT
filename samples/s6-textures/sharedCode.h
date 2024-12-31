@@ -39,7 +39,7 @@ struct TrianglesGeomData {
 };
 
 struct RayGenData {
-  gprt::Accel world;
+  SurfaceAccelerationStructure world;
   uint *frameBuffer;
   int2 fbSize;
 };

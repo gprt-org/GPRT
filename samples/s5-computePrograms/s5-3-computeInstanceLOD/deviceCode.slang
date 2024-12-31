@@ -85,8 +85,7 @@ RayGen(uniform RayGenData record) {
   rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload);
+  TraceRay(record.world, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, 0, rayDesc, payload);
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
 }
