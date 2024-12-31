@@ -101,7 +101,9 @@ static struct RequestedFeatures {
   uint32_t rayRecursionDepth = 1;
 
   uint32_t maxRayPayloadSize = 32;
-  uint32_t maxRayHitAttributeSize = 2;
+
+  // Setting to 4, to allow for RSTW attributes
+  uint32_t maxRayHitAttributeSize = 4;
   
   uint32_t internalAdditionalSize = 32;
   uint32_t recordSize = 256;
@@ -316,6 +318,8 @@ struct SphereGeom;
 struct SphereGeomType;
 struct LSSGeom;
 struct LSSGeomType;
+struct SolidGeom;
+struct SolidGeomType;
 struct AABBGeom;
 struct AABBGeomType;
 struct NNPointGeom;
@@ -2808,6 +2812,90 @@ Geom *LSSGeomType::createGeom() {
   return new LSSGeom(this);
 }
 
+struct SolidGeomType : public GeomType {
+  SolidGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
+      : GeomType(context, numRayTypes, recordSize) {}
+  ~SolidGeomType() {}
+  Geom *createGeom();
+
+  GPRTGeomKind getKind() { return GPRT_SOLIDS; }
+};
+
+struct SolidGeom : public Geom {
+  struct {
+    uint32_t count;
+    uint32_t stride;
+    uint32_t offset;
+    std::vector<Buffer *> buffers;
+  } aabb;
+
+  struct {
+    uint32_t count = 0;         // number of indices
+    uint32_t stride = 0;        // stride between indices
+    uint32_t offset = 0;        // offset in bytes to the first index
+    uint32_t firstVertex = 0;   // added to the index values before fetching vertices
+    Buffer *buffer = nullptr;
+  } index;
+
+  struct {
+    uint32_t count = 0;    // number of vertices
+    uint32_t stride = 0;   // stride between vertices
+    uint32_t offset = 0;   // an offset in bytes to the first vertex
+    std::vector<Buffer *> buffers;
+  } vertex;
+
+  struct {
+    uint32_t count = 0;         // number of indices
+    uint32_t stride = 0;        // stride between indices
+    uint32_t offset = 0;        // offset in bytes to the first index
+    uint32_t firstVertex = 0;   // added to the index values before fetching vertices
+    Buffer *buffer = nullptr;
+  } types;
+
+  SolidGeom(SolidGeomType *_geomType) : Geom(_geomType->context) {
+    geomType = (GeomType *) _geomType;
+
+    // Allocate the variables for this geometry
+    this->SBTRecord = (uint8_t *) malloc(geomType->recordSize);
+    this->recordSize = geomType->recordSize;
+  };
+  ~SolidGeom() { free(this->SBTRecord); };
+
+  void setAABBs(Buffer *aabbs, uint32_t count, uint32_t stride, uint32_t offset) {
+    aabb.buffers.resize(1);
+    aabb.buffers[0] = aabbs;
+    aabb.count = count;
+    aabb.stride = stride;
+    aabb.offset = offset;
+  }
+
+  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+    vertex.buffers.resize(1);
+    vertex.buffers[0] = vertices;
+    vertex.count = count;
+    vertex.stride = stride;
+    vertex.offset = offset;
+  }
+
+  void setIndices(Buffer *indices, uint32_t count, uint32_t stride, uint32_t offset) {
+    index.buffer = indices;
+    index.count = count;
+    index.stride = stride;
+    index.offset = offset;
+  }
+
+  void setTypes(Buffer *_types, uint32_t count, uint32_t stride, uint32_t offset) {
+    types.buffer = _types;
+    types.count = count;
+    types.stride = stride;
+    types.offset = offset;
+  }
+};
+
+Geom *SolidGeomType::createGeom() {
+  return new SolidGeom(this);
+}
+
 struct AABBGeomType : public GeomType {
   AABBGeomType(Context* context, uint32_t numRayTypes, size_t recordSize)
       : GeomType(context, numRayTypes, recordSize) {}
@@ -2850,14 +2938,12 @@ Geom *AABBGeomType::createGeom() {
 
 typedef enum {
   GPRT_UNKNOWN_ACCEL = 0x0,
-  GPRT_INSTANCE_ACCEL = 0x1,
-  GPRT_TRIANGLE_ACCEL = 0x2,
-  GPRT_SPHERE_ACCEL = 0x3,
-  GPRT_LSS_ACCEL = 0x4,
-  GPRT_AABB_ACCEL = 0x5,
-  GPRT_NN_POINT_ACCEL = 0x6,
-  GPRT_NN_EDGE_ACCEL = 0x7,
-  GPRT_NN_TRIANGLE_ACCEL = 0x8,
+  GPRT_AABB_ACCEL = 0x1,
+  GPRT_INSTANCE_ACCEL = 0x2,
+  GPRT_TRIANGLE_ACCEL = 0x3,
+  GPRT_SPHERE_ACCEL = 0x4,
+  GPRT_LSS_ACCEL = 0x5,
+  GPRT_SOLID_ACCEL = 0x6
 } AccelType;
 
 struct Accel {
@@ -2949,6 +3035,24 @@ public:
     handle.index = this->address;                     // virtual address, not the device address
     handle.numGeometries = this->geometries.size();   // Useful for SBT
     return handle;
+  }
+
+  // Acceleration structure handles will change only when the backing memory changes.
+  // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
+  // where primitive counts increase.
+  uint64_t getDeviceAddress() {
+    Buffer *backingBuffer;
+    if (this->isCompact) {
+      if (!compactBuffer)
+        LOG_ERROR("compactBuffer is nullptr! Was the tree built before this address was requested?");
+      backingBuffer = compactBuffer;
+    } else {
+      if (!accelBuffer)
+        LOG_ERROR("accelBuffer is nullptr! Was the tree built before this address was requested?");
+      backingBuffer = accelBuffer;
+    }
+
+    return backingBuffer->getDeviceAddress();
   }
 
   VkDeviceAddress getScratchDeviceAddress() {
@@ -3829,6 +3933,143 @@ struct LSSAccel : public Accel {
   }
 };
 
+struct SolidAccel : public Accel {
+  // AABBs for when we need to fall back to a software implementation
+  GPRTBufferOf<float4> AABBs = nullptr;
+  std::vector<uint32_t> AABBOffsets;
+
+  SolidAccel(Context *context, size_t numGeometries, SolidGeom *geometries) : Accel(context, true) {
+    this->geometries.resize(numGeometries);
+    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+
+    {
+      AABBOffsets.resize(numGeometries + 1);
+      // Placeholder. The actual allocation here will vary from build to build.
+      AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
+    }
+  };
+
+  ~SolidAccel() {};
+
+  AccelType getType() { return GPRT_SOLID_ACCEL; }
+
+  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+    this->buildMode = buildMode;
+
+    accelerationBuildStructureRangeInfos.resize(geometries.size());
+    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
+    accelerationStructureGeometries.resize(geometries.size());
+    maxPrimitiveCounts.resize(geometries.size());
+
+    {
+      // Do a prefix sum over the prim counts
+      AABBOffsets[0] = 0;
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
+        AABBOffsets[gid + 1] = solidGeom->index.count + AABBOffsets[gid];
+      }
+
+      // Resize the AABB buffer if needed...
+      size_t requiredBytesForAABBs = 2 * sizeof(float4) * AABBOffsets[geometries.size()];
+      if (gprtBufferGetSize(AABBs) != requiredBytesForAABBs) {
+        gprtBufferResize((GPRTContext) context, AABBs, AABBOffsets[geometries.size()] * 2, false);
+      }
+
+      // Now populate the AABB buffer using the fallback bounds kernel
+      auto SolidBounds = (GPRTComputeOf<SolidBoundsParameters>) context->internalComputePrograms["SolidBounds"];
+      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+        auto &geom = accelerationStructureGeometries[gid];
+        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
+
+        SolidBoundsParameters params;
+        params.aabbs = gprtBufferGetDevicePointer(AABBs);
+        params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+        params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+        params.indicesOffset = solidGeom->index.offset;
+        params.indicesStride = solidGeom->index.stride;
+        params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+        params.offset = AABBOffsets[gid];
+        params.count = AABBOffsets[gid + 1] - params.offset;
+        gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
+      }
+    }
+
+    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+      auto &geom = accelerationStructureGeometries[gid];
+      SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
+
+      geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+
+      // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      //   means, anyhit should only be called once.
+      //   If absent, then an anyhit shader might be called more than once...
+      geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      // apparently, geom.flags can't be 0, otherwise we get a device loss on
+      // build...
+      {
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
+
+        // aabb data
+        size_t offsetInBytes = AABBOffsets[gid] * 2 * sizeof(float4);
+        geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
+        geom.geometry.aabbs.stride = 2 * sizeof(float4);
+        geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(AABBs);
+        // ((VkDeviceAddress) ( + offsetInBytes));
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = solidGeom->index.count;
+        // geomRange.primitiveOffset = solidGeom->aabb.offset;
+        geomRange.primitiveOffset = AABBOffsets[gid];
+        geomRange.firstVertex = 0;   // unused
+        geomRange.transformOffset = 0;
+      }
+
+      maxPrimitiveCounts[gid] = solidGeom->index.count;
+    }
+
+    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  }
+
+  //   for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
+  //     auto &geom = accelerationStructureGeometries[gid];
+  //     AABBGeom *aabbGeom = (AABBGeom *) geometries[gid];
+
+  //     geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+  //     // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  //     //   means, anyhit shader is disabled
+
+  //     // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+  //     //   means, anyhit should only be called once.
+  //     //   If absent, then an anyhit shader might be called more than once...
+  //     geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+  //     // apparently, geom.flags can't be 0, otherwise we get a device loss on
+  //     // build...
+
+  //     geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+
+  //     // aabb data
+  //     geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+  //     geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
+  //     geom.geometry.aabbs.data.deviceAddress = aabbGeom->aabb.buffers[0]->deviceAddress;
+  //     geom.geometry.aabbs.stride = aabbGeom->aabb.stride;
+
+  //     auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+  //     accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+  //     geomRange.primitiveCount = aabbGeom->aabb.count;
+  //     geomRange.primitiveOffset = aabbGeom->aabb.offset;
+  //     geomRange.firstVertex = 0;   // unused
+  //     geomRange.transformOffset = 0;
+
+  //     maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
+  //   }
+
+  //   innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  // }
+};
+
 struct AABBAccel : public Accel {
   AABBAccel(Context *context, size_t numGeometries, AABBGeom *geometries) : Accel(context, true) {
     this->geometries.resize(numGeometries);
@@ -4108,6 +4349,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         if (geomType->getKind() == GPRT_TRIANGLES)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_AABBS)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_SOLIDS)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_LSS) {
           if (requestedFeatures.linearSweptSpheres) {
@@ -4424,6 +4667,17 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                     isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
                     isectParams.exitTest = s->exitTest;
                     memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+                  }
+
+                  if (geom->geomType->getKind() == GPRT_SOLIDS) {
+                    SolidGeom *s = (SolidGeom *) geom;
+                    SolidParameters isectParams;
+                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+                    isectParams.indices = (uint4*) s->index.buffer->getDeviceAddress();
+                    isectParams.types = (uint8_t*) s->types.buffer->getDeviceAddress();
+                    isectParams.typeOffet = 0;
+                    isectParams.typeStride = 1;
+                    memcpy(internalParams, &isectParams, sizeof(SolidParameters));
                   }
                 }
               }
@@ -5950,6 +6204,7 @@ Context::setupInternalPrograms() {
     Context *context = this;
     internalComputePrograms.insert({"LSSBounds", new Compute(context, fallbacksModule, "LSSBounds")});
     internalComputePrograms.insert({"SphereBounds", new Compute(context, fallbacksModule, "SphereBounds")});
+    internalComputePrograms.insert({"SolidBounds", new Compute(context, fallbacksModule, "SolidBounds")});
   }
   computePipelinesOutOfDate = true;
 }
@@ -6853,6 +7108,38 @@ gprtLSSSetIndices(GPRTGeom _lssGeom, GPRTBuffer _indices, uint32_t count, uint32
   lssGeom->setIndices(indices, count, stride, offset);
 }
 
+GPRT_API void
+gprtSolidsSetVertices(GPRTGeom _solidGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  Buffer *vertices = (Buffer *) _vertices;
+  solidGeom->setVertices(vertices, count, stride, offset);
+}
+
+GPRT_API void
+gprtSolidsSetIndices(GPRTGeom _solidGeom, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  Buffer *indices = (Buffer *) _indices;
+  solidGeom->setIndices(indices, count, stride, offset);
+}
+
+GPRT_API void
+gprtSolidsSetTypes(GPRTGeom _solidGeom, GPRTBuffer _types, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  Buffer *types = (Buffer *) _types;
+  solidGeom->setTypes(types, count, stride, offset);
+}
+
+void
+gprtSolidsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  SolidGeom *aabbs = (SolidGeom *) _aabbs;
+  Buffer *positions = (Buffer *) _positions;
+  aabbs->setAABBs(positions, count, stride, offset);
+}
+
 void
 gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
@@ -7075,6 +7362,14 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   case GPRT_AABBS:
     geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    break;
+  case GPRT_SOLIDS:
+    geomType = new SolidGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    // Supply a built-in software intersector
+    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+      gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
+                                      "SolidIntersection");
+    }
     break;
   case GPRT_LSS:
     geomType = new LSSGeomType(context, requestedFeatures.numRayTypes, recordSize);
@@ -8002,6 +8297,14 @@ gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
 }
 
 GPRT_API GPRTAccel
+gprtSolidAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  SolidAccel *accel = new SolidAccel(context, 1, (SolidGeom *) geom);
+  return (GPRTAccel) accel;
+}
+
+GPRT_API GPRTAccel
 gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferOf<gprt::Instance> instancesBuffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
@@ -8052,6 +8355,14 @@ gprtAccelGetHandle(GPRTAccel _accel, int deviceID) {
   if (accel->isBottomLevel)
     LOG_ERROR("Handles are only available for instance acceleration structures");
   return accel->getAccelHandle();
+}
+
+GPRT_API const void*
+gprtAccelGetDeviceAddress(GPRTAccel _accel, int deviceID) {
+  Accel *accel = (Accel *) _accel;
+  if (accel->isBottomLevel)
+    LOG_ERROR("Handles are only available for instance acceleration structures");
+  return (const void*) accel->getDeviceAddress();
 }
 
 GPRT_API gprt::Instance

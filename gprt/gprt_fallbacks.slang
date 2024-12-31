@@ -1,4 +1,7 @@
+#pragma once
+
 #include "gprt_fallbacks.h"
+import gprt_builtins;
 
 [ForceInline]
 T
@@ -227,53 +230,249 @@ void SphereBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SphereBou
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// LINEAR CELLS
+// SOLIDS
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define GPRT_TETRA 10
-#define GPRT_VOXEL 11
+#define GPRT_TETRAHEDRON      10
+// #define GPRT_VOXEL 11
 #define GPRT_HEXAHEDRON 12
 #define GPRT_WEDGE 13
 #define GPRT_PYRAMID 14
-#define GPRT_PENTAGONAL_PRISM 15
-#define GPRT_HEXAGONAL_PRISM 16
+#define GPRT_TETRAHEDRAL_PAIR 23
+// #define GPRT_PENTAGONAL_PRISM 15
+// #define GPRT_HEXAGONAL_PRISM  16
 
 int getVertexCount(uint32_t cellType) {
   switch (cellType) {
-    case GPRT_TETRA: return 4;
-    case GPRT_VOXEL: return 8;
-    case GPRT_HEXAHEDRON: return 8;
-    case GPRT_WEDGE: return 6;
-    case GPRT_PYRAMID: return 14;
-    case GPRT_PENTAGONAL_PRISM: return 10;
-    case GPRT_HEXAGONAL_PRISM: return 12;
-    default: return 0;
+  case GPRT_TETRAHEDRON: return 4;
+  case GPRT_PYRAMID: return 5;
+  case GPRT_WEDGE: return 6;
+  case GPRT_HEXAHEDRON: return 8;
+  case GPRT_TETRAHEDRAL_PAIR: return 8;
+  default: return 0;
   }
+}
+
+uint getSolidHitKind(uint32_t cellType) {
+  switch (cellType) {
+  case GPRT_TETRAHEDRON: return HIT_KIND_TETRAHEDRON;
+  case GPRT_TETRAHEDRAL_PAIR: return HIT_KIND_TETRAHEDRON;
+  case GPRT_PYRAMID: return HIT_KIND_PYRAMID;
+  case GPRT_WEDGE: return HIT_KIND_WEDGE;
+  case GPRT_HEXAHEDRON: return HIT_KIND_HEXAHEDRON;
+  default: return 0;
+  }
+}
+
+static float3 GetInitialRST(int numNodes) {
+  float3 center = float3(.5);
+  if (numNodes == 4) center = float3(.25);
+  if (numNodes == 5) center.z = .2;
+  return center;
+};
+
+static bool IsoIsContained(int numNodes, float3 rst) {
+  float r = rst.x;
+  float s = rst.y;
+  float t = rst.z;
+  bool contained = all(rst >= 0.0) && all(rst <= 1.0);
+  if (numNodes == 4) {
+    contained &= ((r + s + t) <= 1.0f);
+  }
+  if (numNodes == 6) {
+    contained &= r + s <= 1.0f;
+  }
+  return contained;
+};
+
+// [ForceInline]
+// bool
+// intersectPointSolid(float3 P,      // The query point
+//                     float3[8] Q,   // The nodal points defining the solid
+//                     float[8] W,    // The corresponding per-node densities
+//                     uint32_t nodeCount, 
+//                     out float4 rstw)
+// {
+//   rstw = float4(0.);
+//   float rcp_vol_all = rcp(determinant(float3x3(Q[1] - Q[0], Q[2] - Q[0], Q[3] - Q[0])));
+
+//   // Determine how far the point is from each of the faces.
+//   float w0 = determinant(float3x3(P - Q[1], Q[3] - Q[1], Q[2] - Q[1])) * rcp_vol_all;
+//   if (w0 < 0.0) return false;
+//   float w1 = determinant(float3x3(P - Q[0], Q[2] - Q[0], Q[3] - Q[0])) * rcp_vol_all;
+//   if (w1 < 0.0) return false;
+//   float w2 = determinant(float3x3(P - Q[0], Q[3] - Q[0], Q[1] - Q[0])) * rcp_vol_all;
+//   if (w2 < 0.0) return false;
+//   float w3 = determinant(float3x3(P - Q[0], Q[1] - Q[0], Q[2] - Q[0])) * rcp_vol_all;
+//   if (w3 < 0.0) return false;
+
+//   // 1 = w0 + w1 + w2 + w3, so 1 - w1 - w2 - w3 = w0
+//   rstw.xyz = float3(w1, w2, w3);
+//   rstw.w = dot(float4(w0, w1, w2, w3), float4(W[0], W[1], W[2], W[3]));
+//   return true;
+// }
+
+#define NEWTON_ITERATIONS 2
+#define CONVERGED_ERROR   1e-3
+#define DIVERGED_ERROR    1e6
+
+[Differentiable]
+float[8] IsoToSupport(int numNodes, float3 rst) {
+  float[8] w = { 0., 0., 0., 0., 0., 0., 0., 0. };
+  float3 rstm = 1.0 - rst;
+  if (numNodes == 4) {
+    w[0] = 1.f - (rst.x + rst.y + rst.z);
+    w[1] = rst.x;
+    w[2] = rst.y;
+    w[3] = rst.z;
+  }
+  if (numNodes == 5) {
+    w[0] = rstm.x * rstm.y * rstm.z;
+    w[1] = rst.x * rstm.y * rstm.z;
+    w[2] = rst.x * rst.y * rstm.z;
+    w[3] = rstm.x * rst.y * rstm.z;
+    w[4] = rst.z;
+  }
+  if (numNodes == 6) {
+    w[0] = (1.0 - rst.x - rst.y) * (1.0 - rst.z);
+    w[1] = rst.x * (1.0 - rst.z);
+    w[2] = rst.y * (1.0 - rst.z);
+    w[3] = (1.0 - rst.x - rst.y) * rst.z;
+    w[4] = rst.x * rst.z;
+    w[5] = rst.y * rst.z;
+  }
+  if (numNodes == 8) {
+    w[0] = rstm.x * rstm.y * rstm.z;
+    w[1] = rst.x * rstm.y * rstm.z;
+    w[2] = rst.x * rst.y * rstm.z;
+    w[3] = rstm.x * rst.y * rstm.z;
+    w[4] = rstm.x * rstm.y * rst.z;
+    w[5] = rst.x * rstm.y * rst.z;
+    w[6] = rst.x * rst.y * rst.z;
+    w[7] = rstm.x * rst.y * rst.z;
+  }
+  return w;
+};
+
+// General method for inverting linear elements
+bool intersectPointSolid(float3 P,      // The query point
+                        float3[8] Q,   // The nodal points defining the solid
+                        float[8] W,    // The corresponding per-node densities
+                        uint32_t nodeCount, 
+                        out float4 rstw) {
+  // Initialize our canonical coordinates to be in the center of the element
+  // We'll iteratively refine these with Newton's method to match the given "P"
+  rstw.xyz = GetInitialRST(nodeCount);
+  rstw.w = 0.0;
+
+  float w[8];
+  // Iteration for Newton's method
+  [unroll]
+  for (int iteration = 0; iteration < NEWTON_ITERATIONS; iteration++) {
+    // Compute support function values for the current position in "rst" space
+    w = IsoToSupport(nodeCount, rstw.xyz);
+
+    // Determine if the current cannonical coordinates accurately reflect the given query point
+    float3 fcol = -P;
+    [unroll] for (int i = 0; i < 8; ++i) fcol += Q[i] * w[i]; // todo, ensure this is an FMA / MAD
+
+    // rst-derivatives
+    let dwr = fwd_diff(IsoToSupport)(nodeCount, diffPair(rstw.xyz, float3(1.0, 0.0, 0.0))).getDifferential();
+    let dws = fwd_diff(IsoToSupport)(nodeCount, diffPair(rstw.xyz, float3(0.0, 1.0, 0.0))).getDifferential();
+    let dwt = fwd_diff(IsoToSupport)(nodeCount, diffPair(rstw.xyz, float3(0.0, 0.0, 1.0))).getDifferential();
+
+    // Now get derivatives in world space
+    float3 rcol = float3(0.f), scol = float3(0.f), tcol = float3(0.f);
+    [unroll] for (int i = 0; i < 8; ++i) rcol += Q[i] * dwr[i]; // todo, ensure this is an FMA / MAD
+    [unroll] for (int i = 0; i < 8; ++i) scol += Q[i] * dws[i]; // todo, ensure this is an FMA / MAD
+    [unroll] for (int i = 0; i < 8; ++i) tcol += Q[i] * dwt[i]; // todo, ensure this is an FMA / MAD
+
+    // Compute determinants and generate improvements
+    float d = determinant(float3x3(rcol, scol, tcol));
+    if (abs(d) < 1e-20) return false;   // Determinant too small, likely singular
+    float dinv = rcp(d);
+
+    // Newton Raphson update formula, x_new = x_old - f(x) / f'(x), but generalized to
+    // multiple dimensions. fcol has principle values, while other two contain gradients,
+    // so the ratio effectively calculates changes needed using Cramer's rule.
+    rstw.x -= determinant(float3x3(fcol, scol, tcol)) * dinv;
+    rstw.y -= determinant(float3x3(rcol, fcol, tcol)) * dinv;
+    rstw.z -= determinant(float3x3(rcol, scol, fcol)) * dinv;
+  }
+
+  // Check for containment of the final cannonical point location
+  bool contained = IsoIsContained(nodeCount, rstw.xyz);
+  [unroll] for (int i = 0; i < 8; ++i) rstw.w += W[i] * w[i];
+  return contained;
 }
 
 // Not particularly efficient at the moment, meant to be general and easy to maintain.
 [shader("compute")]
 [numthreads(256, 1, 1)]
-void LinearCellBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CellParameters record) {
+void SolidBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SolidBoundsParameters record) {
   int primID = DispatchThreadID.x;
   if (primID >= record.count)
     return;
 
-  float3 *vertices = record.vertices;
-  uint32_t *indices = record.indices;
+  float4 *vertices = record.vertices;
+  uint *indices = (uint*)record.indices;
+  uint8_t *types = record.types;
 
-  uint32_t numVertices = getVertexCount(record.count);
+  uint8_t type = types[primID];
+
+  uint32_t numVertices = getVertexCount(type);
   float3 aabbMin = +float3(FLT_MAX);
   float3 aabbMax = -float3(FLT_MAX);
+  float2 densMinMax = float2(+FLT_MAX, -FLT_MAX);
 
   // TODO: Try to load indices by groups of four.
   // TODO: Use aligned loads...
   // TODO: Add some validation and report an error if indices are invalid.
   for (int i = 0; i < numVertices; ++i) {
-    int index = indices[i];
-    float3 vert = vertices[index];
-    aabbMin = min(aabbMin, vert);
-    aabbMax = max(aabbMin, vert);
+    int index = indices[(record.indicesOffset/4) + (record.indicesStride/4) * primID + i];
+    float4 vert = vertices[index];
+    aabbMin = min(aabbMin, vert.xyz);
+    aabbMax = max(aabbMax, vert.xyz);
+    densMinMax = min(densMinMax.x, vert.w);
+    densMinMax = max(densMinMax.y, vert.w);
+  }
+
+  uint32_t offset = record.offset;
+  record.aabbs[(offset * 2) + 2 * primID] = float4(aabbMin.xyz, aabbMax.x);
+  record.aabbs[(offset * 2) + 2 * primID + 1] = float4(aabbMax.yz, densMinMax);
+}
+
+[shader("intersection")]
+void
+SolidIntersection(uniform uint32_t userData[64], uniform SolidParameters s) {
+  uint primID = PrimitiveIndex();
+  float4 QW[8] = { 0., 0., 0., 0., 0., 0., 0., 0. };
+  uint8_t type = s.types[s.typeOffet + s.typeStride * primID];
+
+  uint32_t numVertices = getVertexCount(type);
+
+  uint4 i0 = LoadAligned<16>(s.indices + (primID * 2 + 0));
+  QW[0] = LoadAligned<16>(s.vertices + i0.x);
+  QW[1] = LoadAligned<16>(s.vertices + i0.y);
+  QW[2] = LoadAligned<16>(s.vertices + i0.z);
+  QW[3] = LoadAligned<16>(s.vertices + i0.w);
+
+  if (numVertices > 4) {
+    uint4 i1 = LoadAligned<16>(s.indices + (primID * 2 + 1));
+    QW[4] = LoadAligned<16>(s.vertices + i1.x);
+    if (numVertices > 5) QW[5] = LoadAligned<16>(s.vertices + i1.y);
+    if (numVertices > 6) QW[6] = LoadAligned<16>(s.vertices + i1.z);
+    if (numVertices > 7) QW[7] = LoadAligned<16>(s.vertices + i1.w);
+  }
+
+  float4 rstw;
+  if (intersectPointSolid(ObjectRayOrigin(),   // The query point
+                          { QW[0].xyz, QW[1].xyz, QW[2].xyz, QW[3].xyz, QW[4].xyz, QW[5].xyz, QW[6].xyz, QW[7].xyz },
+                          { QW[0].w, QW[1].w, QW[2].w, QW[3].w, QW[4].w, QW[5].w, QW[6].w, QW[7].w },
+                          numVertices,
+                          rstw))
+  {
+    ReportHit(0.0, getSolidHitKind(type), rstw);
   }
 }
 

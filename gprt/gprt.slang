@@ -1,5 +1,5 @@
 /**
- * @file gprt.slangh
+ * @file gprt.slang
  * @author Nate Morrical (natemorrical@gmail.com)
  * @brief This file defines the device-side interface for the general purpose
  * raytracing toolkit.
@@ -27,8 +27,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#pragma once
-
 #include "math\MathConstants.slangh"
 
 #include "gprt_shared.h"

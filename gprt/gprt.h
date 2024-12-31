@@ -1,7 +1,7 @@
 /**
  * @file gprt.h
  * @author Nate Morrical (natemorrical@gmail.com)
- * @brief This file includes either gprt_host.h or gprt.slangh depending on
+ * @brief This file includes either gprt_host.h or gprt.slang depending on
  * the architecture.
  * @version 0.1
  * @date 2022-11-03
@@ -31,7 +31,10 @@
 #pragma once
 
 #if defined(__SLANG_COMPILER__)
-#include "gprt.slangh"
+#include "gprt.slang"
+// Importing for access control
+import gprt_builtins;
 #else
 #include "gprt_host.h"
+#include "gprt_builtins.slang"
 #endif

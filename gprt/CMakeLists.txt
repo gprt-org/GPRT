@@ -51,7 +51,7 @@ embed_devicecode(
 #     scanDeviceCode
 #   HEADERS
 #     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_shared.h
-#     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slangh
+#     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.slang
 #     ${CMAKE_CURRENT_SOURCE_DIR}/gprt.h
 #   SOURCES
 #     ${CMAKE_CURRENT_SOURCE_DIR}/gprt_scan.slang

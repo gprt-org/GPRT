@@ -1,3 +1,6 @@
+#pragma once 
+
+
 #include "gprt.h"
 
 struct LSSBoundsParameters {
@@ -29,12 +32,22 @@ struct SphereParameters {
   uint32_t exitTest;   // false: return entry hits, true: return exit hits
 };
 
-struct CellParameters {
-  uint32_t *indices;
-  float3* vertices;
+struct SolidBoundsParameters {
+  float4 *vertices;
+  uint4 *indices;
+  uint32_t indicesOffset;
+  uint32_t indicesStride;
+  uint8_t *types;
+  float4 *aabbs;
+  uint32_t offset;
   uint32_t count;
-  // Todo... support the below...
-  // uint32_t offset; // 
-  // uint32_t stride;
-  uint32_t type;
+};
+
+// 20 bytes...
+struct SolidParameters {
+  float4 *vertices;
+  uint4 *indices;
+  uint8_t *types;
+  uint32_t typeOffet;
+  uint32_t typeStride;
 };

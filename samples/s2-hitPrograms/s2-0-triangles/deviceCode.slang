@@ -25,8 +25,8 @@ void raygen(uniform RayGenData record) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
-  
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+
+  RaytracingAccelerationStructure world = getAccelFromAddress(record.world.address); //;gprt::getAccelHandle(record.world);
 
   // camera movement
   float an = pc.time;

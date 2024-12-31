@@ -189,26 +189,36 @@ typedef enum {
   GPRT_MATRIX_FORMAT_ROW_MAJOR
 } GPRTMatrixFormat;
 
-typedef enum { GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, GPRT_CELLS } GPRTGeomKind;
+typedef enum { 
+  GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, /*bilinear solids?*/GPRT_SOLIDS
+} GPRTGeomKind;
 
-// A subset of the cell types supported by VTK.
-// Keep in sync with https://github.com/Kitware/VTK/blob/master/Common/DataModel/vtkCellType.h
-typedef enum
-{
-  // Linear cells
-  GPRT_TETRA = 10,
-  GPRT_VOXEL = 11,
+
+// Indices below are made to match VTU/VTK where possible.
+typedef enum {
+  GPRT_TETRAHEDRON = 10,
   GPRT_HEXAHEDRON = 12,
-  GPRT_WEDGE = 13,
-  GPRT_PYRAMID = 14,
-  GPRT_PENTAGONAL_PRISM = 15,
-  GPRT_HEXAGONAL_PRISM = 16,
+  GPRT_WEDGE = 13, 
+  GPRT_PYRAMID = 14, 
+  GPRT_TETRAHEDRAL_PAIR = 23,
+} GPRTSolidTypes;
+
+  // // Linear cells
+  // GPRT_TETRA = 10,
+  // GPRT_VOXEL = 11,
+  // GPRT_HEXAHEDRON = 12,
+  // GPRT_WEDGE = 13,
+  // GPRT_PYRAMID = 14,
+  // GPRT_PENTAGONAL_PRISM = 15,
+  // GPRT_HEXAGONAL_PRISM = 16,
 
   // // Quadratic, isoparametric cells
   // GPRT_QUADRATIC_TETRA = 24,
   // GPRT_QUADRATIC_HEXAHEDRON = 25,
   // GPRT_QUADRATIC_WEDGE = 26,
   // GPRT_QUADRATIC_PYRAMID = 27,
+
+
   // GPRT_TRIQUADRATIC_HEXAHEDRON = 29,
   // GPRT_TRIQUADRATIC_PYRAMID = 37,
   // GPRT_QUADRATIC_LINEAR_WEDGE = 31,
@@ -235,7 +245,7 @@ typedef enum
   // GPRT_BEZIER_HEXAHEDRON = 79,
   // GPRT_BEZIER_WEDGE = 80,
   // GPRT_BEZIER_PYRAMID = 81,
-} GPRTCellType;
+// } GPRTCellType;
 
 typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,
@@ -419,6 +429,50 @@ void
 gprtLSSSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
                   uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtLSSSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
+}
+
+GPRT_API void gprtSolidsSetVertices(GPRTGeom solidsGeom, GPRTBuffer vertices, uint32_t count,
+                                 uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtSolidsSetVertices(GPRTGeomOf<T1> solidsGeom, GPRTBufferOf<T2> vertices, uint32_t count,
+                   uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtSolidsSetVertices((GPRTGeom) solidsGeom, (GPRTBuffer) vertices, count, stride, offset);
+}
+
+GPRT_API void gprtSolidsSetIndices(GPRTGeom solidsGeom, GPRTBuffer indices, uint32_t count,
+                                   uint32_t stride GPRT_IF_CPP(= 2 * sizeof(uint4)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtSolidsSetIndices(GPRTGeomOf<T1> solidsGeom, GPRTBufferOf<T2> indices, uint32_t count,
+                  uint32_t stride GPRT_IF_CPP(= 2 * sizeof(uint4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtSolidsSetIndices((GPRTGeom) solidsGeom, (GPRTBuffer) indices, count, stride, offset);
+}
+
+GPRT_API void gprtSolidsSetTypes(GPRTGeom solidsGeom, GPRTBuffer types, uint32_t count,
+                                   uint32_t stride GPRT_IF_CPP(= sizeof(uint8_t)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtSolidsSetTypes(GPRTGeomOf<T1> solidsGeom, GPRTBufferOf<T2> types, uint32_t count,
+                  uint32_t stride GPRT_IF_CPP(= sizeof(uint8_t)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtSolidsSetTypes((GPRTGeom) solidsGeom, (GPRTBuffer) types, count, stride, offset);
+}
+
+/*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ)
+  for the given AABB geometry. This _has_ to be set before the accel(s)
+  that this geom is used in get built. */
+GPRT_API void gprtSolidsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint32_t count,
+                                    uint32_t stride GPRT_IF_CPP(= 8 * sizeof(float4)),
+                                    uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtSolidsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
+                      uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtSolidsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
 /*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ)
@@ -1069,6 +1123,18 @@ gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags 
 }
 
 // ------------------------------------------------------------------
+/*! create a new acceleration structure for solid geometries.
+  \param flags reserved for future use
+*/
+GPRT_API GPRTAccel gprtSolidAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
+
+template <typename T>
+GPRTAccel
+gprtSolidAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+  return gprtSolidAccelCreate(context, (GPRTGeom *) &geom, flags);
+}
+
+// ------------------------------------------------------------------
 /*! create a new instance acceleration structure with given number of
   instances.
 
@@ -1167,6 +1233,8 @@ GPRT_API void gprtAccelCompact(GPRTContext context, GPRTAccel accel);
 GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0));
 
 GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
+
+GPRT_API const void* gprtAccelGetDeviceAddress(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
 /**
  * @brief Returns an instance of the given acceleration structure, which can then be used as an input

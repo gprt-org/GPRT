@@ -1,5 +1,5 @@
 add_subdirectory(s2-0-triangles)
 add_subdirectory(s2-1-spheres)
 add_subdirectory(s2-2-lss)
-add_subdirectory(s2-4-cells)
+add_subdirectory(s2-4-solids)
 add_subdirectory(s2-5-aabbs)
