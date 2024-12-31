@@ -32,22 +32,17 @@ struct SphereParameters {
   uint32_t exitTest;   // false: return entry hits, true: return exit hits
 };
 
-struct SolidBoundsParameters {
-  float4 *vertices;
-  uint4 *indices;
-  uint32_t indicesOffset;
-  uint32_t indicesStride;
-  uint8_t *types;
-  float4 *aabbs;
-  uint32_t offset;
-  uint32_t count;
-};
-
-// 20 bytes...
 struct SolidParameters {
   float4 *vertices;
   uint4 *indices;
   uint8_t *types;
-  uint32_t typeOffet;
-  uint32_t typeStride;
+  float4 *aabbs;
+  uint32_t offset;
+  uint32_t count;
+  uint32_t typesOffset;
+  uint32_t typesStride;
+  uint32_t indicesOffset;
+  uint32_t indicesStride;
+  uint32_t verticesOffset;
+  uint32_t verticesStride;
 };

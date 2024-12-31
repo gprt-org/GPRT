@@ -105,7 +105,7 @@ static struct RequestedFeatures {
   // Setting to 4, to allow for RSTW attributes
   uint32_t maxRayHitAttributeSize = 4;
   
-  uint32_t internalAdditionalSize = 32;
+  uint32_t internalAdditionalSize = 128;
   uint32_t recordSize = 256;
 
   uint32_t maxDescriptorCount = 256;
@@ -3977,18 +3977,22 @@ struct SolidAccel : public Accel {
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
-      auto SolidBounds = (GPRTComputeOf<SolidBoundsParameters>) context->internalComputePrograms["SolidBounds"];
+      auto SolidBounds = (GPRTComputeOf<SolidParameters>) context->internalComputePrograms["SolidBounds"];
       for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
         auto &geom = accelerationStructureGeometries[gid];
         SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
 
-        SolidBoundsParameters params;
+        SolidParameters params;
         params.aabbs = gprtBufferGetDevicePointer(AABBs);
         params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
         params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+        params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+        params.verticesOffset = solidGeom->vertex.offset;
+        params.verticesStride = solidGeom->vertex.stride;
         params.indicesOffset = solidGeom->index.offset;
         params.indicesStride = solidGeom->index.stride;
-        params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+        params.typesOffset = solidGeom->types.offset;
+        params.typesStride = solidGeom->types.stride;
         params.offset = AABBOffsets[gid];
         params.count = AABBOffsets[gid + 1] - params.offset;
         gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
@@ -4670,14 +4674,18 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   }
 
                   if (geom->geomType->getKind() == GPRT_SOLIDS) {
-                    SolidGeom *s = (SolidGeom *) geom;
-                    SolidParameters isectParams;
-                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.indices = (uint4*) s->index.buffer->getDeviceAddress();
-                    isectParams.types = (uint8_t*) s->types.buffer->getDeviceAddress();
-                    isectParams.typeOffet = 0;
-                    isectParams.typeStride = 1;
-                    memcpy(internalParams, &isectParams, sizeof(SolidParameters));
+                    SolidGeom *solidGeom = (SolidGeom *) geom;
+                    SolidParameters params;
+                    params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+                    params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+                    params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+                    params.verticesOffset = solidGeom->vertex.offset;
+                    params.verticesStride = solidGeom->vertex.stride;
+                    params.indicesOffset = solidGeom->index.offset;
+                    params.indicesStride = solidGeom->index.stride;
+                    params.typesOffset = solidGeom->types.offset;
+                    params.typesStride = solidGeom->types.stride;
+                    memcpy(internalParams, &params, sizeof(SolidParameters));
                   }
                 }
               }

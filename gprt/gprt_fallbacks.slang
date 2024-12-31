@@ -312,7 +312,7 @@ static bool IsoIsContained(int numNodes, float3 rst) {
 //   return true;
 // }
 
-#define NEWTON_ITERATIONS 2
+#define NEWTON_ITERATIONS 5
 #define CONVERGED_ERROR   1e-3
 #define DIVERGED_ERROR    1e6
 
@@ -367,6 +367,7 @@ bool intersectPointSolid(float3 P,      // The query point
 
   float w[8];
   // Iteration for Newton's method
+  bool converged = false;
   [unroll]
   for (int iteration = 0; iteration < NEWTON_ITERATIONS; iteration++) {
     // Compute support function values for the current position in "rst" space
@@ -398,27 +399,27 @@ bool intersectPointSolid(float3 P,      // The query point
     rstw.x -= determinant(float3x3(fcol, scol, tcol)) * dinv;
     rstw.y -= determinant(float3x3(rcol, fcol, tcol)) * dinv;
     rstw.z -= determinant(float3x3(rcol, scol, fcol)) * dinv;
+    if (all(abs(fcol) < CONVERGED_ERROR)) { converged = true; break;}
   }
+  if (!converged) return false;
 
   // Check for containment of the final cannonical point location
-  bool contained = IsoIsContained(nodeCount, rstw.xyz);
+  if (!IsoIsContained(nodeCount, rstw.xyz)) return false;
+
   [unroll] for (int i = 0; i < 8; ++i) rstw.w += W[i] * w[i];
-  return contained;
+  return true;
 }
 
 // Not particularly efficient at the moment, meant to be general and easy to maintain.
 [shader("compute")]
 [numthreads(256, 1, 1)]
-void SolidBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SolidBoundsParameters record) {
+void SolidBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SolidParameters s) {
   int primID = DispatchThreadID.x;
-  if (primID >= record.count)
+  if (primID >= s.count)
     return;
 
-  float4 *vertices = record.vertices;
-  uint *indices = (uint*)record.indices;
-  uint8_t *types = record.types;
-
-  uint8_t type = types[primID];
+  uint8_t *types = s.types;
+  uint8_t type = types[s.typesOffset + s.typesStride * primID];
 
   uint32_t numVertices = getVertexCount(type);
   float3 aabbMin = +float3(FLT_MAX);
@@ -428,18 +429,23 @@ void SolidBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform SolidBound
   // TODO: Try to load indices by groups of four.
   // TODO: Use aligned loads...
   // TODO: Add some validation and report an error if indices are invalid.
+  uint8_t *idxstart = ((uint8_t *) s.indices) + (s.indicesOffset + s.indicesStride * primID);
+  uint *indices = (uint *) idxstart;
+  float4 *vertices = s.vertices;
   for (int i = 0; i < numVertices; ++i) {
-    int index = indices[(record.indicesOffset/4) + (record.indicesStride/4) * primID + i];
-    float4 vert = vertices[index];
+    int index = indices[i];
+    float4 vert = vertices[(s.verticesOffset + s.verticesStride * index) / sizeof(float4)];
     aabbMin = min(aabbMin, vert.xyz);
     aabbMax = max(aabbMax, vert.xyz);
     densMinMax = min(densMinMax.x, vert.w);
     densMinMax = max(densMinMax.y, vert.w);
   }
 
-  uint32_t offset = record.offset;
-  record.aabbs[(offset * 2) + 2 * primID] = float4(aabbMin.xyz, aabbMax.x);
-  record.aabbs[(offset * 2) + 2 * primID + 1] = float4(aabbMax.yz, densMinMax);
+  uint32_t offset = s.offset;
+  s.aabbs[(offset * 2) + 2 * primID] = float4(aabbMin.xyz, aabbMax.x);
+  s.aabbs[(offset * 2) + 2 * primID + 1] = float4(aabbMax.yz, densMinMax);
+
+  // printf("primID %d bounds %f %f %f %f %f %f\n", primID, aabbMin.x, aabbMin.y, aabbMin.z, aabbMax.x, aabbMax.y, aabbMax.z);
 }
 
 [shader("intersection")]
@@ -447,25 +453,55 @@ void
 SolidIntersection(uniform uint32_t userData[64], uniform SolidParameters s) {
   uint primID = PrimitiveIndex();
   float4 QW[8] = { 0., 0., 0., 0., 0., 0., 0., 0. };
-  uint8_t type = s.types[s.typeOffet + s.typeStride * primID];
-
+  uint8_t type = s.types[s.typesOffset + s.typesStride * primID];
   uint32_t numVertices = getVertexCount(type);
 
-  uint4 i0 = LoadAligned<16>(s.indices + (primID * 2 + 0));
-  QW[0] = LoadAligned<16>(s.vertices + i0.x);
-  QW[1] = LoadAligned<16>(s.vertices + i0.y);
-  QW[2] = LoadAligned<16>(s.vertices + i0.z);
-  QW[3] = LoadAligned<16>(s.vertices + i0.w);
+  // uint8_t* indices = (uint8_t *) s.indices;
+  // uint8_t *idxstart = indices + (s.indicesOffset + s.indicesStride * primID);
+  // uint4 *u4Indices = (uint4 *) idxstart;
 
-  if (numVertices > 4) {
-    uint4 i1 = LoadAligned<16>(s.indices + (primID * 2 + 1));
-    QW[4] = LoadAligned<16>(s.vertices + i1.x);
-    if (numVertices > 5) QW[5] = LoadAligned<16>(s.vertices + i1.y);
-    if (numVertices > 6) QW[6] = LoadAligned<16>(s.vertices + i1.z);
-    if (numVertices > 7) QW[7] = LoadAligned<16>(s.vertices + i1.w);
+  uint8_t *idxstart = ((uint8_t *)s.indices) + (s.indicesOffset + s.indicesStride * primID);
+  uint *indices = (uint *)idxstart;
+  float4 *vertices = s.vertices;
+  for (int i = 0; i < numVertices; ++i) {
+      int index = indices[i];
+      float4 vert = vertices[(s.verticesOffset + s.verticesStride * index) / sizeof(float4)];
+      QW[i] = vert;
+      // aabbMin = min(aabbMin, vert.xyz);
+      // aabbMax = max(aabbMax, vert.xyz);
+      // densMinMax = min(densMinMax.x, vert.w);
+      // densMinMax = max(densMinMax.y, vert.w);
   }
 
-  float4 rstw;
+
+
+
+  // uint4 i0 = LoadAligned<16>(u4Indices + 0);
+
+  // // printf("primID %d indices %d %d %d %d\n", primID, i0.x, i0.y, i0.z, i0.w);
+  // float4 *vertices = s.vertices;
+
+  // uint4 i0s = (s.verticesOffset + s.verticesStride * i0) / sizeof(float4);
+  // // uint4 i0s = (0 + 16*i0) / sizeof(float4);
+
+  // QW[0] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i0.x)/sizeof(float4)) );
+  // QW[1] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i0.y)/sizeof(float4)) );
+  // QW[2] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i0.z)/sizeof(float4)) );
+  // QW[3] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i0.w)/sizeof(float4)) );
+  // // printf("primID %d offset %d stride %d indices %d %d %d %d\n", primID, s.verticesOffset, s.verticesStride, i0s.x, i0s.y, i0s.z, i0s.w);
+
+  // // printf("primID %d v0 %f %f %f %f\n", primID, QW[0].x, QW[0].y, QW[0].z, QW[0].w);
+
+  // if (numVertices > 4) {
+  //   uint4 i1 = LoadAligned<16>(u4Indices + 1);
+  //   uint4 i1s = (s.verticesOffset + s.verticesStride * i1) / sizeof(float4);
+  //   if (numVertices > 4) QW[4] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i1.x)/sizeof(float4)) );
+  //   if (numVertices > 5) QW[5] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i1.y)/sizeof(float4)) );
+  //   if (numVertices > 6) QW[6] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i1.z)/sizeof(float4)) );
+  //   if (numVertices > 7) QW[7] = LoadAligned<16>(s.vertices + ((s.verticesOffset + s.verticesStride * i1.w)/sizeof(float4)) );
+  // }
+
+  float4 rstw = float4(0.f);
   if (intersectPointSolid(ObjectRayOrigin(),   // The query point
                           { QW[0].xyz, QW[1].xyz, QW[2].xyz, QW[3].xyz, QW[4].xyz, QW[5].xyz, QW[6].xyz, QW[7].xyz },
                           { QW[0].w, QW[1].w, QW[2].w, QW[3].w, QW[4].w, QW[5].w, QW[6].w, QW[7].w },

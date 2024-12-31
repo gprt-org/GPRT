@@ -7,7 +7,8 @@ struct SolidAccelerationStructure {
   const void* address;
 
   // Conversion constructor
-  SolidAccelerationStructure(const void* addr) : address(addr) {}
+  SolidAccelerationStructure(const void *addr) : address(addr) {}
+  SolidAccelerationStructure() : address(nullptr) {}
 };
 
 /// Opaque type representing an acceleration structure containing surfaces which can be intersected by rays.
@@ -16,6 +17,7 @@ struct SurfaceAccelerationStructure {
 
   // Conversion constructor
   SurfaceAccelerationStructure(const void *addr) : address(addr) {}
+  SurfaceAccelerationStructure() : address(nullptr) {}
 };
 #endif 
 

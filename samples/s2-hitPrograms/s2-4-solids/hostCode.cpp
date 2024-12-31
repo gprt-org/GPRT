@@ -41,7 +41,7 @@ int main(int ac, char **av) {
 
   // Each solid primitive will read up to eight consecutive indices, depending on the type.
   GPRTBufferOf<uint4> solidIndices = gprtDeviceBufferCreate<uint4>(context, indices.size(), indices.data());
-  gprtSolidsSetIndices(solidGeom, solidIndices, indices.size(), /*indices stride*/ 2 * sizeof(uint4));
+  gprtSolidsSetIndices(solidGeom, solidIndices, indices.size()/2, /*indices stride*/ 2 * sizeof(uint4));
 
   // Solids can vary in their types. If all elements are known to be the same type, one can create a type 
   // array of one element, then set the type stride to 0 when creating the solid geometry. 
