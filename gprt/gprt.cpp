@@ -3024,28 +3024,6 @@ public:
   // Acceleration structure handles will change only when the backing memory changes.
   // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
   // where primitive counts increase.
-  gprt::Accel getAccelHandle() {
-    Buffer *backingBuffer;
-    if (this->isCompact) {
-      if (!compactBuffer)
-        LOG_ERROR("compactBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = compactBuffer;
-    } else {
-      if (!accelBuffer)
-        LOG_ERROR("accelBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = accelBuffer;
-    }
-
-    gprt::Accel handle;
-    handle.address = backingBuffer->getDeviceAddress();
-    handle.index = this->address;                     // virtual address, not the device address
-    handle.numGeometries = this->geometries.size();   // Useful for SBT
-    return handle;
-  }
-
-  // Acceleration structure handles will change only when the backing memory changes.
-  // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
-  // where primitive counts increase.
   uint64_t getDeviceAddress() {
     Buffer *backingBuffer;
     if (this->isCompact) {
@@ -7520,12 +7498,11 @@ gprtSamplerDestroy(GPRTSampler _sampler) {
   sampler = nullptr;
 }
 
-GPRT_API gprt::Sampler
-gprtSamplerGetHandle(GPRTSampler _sampler) {
+GPRT_API uint32_t
+gprtSamplerGetIndex(GPRTSampler _sampler, int deviceID) {
   LOG_API_CALL();
   Sampler *sampler = (Sampler *) _sampler;
-  gprt::Sampler samplerHandle = {sampler->address};
-  return samplerHandle;
+  return sampler->address;
 }
 
 GPRT_API GPRTTexture
@@ -7634,13 +7611,11 @@ gprtTextureGetPointer(GPRTTexture _texture, int deviceID) {
   return texture->mapped;
 }
 
-GPRT_API gprt::Texture
-gprtTextureGetHandle(GPRTTexture _texture, int deviceID) {
+GPRT_API uint32_t
+gprtTextureGetIndex(GPRTTexture _texture, int deviceID) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
-  gprt::Texture texHandle;
-  texHandle = {texture->address};
-  return texHandle;
+  return texture->address;
 }
 
 GPRT_API void
@@ -8393,14 +8368,6 @@ gprtAccelGetSize(GPRTAccel _accel, int deviceID) {
   return accel->getSize();
 }
 
-GPRT_API gprt::Accel
-gprtAccelGetHandle(GPRTAccel _accel, int deviceID) {
-  Accel *accel = (Accel *) _accel;
-  if (accel->isBottomLevel)
-    LOG_ERROR("Handles are only available for instance acceleration structures");
-  return accel->getAccelHandle();
-}
-
 GPRT_API const void*
 gprtAccelGetDeviceAddress(GPRTAccel _accel, int deviceID) {
   Accel *accel = (Accel *) _accel;
@@ -8415,10 +8382,9 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   if (!accel->isBottomLevel)
     LOG_ERROR("Instances are only available for bottom level acceleration structures");
   gprt::Instance newInstance = gprt::Instance();
-  gprt::Accel handle = accel->getAccelHandle();
-  newInstance.__gprtAccelAddress = handle.address;
-  newInstance.instanceCustomIndex = handle.index;
-  newInstance.__gprtSBTOffset = handle.index;
+  newInstance.__gprtAccelAddress = accel->getDeviceAddress();
+  newInstance.instanceCustomIndex = accel->address; // our own virtual address handle.index;
+  newInstance.__gprtSBTOffset = accel->address;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =

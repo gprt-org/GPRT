@@ -84,36 +84,10 @@
 #define __MUTATING__
 #endif
 
+
+
 // NOTE, struct must be synchronized with declaration in gprt_host.h
 namespace gprt {
-
-struct Texture {
-  uint32_t index;
-};
-
-struct Sampler {
-  uint32_t index;
-};
-
-// Update: now, we simply use Slang's pointer type for buffers
-// Shared between Slang and C++
-// struct Buffer {
-//   // eventually will become address as features progress
-//   uint32_t index;
-//   uint32_t temp;
-// };
-
-/** The reference to the acceleration structure.
- * @note this handle is subject to change if the memory backing the accel changes.
- */
-struct Accel {
-  // A VkDeviceAddress
-  uint64_t address;
-
-  // A host-side index for SBT management
-  uint32_t index;
-  uint32_t numGeometries;
-};
 
 struct Instance {
   float3x4 transform;

@@ -134,6 +134,17 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 // GPRTPrograms are just SPIR-V binaries under the hood
 using GPRTProgram = std::vector<uint8_t>;
 
+// CPU implementation of Slang's descriptor handle type.
+struct Texture1D {uint placeHolder;};
+struct Texture2D {uint placeHolder;};
+struct Texture3D {uint placeHolder;};
+struct SamplerState {uint placeHolder;};
+template<typename T>
+struct DescriptorHandle
+{
+  uint2 index;
+};
+
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
 
@@ -1232,7 +1243,7 @@ GPRT_API void gprtAccelCompact(GPRTContext context, GPRTAccel accel);
 
 GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0));
 
-GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
+// GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
 GPRT_API const void* gprtAccelGetDeviceAddress(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
@@ -1342,7 +1353,15 @@ gprtSamplerCreate(GPRTContext context, GPRTFilter magFilter GPRT_IF_CPP(= GPRT_F
                   GPRTSamplerAddressMode addressMode GPRT_IF_CPP(= GPRT_SAMPLER_ADDRESS_MODE_REPEAT),
                   GPRTBorderColor borderColor GPRT_IF_CPP(= GPRT_BORDER_COLOR_OPAQUE_BLACK));
 
-GPRT_API gprt::Sampler gprtSamplerGetHandle(GPRTSampler sampler);
+// Returns the unique gprt-managed index for the given texture sampler.
+GPRT_API uint32_t gprtSamplerGetIndex(GPRTSampler texture, int deviceID GPRT_IF_CPP(= 0));
+
+inline DescriptorHandle<SamplerState> gprtSamplerGetHandle(GPRTSampler sampler, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<SamplerState> handle;
+  handle.index.x = gprtSamplerGetIndex(sampler);
+  handle.index.y = 0;
+  return handle;
+}
 
 GPRT_API void gprtSamplerDestroy(GPRTSampler);
 
@@ -1406,12 +1425,37 @@ gprtTextureUnmap(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
   gprtTextureUnmap((GPRTTexture) texture, deviceID);
 }
 
-GPRT_API gprt::Texture gprtTextureGetHandle(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
+// Returns the unique gprt-managed index for the given texture.
+GPRT_API uint32_t gprtTextureGetIndex(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
+
+// Returns the unique gprt-managed index for the given texture.
+template <typename T>
+uint32_t gprtTextureGetIndex(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  return gprtTextureGetIndex((GPRTTexture) texture, deviceID);
+}
 
 template <typename T>
-gprt::Texture
-gprtTextureGetHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  return gprtTextureGetHandle((GPRTTexture) texture, deviceID);
+inline DescriptorHandle<Texture1D> gprtTextureGet1DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture1D> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T>
+inline DescriptorHandle<Texture2D> gprtTextureGet2DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture2D> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T>
+inline DescriptorHandle<Texture3D> gprtTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture3D> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
 }
 
 // Returns the number of bytes between each row of texels in the image.

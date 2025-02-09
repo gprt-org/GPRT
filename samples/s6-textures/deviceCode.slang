@@ -120,15 +120,15 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   float2 TC = TCB * bc.x + TCC * bc.y + TCA * (1.f - (bc.x + bc.y));
 
   // fetch the texture and sampler for this plane
-  Texture2D texture = gprt::getTexture2DHandle(record.texture);
-  SamplerState sampler = gprt::getSamplerHandle(record.samplers[instanceID]);
-
+  DescriptorHandle<Texture2D> texture = record.texture;
+  DescriptorHandle<SamplerState> sampler = record.samplers[instanceID];
+  
   // For now, we're using an approximate ray cone method to drive texture sampling.
   // The cone footprint grows larger with distance, and is grows larger at glancing angles
   float footprint = payload.spreadAngle * RayTCurrent() / (dot(Ng, normalize(ObjectRayDirection())));
   float2 DDX = float2(footprint, footprint) * .5f;
   float2 DDY = float2(footprint, footprint) * .5f;
-  float4 color;
+  float4 color = float4(1.0, 0.0, 1.0, 1.0);
 
   // Here's how you'd normally sample a texture
   if (instanceID == 0) {

@@ -14,7 +14,7 @@ struct SolidGeomData {
 struct RayGenData {
   uint *frameBuffer;
   SolidAccelerationStructure world;
-  gprt::Texture stbn;
+  DescriptorHandle<Texture2D> stbn;
 };
 
 /* Constants that change each frame */
