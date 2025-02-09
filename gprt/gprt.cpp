@@ -374,7 +374,10 @@ struct Context {
 
   // Vulkan instance, stores all per-application states
   VkInstance instance;
-  std::vector<std::string> supportedInstanceExtensions;
+  std::vector<VkLayerProperties> supportedInstanceLayers;
+  std::vector<std::string> supportedInstanceLayerNames;
+  std::vector<VkExtensionProperties> supportedInstanceExtensions;
+  std::vector<std::string> supportedInstanceExtensionNames;
 
   // optional windowing features
   VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -561,6 +564,9 @@ struct Context {
   void freeDebugCallback(VkInstance instance);
 
   size_t getNumHitRecords();
+
+  void enumerateInstanceValidationLayers();
+  void enumerateInstanceExtensions();
 
   Context(int32_t *requestedDeviceIDs, int numRequestedDevices);
 
@@ -4885,7 +4891,43 @@ Context::freeDebugCallback(VkInstance instance) {
   }
 }
 
+void Context::enumerateInstanceValidationLayers()
+{
+  uint32_t layerCount = 0;
+  VkResult result = vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate instance layers");
+
+  if (layerCount > 0) {
+    supportedInstanceLayers.resize(layerCount);
+    result = vkEnumerateInstanceLayerProperties(&layerCount, supportedInstanceLayers.data());
+    if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate instance layers");
+
+    for (VkLayerProperties layer : supportedInstanceLayers) {
+      supportedInstanceLayerNames.push_back(layer.layerName);
+    }
+  }
+}
+
+void Context::enumerateInstanceExtensions()
+{
+  uint32_t instExtCount = 0;
+  VkResult result = vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate extensions");
+
+  if (instExtCount > 0) {
+    supportedInstanceExtensions.resize(instExtCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &supportedInstanceExtensions.front()) == VK_SUCCESS) {
+      for (VkExtensionProperties extension : supportedInstanceExtensions) {
+        supportedInstanceExtensionNames.push_back(extension.extensionName);
+      }
+    }
+  }
+}
+
 Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+  enumerateInstanceValidationLayers();
+  enumerateInstanceExtensions();
+
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName = "GPRT";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -4901,24 +4943,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
 
-  // Get extensions supported by the instance and store for later use
-  uint32_t instExtCount = 0;
-  vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
-  if (instExtCount > 0) {
-    std::vector<VkExtensionProperties> extensions(instExtCount);
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &extensions.front()) == VK_SUCCESS) {
-      for (VkExtensionProperties extension : extensions) {
-        supportedInstanceExtensions.push_back(extension.extensionName);
-      }
-    }
-  }
-
   // Enabled requested instance extensions
   if (enabledInstanceExtensions.size() > 0) {
     for (const char *enabledExtension : enabledInstanceExtensions) {
       // Output message if requested extension is not available
-      if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) ==
-          supportedInstanceExtensions.end()) {
+      if (std::find(supportedInstanceExtensionNames.begin(), supportedInstanceExtensionNames.end(), enabledExtension) ==
+          supportedInstanceExtensionNames.end()) {
         std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
       }
       instanceExtensions.push_back(enabledExtension);
@@ -4980,13 +5010,19 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
 
   if (requestedFeatures.debugPrintf) {
-    instanceCreateInfo.enabledLayerCount = 1;
+    // Todo, look and see if any profiling layers might be active. If so, we should disable printf.
+    if (std::find(supportedInstanceLayerNames.begin(), supportedInstanceLayerNames.end(), layerNames[0]) ==
+        supportedInstanceLayerNames.end()) {
+      LOG_WARNING("VK_LAYER_KHRONOS_validation is not present. Device-side printf will be disabled.");
+    }
+    else {
+      instanceCreateInfo.enabledLayerCount = 1;
+    }
   } else {
     instanceCreateInfo.enabledLayerCount = 0;
   }
 
   VkResult err;
-
   err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
   if (err) {
     LOG_ERROR("failed to create instance! : \n" + errorString(err));

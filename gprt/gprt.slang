@@ -36,6 +36,7 @@
 [[vk::binding(0, 0)]] Texture1D texture1Ds[];
 [[vk::binding(0, 0)]] Texture2D texture2Ds[];
 [[vk::binding(0, 0)]] Texture3D texture3Ds[];
+[[vk::binding(0, 0)]] globallycoherent RWByteAddressBuffer buffers[];
 
 // Perhaps reserve binding 1 for SBT values?
 
@@ -46,7 +47,6 @@
 // the entire GPU such that other groups can see writes. Without this specifier,
 // a memory barrier or sync will only flush a UAV within the current group.
 // [[vk::binding(0, 5)]]
-// globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
