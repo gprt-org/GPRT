@@ -410,7 +410,7 @@ template <typename T1, typename T2>
 void
 gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
                         uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0)) {
-  static_assert((std::is_same_v<T2, uint> || std::is_same_v<T2, uint3>), "Triangle index buffer must contain uint32_t.");
+  static_assert((std::is_same_v<T2, uint> || std::is_same_v<T2, uint3>), "Triangle index buffer must contain uint32_t or uint3.");
   gprtTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 

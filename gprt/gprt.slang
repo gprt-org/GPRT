@@ -123,13 +123,13 @@ over(float4 a, float4 b) {
 
 // [[vk::ext_instruction(4447)]] RaytracingAccelerationStructure getAccelHandle(uint64_t ptr);
 
-RaytracingAccelerationStructure
-getAccelHandle(Accel accel) {
-  uint64_t address = accel.address;
-  return spirv_asm {
-    result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
-  };
-}
+// RaytracingAccelerationStructure
+// getAccelHandle(Accel accel) {
+//   uint64_t address = accel.address;
+//   return spirv_asm {
+//     result: $$RaytracingAccelerationStructure = OpConvertUToAccelerationStructureKHR $address
+//   };
+// }
 
 // Mainly used to teach how miss programs work, without involving closest hit or geometry complexity.
 RaytracingAccelerationStructure

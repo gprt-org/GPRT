@@ -45,7 +45,7 @@ float3 vertices[NUM_VERTICES] = {
 // Indices connect those vertices together.
 // Here, vertex 0 connects to 1, which connects to 2 to form a triangle.
 const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+uint3 indices[NUM_INDICES] = {{0, 1, 2}};
 
 // initial image resolution
 const uint2 fbSize = {1400, 460};
@@ -112,7 +112,7 @@ int main(int ac, char **av) {
   // The vertex and index buffers here define the triangle vertices
   // and how those vertices are connected together.
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_INDICES, indices);
 
   // Next, we will create an instantiation of our geometry declaration.
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);

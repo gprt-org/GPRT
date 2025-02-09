@@ -27,7 +27,7 @@
 /* variables for the triangle mesh geometry */
 struct TrianglesGeomData {
   /*! array/buffer of vertex indices */
-  int3 *index;   // vec3i*
+  uint3 *index;   // vec3i*
   /*! array/buffer of vertex positions */
   float3 *vertex;   // vec3f *
 };

@@ -13,7 +13,7 @@ float3 vertices[NUM_VERTICES] = {
 
 // Indices defining the connections between vertices
 const int NUM_INDICES = 1;
-int3 indices[NUM_INDICES] = {{0, 1, 2}};
+uint3 indices[NUM_INDICES] = {{0, 1, 2}};
 
 // Initial image resolution
 const int2 fbSize = {1400, 460};
@@ -35,7 +35,7 @@ int main(int ac, char **av) {
 
   // Upload vertex and index data to GPU buffers
   auto vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  auto indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  auto indexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_INDICES, indices);
 
   // New: Create geometry instance and set vertex and index buffers
   auto trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);

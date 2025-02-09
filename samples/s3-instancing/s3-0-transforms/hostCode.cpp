@@ -9,7 +9,7 @@ float3 vertices[NUM_VERTICES] = {{-1.f, -1.f, -1.f}, {+1.f, -1.f, -1.f}, {-1.f, 
                                  {-1.f, -1.f, +1.f}, {+1.f, -1.f, +1.f}, {-1.f, +1.f, +1.f}, {+1.f, +1.f, +1.f}};
 
 const int NUM_INDICES = 12;
-int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4}, {0, 4, 5}, {0, 5, 1},
+uint3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4}, {0, 4, 5}, {0, 5, 1},
                              {2, 3, 7}, {2, 7, 6}, {1, 5, 7}, {1, 7, 3}, {4, 0, 2}, {4, 2, 6}};
 
 // Several affine transformation matrices to place instances of our cube in the
@@ -83,7 +83,7 @@ main(int ac, char **av) {
 
   // Create our cube mesh
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
+  GPRTBufferOf<uint3> indexBuffer = gprtDeviceBufferCreate<uint3>(context, NUM_INDICES, indices);
   GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
   gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
   gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
