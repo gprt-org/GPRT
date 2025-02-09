@@ -5094,6 +5094,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
   // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
   // components, without additional requirements.
+  enabledDeviceExtensions.push_back(VK_KHR_SHADER_RELAXED_EXTENDED_INSTRUCTION_EXTENSION_NAME);
+
+  // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
+  // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
+  // components, without additional requirements.
   enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
 
   // Allows storing different descriptor types in the same binding.
@@ -7064,6 +7069,7 @@ GPRT_API void
 gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
+  if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetVertices on non-triangular geometry type!");
   Buffer *vertices = (Buffer *) _vertices;
   triangles->setVertices(vertices, count, stride, offset);
 }
@@ -7088,6 +7094,7 @@ GPRT_API void
 gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
+  if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetIndices on non-triangular geometry type!");
   Buffer *indices = (Buffer *) _indices;
   triangles->setIndices(indices, count, stride, offset);
 }
@@ -7096,6 +7103,7 @@ GPRT_API void
 gprtSpheresSetVertices(GPRTGeom _sphereGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   SphereGeom *sphereGeom = (SphereGeom *) _sphereGeom;
+  if (sphereGeom->geomType->getKind() != GPRT_SPHERES) LOG_ERROR("Calling gprtSpheresSetVertices on non-sphere geometry type!");
   Buffer *vertices = (Buffer *) _vertices;
   sphereGeom->setVertices(vertices, count, stride, offset);
 }
@@ -7104,6 +7112,7 @@ GPRT_API void
 gprtLSSSetVertices(GPRTGeom _lssGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   LSSGeom *lssGeom = (LSSGeom *) _lssGeom;
+  if (lssGeom->geomType->getKind() != GPRT_LSS) LOG_ERROR("Calling gprtLSSSetVertices on non-LSS geometry type!");
   Buffer *vertices = (Buffer *) _vertices;
   lssGeom->setVertices(vertices, count, stride, offset);
 }
@@ -7112,6 +7121,7 @@ GPRT_API void
 gprtLSSSetIndices(GPRTGeom _lssGeom, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   LSSGeom *lssGeom = (LSSGeom *) _lssGeom;
+  if (lssGeom->geomType->getKind() != GPRT_LSS) LOG_ERROR("Calling gprtLSSSetIndices on non-LSS geometry type!");
   Buffer *indices = (Buffer *) _indices;
   lssGeom->setIndices(indices, count, stride, offset);
 }
@@ -7120,6 +7130,7 @@ GPRT_API void
 gprtSolidsSetVertices(GPRTGeom _solidGeom, GPRTBuffer _vertices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  if (solidGeom->geomType->getKind() != GPRT_SOLIDS) LOG_ERROR("Calling gprtSolidsSetVertices on non-solid geometry type!");
   Buffer *vertices = (Buffer *) _vertices;
   solidGeom->setVertices(vertices, count, stride, offset);
 }
@@ -7128,6 +7139,7 @@ GPRT_API void
 gprtSolidsSetIndices(GPRTGeom _solidGeom, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  if (solidGeom->geomType->getKind() != GPRT_SOLIDS) LOG_ERROR("Calling gprtSolidsSetIndices on non-solid geometry type!");
   Buffer *indices = (Buffer *) _indices;
   solidGeom->setIndices(indices, count, stride, offset);
 }
@@ -7136,22 +7148,25 @@ GPRT_API void
 gprtSolidsSetTypes(GPRTGeom _solidGeom, GPRTBuffer _types, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  if (solidGeom->geomType->getKind() != GPRT_SOLIDS) LOG_ERROR("Calling gprtSolidsSetTypes on non-solid geometry type!");
   Buffer *types = (Buffer *) _types;
   solidGeom->setTypes(types, count, stride, offset);
 }
 
 void
-gprtSolidsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
+gprtSolidsSetPositions(GPRTGeom _solidGeom, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
-  SolidGeom *aabbs = (SolidGeom *) _aabbs;
+  SolidGeom *solidGeom = (SolidGeom *) _solidGeom;
+  if (solidGeom->geomType->getKind() != GPRT_SOLIDS) LOG_ERROR("Calling gprtSolidsSetPositions on non-solid geometry type!");
   Buffer *positions = (Buffer *) _positions;
-  aabbs->setAABBs(positions, count, stride, offset);
+  solidGeom->setAABBs(positions, count, stride, offset);
 }
 
 void
 gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   AABBGeom *aabbs = (AABBGeom *) _aabbs;
+  if (aabbs->geomType->getKind() != GPRT_AABBS) LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
   Buffer *positions = (Buffer *) _positions;
   aabbs->setAABBs(positions, count, stride, offset);
 }
@@ -7452,6 +7467,10 @@ GPRT_API void
 gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule _module, const char *progName) {
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
+  if (geomType->getKind() != GPRT_AABBS) {
+    LOG_ERROR("Custom intersection programs are only allowed for AABB types");
+  }
+
   Module *module = (Module *) _module;
 
   if (!module->checkForEntrypoint(progName)) {

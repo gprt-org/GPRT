@@ -374,6 +374,7 @@ template <typename T1, typename T2>
 void
 gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, uint32_t count,
                          uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  static_assert((std::is_same_v<T2, float> || std::is_same_v<T2, float3> || std::is_same_v<T2, float4>), "Triangle vertex buffer must contain floats.");
   gprtTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
 }
 
@@ -398,6 +399,7 @@ template <typename T1, typename T2>
 void
 gprtTrianglesSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
                         uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  static_assert((std::is_same_v<T2, uint> || std::is_same_v<T2, uint3>), "Triangle index buffer must contain uint32_t.");
   gprtTrianglesSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
 }
 
