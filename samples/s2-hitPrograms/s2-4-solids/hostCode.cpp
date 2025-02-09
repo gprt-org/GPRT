@@ -85,7 +85,7 @@ int main(int ac, char **av) {
   GPRTTextureOf<stbi_us> stbnTex = gprtDeviceTextureCreate<stbi_us>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R16_UNORM, x, y, /*depth*/ 1,
       /* generate mipmaps */ false, stbn.data());
-  rayGenData->stbn = gprtTextureGetHandle(stbnTex);
+  rayGenData->stbn = gprtTextureGet2DHandle(stbnTex);
 
   // Build the Shader Binding Table (SBT), updating all parameters.
   gprtBuildShaderBindingTable(context);

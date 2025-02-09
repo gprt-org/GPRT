@@ -68,5 +68,5 @@ struct CompositeGuiConstants {
   uint2 fbSize;
   float4 *imageBuffer;
   uint *frameBuffer;
-  gprt::Texture guiTexture;
+  DescriptorHandle<Texture2D> guiTexture;
 };

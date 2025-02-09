@@ -148,7 +148,7 @@ int main(int ac, char **av) {
   guiPC.fbSize = fbSize;
   guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
-  guiPC.guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  guiPC.guiTexture = gprtTextureGet2DHandle(guiColorAttachment);
 
   RTPushConstants rtPC;
 

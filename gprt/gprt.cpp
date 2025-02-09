@@ -374,7 +374,10 @@ struct Context {
 
   // Vulkan instance, stores all per-application states
   VkInstance instance;
-  std::vector<std::string> supportedInstanceExtensions;
+  std::vector<VkLayerProperties> supportedInstanceLayers;
+  std::vector<std::string> supportedInstanceLayerNames;
+  std::vector<VkExtensionProperties> supportedInstanceExtensions;
+  std::vector<std::string> supportedInstanceExtensionNames;
 
   // optional windowing features
   VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -561,6 +564,9 @@ struct Context {
   void freeDebugCallback(VkInstance instance);
 
   size_t getNumHitRecords();
+
+  void enumerateInstanceValidationLayers();
+  void enumerateInstanceExtensions();
 
   Context(int32_t *requestedDeviceIDs, int numRequestedDevices);
 
@@ -3018,28 +3024,6 @@ public:
   // Acceleration structure handles will change only when the backing memory changes.
   // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
   // where primitive counts increase.
-  gprt::Accel getAccelHandle() {
-    Buffer *backingBuffer;
-    if (this->isCompact) {
-      if (!compactBuffer)
-        LOG_ERROR("compactBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = compactBuffer;
-    } else {
-      if (!accelBuffer)
-        LOG_ERROR("accelBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = accelBuffer;
-    }
-
-    gprt::Accel handle;
-    handle.address = backingBuffer->getDeviceAddress();
-    handle.index = this->address;                     // virtual address, not the device address
-    handle.numGeometries = this->geometries.size();   // Useful for SBT
-    return handle;
-  }
-
-  // Acceleration structure handles will change only when the backing memory changes.
-  // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
-  // where primitive counts increase.
   uint64_t getDeviceAddress() {
     Buffer *backingBuffer;
     if (this->isCompact) {
@@ -4885,7 +4869,43 @@ Context::freeDebugCallback(VkInstance instance) {
   }
 }
 
+void Context::enumerateInstanceValidationLayers()
+{
+  uint32_t layerCount = 0;
+  VkResult result = vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate instance layers");
+
+  if (layerCount > 0) {
+    supportedInstanceLayers.resize(layerCount);
+    result = vkEnumerateInstanceLayerProperties(&layerCount, supportedInstanceLayers.data());
+    if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate instance layers");
+
+    for (VkLayerProperties layer : supportedInstanceLayers) {
+      supportedInstanceLayerNames.push_back(layer.layerName);
+    }
+  }
+}
+
+void Context::enumerateInstanceExtensions()
+{
+  uint32_t instExtCount = 0;
+  VkResult result = vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to enumerate extensions");
+
+  if (instExtCount > 0) {
+    supportedInstanceExtensions.resize(instExtCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &supportedInstanceExtensions.front()) == VK_SUCCESS) {
+      for (VkExtensionProperties extension : supportedInstanceExtensions) {
+        supportedInstanceExtensionNames.push_back(extension.extensionName);
+      }
+    }
+  }
+}
+
 Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+  enumerateInstanceValidationLayers();
+  enumerateInstanceExtensions();
+
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName = "GPRT";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -4901,24 +4921,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
 
-  // Get extensions supported by the instance and store for later use
-  uint32_t instExtCount = 0;
-  vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, nullptr);
-  if (instExtCount > 0) {
-    std::vector<VkExtensionProperties> extensions(instExtCount);
-    if (vkEnumerateInstanceExtensionProperties(nullptr, &instExtCount, &extensions.front()) == VK_SUCCESS) {
-      for (VkExtensionProperties extension : extensions) {
-        supportedInstanceExtensions.push_back(extension.extensionName);
-      }
-    }
-  }
-
   // Enabled requested instance extensions
   if (enabledInstanceExtensions.size() > 0) {
     for (const char *enabledExtension : enabledInstanceExtensions) {
       // Output message if requested extension is not available
-      if (std::find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(), enabledExtension) ==
-          supportedInstanceExtensions.end()) {
+      if (std::find(supportedInstanceExtensionNames.begin(), supportedInstanceExtensionNames.end(), enabledExtension) ==
+          supportedInstanceExtensionNames.end()) {
         std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
       }
       instanceExtensions.push_back(enabledExtension);
@@ -4980,13 +4988,19 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceCreateInfo.ppEnabledLayerNames = &layerNames[0];
 
   if (requestedFeatures.debugPrintf) {
-    instanceCreateInfo.enabledLayerCount = 1;
+    // Todo, look and see if any profiling layers might be active. If so, we should disable printf.
+    if (std::find(supportedInstanceLayerNames.begin(), supportedInstanceLayerNames.end(), layerNames[0]) ==
+        supportedInstanceLayerNames.end()) {
+      LOG_WARNING("VK_LAYER_KHRONOS_validation is not present. Device-side printf will be disabled.");
+    }
+    else {
+      instanceCreateInfo.enabledLayerCount = 1;
+    }
   } else {
     instanceCreateInfo.enabledLayerCount = 0;
   }
 
   VkResult err;
-
   err = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
   if (err) {
     LOG_ERROR("failed to create instance! : \n" + errorString(err));
@@ -7503,12 +7517,11 @@ gprtSamplerDestroy(GPRTSampler _sampler) {
   sampler = nullptr;
 }
 
-GPRT_API gprt::Sampler
-gprtSamplerGetHandle(GPRTSampler _sampler) {
+GPRT_API uint32_t
+gprtSamplerGetIndex(GPRTSampler _sampler, int deviceID) {
   LOG_API_CALL();
   Sampler *sampler = (Sampler *) _sampler;
-  gprt::Sampler samplerHandle = {sampler->address};
-  return samplerHandle;
+  return sampler->address;
 }
 
 GPRT_API GPRTTexture
@@ -7617,13 +7630,11 @@ gprtTextureGetPointer(GPRTTexture _texture, int deviceID) {
   return texture->mapped;
 }
 
-GPRT_API gprt::Texture
-gprtTextureGetHandle(GPRTTexture _texture, int deviceID) {
+GPRT_API uint32_t
+gprtTextureGetIndex(GPRTTexture _texture, int deviceID) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
-  gprt::Texture texHandle;
-  texHandle = {texture->address};
-  return texHandle;
+  return texture->address;
 }
 
 GPRT_API void
@@ -8376,14 +8387,6 @@ gprtAccelGetSize(GPRTAccel _accel, int deviceID) {
   return accel->getSize();
 }
 
-GPRT_API gprt::Accel
-gprtAccelGetHandle(GPRTAccel _accel, int deviceID) {
-  Accel *accel = (Accel *) _accel;
-  if (accel->isBottomLevel)
-    LOG_ERROR("Handles are only available for instance acceleration structures");
-  return accel->getAccelHandle();
-}
-
 GPRT_API const void*
 gprtAccelGetDeviceAddress(GPRTAccel _accel, int deviceID) {
   Accel *accel = (Accel *) _accel;
@@ -8398,10 +8401,9 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   if (!accel->isBottomLevel)
     LOG_ERROR("Instances are only available for bottom level acceleration structures");
   gprt::Instance newInstance = gprt::Instance();
-  gprt::Accel handle = accel->getAccelHandle();
-  newInstance.__gprtAccelAddress = handle.address;
-  newInstance.instanceCustomIndex = handle.index;
-  newInstance.__gprtSBTOffset = handle.index;
+  newInstance.__gprtAccelAddress = accel->getDeviceAddress();
+  newInstance.instanceCustomIndex = accel->address; // our own virtual address handle.index;
+  newInstance.__gprtSBTOffset = accel->address;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =

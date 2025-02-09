@@ -48,9 +48,9 @@ void raygen(uniform RayGenData record) {
   uint frameID = pc.frameID;
 
   bool debug = all(pixelID == iResolution / 2);
-  
+
   // 8 by 16 grid of 256x256 blue noise textures
-  Texture2D stbn = gprt::getTexture2DHandle(record.stbn);
+  DescriptorHandle<Texture2D> stbn = record.stbn;
 
   // camera movement
   float an = pc.time * .1;

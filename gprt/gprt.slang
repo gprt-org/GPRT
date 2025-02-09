@@ -36,6 +36,27 @@
 [[vk::binding(0, 0)]] Texture1D texture1Ds[];
 [[vk::binding(0, 0)]] Texture2D texture2Ds[];
 [[vk::binding(0, 0)]] Texture3D texture3Ds[];
+[[vk::binding(0, 0)]] globallycoherent RWByteAddressBuffer buffers[];
+
+[[vk::binding(0, 0)]]
+__DynamicResource<__DynamicResourceKind.Sampler> samplerHandles[];
+
+[[vk::binding(0, 0)]]
+__DynamicResource<__DynamicResourceKind.General> resourceHandles[];
+
+export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqueDescriptor
+{
+  __target_switch
+    {
+  case spirv:
+    if (T.kind == DescriptorKind.Sampler)
+      return samplerHandles[((uint2) handle).x].asOpaqueDescriptor<T>();
+    else
+      return resourceHandles[((uint2) handle).x].asOpaqueDescriptor<T>();
+  default:
+    return defaultGetDescriptorFromHandle(handle);
+  }
+}
 
 // Perhaps reserve binding 1 for SBT values?
 
@@ -46,7 +67,6 @@
 // the entire GPU such that other groups can see writes. Without this specifier,
 // a memory barrier or sync will only flush a UAV within the current group.
 // [[vk::binding(0, 5)]]
-// globallycoherent RWByteAddressBuffer buffers[];
 
 namespace gprt {
 inline uint32_t
@@ -124,26 +144,6 @@ getNullAccelHandle() {
 // getBufferHandle(Buffer buffer) {
 //   return buffers[buffer.index];
 // }
-
-Texture1D
-getTexture1DHandle(gprt::Texture texture) {
-  return texture1Ds[texture.index];
-}
-
-Texture2D
-getTexture2DHandle(gprt::Texture texture) {
-  return texture2Ds[texture.index];
-}
-
-Texture3D
-getTexture3DHandle(gprt::Texture texture) {
-  return texture3Ds[texture.index];
-}
-
-SamplerState
-getSamplerHandle(gprt::Sampler sampler) {
-  return samplers[sampler.index];
-}
 
 SamplerState
 getDefaultSampler() {

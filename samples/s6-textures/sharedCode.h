@@ -33,9 +33,9 @@ struct TrianglesGeomData {
   /*! array/buffer of vertex positions */
   float2 *texcoord;   // vec2f *
   /*! base color texture we use for the entire mesh */
-  gprt::Texture texture;
+  DescriptorHandle<Texture2D> texture;
   /*! an array of texture samplers to use */
-  gprt::Sampler samplers[12];
+  DescriptorHandle<SamplerState> samplers[12];
 };
 
 struct RayGenData {
