@@ -139,6 +139,14 @@ struct Texture1D {uint placeHolder;};
 struct Texture2D {uint placeHolder;};
 struct Texture3D {uint placeHolder;};
 struct SamplerState {uint placeHolder;};
+struct RWByteAddressBuffer {uint placeHolder;};
+
+template<typename T>
+struct RWStructuredBuffer
+{
+  uint placeHolder;
+};
+
 template<typename T>
 struct DescriptorHandle
 {
@@ -1603,7 +1611,8 @@ gprtHostBufferCreate(GPRTContext context, size_t count = 1, const T *init = null
  * @return GPRTBuffer Returns a handle to the created buffer that resides in device memory.
  */
 GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, size_t count = 1,
-                                           const void *init = nullptr, size_t alignment = 16);
+                                           const void *init = nullptr, size_t alignment = 16, 
+                                           bool allocateResourceHandle = false);
 
 /**
  * @brief Creates a typed buffer using device memory.
@@ -1625,8 +1634,8 @@ GPRT_API GPRTBuffer gprtDeviceBufferCreate(GPRTContext context, size_t size, siz
  */
 template <typename T>
 GPRTBufferOf<T>
-gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16) {
-  return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init, alignment);
+gprtDeviceBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16, bool allocateResourceHandle = false) {
+  return (GPRTBufferOf<T>) gprtDeviceBufferCreate(context, sizeof(T), count, init, alignment, allocateResourceHandle);
 }
 
 /**
@@ -1686,6 +1695,25 @@ template <typename T>
 GPRTBufferOf<T>
 gprtSharedBufferCreate(GPRTContext context, size_t count = 1, const T *init = nullptr, size_t alignment = 16) {
   return (GPRTBufferOf<T>) gprtSharedBufferCreate(context, sizeof(T), count, init, alignment);
+}
+
+/**
+ * @brief Returns a descriptor handle referencing the given buffer, mainly as a workaround for 
+ * slang pointer limitations regarding globallycoherent.
+ * 
+ * @return DescriptorHandle<RWStructuredBuffer<uint32_t>> 
+ */
+DescriptorHandle<RWStructuredBuffer<uint32_t>> gprtDeviceBufferGetHandle(GPRTBuffer buffer);
+
+/**
+ * @brief Returns a descriptor handle referencing the given buffer, mainly as a workaround for 
+ * slang pointer limitations regarding globallycoherent.
+ * 
+ * @return DescriptorHandle<RWStructuredBuffer<uint32_t>> 
+ */
+template <typename T>
+DescriptorHandle<RWStructuredBuffer<uint32_t>> gprtDeviceBufferGetHandle(GPRTBufferOf<T> buffer) {
+  return gprtDeviceBufferGetHandle((GPRTBuffer) buffer);
 }
 
 /**

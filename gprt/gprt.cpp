@@ -309,7 +309,7 @@ struct Miss;
 struct Callable;
 struct Compute;
 struct Module;
-struct ImageResource;
+struct GPRTDescriptorResource;
 struct Buffer;
 struct GeomType;
 struct TriangleGeom;
@@ -502,7 +502,7 @@ struct Context {
   std::vector<Callable *> callables;
   std::vector<GeomType *> geomTypes;
   std::vector<Buffer *> buffers;
-  std::vector<ImageResource *> imageResources;
+  std::vector<GPRTDescriptorResource *> descriptorResources;
   std::vector<Geom *> geoms;
   std::vector<Accel *> accels;
 
@@ -700,6 +700,99 @@ struct Module {
   ~Module() {}
 };
 
+
+
+typedef enum {
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_UNKNOWN = 0x0,
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_SAMPLER = 0x1,
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_1D = 0x2,
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_2D = 0x3,
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_3D = 0x4,
+  GPRT_DESCRIPTOR_RESOURCE_TYPE_BUFFER = 0x5
+} DescriptorResourceType;
+
+struct GPRTDescriptorResource {
+  Context *context;
+
+  // Unlike buffers, image resources in Vulkan don't (currently) support device addresses.
+  // Some vendors, like NVIDIA, use a separate hardware table for images and samplers.
+  // This table stores headers for where memory of textures reside (eg, multiple mip levels),
+  // alongside other information for the texture units on how to interpret that texture data.
+  //
+  // Still, we wish to access image resources in a "bindless" way. To do so, we will
+  // create our own "virtual" address space.
+  uint32_t address = -1;
+
+  ~GPRTDescriptorResource() {};
+
+  GPRTDescriptorResource() {};
+
+  GPRTDescriptorResource(Context *context) {
+    this->context = context;
+
+    // Hunt for an existing free address for this resource
+    for (uint32_t i = 0; i < context->descriptorResources.size(); ++i) {
+      if (context->descriptorResources[i] == nullptr) {
+        context->descriptorResources[i] = this;
+        address = i;
+        break;
+      }
+    }
+    // If we cant find a free spot in the current list, allocate a new one
+    if (address == -1) {
+      context->descriptorResources.push_back(this);
+      address = (uint32_t) context->descriptorResources.size() - 1;
+    }
+  };
+
+  virtual void destroy() {
+    if (address != -1) {
+      // Free slot for use by subsequently made resource
+      context->descriptorResources[address] = nullptr;
+      address = -1;
+    }
+  }
+
+  virtual DescriptorResourceType getType() { return GPRT_DESCRIPTOR_RESOURCE_TYPE_UNKNOWN; }
+};
+
+struct BufferResource : public GPRTDescriptorResource {
+  ~BufferResource() {};
+
+  BufferResource() {};
+
+  BufferResource(Context *context)
+      : GPRTDescriptorResource(context) {
+  }
+
+  void updateDescriptor(VkBuffer buffer)
+  {
+    // Write the buffer into the descriptor array
+    VkDescriptorBufferInfo bufferDescriptor = {};
+    bufferDescriptor.buffer = buffer;
+    bufferDescriptor.offset = 0;
+    bufferDescriptor.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet writeDescriptorSet = {};
+    writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.dstArrayElement = address;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.pBufferInfo = &bufferDescriptor;
+    writeDescriptorSet.dstSet = context->descriptorSet;
+    writeDescriptorSet.pImageInfo = 0;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
+  }
+
+  void destroy() override {
+    GPRTDescriptorResource::destroy();
+  }
+
+  virtual DescriptorResourceType getType() { return GPRT_DESCRIPTOR_RESOURCE_TYPE_BUFFER; }
+};
+
+
 struct Buffer {
   Context* context;
 
@@ -726,6 +819,8 @@ struct Buffer {
   VkDeviceSize size = 0;
   VkDeviceSize alignment = 16;
   void *mapped = nullptr;
+
+  BufferResource resourceHandle;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
     if (mapped)
@@ -858,6 +953,10 @@ struct Buffer {
   void destroy() {
     // Free sampler slot for use by subsequently made buffers
     context->buffers[virtualAddress] = nullptr;
+
+    if (resourceHandle.address != -1) {
+      resourceHandle.destroy();
+    }
 
     unmap();
 
@@ -1108,6 +1207,11 @@ struct Buffer {
         map();
       }
     }
+
+    // If a mutable descriptor handle was requested (eg for globally coherent atomics), create one now.
+    if (resourceHandle.address != -1) {
+      resourceHandle.updateDescriptor(buffer);
+    }
   }
 
   size_t getSize() { return (size_t) size; }
@@ -1118,7 +1222,7 @@ struct Buffer {
   ~Buffer() {};
 
   Buffer(Context* context, VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
-         void *data = nullptr) {
+         void *data = nullptr, bool allocateDescriptor = false) {
     this->context = context;
 
     // Hunt for an existing free virtual address for this buffer
@@ -1209,6 +1313,12 @@ struct Buffer {
     // means we can get this buffer's address with vkGetBufferDeviceAddress
     if ((usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0)
       deviceAddress = getDeviceAddress();
+  
+    // If a mutable descriptor handle was requested (eg for globally coherent atomics), create one now.
+    if (allocateDescriptor) {
+      resourceHandle = BufferResource(context);
+      resourceHandle.updateDescriptor(buffer);
+    }
   }
 };
 
@@ -1235,55 +1345,7 @@ gprtFormatGetSize(GPRTFormat format) {
   }
 }
 
-typedef enum {
-  GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN = 0x0,
-  GPRT_IMAGE_RESOURCE_TYPE_SAMPLER = 0x1,
-  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_1D = 0x2,
-  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_2D = 0x3,
-  GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_3D = 0x4
-} ImageResourceType;
-
-struct ImageResource {
-  Context *context;
-
-  // Unlike buffers, image resources in Vulkan don't (currently) support device addresses.
-  // Some vendors, like NVIDIA, use a separate hardware table for images and samplers.
-  // This table stores headers for where memory of textures reside (eg, multiple mip levels),
-  // alongside other information for the texture units on how to interpret that texture data.
-  //
-  // Still, we wish to access image resources in a "bindless" way. To do so, we will
-  // create our own "virtual" address space.
-  uint32_t address = -1;
-
-  ~ImageResource() {};
-
-  ImageResource(Context *context) {
-    this->context = context;
-
-    // Hunt for an existing free address for this image resource
-    for (uint32_t i = 0; i < context->imageResources.size(); ++i) {
-      if (context->imageResources[i] == nullptr) {
-        context->imageResources[i] = this;
-        address = i;
-        break;
-      }
-    }
-    // If we cant find a free spot in the current list, allocate a new one
-    if (address == -1) {
-      context->imageResources.push_back(this);
-      address = (uint32_t) context->imageResources.size() - 1;
-    }
-  };
-
-  virtual void destroy() {
-    // Free slot for use by subsequently made image resource
-    context->imageResources[address] = nullptr;
-  }
-
-  virtual ImageResourceType getType() { return GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN; }
-};
-
-struct Texture : public ImageResource {
+struct Texture : public GPRTDescriptorResource {
   VkPhysicalDeviceMemoryProperties memoryProperties;
 
   /** @brief Usage flags to be filled by external source at image creation */
@@ -1790,7 +1852,7 @@ struct Texture : public ImageResource {
   Texture(Context *context, VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type,
           VkFormat _format, uint32_t _width, uint32_t _height, uint32_t _depth, bool allocateMipmap,
           const void *data = nullptr)
-      : ImageResource(context) {
+      : GPRTDescriptorResource(context) {
     this->context = context;
     memoryPropertyFlags = _memoryPropertyFlags;
     usageFlags = _usageFlags;
@@ -2041,7 +2103,7 @@ struct Texture : public ImageResource {
 
   /*! Calls vkDestroy on the image, and frees underlying memory */
   void destroy() override {
-    ImageResource::destroy();
+    GPRTDescriptorResource::destroy();
 
     if (imageView) {
       vkDestroyImageView(context->logicalDevice, imageView, nullptr);
@@ -2065,25 +2127,25 @@ struct Texture : public ImageResource {
     }
   }
 
-  virtual ImageResourceType getType() {
+  virtual DescriptorResourceType getType() {
     if (imageType == VK_IMAGE_TYPE_1D)
-      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_1D;
+      return GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_1D;
     if (imageType == VK_IMAGE_TYPE_2D)
-      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_2D;
+      return GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_2D;
     if (imageType == VK_IMAGE_TYPE_3D)
-      return GPRT_IMAGE_RESOURCE_TYPE_TEXTURE_3D;
-    return GPRT_IMAGE_RESOURCE_TYPE_UNKNOWN;
+      return GPRT_DESCRIPTOR_RESOURCE_TYPE_TEXTURE_3D;
+    return GPRT_DESCRIPTOR_RESOURCE_TYPE_UNKNOWN;
   }
 };
 
-struct Sampler : public ImageResource {
+struct Sampler : public GPRTDescriptorResource {
   VkSampler sampler;
 
   ~Sampler() {};
 
   Sampler(Context *context, VkFilter magFilter, VkFilter minFilter, VkSamplerMipmapMode mipFilter, uint32_t anisotropy,
           VkSamplerAddressMode addressMode, VkBorderColor borderColor)
-      : ImageResource(context) {
+      : GPRTDescriptorResource(context) {
 
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -2125,14 +2187,14 @@ struct Sampler : public ImageResource {
   }
 
   void destroy() override {
-    ImageResource::destroy();
+    GPRTDescriptorResource::destroy();
 
     if (sampler) {
       vkDestroySampler(context->logicalDevice, sampler, nullptr);
     }
   }
 
-  virtual ImageResourceType getType() { return GPRT_IMAGE_RESOURCE_TYPE_SAMPLER; }
+  virtual DescriptorResourceType getType() { return GPRT_DESCRIPTOR_RESOURCE_TYPE_SAMPLER; }
 };
 
 struct Compute {
@@ -4816,12 +4878,12 @@ Context::destroy() {
   }
   buffers.resize(0);
 
-  for (uint32_t i = 0; i < imageResources.size(); ++i) {
-    if (imageResources[i] != nullptr) {
-      imageResources[i]->destroy();
+  for (uint32_t i = 0; i < descriptorResources.size(); ++i) {
+    if (descriptorResources[i] != nullptr) {
+      descriptorResources[i]->destroy();
     }
   }
-  imageResources.resize(0);
+  descriptorResources.resize(0);
 
   for (uint32_t i = 0; i < computes.size(); ++i) {
     if (computes[i] != nullptr) {
@@ -7703,7 +7765,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
 }
 
 GPRT_API GPRTBuffer
-gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment) {
+gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const void *init, size_t alignment, bool allocateResourceHandle) {
   LOG_API_CALL();
   const VkBufferUsageFlags bufferUsageFlags =
       // means we can get this buffer's address with vkGetBufferDeviceAddress
@@ -7723,7 +7785,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment, nullptr, allocateResourceHandle);
 
   if (init) {
     buffer->map();
@@ -8232,12 +8294,18 @@ gprtBufferSortPayload(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values
   bufferSort(_context, _keys, _values, _scratch);
 }
 
-// GPRT_API gprt::Buffer
-// gprtBufferGetHandle(GPRTBuffer _buffer, int deviceID) {
-//   LOG_API_CALL();
-//   Buffer *buffer = (Buffer *) _buffer;
-//   return gprt::Buffer{buffer->virtualAddress, 0};
-// }
+DescriptorHandle<RWStructuredBuffer<uint32_t>> 
+gprtDeviceBufferGetHandle(GPRTBuffer _buffer) {
+  LOG_API_CALL();
+  Buffer *buffer = (Buffer *) _buffer;
+  if (buffer->resourceHandle.address == -1) {
+    LOG_ERROR("In gprtDeviceBufferGetHandle, resource handle not requested during buffer creation, or buffer was destroyed.");
+  }
+  DescriptorHandle<RWStructuredBuffer<uint32_t>> handle;
+  handle.index.x = buffer->resourceHandle.address;
+  handle.index.y = 0; 
+  return handle;
+}
 
 GPRT_API uint64_t
 gprtBufferGetDeviceAddress(GPRTBuffer _buffer, int deviceID) {

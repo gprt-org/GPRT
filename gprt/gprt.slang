@@ -36,10 +36,13 @@
 [[vk::binding(0, 0)]] Texture1D texture1Ds[];
 [[vk::binding(0, 0)]] Texture2D texture2Ds[];
 [[vk::binding(0, 0)]] Texture3D texture3Ds[];
-[[vk::binding(0, 0)]] globallycoherent RWByteAddressBuffer buffers[];
 
 [[vk::binding(0, 0)]]
 __DynamicResource<__DynamicResourceKind.Sampler> samplerHandles[];
+
+[[vk::binding(0, 0)]]
+globallycoherent
+__DynamicResource<__DynamicResourceKind.General> resourceBuffers[];
 
 [[vk::binding(0, 0)]]
 __DynamicResource<__DynamicResourceKind.General> resourceHandles[];
@@ -51,6 +54,8 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
   case spirv:
     if (T.kind == DescriptorKind.Sampler)
       return samplerHandles[((uint2) handle).x].asOpaqueDescriptor<T>();
+    else if (T.kind == DescriptorKind.Buffer)
+      return resourceBuffers[((uint2) handle).x].asOpaqueDescriptor<T>();
     else
       return resourceHandles[((uint2) handle).x].asOpaqueDescriptor<T>();
   default:
