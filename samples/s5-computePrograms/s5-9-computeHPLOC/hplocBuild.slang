@@ -599,9 +599,277 @@ void HPLOC_Build(uint3 DispatchThreadID: SV_DispatchThreadID, uint3 GroupThreadI
   }
 }
 
-// Implements the HPLOC BVH2->BVHN conversion algorithm.
+// Implements the HPLOC BVH2->BVH8 conversion algorithm.
 [shader("compute")]
 [numthreads(1024, 1, 1)]
 void HPLOC_ToBVHN(uint3 DispatchThreadID: SV_DispatchThreadID, uniform HPLOCParams params)
 {
+  // RWByteAddressBuffer indexPairs = buffers[params.indexPairs.index];
+  // RWByteAddressBuffer bvh2 = buffers[params.BVH2.index];
+  // RWByteAddressBuffer bvh8 = buffers[params.BVH8.index];
+
+  // int failsafe = 1000000;
+  // uint32_t bvh2ClusterID = INVALID_ID;
+  // uint32_t bvh8ClusterID = INVALID_ID;
+
+  // int threadID = DispatchThreadID.x;
+  // if (threadID >= params.N) return;
+
+  // // mark root node's parent as -1
+  // if (threadID == 0) {
+  //   store<int>(params.BVH8P, 0, INVALID_ID);
+  // }
+
+  // while (true) {
+  //   int signal = load<int>(params.AC, 5);
+  //   if (signal != 0) return;   // break out early if we're signaled to stop
+
+  //   uint64_t val = indexPairs.LoadAligned<uint64_t>(threadID * sizeof(uint64_t));
+  //   bvh2ClusterID = uint32_t(val >> 32ull);
+  //   bvh8ClusterID = uint32_t(val);
+
+  //   // temp failsafe to prevent infinite loops
+  //   if (failsafe-- <= 0) {
+  //     printf("Thread %d timed out!\n", threadID);
+  //     store<int>(params.AC, 5, ERROR_TIMEOUT);
+  //     break;
+  //   }
+
+  //   // Only continue if we were assigned a cluster
+  //   if (bvh2ClusterID == INVALID_ID) continue;
+
+  //   // Once we have a leaf, store it and return.
+  //   // The kernel terminates once every worker is assigned a leaf.
+  //   if (isLeaf(bvh2ClusterID)) {
+  //     // (todo, store up to 3 triangles per leaf)
+  //     float3 v[3];
+  //     LoadTriangle(params, bvh2ClusterID, v);
+  //     BVH8Triangle triblock;
+  //     triblock.v0 = v[0]; triblock.v1 = v[1]; triblock.v2 = v[2];
+  //     triblock.userTriangleID = bvh2ClusterID & 0x00FFFFFF;
+  //     triblock.primBits = bvh2ClusterID >> 24;
+  //     store<BVH8Triangle>(params.BVH8L, bvh8ClusterID, triblock);
+  //     break;
+  //   }
+
+  //   // Else, we were assigned an inner BVH2 node to collapse
+  //   // From here, our goal is to collect up to 8 children
+  //   uint childClusterIndices[8];
+  //   uint numChildren = openBVH2Node<8>(params, bvh2ClusterID, childClusterIndices);
+  //   Stack<8> nodeStack = Stack<8>();
+  //   Stack<8> leafStack = Stack<8>();
+  //   for (int i = 0; i < numChildren; ++i) {
+  //     uint childClusterID = childClusterIndices[i];
+  //     if (isNode(childClusterID)) nodeStack.push(childClusterID);
+  //     if (isLeaf(childClusterID)) leafStack.push(childClusterID);
+  //   }
+
+  //   // test to make sure all items in the queue are valid
+  //   {
+  //     // Verify size is okay
+  //     if (nodeStack.size() > 8) {
+  //       printf("Error, children.size() > 8\n");
+  //     }
+
+  //     for (int i = 0; i < nodeStack.size(); ++i) {
+  //       uint node = nodeStack.data[i];
+  //       if ((node & 0x00FFFFFF) >= params.BVH2.size) {
+  //         printf("Error, node %d is out of bounds\n", node & 0x00FFFFFF);
+  //       }
+
+  //       // Verify no duplicate entries
+  //       for (int j = 0; j < nodeStack.size(); ++j) {
+  //         if (j == i) continue;
+  //         if (nodeStack.data[j] == node) {
+  //           printf("Error, node %d is duplicated!\n", node & 0x00FFFFFF);
+  //         }
+  //       }
+  //     }
+
+  //     for (int i = 0; i < leafStack.size(); ++i) {
+  //       uint leaf = leafStack.data[i];
+  //       if ((leaf & 0x00FFFFFF) >= params.N) {
+  //         printf("Error, leaf %d is out of bounds\n", leaf & 0x00FFFFFF);
+  //       }
+
+  //       // Verify no duplicate entries
+  //       for (int j = 0; j < leafStack.size(); ++j) {
+  //         if (j == i) continue;
+  //         if (leafStack.data[j] == leaf) {
+  //           printf("Error, leaf %d is duplicated!\n", leaf & 0x00FFFFFF);
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   // Allocate slots for our newly created inner BVH8 nodes and leaf clusters
+  //   uint childNodeBaseIndex = atomicAdd(params.AC, 3, nodeStack.size());
+  //   uint primitiveBaseIndex = atomicAdd(params.AC, 4, leafStack.size());
+
+  //   // Shouldn't happen, but useful for debugging purposes.
+  //   if (childNodeBaseIndex + nodeStack.size() > params.BVH8.size) {
+  //     store<int>(params.AC, 5, ERROR_OUT_OF_BOUNDS);
+  //     printf("BVH2->BVH8 not enough nodes. childNodeBaseIndex (%d) + children.numNodes (%d) > BVH8.size (%d)\n",
+  //            childNodeBaseIndex, nodeStack.size(), params.BVH8.size);
+  //     return;
+  //   }
+
+  //   if (primitiveBaseIndex + leafStack.size() > params.N) {
+  //     store<int>(params.AC, 5, ERROR_OUT_OF_BOUNDS);
+  //     printf("BVH2->BVH8 not enough leaves. primitiveBaseIndex (%d) + children.numLeaves (%d) > params.N (%d)\n",
+  //            primitiveBaseIndex, leafStack.size(), params.N);
+  //     return;
+  //   }
+
+  //   // Temporarily storing parent information for debugging traversal
+  //   for (int i = 0; i < nodeStack.size(); ++i) {
+  //     store<uint>(params.BVH8P, childNodeBaseIndex + i, bvh8ClusterID);
+  //   }
+
+  //   for (int i = 0; i < leafStack.size(); ++i) {
+  //     store<uint>(params.BVH8LP, primitiveBaseIndex + i, bvh8ClusterID);
+  //   }
+
+  //   // At this point, we're ready to generate the actual BVH8 node.
+  //   // First, determine the bounds of the children, and a common bound containing them all.
+  //   float2x3 parentAABB = float2x3(float3(FLT_MAX), -float3(FLT_MAX));
+  //   float2x3 childBounds[8];
+  //   for (int i = 0; i < 8; ++i) {
+  //     int j = i - leafStack.size();
+  //     if (i < leafStack.size()) {
+  //       uint leafID = leafStack.data[i];
+  //       uint geomID = getClusterMeta(leafID);
+  //       uint primID = getClusterIndex(leafID);
+  //       bool success = LoadTriangleBounds(params, primID, geomID, childBounds[i]);
+  //       if (!success) printf("ERROR, Thread %d read triangle out of bounds! geomID %d primID %d\n", threadID, geomID, primID);
+  //     }
+  //           else if (j < nodeStack.size()) {
+  //       uint nodeID = nodeStack.data[j];
+  //       uint nodeIndex = getClusterIndex(nodeID);
+  //       bool success = LoadBvh2Bounds(params, nodeIndex, childBounds[i]);
+  //       if (!success) printf("ERROR, Thread %d read BVH2 node out of bounds! nodeIndex %d\n", threadID, nodeIndex);
+  //     }
+  //           else continue;   // empty slot
+  //     parentAABB[0] = min(parentAABB[0], childBounds[i][0]);
+  //     parentAABB[1] = max(parentAABB[1], childBounds[i][1]);
+  //   }
+
+  //   // Determine node scale, rounding up to next power of two.
+  //   int magic = 0x0000FFFF - (7 << 23);
+  //   uint xscale = uint(clamp((asint(__fsub_ru(parentAABB[1].x, parentAABB[0].x)) + magic) >> 23, 1, 248));
+  //   uint yscale = uint(clamp((asint(__fsub_ru(parentAABB[1].y, parentAABB[0].y)) + magic) >> 23, 1, 248));
+  //   uint zscale = uint(clamp((asint(__fsub_ru(parentAABB[1].z, parentAABB[0].z)) + magic) >> 23, 1, 248));
+
+  //   // Pack quantization position and exponent for each axis into the node header.
+  //   uint4 byteShift = uint4(0, 8, 16, 24);
+
+  //   BVH8Node node;
+  //   float3 parentLo = parentAABB[0];
+
+  //   // 1.0f / exp2(scale)
+  //   float xmul = asfloat((254 - xscale) << 23);
+  //   float ymul = asfloat((254 - yscale) << 23);
+  //   float zmul = asfloat((254 - zscale) << 23);
+
+  //   node.lox = node.loy = node.loz = 0;
+  //   node.hix = node.hiy = node.hiz = 0;
+
+  //   // smask indicates which child slots are in use.
+  //   uint8_t smask = 0;
+  //   uint8_t meta[8] = uint8_t[8](0, 0, 0, 0, 0, 0, 0, 0);
+
+  //   for (int i = 0; i < 8; ++i) {
+  //     int j = i - leafStack.size();
+  //     float3 lo, hi;
+  //     if (i < leafStack.size()) {
+  //       meta[i] = uint8_t(0b1000 | i);   // leaf node
+  //       // Mark the slot as in use
+  //       smask |= uint8_t(1u << i);
+  //       lo = childBounds[i][0];
+  //       hi = childBounds[i][1];
+  //     }
+  //           else if (j < nodeStack.size()) {
+  //       meta[i] = uint8_t(0b0000 | j);   // inner node
+  //       // Mark the slot as in use
+  //       smask |= uint8_t(1u << i);
+  //       lo = childBounds[i][0];
+  //       hi = childBounds[i][1];
+  //     }
+  //           else {
+  //       // Empty slot
+  //       lo = +FLT_MAX;
+  //       hi = -FLT_MAX;
+  //     }
+
+  //     // Quantize the child bounds
+  //     int imod4 = i % 4, idiv4 = i / 4;
+  //     node.lox[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //     node.loy[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //     node.loz[idiv4] |= (uint(clamp(floor(__fmul_rd(__fsub_rd(lo.z, parentLo.z), zmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //     node.hix[idiv4] |= (uint(clamp(ceil(__fmul_ru(__fsub_ru(hi.x, parentLo.x), xmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //     node.hiy[idiv4] |= (uint(clamp(ceil(__fmul_ru(__fsub_ru(hi.y, parentLo.y), ymul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //     node.hiz[idiv4] |= (uint(clamp(ceil(__fmul_ru(__fsub_ru(hi.z, parentLo.z), zmul)), 0b00000000, 0b11111111)) << byteShift[imod4]);
+  //   }
+
+  //   // Setup BVH8 node header
+  //   uint4 sxyzshft = uint4(xscale, yscale, zscale, smask) << byteShift;
+  //   uint32_t packedScaleSMask = sxyzshft.x | sxyzshft.y | sxyzshft.z | sxyzshft.w;
+  //   node.posScaleSMask[0] = asuint(parentLo.x);
+  //   node.posScaleSMask[1] = asuint(parentLo.y);
+  //   node.posScaleSMask[2] = asuint(parentLo.z);
+  //   node.posScaleSMask[3] = packedScaleSMask;
+
+  //   uint4 meta0123shft = uint4(meta[0], meta[1], meta[2], meta[3]) << byteShift;
+  //   uint4 meta4567shft = uint4(meta[4], meta[5], meta[6], meta[7]) << byteShift;
+  //   uint32_t meta0123 = meta0123shft.x | meta0123shft.y | meta0123shft.z | meta0123shft.w;
+  //   uint32_t meta4567 = meta4567shft.x | meta4567shft.y | meta4567shft.z | meta4567shft.w;
+  //   node.idxAndMeta[0] = childNodeBaseIndex;
+  //   node.idxAndMeta[1] = primitiveBaseIndex;
+  //   node.idxAndMeta[2] = meta0123;
+  //   node.idxAndMeta[3] = meta4567;
+
+  //   // Store the BVH8 node
+  //   float4 n[8] = reinterpret<float4[8]>(node);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 0), n[0]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 1), n[1]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 2), n[2]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 3), n[3]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 4), n[4]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 5), n[5]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 6), n[6]);
+  //   bvh8.StoreAligned<float4>(sizeof(float4) * (bvh8ClusterID * 8 + 7), n[7]);
+
+  //   // store<BVH8Node>(params.BVH8, bvh8ClusterID, node);
+
+  //   // ------------------------------------------------------------------------------------------------------------------------
+
+  //   // Allocate a worker thread for every child we collected
+  //   //  (excluding the current thread which we will reuse)
+  //   uint baseWorkerOffset = atomicAdd(params.AC, 2, numChildren - 1);
+
+  //   // First, assign the leaves to contiguous worker threads. These threads will generate the leaves, then terminate.
+  //   // Then, contiguously assign the inner nodes to subsequent worker threads.
+  //   for (int i = 0; i < 8; ++i) {
+  //     int j = i - leafStack.size();
+  //     uint workerAddr = (i == 0) ? threadID : baseWorkerOffset + i;
+  //     uint64_t newPair;
+
+  //     // leaf node
+  //     if (i < leafStack.size()) {
+  //       // (todo... store up to 3 triangles...)
+  //       newPair = (uint64_t(leafStack.data[i]) << 32ull) | (uint64_t(primitiveBaseIndex + i));
+  //     }
+
+  //     // inner node
+  //     else if (j < nodeStack.size()) {
+  //       newPair = (uint64_t(nodeStack.data[j]) << 32ull) | (uint64_t(childNodeBaseIndex + j));
+  //     }
+
+  //     // empty slot
+  //     else continue;
+
+  //     // Store the new pair in the indexPairs buffer
+  //     indexPairs.Store<uint64_t>(workerAddr * sizeof(uint64_t), newPair);
+  //   }
+  // }
 }

@@ -57,14 +57,14 @@ float3 vertices[NUM_VERTICES] = {
 float radii[NUM_VERTICES] = {.015f, .025f, .035f, .045f, .055f, .065f, .055f, .045f, .035f, .025f, .015f};
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const int2 fbSize = {1024, 1024};
 
 // final image output
 const char *outFileName = "s5-9-computeHPLOC.png";
 
 // Initial camera parameters
-float3 lookFrom = {0.5f, 0.0f, 0.6f};
-float3 lookAt = {0.5f, 0.f, 0.f};
+float3 lookFrom = {8.f, 0.0f, 0.f};
+float3 lookAt = {0.0f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
@@ -74,14 +74,14 @@ int main(int ac, char **av) {
   // AABB will contain a single sphere.
 
   // create a context on the first device:
-  gprtRequestMaxAttributeSize(2 * sizeof(float4));
+  gprtRequestMaxAttributeSize(32);
   gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s5_9_deviceCode);
 
   GPRTModule hplocBuildModule = gprtModuleCreate(context, s5_9_hplocBuildDeviceCode);
 
-  Mesh<SphereMesh> testMesh = Mesh<SphereMesh>(context, SphereMesh{});
+  Mesh<TorusKnotMesh> testMesh = Mesh<TorusKnotMesh>(context, TorusKnotMesh{});
   float3* vertexBufferPtr = gprtBufferGetDevicePointer(testMesh.vertexBuffer);
   uint3* indexBufferPtr = gprtBufferGetDevicePointer(testMesh.indexBuffer);
 
@@ -104,26 +104,28 @@ int main(int ac, char **av) {
   GPRTBufferOf<uint64_t> spaceFillingCodes = gprtDeviceBufferCreate<uint64_t>(context, hploc.N, nullptr, 16);
   
   // For scheduling the BVH2->BVH-N planner.
-  GPRTBufferOf<uint64_t> indexPairs = gprtDeviceBufferCreate<uint64_t>(context, hploc.N, nullptr, 16);
+  GPRTBufferOf<uint64_t> indexPairs = gprtDeviceBufferCreate<uint64_t>(context, hploc.N, nullptr, 16, true);
   GPRTBufferOf<uint8_t> scratchBuffer = gprtDeviceBufferCreate<uint8_t>((GPRTContext)context); // to be resized as needed.
   
   // Initialize this one to -1s
-  GPRTBufferOf<float3> rootBounds = gprtDeviceBufferCreate<float3>(context, 2, nullptr, 16, /* create a descriptor handle for globally coherent atomics*/ true);
+  GPRTBufferOf<uint32_t> rootBounds = gprtDeviceBufferCreate<uint32_t>(context, 6, nullptr, 16, /* create a descriptor handle for globally coherent atomics*/ true);
   GPRTBufferOf<uint32_t> bvh2ParentIDs = gprtDeviceBufferCreate<uint32_t>(context, hploc.N, nullptr, 16, /* create a descriptor handle for globally coherent atomics*/ true);
   GPRTBufferOf<uint32_t> atomicCounters = gprtDeviceBufferCreate<uint32_t>(context, 5, nullptr, 16, /* create a descriptor handle for globally coherent atomics*/ true);
   GPRTBufferOf<uint32_t> primitivePrefix = gprtDeviceBufferCreate<uint32_t>(context, 1, triPrefixSum.data());
-  hploc.pID = gprtDeviceBufferGetHandle(bvh2ParentIDs);
+  GPRTBufferOf<BVH2Node> hplocBVH2Nodes = gprtDeviceBufferCreate<BVH2Node>(context, hploc.N-1, nullptr); // this might also need to be backed by globally coherent...
+  hploc.pID = gprtBufferGetHandle(bvh2ParentIDs);
   hploc.triangles = gprtBufferGetDevicePointer(triangleBuffers);
   hploc.vertices = gprtBufferGetDevicePointer(vertexBuffers);
-  hploc.AC = gprtDeviceBufferGetHandle(atomicCounters);
+  hploc.AC = gprtBufferGetHandle(atomicCounters);
   hploc.I = gprtBufferGetDevicePointer(clusterIndices);
   hploc.C = gprtBufferGetDevicePointer(spaceFillingCodes);
-  hploc.indexPairs = gprtBufferGetDevicePointer(indexPairs);
-  hploc.rootBounds = gprtDeviceBufferGetHandle(rootBounds);
+  hploc.indexPairs = gprtBufferGetHandle(indexPairs);
+  hploc.rootBounds = gprtBufferGetHandle(rootBounds);
+  hploc.BVH2 = gprtBufferGetDevicePointer(hplocBVH2Nodes);
   
   {
     gprtBufferMap(rootBounds);
-    float3* rootBoundsPtr = gprtBufferGetHostPointer(rootBounds);
+    float3* rootBoundsPtr = (float3*)gprtBufferGetHostPointer(rootBounds);
     rootBoundsPtr[0] = float3(1e38f, 1e38f, 1e38f);
     rootBoundsPtr[1] = float3(-1e38f, -1e38f, -1e38f);
     gprtBufferUnmap(rootBounds);
@@ -158,12 +160,21 @@ int main(int ac, char **av) {
 
   {
     gprtBufferMap(rootBounds);
-    float3* rootBoundsPtr = gprtBufferGetHostPointer(rootBounds);
+    float3* rootBoundsPtr = (float3*)gprtBufferGetHostPointer(rootBounds);
     std::cout<<"Bounds are " << rootBoundsPtr[0].x << " " << rootBoundsPtr[0].y << " " << rootBoundsPtr[0].z << ", "
                             << rootBoundsPtr[1].x << " " << rootBoundsPtr[1].y << " " << rootBoundsPtr[1].z << std::endl; 
     gprtBufferUnmap(rootBounds);
   }
 
+  std::vector<float3> visBVH2(2 * (hploc.N-1));
+  gprtBufferMap(hplocBVH2Nodes);
+  BVH2Node *bvh2Nodes = gprtBufferGetHostPointer(hplocBVH2Nodes);
+  for (int i = 0; i < hploc.N-1; ++i) {
+    BVH2Node node = bvh2Nodes[i];
+    visBVH2[i*2+0] = node.aabbMinAndL.xyz();
+    visBVH2[i*2+1] = node.aabbMaxAndR.xyz();
+  }
+  gprtBufferUnmap(hplocBVH2Nodes);
 
 
   // ##################################################################
@@ -174,7 +185,7 @@ int main(int ac, char **av) {
   // declare geometry type
   // -------------------------------------------------------
   GPRTGeomTypeOf<AABBGeomData> customGeomType = gprtGeomTypeCreate<AABBGeomData>(context, GPRT_AABBS);
-  gprtGeomTypeSetClosestHitProg(customGeomType, 0, module, "AABBClosestHit");
+  gprtGeomTypeSetAnyHitProg(customGeomType, 0, module, "AABBAnyHit");
   gprtGeomTypeSetIntersectionProg(customGeomType, 0, module, "AABBIntersection");
 
   // -------------------------------------------------------
@@ -199,21 +210,24 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // aabb mesh
   // ------------------------------------------------------------------
+
   GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
   GPRTBufferOf<float> radiusBuffer = gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
-  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
+  // GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
+
+  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, (hploc.N-1) * 2, visBVH2.data());
 
   GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate(context, customGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, (hploc.N-1));
 
   AABBGeomData geomData;
-  geomData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
-  geomData.radius = gprtBufferGetDevicePointer(radiusBuffer);
+  // geomData.vertex = gprtBufferGetDevicePointer(vertexBuffer);
+  // geomData.radius = gprtBufferGetDevicePointer(radiusBuffer);
   geomData.aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
   gprtGeomSetParameters(aabbGeom, geomData);
 
   // Launch the compute kernel, which will populate our aabbPositionsBuffer
-  gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1, 1, 1}, geomData);
+  // gprtComputeLaunch(boundsProgram, {NUM_VERTICES, 1, 1}, {1, 1, 1}, geomData);
 
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure

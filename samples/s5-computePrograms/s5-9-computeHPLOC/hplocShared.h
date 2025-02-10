@@ -79,7 +79,8 @@ struct HPLOCParams {
     DescriptorHandle<RWStructuredBuffer<uint32_t>> pID; 
 
     // gprt::Buffer indexPairs; // BVH2 -> BVH8 pairs (N x 8bytes)
-    uint64_t* indexPairs; // Might need to be a descriptor handle...
+    DescriptorHandle<RWStructuredBuffer<uint64_t>> indexPairs; 
+    // uint64_t* indexPairs; // Might need to be a descriptor handle...
     
     // For geometry
     // gprt::Buffer rootBounds; 

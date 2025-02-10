@@ -43,7 +43,7 @@ simpleRayGen(uniform RayGenData record) {
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   TraceRay(record.world,            // the tree
-           RAY_FLAG_FORCE_OPAQUE,   // ray flags
+           RAY_FLAG_NONE,   // ray flags
            0xff,                    // instance inclusion mask
            0,                       // ray type
            1,                       // number of ray types
@@ -130,9 +130,9 @@ AABBIntersection(uniform AABBGeomData record) {
 //
 // Also note, this program is also called after all ReportHit's have been
 // called and we can conclude which reported hit is closest.
-[shader("closesthit")]
+[shader("anyhit")]
 void
-AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttributes attr) {
+AABBAnyHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttributes attr) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   int hitKind = HitKind();
@@ -140,17 +140,30 @@ AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttrib
   // front
   if (bool(hitKind & 1)) {
     float3 pos = ro + rd * attr.tN;
-    float3 e = smoothstep(attr.rad - 0.003, attr.rad - 0.002, abs(pos - attr.cen));
+    float3 e = smoothstep(attr.rad - 0.003 * 5., attr.rad - 0.002 * 5., abs(pos - attr.cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
-    payload.color = lerp(float3(0.0), float3(1.0), 0.15 + 0.85 * al);
+
+    float3 col = lerp(float3(0.0), float3(1.0), 0.25 + 0.75 * al);
+    if (col.x < .3) {
+      IgnoreHit();
+      return;
+    }
+
+    payload.color = col;
   }
 
   // back
   if (bool(hitKind & 2)) {
     float3 pos = ro + rd * attr.tF;
-    float3 e = smoothstep(attr.rad - 0.003, attr.rad - 0.002, abs(pos - attr.cen));
+    float3 e = smoothstep(attr.rad - 0.003 * 5., attr.rad - 0.002 * 5., abs(pos - attr.cen));
     float al = 1.0 - (1.0 - e.x * e.y) * (1.0 - e.y * e.z) * (1.0 - e.z * e.x);
-    payload.color = lerp(payload.color, float3(1.0), 0.25 + 0.75 * al);
+    float3 col = lerp(payload.color, float3(1.0), 0.25 + 0.75 * al);
+    if (col.x < .3) {
+      IgnoreHit();
+      return;
+    }
+
+    payload.color = col;
   }
 }
 
