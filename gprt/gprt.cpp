@@ -3801,7 +3801,7 @@ struct SphereAccel : public Accel {
       // If we have hardware accelerated support for LSS, use the built-in type
       if (requestedFeatures.linearSweptSpheres) {
         // Specify that the geometry type is LSS
-        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_SPHERES_NV;
 
         // Pass the sphere structure into the pNext of the geometry
         VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
@@ -3813,14 +3813,17 @@ struct SphereAccel : public Accel {
 
         // Vertex data (assuming an XYZR float4 format)
         sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-        sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
-        sphereData.vertexStride = sizeof(float4);
-        sphereData.radiusStride = sizeof(float4);
         sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
+        sphereData.vertexStride = sizeof(float4);
+        
+        sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
         sphereData.radiusData.deviceAddress =
             sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
+        sphereData.radiusStride = sizeof(float4);
 
         // Index data
+        sphereData.indexData = {};
+        sphereData.indexStride = sizeof(uint32_t);
         sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
 
         maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
