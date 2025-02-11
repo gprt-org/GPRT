@@ -7481,8 +7481,8 @@ GPRT_API void
 gprtGeomTypeSetIntersectionProg(GPRTGeomType _geomType, int rayType, GPRTModule _module, const char *progName) {
   LOG_API_CALL();
   GeomType *geomType = (GeomType *) _geomType;
-  if (geomType->getKind() != GPRT_AABBS) {
-    LOG_ERROR("Custom intersection programs are only allowed for AABB types");
+  if (geomType->getKind() == GPRT_TRIANGLES) {
+    LOG_ERROR("Custom intersection programs are not allowed for the built-in triangle type");
   }
 
   Module *module = (Module *) _module;
