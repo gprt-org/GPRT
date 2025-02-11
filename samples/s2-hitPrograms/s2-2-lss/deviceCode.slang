@@ -8,12 +8,12 @@ struct Payload {
 };
 
 [shader("closesthit")]
-void LSSClosestHit(uniform LSSGeomData record, inout Payload payload, in float u) {
+void LSSClosestHit(uniform LSSGeomData record, inout Payload payload, in float attr) {
   uint primID = PrimitiveIndex();
   uint2 indices = record.indices[primID];
   float4 pa = record.vertices[indices.x];
   float4 pb = record.vertices[indices.y];
-  float4 p = lerp(pa, pb, u);
+  float4 p = lerp(pa, pb, attr);
 
   float t = RayTCurrent();
   float3 ro = WorldRayOrigin();

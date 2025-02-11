@@ -119,7 +119,7 @@ static struct RequestedFeatures {
   bool rayQueries = false;
 
   bool invocationReordering = false;
-  bool linearSweptSpheres = false;
+  bool linearSweptSpheres = true;
 
   bool debugPrintf = true;
 
@@ -419,6 +419,9 @@ struct Context {
   VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
+  #ifdef VK_NV_ray_tracing_linear_swept_spheres
+  VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV linearSweptSpheresFeatures;
+  #endif
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
   VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
   VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutableDescriptorFeatures;
@@ -3716,6 +3719,9 @@ struct TriangleAccel : public Accel {
 };
 
 struct SphereAccel : public Accel {
+#ifdef VK_NV_ray_tracing_linear_swept_spheres
+  std::vector<VkAccelerationStructureGeometrySpheresDataNV> accelerationStructureGeometrySpheres;
+#endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
@@ -3744,6 +3750,9 @@ struct SphereAccel : public Accel {
     accelerationBuildStructureRangeInfos.resize(geometries.size());
     accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
     accelerationStructureGeometries.resize(geometries.size());
+#ifdef VK_NV_ray_tracing_linear_swept_spheres
+    accelerationStructureGeometrySpheres.resize(geometries.size());
+#endif
 
     if (!requestedFeatures.linearSweptSpheres) {
       // Do a prefix sum over the sphere counts
@@ -3787,6 +3796,43 @@ struct SphereAccel : public Accel {
       geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
       // apparently, geom.flags can't be 0, otherwise we get a device loss on
       // build...
+
+      #ifdef VK_NV_ray_tracing_linear_swept_spheres
+      // If we have hardware accelerated support for LSS, use the built-in type
+      if (requestedFeatures.linearSweptSpheres) {
+        // Specify that the geometry type is LSS
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+
+        // Pass the sphere structure into the pNext of the geometry
+        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
+        geom.pNext = &sphereData;
+
+        // Fill out the LSS data
+        sphereData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_SPHERES_DATA_NV;
+        sphereData.pNext = nullptr;
+
+        // Vertex data (assuming an XYZR float4 format)
+        sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
+        sphereData.vertexStride = sizeof(float4);
+        sphereData.radiusStride = sizeof(float4);
+        sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
+        sphereData.radiusData.deviceAddress =
+            sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
+
+        // Index data
+        sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
+
+        maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = sphereGeom->vertex.count;
+        geomRange.primitiveOffset = sphereGeom->vertex.offset;
+        geomRange.firstVertex = 0;
+        geomRange.transformOffset = 0;
+      } else
+#endif
       {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
@@ -3816,6 +3862,9 @@ struct SphereAccel : public Accel {
 
 // todo, implement refit...
 struct LSSAccel : public Accel {
+  #ifdef VK_NV_ray_tracing_linear_swept_spheres
+  std::vector<VkAccelerationStructureGeometryLinearSweptSpheresDataNV> accelerationStructureGeometryLinearSweptSpheres;
+  #endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
@@ -3833,6 +3882,10 @@ struct LSSAccel : public Accel {
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
+    else {
+      useHWIntersector = true;
+
+    }
   };
 
   ~LSSAccel() {};
@@ -3846,6 +3899,10 @@ struct LSSAccel : public Accel {
     accelerationBuildStructureRangeInfos.resize(geometries.size());
     accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
     accelerationStructureGeometries.resize(geometries.size());
+
+    #ifdef VK_NV_ray_tracing_linear_swept_spheres
+    accelerationStructureGeometryLinearSweptSpheres.resize(geometries.size());
+    #endif
 
     if (!requestedFeatures.linearSweptSpheres) {
       // Do a prefix sum over the LSS counts
@@ -3890,6 +3947,50 @@ struct LSSAccel : public Accel {
       geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
       // apparently, geom.flags can't be 0, otherwise we get a device loss on
       // build...
+
+#ifdef VK_NV_ray_tracing_linear_swept_spheres
+      // If we have hardware accelerated support for LSS, use the built-in type
+      if (requestedFeatures.linearSweptSpheres) {
+        // Specify that the geometry type is LSS
+        geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
+
+        // Pass the LSS structure into the pNext of the geometry
+        VkAccelerationStructureGeometryLinearSweptSpheresDataNV &lssData =
+            accelerationStructureGeometryLinearSweptSpheres[gid];
+        geom.pNext = &lssData;
+
+        // Fill out the LSS data
+        lssData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_LINEAR_SWEPT_SPHERES_DATA_NV;
+        lssData.pNext = nullptr;
+
+        // Vertex data (assuming an XYZR float4 format)
+        lssData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        lssData.vertexData.deviceAddress = lssGeom->vertex.buffers[0]->deviceAddress + lssGeom->vertex.offset;
+        lssData.vertexStride = sizeof(float4);
+        lssData.radiusFormat = VK_FORMAT_R32_SFLOAT;
+        lssData.radiusData.deviceAddress =
+            lssGeom->vertex.buffers[0]->deviceAddress + lssGeom->vertex.offset + sizeof(float3);
+        lssData.radiusStride = sizeof(float4);
+
+        // Index data
+        lssData.indexType = VK_INDEX_TYPE_UINT32;
+        lssData.indexData.deviceAddress = lssGeom->index.buffer->deviceAddress;
+        lssData.indexStride = sizeof(uint32_t);//sizeof(uint2);
+        lssData.indexingMode = VK_RAY_TRACING_LSS_INDEXING_MODE_LIST_NV;   // could also be successive
+
+        // Can also be
+        lssData.endCapsMode = VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV;
+
+        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
+        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        geomRange.primitiveCount = lssGeom->index.count;
+        geomRange.primitiveOffset = lssGeom->index.offset;
+        geomRange.firstVertex = lssGeom->index.firstVertex;
+        geomRange.transformOffset = 0;
+      }
+      // Otherwise, fall back to AABBs and software isect.
+      else
+#endif
       {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
@@ -4398,6 +4499,15 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       pipelineInterfaceCreateInfo.maxPipelineRayPayloadSize = requestedFeatures.maxRayPayloadSize;
       pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
 
+      void* pNext = nullptr;
+      #ifdef VK_NV_ray_tracing_linear_swept_spheres
+      VkPipelineCreateFlags2CreateInfo pipelineCreateFlags;
+      pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
+      pipelineCreateFlags.flags = VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV ;
+      pipelineCreateFlags.pNext = nullptr;
+      pNext = &pipelineCreateFlags;
+      #endif
+
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
       rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
       rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -4407,6 +4517,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
       rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
+      rayTracingPipelineCI.pNext = pNext;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " +
                std::to_string(requestedFeatures.rayRecursionDepth) + ".");
@@ -5160,6 +5271,15 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
   }
 
+  if (requestedFeatures.linearSweptSpheres) {
+    #ifdef VK_NV_ray_tracing_linear_swept_spheres
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
+    #else
+    LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
+    requestedFeatures.linearSweptSpheres = false;
+    #endif
+  }
+
 #if defined(VK_USE_PLATFORM_MACOS_MVK) && (VK_HEADER_VERSION >= 216)
   enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 #endif
@@ -5278,6 +5398,15 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     invocationReorderFeatures.pNext = pNext;
     pNext = &invocationReorderFeatures;
   }
+
+  #ifdef VK_NV_ray_tracing_linear_swept_spheres
+  linearSweptSpheresFeatures = {};
+  linearSweptSpheresFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_LINEAR_SWEPT_SPHERES_FEATURES_NV;
+  if (requestedFeatures.linearSweptSpheres) {
+    linearSweptSpheresFeatures.pNext = pNext;
+    pNext = &linearSweptSpheresFeatures;
+  }
+  #endif
 
   accelerationStructureFeatures = {};
   accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
