@@ -259,6 +259,11 @@ typedef enum {
 // } GPRTCellType;
 
 typedef enum {
+  GPRT_LSS_CHAINED_END_CAPS = 0,
+  GPRT_LSS_NO_END_CAPS = 1
+} GPRTLSSFlags;
+
+typedef enum {
   GPRT_BUILD_MODE_UNINITIALIZED,
   GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE,
   GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE,
@@ -1126,12 +1131,11 @@ gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int fla
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom *geom,
-                                      unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom *geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS));
 
 template <typename T>
 GPRTAccel
-gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
+gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS)) {
   return gprtLSSAccelCreate(context, (GPRTGeom *) &geom, flags);
 }
 

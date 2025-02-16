@@ -3873,11 +3873,15 @@ struct LSSAccel : public Accel {
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
   std::vector<uint32_t> fallbackAABBOffsets;
 
+  bool useEndCaps;
+
   bool useHWIntersector;
 
-  LSSAccel(Context *context, size_t numGeometries, LSSGeom *geometries) : Accel(context, true) {
+  LSSAccel(Context *context, size_t numGeometries, LSSGeom *geometries, GPRTLSSFlags flags) : Accel(context, true) {
     this->geometries.resize(numGeometries);
     memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+
+    useEndCaps = ((flags & GPRT_LSS_CHAINED_END_CAPS) != 0);
 
     // If we don't have hardware acceleration for LSS, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
@@ -3982,7 +3986,8 @@ struct LSSAccel : public Accel {
         lssData.indexingMode = VK_RAY_TRACING_LSS_INDEXING_MODE_LIST_NV;   // could also be successive
 
         // Can also be
-        lssData.endCapsMode = VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV;
+        lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV : 
+                                             VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_NONE_NV;
 
         auto &geomRange = accelerationBuildStructureRangeInfos[gid];
         accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
@@ -8459,10 +8464,10 @@ gprtSphereAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) 
 }
 
 GPRT_API GPRTAccel
-gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, GPRTLSSFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  LSSAccel *accel = new LSSAccel(context, 1, (LSSGeom *) geom);
+  LSSAccel *accel = new LSSAccel(context, 1, (LSSGeom *) geom, flags);
   return (GPRTAccel) accel;
 }
 
