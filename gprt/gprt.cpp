@@ -4577,10 +4577,12 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         // means we can use this buffer as a storage buffer resource
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
-                                                                                           // vkMapMemory
-                                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
-                                                                                           // "invalidate" not needed
+    const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
+                                                                                        // device access
+    // const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |   // mappable to host with
+    //                                                                                        // vkMapMemory
+    //                                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;   // means "flush" and
+    //                                                                                        // "invalidate" not needed
 
     // std::cout<<"Todo, get some smarter memory allocation working..."
     // <<std::endl;
@@ -4724,7 +4726,9 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           // SBT data... So, if we have a bunch of instances set by reference on
           // device, we need to eventually do something smarter here...
           // Todo, move this setup to the device...
-          instanceAccel->instancesBuffer->map();
+
+          bool previouslyMapped = (instanceAccel->instancesBuffer->mapped != nullptr);
+          if (!previouslyMapped) instanceAccel->instancesBuffer->map();
           gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
 
           for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
@@ -4797,7 +4801,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
             }
           }
 
-          instanceAccel->instancesBuffer->unmap();
+          if (!previouslyMapped) instanceAccel->instancesBuffer->unmap();
         }
       }
       hitgroupTable->unmap();

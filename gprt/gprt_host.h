@@ -259,8 +259,8 @@ typedef enum {
 // } GPRTCellType;
 
 typedef enum {
-  GPRT_LSS_CHAINED_END_CAPS = 0,
-  GPRT_LSS_NO_END_CAPS = 1
+  GPRT_LSS_CHAINED_END_CAPS = 1,
+  GPRT_LSS_NO_END_CAPS = 2
 } GPRTLSSFlags;
 
 typedef enum {
