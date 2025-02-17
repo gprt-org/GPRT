@@ -1068,12 +1068,12 @@ gprtCallableSetParameters(GPRTCallableOf<T> callable, T &parameters, int deviceI
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
 gprtAABBAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtAABBAccelCreate(context, (GPRTGeom *) &geom, flags);
+  return gprtAABBAccelCreate(context, (GPRTGeom) geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1089,12 +1089,12 @@ gprtAABBAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
 gprtTriangleAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtTriangleAccelCreate(context, (GPRTGeom *) &geom, flags);
+  return gprtTriangleAccelCreate(context, (GPRTGeom)geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1110,12 +1110,12 @@ gprtTriangleAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int f
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
 gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtSphereAccelCreate(context, (GPRTGeom *) &geom, flags);
+  return gprtSphereAccelCreate(context, (GPRTGeom) geom, flags);
 }
 
 // ------------------------------------------------------------------
@@ -1131,24 +1131,24 @@ gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int fla
 
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom *geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS));
+GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS));
 
 template <typename T>
 GPRTAccel
 gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS)) {
-  return gprtLSSAccelCreate(context, (GPRTGeom *) &geom, flags);
+  return gprtLSSAccelCreate(context, (GPRTGeom) geom, flags);
 }
 
 // ------------------------------------------------------------------
 /*! create a new acceleration structure for solid geometries.
   \param flags reserved for future use
 */
-GPRT_API GPRTAccel gprtSolidAccelCreate(GPRTContext context, GPRTGeom *geom, unsigned int flags GPRT_IF_CPP(= 0));
+GPRT_API GPRTAccel gprtSolidAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
 GPRTAccel
 gprtSolidAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags GPRT_IF_CPP(= 0)) {
-  return gprtSolidAccelCreate(context, (GPRTGeom *) &geom, flags);
+  return gprtSolidAccelCreate(context, (GPRTGeom) geom, flags);
 }
 
 // ------------------------------------------------------------------

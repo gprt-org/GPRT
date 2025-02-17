@@ -3655,9 +3655,9 @@ public:
 };
 
 struct TriangleAccel : public Accel {
-  TriangleAccel(Context *context, size_t numGeometries, TriangleGeom *geometries) : Accel(context, true) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  TriangleAccel(Context *context, std::vector<TriangleGeom*> geometries) : Accel(context, true) {
+    this->geometries.resize(geometries.size());
+    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
   };
 
   ~TriangleAccel() {};
@@ -3727,13 +3727,13 @@ struct SphereAccel : public Accel {
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
   std::vector<uint32_t> fallbackAABBOffsets;
 
-  SphereAccel(Context *context, size_t numGeometries, SphereGeom *geometries) : Accel(context, true) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  SphereAccel(Context *context, std::vector<SphereGeom*> geometries) : Accel(context, true) {
+    this->geometries.resize(geometries.size());
+    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
 
     // If we don't have hardware acceleration for spheres, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(numGeometries + 1);
+      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3877,15 +3877,15 @@ struct LSSAccel : public Accel {
 
   bool useHWIntersector;
 
-  LSSAccel(Context *context, size_t numGeometries, LSSGeom *geometries, GPRTLSSFlags flags) : Accel(context, true) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  LSSAccel(Context *context, std::vector<LSSGeom*> geometries, GPRTLSSFlags flags) : Accel(context, true) {
+    this->geometries.resize(geometries.size());
+    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
 
     useEndCaps = ((flags & GPRT_LSS_CHAINED_END_CAPS) != 0);
 
     // If we don't have hardware acceleration for LSS, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(numGeometries + 1);
+      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -4031,12 +4031,12 @@ struct SolidAccel : public Accel {
   GPRTBufferOf<float4> AABBs = nullptr;
   std::vector<uint32_t> AABBOffsets;
 
-  SolidAccel(Context *context, size_t numGeometries, SolidGeom *geometries) : Accel(context, true) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  SolidAccel(Context *context, std::vector<SolidGeom*> geometries) : Accel(context, true) {
+    this->geometries.resize(geometries.size());
+    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
 
     {
-      AABBOffsets.resize(numGeometries + 1);
+      AABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
     }
@@ -4168,9 +4168,9 @@ struct SolidAccel : public Accel {
 };
 
 struct AABBAccel : public Accel {
-  AABBAccel(Context *context, size_t numGeometries, AABBGeom *geometries) : Accel(context, true) {
-    this->geometries.resize(numGeometries);
-    memcpy(this->geometries.data(), geometries, sizeof(GPRTGeom *) * numGeometries);
+  AABBAccel(Context *context, std::vector<AABBGeom*> geometries) : Accel(context, true) {
+    this->geometries.resize(geometries.size());
+    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
   };
 
   ~AABBAccel() {};
@@ -8444,42 +8444,68 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
 }
 
 GPRT_API GPRTAccel
-gprtAABBAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+gprtAABBAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  AABBAccel *accel = new AABBAccel(context, 1, (AABBGeom *) geom);
+  Geom* geom = ((Geom*)_geom);
+  if (geom->geomType->getKind() != GPRT_AABBS) {
+    LOG_ERROR("Given geometry was made from an incompatible geometry type.");
+  }
+  std::vector<AABBGeom*> geo = {(AABBGeom *) _geom};
+  AABBAccel *accel = new AABBAccel(context, geo);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  TriangleAccel *accel = new TriangleAccel(context, 1, (TriangleGeom *) geom);
+  Geom* geom = ((Geom*)_geom);
+  if (geom->geomType->getKind() != GPRT_TRIANGLES) {
+    LOG_ERROR("Given geometry was made from an incompatible geometry type.");
+  }
+
+  std::vector<TriangleGeom*> geo = {(TriangleGeom *) _geom};
+  TriangleAccel *accel = new TriangleAccel(context, geo);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtSphereAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+gprtSphereAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  SphereAccel *accel = new SphereAccel(context, 1, (SphereGeom *) geom);
+  Geom* geom = ((Geom*)_geom);
+  if (geom->geomType->getKind() != GPRT_SPHERES) {
+    LOG_ERROR("Given geometry was made from an incompatible geometry type.");
+  }
+  std::vector<SphereGeom*> geo = {(SphereGeom *) _geom};
+  SphereAccel *accel = new SphereAccel(context, geo);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtLSSAccelCreate(GPRTContext _context, GPRTGeom *geom, GPRTLSSFlags flags) {
+gprtLSSAccelCreate(GPRTContext _context, GPRTGeom _geom, GPRTLSSFlags flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  LSSAccel *accel = new LSSAccel(context, 1, (LSSGeom *) geom, flags);
+  Geom* geom = ((Geom*)_geom);
+  if (geom->geomType->getKind() != GPRT_LSS) {
+    LOG_ERROR("Given geometry was made from an incompatible geometry type.");
+  }
+  std::vector<LSSGeom*> geo = {(LSSGeom *) _geom};
+  LSSAccel *accel = new LSSAccel(context, geo, flags);
   return (GPRTAccel) accel;
 }
 
 GPRT_API GPRTAccel
-gprtSolidAccelCreate(GPRTContext _context, GPRTGeom *geom, unsigned int flags) {
+gprtSolidAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  SolidAccel *accel = new SolidAccel(context, 1, (SolidGeom *) geom);
+  Geom* geom = ((Geom*)_geom);
+  if (geom->geomType->getKind() != GPRT_SOLIDS) {
+    LOG_ERROR("Given geometry was made from an incompatible geometry type.");
+  }
+  std::vector<SolidGeom*> geo = {(SolidGeom *) _geom};
+  SolidAccel *accel = new SolidAccel(context, geo);
   return (GPRTAccel) accel;
 }
 
@@ -8488,7 +8514,6 @@ gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferO
   LOG_API_CALL();
   Context *context = (Context *) _context;
   InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
-
   return (GPRTAccel) accel;
 }
 
