@@ -121,6 +121,8 @@ static struct RequestedFeatures {
   bool invocationReordering = false;
   bool linearSweptSpheres = true;
 
+  bool externalMemory = true;
+
   bool debugPrintf = true;
 
   /*! returns whether logging is enabled */
@@ -432,6 +434,7 @@ struct Context {
 
   // For handling vulkan memory allocation
   VmaAllocator allocator;
+  std::vector<VkExternalMemoryHandleTypeFlags> externalHandleTypes;
 
   /** @brief Queue family properties of the chosen physical device */
   std::vector<VkQueueFamilyProperties> queueFamilyProperties;
@@ -1170,6 +1173,19 @@ struct Buffer {
       allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     }
 
+    VkExternalMemoryBufferCreateInfo externalBufferCreateInfo = {};
+    externalBufferCreateInfo.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+    // Use the correct flag for your platform (e.g., Windows: VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT)
+    #ifdef _WIN32
+    externalBufferCreateInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+    #else
+    externalBufferCreateInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT; 
+    #endif
+
+    if (requestedFeatures.externalMemory) {
+      bufferCreateInfo.pNext = &externalBufferCreateInfo;
+    }
+
     VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment, &buffer,
                                                  &allocation, nullptr));
 
@@ -1187,6 +1203,19 @@ struct Buffer {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
+
+      VkExternalMemoryBufferCreateInfo externalBufferCreateInfo = {};
+      externalBufferCreateInfo.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+      // Use the correct flag for your platform (e.g., Windows: VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT)
+      #ifdef _WIN32
+      externalBufferCreateInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+      #else
+      externalBufferCreateInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT; 
+      #endif
+      
+      if (requestedFeatures.externalMemory) {
+        bufferCreateInfo.pNext = &externalBufferCreateInfo;
+      }
       // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
       // VmaAllocationCreateInfo allocInfo = {};
@@ -5052,6 +5081,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
 
+  // For interop between GPRT and other target applications. 
+  if (requestedFeatures.externalMemory) {
+    enabledInstanceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+  }
+
   // Enabled requested instance extensions
   if (enabledInstanceExtensions.size() > 0) {
     for (const char *enabledExtension : enabledInstanceExtensions) {
@@ -5671,6 +5705,22 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   allocatorCreateInfo.instance = instance;
   allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
   allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+
+  
+  if (requestedFeatures.externalMemory) {
+    VkPhysicalDeviceMemoryProperties memProps;
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+    uint32_t memTypeCount = memProps.memoryTypeCount;
+    VkExternalMemoryHandleTypeFlagBits bits;
+    #ifdef _WIN32
+    bits = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
+    #else
+    bits = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+    #endif
+    externalHandleTypes.resize(memTypeCount, bits);
+
+    allocatorCreateInfo.pTypeExternalMemoryHandleTypes = externalHandleTypes.data();
+  }
   err = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
   if (err) {
     LOG_ERROR("Could not create vulkan memory allocator : \n" + errorString(err));
