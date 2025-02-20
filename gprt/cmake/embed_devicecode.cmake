@@ -45,7 +45,7 @@ function(embed_devicecode)
     -ignore-capabilities
     -zero-initialize # zero-initialize all variables
     -Wno-39001 # for VK_EXT_mutable_descriptor_type, allows overlapping bindings
-    -g
+    # -g
     -O3
     -I ${GPRT_INCLUDE_DIR}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv

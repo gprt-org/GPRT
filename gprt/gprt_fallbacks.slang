@@ -162,6 +162,59 @@ LSSIntersection(uniform uint32_t userData[64], uniform LSSParameters lss) {
   }
 }
 
+void computeLssAabb(float3 v0, float r0, bool endcap0, float3 v1, float r1, bool endcap1, out float3 bblo, out float3 bbhi)
+{
+  float3 bblov0 = v0, bbhiv0 = v0; 
+  float3 bblov1 = v1, bbhiv1 = v1;
+
+  float3 cme, cpe;
+  if (!endcap0 || !endcap1) {
+    // On average, one end cap will be missing (the case with chained LSS)
+    // So I'm computing these terms up front, assuming they will be used.
+    float rd = r1-r0;  // Change in radius
+    float3 n = v0-v1;  // Direction of LSS, also normal of end cap circle
+    float3 nsqr = n*n;
+    float l2 = nsqr.x + nsqr.y + nsqr.z;
+    float l2Inv = rcp(l2); // when l2 is +inf, rcp returns +0
+    
+    float3 X = 1.f - nsqr * l2Inv;    // sin of angle between n and the coordinate bases
+    float  Y = 1.f - rd * rd * l2Inv; // sin of angle between n and any point of tangency on the spherical end cap
+    float3 e = sqrt(abs(X * Y)); // unit circle extents aligned with the base circle subtending the cap.
+    
+    float3 c = rd * n * l2Inv;
+    cme = c - e;
+    cpe = c + e;
+  }
+
+  #define SUPPORT_NEGATIVE_R
+  #ifdef SUPPORT_NEGATIVE_R
+  if (r0 < 0.0) {
+    bblov0 += (r0 * rcp(r1-r0)) * (v0-v1); bbhiv0 = bblov0;
+  } else
+  #endif
+  if (endcap0) {
+    bblov0 += -r0; bbhiv0 += r0;
+  }
+  else {
+    bblov0 += r0 * cme; bbhiv0 += r0 * cpe;
+  }  
+
+  #ifdef SUPPORT_NEGATIVE_R
+  if (r1 < 0.0) {
+    bblov1 += (r1 * rcp(r1-r0)) * (v0-v1); bbhiv1 = bblov1;
+  } else
+  #endif
+  if (endcap1) {
+    bblov1 += -r1; bbhiv1 += r1;
+  }
+  else {
+    bblov1 += r1 * cme; bbhiv1 += r1 * cpe;
+  }
+
+  bblo = min(bblov0, bblov1);
+  bbhi = max(bbhiv0, bbhiv1);
+}
+
 [shader("compute")]
 [numthreads(256, 1, 1)]
 void
@@ -173,15 +226,11 @@ LSSBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform LSSBoundsParamete
   uint2 I = LoadAligned<8>(lss.indices + primID);
   float4 P0 = LoadAligned<16>(lss.vertices + I.x);
   float4 P1 = LoadAligned<16>(lss.vertices + I.y);
+  bool endcap0 = bool(lss.endcap0);
+  bool endcap1 = bool(lss.endcap1);
 
-  float3 aabbMin = +float3(FLT_MAX);
-  float3 aabbMax = -float3(FLT_MAX);
-
-  aabbMin = min(aabbMin, (P0.xyz - max(P0.w, 0.0)));
-  aabbMin = min(aabbMin, (P1.xyz - max(P1.w, 0.0)));
-
-  aabbMax = max(aabbMax, (P0.xyz + max(P0.w, 0.0)));
-  aabbMax = max(aabbMax, (P1.xyz + max(P1.w, 0.0)));
+  float3 aabbMin, aabbMax;
+  computeLssAabb(P0.xyz, P0.w, endcap0, P1.xyz, P1.w, endcap1, aabbMin, aabbMax);
 
   uint32_t offset = lss.offset;
   lss.aabbs[(offset * 2) + 2 * primID] = aabbMin;

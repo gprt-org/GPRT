@@ -425,6 +425,7 @@ struct Context {
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
   VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
   VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutableDescriptorFeatures;
+  VkPhysicalDeviceShaderClockFeaturesKHR shaderClockFeatures;
 
   // Stores all available memory (type) properties for the physical device
   VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
@@ -2787,7 +2788,7 @@ struct LSSGeom : public Geom {
   // true: endcap0 enabled, false: endcap0 disabled
   bool endcap0 = true;
   // true: endcap1 enabled, false: endcap1 disabled
-  bool endcap1 = true;
+  bool endcap1 = false;
   // false: return entry hits, true: return exit hits
   bool exitTest = false;
 
@@ -3333,6 +3334,7 @@ public:
     if (allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
+    accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
     accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
 
@@ -3938,6 +3940,8 @@ struct LSSAccel : public Accel {
         params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
         params.offset = fallbackAABBOffsets[gid];
         params.count = fallbackAABBOffsets[gid + 1] - params.offset;
+        params.endcap0 = lssGeom->endcap0;
+        params.endcap1 = lssGeom->endcap1;
         gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
       }
     }
@@ -4509,11 +4513,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
       void* pNext = nullptr;
       #ifdef VK_NV_ray_tracing_linear_swept_spheres
-      VkPipelineCreateFlags2CreateInfo pipelineCreateFlags;
-      pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
-      pipelineCreateFlags.flags = VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV ;
-      pipelineCreateFlags.pNext = nullptr;
-      pNext = &pipelineCreateFlags;
+      if (requestedFeatures.linearSweptSpheres) {
+        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags;
+        pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
+        pipelineCreateFlags.flags = VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV ;
+        pipelineCreateFlags.pNext = nullptr;
+        pNext = &pipelineCreateFlags;
+      }
       #endif
 
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
@@ -4575,6 +4581,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
         // means we can get this buffer's address with vkGetBufferDeviceAddress
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
         // means we can use this buffer as a storage buffer resource
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     const VkMemoryPropertyFlags memoryUsageFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;   // means most efficient for
@@ -5209,7 +5217,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
   /* function that checks if the selected physical device meets requirements
    */
-  auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions) -> bool {
+  struct FallbackRequests {
+    bool lss = false;
+  };
+
+  auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions, FallbackRequests &fallbackRequests) -> bool {
     uint32_t extensionCount;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
@@ -5225,8 +5237,20 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       requiredExtensions.erase(extension.extensionName);
     }
 
+    if (requestedFeatures.linearSweptSpheres) {
+      if (requiredExtensions.find(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME) != requiredExtensions.end()) {
+        if (requiredExtensions.find(VK_NV_RAY_TRACING_EXTENSION_NAME) == requiredExtensions.end()) {
+          requiredExtensions.erase(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
+          fallbackRequests.lss = true;
+        }
+      }
+    }
+
     return requiredExtensions.empty();
   };
+
+  // enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
 
   // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
   // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
@@ -5301,6 +5325,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   uint32_t selectedDevice = -1;   // TODO
 
   std::vector<uint32_t> usableDevices;
+  std::vector<FallbackRequests> usableDeviceFallbackRequests;
 
   LOG_INFO("Searching for usable Vulkan physical device...");
   for (uint32_t i = 0; i < gpuCount; i++) {
@@ -5314,8 +5339,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
                std::to_string(deviceProperties.apiVersion & 0xfff);
     LOG_INFO(message);
 
-    if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions)) {
+    FallbackRequests fallbackRequests;
+
+    if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions, fallbackRequests)) {
       usableDevices.push_back(i);
+      usableDeviceFallbackRequests.push_back(fallbackRequests);
       LOG_INFO("\tFound usable device");
     } else {
       // Get list of supported extensions
@@ -5345,6 +5373,15 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
       LOG_INFO("Selecting first usable device");
+      if (usableDeviceFallbackRequests[0].lss ) {
+        LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
+        requestedFeatures.linearSweptSpheres = false;
+        enabledDeviceExtensions.erase(
+            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)), 
+            enabledDeviceExtensions.end()
+        );
+      
+      }
     } else if (numRequestedDevices > 1) {
       LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
     } else {
@@ -5384,9 +5421,17 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // floatControlsProperties.pNext = pNext;
   // pNext = &floatControlsProperties;
 
+  shaderClockFeatures = {};
+  shaderClockFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR;
+  shaderClockFeatures.shaderSubgroupClock = true;
+  shaderClockFeatures.shaderDeviceClock = true;
+  shaderClockFeatures.pNext = pNext;
+  pNext = &shaderClockFeatures;
+
   mutableDescriptorFeatures = {};
   mutableDescriptorFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT;
   mutableDescriptorFeatures.mutableDescriptorType = true;
+  mutableDescriptorFeatures.pNext = pNext;
   pNext = &mutableDescriptorFeatures;
 
   atomicFloatFeatures = {};
