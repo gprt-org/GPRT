@@ -106,7 +106,11 @@ static struct RequestedFeatures {
   uint32_t maxRayHitAttributeSize = 4;
   
   uint32_t internalAdditionalSize = 128;
-  uint32_t recordSize = 256;
+  uint32_t raygenRecordSize = 1024;
+  
+  uint32_t hitRecordSize = 256;
+  uint32_t missRecordSize = 256;
+  uint32_t callableRecordSize = 256;
 
   uint32_t maxDescriptorCount = 256;
 
@@ -2788,7 +2792,7 @@ struct LSSGeom : public Geom {
   // true: endcap0 enabled, false: endcap0 disabled
   bool endcap0 = true;
   // true: endcap1 enabled, false: endcap1 disabled
-  bool endcap1 = false;
+  bool endcap1 = true;
   // false: return entry hits, true: return exit hits
   bool exitTest = false;
 
@@ -4556,13 +4560,28 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
   const uint32_t groupAlignment = rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = rayTracingPipelineProperties.maxShaderGroupStride;
 
-  if (requestedFeatures.recordSize > maxGroupSize) {
-    LOG_ERROR("Requested record size is too large! Max record size for this platform is " +
+  if (requestedFeatures.hitRecordSize > maxGroupSize) {
+    LOG_ERROR("Requested hit record size is too large! Max record size for this platform is " +
+              std::to_string(maxGroupSize) + " bytes.");
+  }
+  if (requestedFeatures.raygenRecordSize > maxGroupSize) {
+    LOG_ERROR("Requested raygen record size is too large! Max record size for this platform is " +
+              std::to_string(maxGroupSize) + " bytes.");
+  }
+  if (requestedFeatures.missRecordSize > maxGroupSize) {
+    LOG_ERROR("Requested miss record size is too large! Max record size for this platform is " +
+              std::to_string(maxGroupSize) + " bytes.");
+  }
+  if (requestedFeatures.callableRecordSize> maxGroupSize) {
+    LOG_ERROR("Requested callable record size is too large! Max record size for this platform is " +
               std::to_string(maxGroupSize) + " bytes.");
   }
 
   // Doubling the record size to allow GPRT to store internal facing data
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t raygenRecordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.raygenRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t hitRecordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.hitRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t missRecordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.missRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t callableRecordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.callableRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
 
   // Check here to confirm we really do have ray tracing programs. With raster support, sometimes
   // we might only have raster programs, and no RT programs.
@@ -4597,7 +4616,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
     // allocate / resize ray generation table
     size_t numRayGens = raygens.size();
-    if (raygenTable && raygenTable->size != recordSize * numRayGens) {
+    if (raygenTable && raygenTable->size != raygenRecordSize * numRayGens) {
       raygenTable->destroy();
       delete raygenTable;
       raygenTable = nullptr;
@@ -4605,45 +4624,45 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
     if (!raygenTable && raygens.size() > 0) {
       raygenTable =
           new Buffer(this, bufferUsageFlags,
-                     memoryUsageFlags, recordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
+                     memoryUsageFlags, raygenRecordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
     // allocate / resize miss table
     size_t numMissProgs = misses.size();
-    if (missTable && missTable->size != recordSize * numMissProgs) {
+    if (missTable && missTable->size != missRecordSize * numMissProgs) {
       missTable->destroy();
       delete missTable;
       missTable = nullptr;
     }
     if (!missTable && misses.size() > 0) {
       missTable = new Buffer(this, bufferUsageFlags,
-                             memoryUsageFlags, recordSize * numMissProgs,
+                             memoryUsageFlags, missRecordSize * numMissProgs,
                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
     // allocate / resize callable table
     size_t numCallableProgs = callables.size();
-    if (callableTable && callableTable->size != recordSize * numCallableProgs) {
+    if (callableTable && callableTable->size != callableRecordSize * numCallableProgs) {
       callableTable->destroy();
       delete callableTable;
       callableTable = nullptr;
     }
     if (!callableTable && callables.size() > 0) {
       callableTable = new Buffer(this,
-                                 bufferUsageFlags, memoryUsageFlags, recordSize * numCallableProgs,
+                                 bufferUsageFlags, memoryUsageFlags, callableRecordSize * numCallableProgs,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
     // allocate / resize hit group table
     size_t numHitRecords = getNumHitRecords();
-    if (hitgroupTable && hitgroupTable->size != recordSize * numHitRecords) {
+    if (hitgroupTable && hitgroupTable->size != hitRecordSize * numHitRecords) {
       hitgroupTable->destroy();
       delete hitgroupTable;
       hitgroupTable = nullptr;
     }
     if (!hitgroupTable && numHitRecords > 0) {
       hitgroupTable = new Buffer(this,
-                                 bufferUsageFlags, memoryUsageFlags, recordSize * numHitRecords,
+                                 bufferUsageFlags, memoryUsageFlags, hitRecordSize * numHitRecords,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
     }
 
@@ -4653,7 +4672,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       uint8_t *mapped = ((uint8_t *) (raygenTable->mapped));
 
       for (uint32_t idx = 0; idx < raygens.size(); ++idx) {
-        size_t recordStride = recordSize;
+        size_t recordStride = raygenRecordSize;
         size_t handleStride = handleSize;
 
         // First, copy handle
@@ -4676,7 +4695,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       uint8_t *mapped = ((uint8_t *) (missTable->mapped));
 
       for (uint32_t idx = 0; idx < misses.size(); ++idx) {
-        size_t recordStride = recordSize;
+        size_t recordStride = missRecordSize;
         size_t handleStride = handleSize;
 
         // First, copy handle
@@ -4700,7 +4719,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       uint8_t *mapped = ((uint8_t *) (callableTable->mapped));
 
       for (uint32_t idx = 0; idx < callables.size(); ++idx) {
-        size_t recordStride = recordSize;
+        size_t recordStride = callableRecordSize;
         size_t handleStride = handleSize;
 
         // First, copy handle
@@ -4750,7 +4769,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                 auto &geom = blas->geometries[geomID];
 
                 for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-                  size_t recordStride = recordSize;
+                  size_t recordStride = hitRecordSize;
                   size_t handleStride = handleSize;
 
                   // First, copy handle
@@ -4767,7 +4786,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
                   memcpy(params, geom->SBTRecord, geom->recordSize);
 
                   // If implementing a software fallback, additionally memcpy data required for intersection testing
-                  uint8_t *internalParams = params + (requestedFeatures.recordSize);
+                  uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
                   if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
                     LSSGeom *lss = (LSSGeom *) geom;
                     LSSParameters isectParams;
@@ -6804,9 +6823,12 @@ gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth) {
 }
 
 GPRT_API void
-gprtRequestRecordSize(uint32_t recordSize) {
+gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32_t missRecordSize, uint32_t callableRecordSize) {
   LOG_API_CALL();
-  requestedFeatures.recordSize = recordSize;
+  requestedFeatures.raygenRecordSize = raygenRecordSize;
+  requestedFeatures.hitRecordSize = hitRecordSize;
+  requestedFeatures.missRecordSize = missRecordSize;
+  requestedFeatures.callableRecordSize = callableRecordSize;
 }
 
 GPRT_API bool
@@ -8697,7 +8719,12 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   const uint32_t groupAlignment = context->rayTracingPipelineProperties.shaderGroupHandleAlignment;
   const uint32_t maxShaderRecordStride = context->rayTracingPipelineProperties.maxShaderGroupStride;
 
-  const uint32_t recordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.recordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t raygenRecordSize   = alignedSize(std::min(maxGroupSize, requestedFeatures.raygenRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t hitRecordSize      = alignedSize(std::min(maxGroupSize, requestedFeatures.hitRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t missRecordSize     = alignedSize(std::min(maxGroupSize, requestedFeatures.missRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+  const uint32_t callableRecordSize = alignedSize(std::min(maxGroupSize, requestedFeatures.callableRecordSize + requestedFeatures.internalAdditionalSize), groupAlignment);
+
+
   uint64_t raygenBaseAddr = getBufferDeviceAddress(context->logicalDevice, context->raygenTable->buffer);
   uint64_t missBaseAddr =
       (context->missTable) ? getBufferDeviceAddress(context->logicalDevice, context->missTable->buffer) : 0;
@@ -8710,14 +8737,14 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   int raygenOffset = 0;
   for (int i = 0; i < context->raygens.size(); ++i) {
     if (context->raygens[i] == raygen) {
-      raygenOffset = i * recordSize;
+      raygenOffset = i * raygenRecordSize;
       break;
     }
   }
 
   VkStridedDeviceAddressRegionKHR raygenShaderSbtEntry{};
   raygenShaderSbtEntry.deviceAddress = raygenBaseAddr + raygenOffset;
-  raygenShaderSbtEntry.stride = recordSize;
+  raygenShaderSbtEntry.stride = raygenRecordSize;
   raygenShaderSbtEntry.size = raygenShaderSbtEntry.stride;   // for raygen, can only be one. this needs to
                                                              // be the same as stride.
   // * context->raygenPrograms.size();
@@ -8725,14 +8752,14 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   VkStridedDeviceAddressRegionKHR missShaderSbtEntry{};
   if (context->misses.size() > 0) {
     missShaderSbtEntry.deviceAddress = missBaseAddr;
-    missShaderSbtEntry.stride = recordSize;
+    missShaderSbtEntry.stride = missRecordSize;
     missShaderSbtEntry.size = missShaderSbtEntry.stride * context->misses.size();
   }
 
   VkStridedDeviceAddressRegionKHR callableShaderSbtEntry{};
   if (context->callables.size() > 0) {
     callableShaderSbtEntry.deviceAddress = callableBaseAddr;
-    callableShaderSbtEntry.stride = recordSize;
+    callableShaderSbtEntry.stride = callableRecordSize;
     callableShaderSbtEntry.size = callableShaderSbtEntry.stride * context->callables.size();
   }
 
@@ -8740,7 +8767,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   size_t numHitRecords = context->getNumHitRecords();
   if (numHitRecords > 0) {
     hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
-    hitShaderSbtEntry.stride = recordSize;
+    hitShaderSbtEntry.stride = hitRecordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
 

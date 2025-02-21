@@ -350,7 +350,7 @@ template<typename T>
             axis = cross(vector<T, 3>(1, 0, 0), orig);
 
         axis = normalize(axis);
-        return quatFromAngleAxis(T(M_PI), axis);
+        return quatFromAngleAxis(T(3.14159265358979323846), axis);
     }
 
     // Implementation from Stan Melax's Game Programming Gems 1 article
