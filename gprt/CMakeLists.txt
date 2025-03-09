@@ -61,6 +61,10 @@ target_sources(gprt PRIVATE
     ${MATH_SRC}
     gprt.cpp
     gprt.h
+    gprt_builtins.slang
+    gprt_fallbacks.slang
+    gprt_fallbacks.h
+    gprt_host.h
     gprt_sort.h
     spirv_reflect.h
     spirv_reflect.cpp

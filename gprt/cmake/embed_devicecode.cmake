@@ -33,21 +33,31 @@ function(embed_devicecode)
 
   unset(EMBED_DEVICECODE_OUTPUTS)
 
+  set(EMBED_DEVICECODE_DEBUG_OPT_FLAG $<$<CONFIG:Debug>:-O0>)  
+  set(EMBED_DEVICECODE_RELEASE_OPT_FLAG $<$<CONFIG:RelWithDebInfo,Release>:-O3>)
+
+  set(EMBED_DEVICECODE_DEBUG_DEFINES $<$<CONFIG:Debug>:-D__DEBUG__>)
+
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     COMMAND ${CMAKE_SLANG_COMPILER}
     ${EMBED_DEVICECODE_SOURCES}
     -profile sm_6_7
-    -target spirv -emit-spirv-directly
+    -target spirv 
+    -emit-spirv-directly
+    -fspv-reflect
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
     -ignore-capabilities
     -zero-initialize # zero-initialize all variables
     -Wno-39001 # for VK_EXT_mutable_descriptor_type, allows overlapping bindings
-    # -g
-    -O3
+    -fp-mode fast
+    -g3
+    ${EMBED_DEVICECODE_DEBUG_OPT_FLAG}
+    ${EMBED_DEVICECODE_RELEASE_OPT_FLAG}
     -I ${GPRT_INCLUDE_DIR}
+    ${EMBED_DEVICECODE_DEBUG_DEFINES}
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slang ${GPRT_INCLUDE_DIR}/gprt.h
   )

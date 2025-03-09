@@ -32,8 +32,8 @@ public struct SolidAccelerationStructure {
 
 /// Opaque type representing an acceleration structure containing surfaces which can be intersected by rays.
 public struct SurfaceAccelerationStructure {
-  internal uint64_t address;
-  public __init() { address = 0; }
+    internal uint64_t address;
+    public __init() { address = 0; }
 };
 
 // Keep below in sync with GPRTSolidTypes...
@@ -115,7 +115,15 @@ public void TraceRay<payload_t>(
     RayDesc                         Ray,
     inout payload_t                 Payload)
 {
-  RaytracingAccelerationStructure accel = getAccelFromAddress(AccelerationStructure.address);
-  TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, MultiplierForGeometryContributionToHitGroupIndex, MissShaderIndex, Ray, Payload);
+    RaytracingAccelerationStructure accel = getAccelFromAddress(AccelerationStructure.address);
+#ifdef __DEBUG__
+    {
+      uint3 RayIndex = DispatchRaysIndex();
+      // uint3 DispatchDims = DispatchRaysDimensions();
+      if (all(Ray.Direction == 0.f)) printf("(Thread Index: %d %d %d): ERROR in TraceRay, RayDesc::Direction is all zero!\n", RayIndex.x, RayIndex.y, RayIndex.z);
+      if (any(isnan(Ray.Direction))) printf("(Thread Index: %d %d %d): ERROR in TraceRay, RayDesc::Direction contans a nan component!\n", RayIndex.x, RayIndex.y, RayIndex.z);
+    }
+#endif
+    TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, MultiplierForGeometryContributionToHitGroupIndex, MissShaderIndex, Ray, Payload);
 }
 #endif

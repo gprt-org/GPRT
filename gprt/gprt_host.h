@@ -389,7 +389,7 @@ GPRT_API void gprtTrianglesSetVertices(GPRTGeom triangles, GPRTBuffer vertices, 
 template <typename T1, typename T2>
 void
 gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, uint32_t count,
-                         uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                         uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   static_assert((std::is_same_v<T2, float> || std::is_same_v<T2, float3> || std::is_same_v<T2, float4>), "Triangle vertex buffer must contain floats.");
   gprtTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
 }
@@ -425,7 +425,7 @@ GPRT_API void gprtSpheresSetVertices(GPRTGeom sphereGeom, GPRTBuffer vertices, u
 template <typename T1, typename T2>
 void
 gprtSpheresSetVertices(GPRTGeomOf<T1> sphereGeom, GPRTBufferOf<T2> vertices, uint32_t count,
-                       uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                       uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtSpheresSetVertices((GPRTGeom) sphereGeom, (GPRTBuffer) vertices, count, stride, offset);
 }
 
@@ -435,7 +435,7 @@ GPRT_API void gprtLSSSetVertices(GPRTGeom lssGeom, GPRTBuffer vertices, uint32_t
 template <typename T1, typename T2>
 void
 gprtLSSSetVertices(GPRTGeomOf<T1> lssGeom, GPRTBufferOf<T2> vertices, uint32_t count,
-                   uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                   uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtLSSSetVertices((GPRTGeom) lssGeom, (GPRTBuffer) vertices, count, stride, offset);
 }
 
@@ -455,7 +455,7 @@ GPRT_API void gprtSolidsSetVertices(GPRTGeom solidsGeom, GPRTBuffer vertices, ui
 template <typename T1, typename T2>
 void
 gprtSolidsSetVertices(GPRTGeomOf<T1> solidsGeom, GPRTBufferOf<T2> vertices, uint32_t count,
-                   uint32_t stride GPRT_IF_CPP(= sizeof(float4)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                   uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtSolidsSetVertices((GPRTGeom) solidsGeom, (GPRTBuffer) vertices, count, stride, offset);
 }
 
@@ -489,7 +489,7 @@ GPRT_API void gprtSolidsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint3
 template <typename T1, typename T2>
 void
 gprtSolidsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
-                      uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                      uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtSolidsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
@@ -497,13 +497,13 @@ gprtSolidsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_
   for the given AABB geometry. This _has_ to be set before the accel(s)
   that this geom is used in get built. */
 GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint32_t count,
-                                    uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)),
+                                    uint32_t stride GPRT_IF_CPP(= 2*sizeof(float3)),
                                     uint32_t offset GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
 gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
-                      uint32_t stride GPRT_IF_CPP(= 2 * sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                      uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
@@ -538,6 +538,15 @@ GPRT_API void gprtSetWindowTitle(GPRTContext context, const char *title);
  * set to NULL.
  */
 GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
+
+/** If a window was requested and enabled is true, this function hides and grabs the cursor, 
+ * providing virtual and unlimited cursor movement. This is useful for implementing 3D 
+ * camera controls. If enabled is fase, the cursor will be made visible and will be released.
+ *
+ * If a window was not requested (ie headless), position arguments will be
+ * set to NULL.
+ */
+GPRT_API void gprtGrabAndHideCursor(GPRTContext context, bool enabled);
 
 #define GPRT_RELEASE 0
 #define GPRT_PRESS   1

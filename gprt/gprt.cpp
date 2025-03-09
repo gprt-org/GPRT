@@ -560,15 +560,6 @@ struct Context {
   };
   SortStages sortStages;
 
-  /*! returns whether validation is enabled */
-  inline static bool validation() {
-#ifdef NDEBUG
-    return false;
-#else
-    return false;
-#endif
-  }
-
   void freeDebugCallback(VkInstance instance);
 
   size_t getNumHitRecords();
@@ -6865,6 +6856,16 @@ gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
     return;
 
   glfwGetCursorPos(context->window, xpos, ypos);
+}
+
+GPRT_API void
+gprtGrabAndHideCursor(GPRTContext _context, bool enabled) {
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+  if (!requestedFeatures.window)
+    return;
+
+  glfwSetInputMode(context->window, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
 }
 
 GPRT_API int
