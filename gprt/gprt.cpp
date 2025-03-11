@@ -5265,11 +5265,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
   // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
   // components, without additional requirements.
-  enabledDeviceExtensions.push_back(VK_KHR_SHADER_RELAXED_EXTENDED_INSTRUCTION_EXTENSION_NAME);
-
-  // This makes structs follow a C-like structure. Modifies alignment rules for uniform buffers,
-  // sortage buffers and push constants, allowing non-scalar types to be aligned solely based on the size of their
-  // components, without additional requirements.
   enabledDeviceExtensions.push_back(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME);
 
   // Allows storing different descriptor types in the same binding.
