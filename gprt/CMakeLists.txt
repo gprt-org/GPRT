@@ -100,6 +100,7 @@ target_link_libraries(gprt
     stb_image
     vma
     imgui
+    dlss
     Threads::Threads
     ${OPENGL_gl_LIBRARY}
 )

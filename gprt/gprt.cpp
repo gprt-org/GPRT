@@ -70,8 +70,26 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+#define VENDOR_ID_AMD 0x1002
+#define VENDOR_ID_ImgTec 0x1010
+#define VENDOR_ID_NVIDIA 0x10DE
+#define VENDOR_ID_ARM 0x13B5
+#define VENDOR_ID_Qualcomm 0x5143
+#define VENDOR_ID_INTEL 0x8086
+static inline std::string getVendorString(uint32_t vendorID) {
+  switch(vendorID) {
+    case VENDOR_ID_AMD: return "AMD";
+    case VENDOR_ID_ImgTec: return "ImgTec";
+    case VENDOR_ID_NVIDIA: return "NVIDIA";
+    case VENDOR_ID_ARM: return "ARM";
+    case VENDOR_ID_Qualcomm: return "Qualcomm";
+    case VENDOR_ID_INTEL: return "INTEL";
+    default: return std::to_string(vendorID);
+  };
+}
+
 // For advanced vulkan memory allocation
-#define VMA_VULKAN_VERSION 1003000   // Vulkan 1.2
+#define VMA_VULKAN_VERSION 1004000   // Vulkan 1.4
 #define VMA_IMPLEMENTATION
 // #define VMA_DEBUG_LOG printf
 #include "vma/vk_mem_alloc.h"
@@ -81,6 +99,10 @@
 
 // For software fallbacks for various primitive types
 #include "gprt_fallbacks.h"
+
+// For DLSS
+#include "nvsdk_ngx_vk.h"
+#include "nvsdk_ngx_helpers_vk.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -126,6 +148,10 @@ static struct RequestedFeatures {
   bool linearSweptSpheres = true;
 
   bool debugPrintf = true;
+
+  // An abstraction over DLSS RR, FSR4, etc
+  bool aiDenoiser = false;
+  uint32_t aiDenoiserFlags = 0;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -5052,7 +5078,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "GPRT";
   appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-  appInfo.apiVersion = VK_API_VERSION_1_2;
+  appInfo.apiVersion = VK_API_VERSION_1_4;
   appInfo.pNext = VK_NULL_HANDLE;
 
   /// 1. Create Instance
@@ -5061,18 +5087,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
   instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
-
-  // Enabled requested instance extensions
-  if (enabledInstanceExtensions.size() > 0) {
-    for (const char *enabledExtension : enabledInstanceExtensions) {
-      // Output message if requested extension is not available
-      if (std::find(supportedInstanceExtensionNames.begin(), supportedInstanceExtensionNames.end(), enabledExtension) ==
-          supportedInstanceExtensionNames.end()) {
-        std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
-      }
-      instanceExtensions.push_back(enabledExtension);
-    }
-  }
 
   VkValidationFeatureEnableEXT enabled[] = {VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT};
   VkValidationFeaturesEXT validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
@@ -5296,6 +5310,9 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // Required for floating point atomics
   enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+  // Required for vkCmdPushDescriptor (Now included with Vulkan 1.4)
+  // enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+
   if (requestedFeatures.window) {
     // If the device will be used for presenting to a display via a swapchain
     // we need to request the swapchain extension
@@ -5336,6 +5353,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   for (uint32_t i = 0; i < gpuCount; i++) {
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+
     std::string message =
         std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
     message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
@@ -5344,9 +5362,19 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
                std::to_string(deviceProperties.apiVersion & 0xfff);
     LOG_INFO(message);
 
+    std::vector<const char *> currentExtensionsList = enabledDeviceExtensions;
+    if (requestedFeatures.aiDenoiser && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+      // If NVIDIA, these are needed to use DLSS
+      currentExtensionsList.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
+      currentExtensionsList.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
+    }
+    else if (requestedFeatures.aiDenoiser) {
+      LOG_WARNING("\tDevice unusable... (GPRT missing AI denoising support for vendor \"" + getVendorString(deviceProperties.vendorID) + "\")");
+      continue;
+    }
+    
     FallbackRequests fallbackRequests;
-
-    if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions, fallbackRequests)) {
+    if (checkDeviceExtensionSupport(physicalDevices[i], currentExtensionsList, fallbackRequests)) {
       usableDevices.push_back(i);
       usableDeviceFallbackRequests.push_back(fallbackRequests);
       LOG_INFO("\tFound usable device");
@@ -5363,7 +5391,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         }
       }
 
-      for (const char *enabledExtension : enabledDeviceExtensions) {
+      for (const char *enabledExtension : currentExtensionsList) {
         if (!extensionSupported(enabledExtension, supportedExtensions)) {
           LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
         }
@@ -5404,6 +5432,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // the physical device Device properties also contain limits and sparse
   // properties
   vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+
+  if (requestedFeatures.aiDenoiser && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    // If NVIDIA, these are needed to use DLSS
+    enabledDeviceExtensions.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
+  }
 
   subgroupProperties = {};
   subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
@@ -6032,6 +6066,17 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     // Call new frame here to initialize some internal imgui data
     ImGui_ImplGlfw_NewFrame();
+  }
+
+  // Init denoisers
+  if (requestedFeatures.aiDenoiser) {
+    NVSDK_NGX_Result result = NVSDK_NGX_VULKAN_Init(/*?*/231313132, L".", instance, physicalDevice, logicalDevice);
+
+    NVSDK_NGX_Parameter* m_ngxParameters = nullptr;
+    result = NVSDK_NGX_VULKAN_GetCapabilityParameters(&m_ngxParameters);
+
+    LOG_INFO("DLSS initialized.");
+
   }
 
   // Finally, setup the internal shader stages and build an initial shader binding table
@@ -6792,6 +6837,14 @@ GPRT_API void
 gprtRequestMaxPayloadSize(uint32_t payloadSize) {
   LOG_API_CALL();
   requestedFeatures.maxRayPayloadSize = payloadSize;
+}
+
+
+GPRT_API void
+gprtRequestDenoiser(uint32_t flags, uint64_t reserved) {
+  LOG_API_CALL();
+  requestedFeatures.aiDenoiser = true;
+  requestedFeatures.aiDenoiserFlags = flags;
 }
 
 GPRT_API void

@@ -4,18 +4,22 @@
 extern GPRTProgram s2_2_deviceCode;
 
 // The positions and radii of our line-swept sphere primitive
-const int NUM_VERTICES = 2;
+const float3 N = normalize(float3(1.0, 0.0, 0.0));
+const float3 T = normalize(float3(0.0, 1.0, 0.0));
+const int NUM_VERTICES = 4;
 float4 vertices[NUM_VERTICES] = {
-    float4(-0.4,-0.1,0.1, 0.4),
-    float4( 0.4, 0.3,0.3, 0.06)
+    float4(0.,0.0,0.0, 0.0) + float4(N , 0.0),
+    float4(0.,0.0,0.0, 0.5),
+    float4(0.,0.0,0.0, 0.0) - float4(N , 0.0)
 };
 
 // Indices connect those vertices together.
-const int NUM_INDICES = 1;
-uint2 indices[NUM_INDICES] = {{0, 1}};
+const int NUM_INDICES = 2;
+uint2 indices[NUM_INDICES] = {{0, 1}, {2, 3}};
 
 // Initial image resolution
-const int2 fbSize = {1400, 460};
+// const int2 fbSize = {1400, 460};
+const int2 fbSize = {1024, 1024};
 
 // Output file name for the rendered image
 const char *outFileName = "s2-3-lss.png";
@@ -34,7 +38,7 @@ int main(int ac, char **av) {
   gprtGeomTypeSetClosestHitProg(lssGeomType, 0, module, "LSSClosestHit");
 
   // Upload vertex and index data to GPU buffers
-  GPRTBufferOf<float4> vertexBuffer = gprtDeviceBufferCreate<float4>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float4> vertexBuffer = gprtHostBufferCreate<float4>(context, NUM_VERTICES, vertices);
   GPRTBufferOf<uint2> indexBuffer = gprtDeviceBufferCreate<uint2>(context, NUM_INDICES, indices);
 
   // New: Create geometry instance and set vertex and index buffers
@@ -50,14 +54,14 @@ int main(int ac, char **av) {
   gprtGeomSetParameters(lssGeom, lssParams);
 
   // Create and build BLAS
-  GPRTAccel lssAccel = gprtLSSAccelCreate(context, lssGeom);
-  gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  GPRTAccel lssAccel = gprtLSSAccelCreate(context, lssGeom, GPRT_LSS_NO_END_CAPS);
+  gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
 
   // Create and build TLAS
   gprt::Instance instance = gprtAccelGetInstance(lssAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
 
   // Set up ray generation and miss programs
   GPRTMissOf<void> miss = gprtMissCreate<void>(context, module, "miss");
@@ -75,9 +79,27 @@ int main(int ac, char **av) {
   // Main render loop
   PushConstants pc;
   do {
-    pc.time = float(gprtGetTime(context));
+    pc.time = float(gprtGetTime(context)) * .5;
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
     gprtBufferPresent(context, frameBuffer);
+
+    float4* verts = gprtBufferGetHostPointer(vertexBuffer);
+
+    // parameters of ellipse
+    float b = .5; // height
+    float a = std::max((cos(pc.time)* .5f + 0.5f) * b, (1.f / 64.f) * b); // width
+
+    float scale = b / a;
+    float A = b;
+    float B = (b*b) / a;
+    float C = sqrt(A*A + B*B);
+
+    verts[0] = float4(-N*a,0.); //
+    verts[1] = float4(+N * B, C); //(sin(pc.time)* .5f + 0.5f); 
+    verts[2] = float4(-N * B, C); //(sin(pc.time)* .5f + 0.5f); 
+    verts[3] = float4(+N*a,0.); //(sin(pc.time)* .5f + 0.5f); 
+    gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
+    gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
   }
   while (!gprtWindowShouldClose(context));
 

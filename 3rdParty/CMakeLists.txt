@@ -181,3 +181,6 @@ target_link_libraries(${VULKAN_LIBRARY} glfw)
 if (GPRT_BUILD_SAMPLES)
 add_subdirectory(generator)
 endif()
+
+# Find DLSS interface
+add_subdirectory(dlss)

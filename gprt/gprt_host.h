@@ -775,6 +775,12 @@ GPRT_API void gprtRequestMaxAttributeSize(uint32_t attributeSize);
 
 GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
 
+/** Tells the GPRT to initialize a vendor-supplied denoising model. 
+ * Different vendors have different denoising requirements, and image 
+ * quality will vary. 
+ */
+GPRT_API void gprtRequestDenoiser(uint32_t flags, uint64_t reserved GPRT_IF_CPP(= 0));
+
 /** creates a new device context with the gives list of devices.
 
   If requested device IDs list if null it implicitly refers to the
