@@ -55,7 +55,7 @@ const int NUM_INDICES = 2;
 uint3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 
 // initial image resolution
-const int2 fbSize = {1400, 460};
+const int2 fbSize = {1920, 1080};
 
 // final image output
 const char *outFileName = "s07-antialiasing.hdr";
@@ -65,29 +65,36 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, 1.f, 0.f};
 float cosFovy = 0.4f;
 
-// Computes a Halton sequence value in [0,1] for a given index and base.
-float Halton(uint index, uint base)
+float2 GetCurrentPixelOffset(uint32_t frameIndex)
 {
-    float result = 0.0;
-    float f = 1.0 / base;
-    while (index > 0)
-    {
-        result += f * (index % base);
-        index /= base;
-        f /= base;
-    }
-    return result;
-}
+    // Halton jitter
+    float2 Result(0.0f, 0.0f);
 
-// Returns a screen-space jitter (in the range [-0.5, 0.5]) using the Halton sequence.
-float2 GetScreenJitter(uint sampleIndex)
-{
-    // Use base 2 for the x-axis and base 3 for the y-axis.
-    float x = Halton(sampleIndex, 2);
-    float y = Halton(sampleIndex, 3);
-    
-    // Remap from [0,1] to [-0.5, 0.5].
-    return float2(x - 0.5, y - 0.5);
+    constexpr int BaseX = 2;
+    int Index = frameIndex + 1;
+    float InvBase = 1.0f / BaseX;
+    float Fraction = InvBase;
+    while (Index > 0)
+    {
+        Result.x += (Index % BaseX) * Fraction;
+        Index /= BaseX;
+        Fraction *= InvBase;
+    }
+
+    constexpr int BaseY = 3;
+    Index = frameIndex + 1;
+    InvBase = 1.0f / BaseY;
+    Fraction = InvBase;
+    while (Index > 0)
+    {
+        Result.y += (Index % BaseY) * Fraction;
+        Index /= BaseY;
+        Fraction *= InvBase;
+    }
+
+    Result.x -= 0.5f;
+    Result.y -= 0.5f;
+    return Result;
 }
 
 int main(int ac, char **av) {
@@ -103,7 +110,7 @@ int main(int ac, char **av) {
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
-  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES));
+  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES | GPRT_DENOISE_FLAGS_DO_SHARPENING | GPRT_DENOISE_FLAGS_AUTO_EXPOSURE | GPRT_DENOISE_FLAGS_DEPTH_INVERTED));
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
   GPRTContext context = gprtContextCreate(nullptr, 1);
@@ -244,7 +251,7 @@ int main(int ac, char **av) {
   double lastxpos, lastypos;
   pc.frame = 0;
   do {
-    float2 jitter = GetScreenJitter(pc.frame);
+    float2 jitter = GetCurrentPixelOffset(pc.frame);
     raygenData->jitter = jitter;
 
 

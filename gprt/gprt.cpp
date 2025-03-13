@@ -8075,6 +8075,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     evalParams.pInMotionVectors  = &motionVectorsBuffer;
     evalParams.InJitterOffsetX = params.jitter.x;
     evalParams.InJitterOffsetY = params.jitter.y; // todo...
+    evalParams.InMVScaleX = 1.f;
+    evalParams.InMVScaleY = 1.f;
     evalParams.Feature.InSharpness = context->aiDenoising.optimalSettings.sharpness;
     evalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
     evalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;

@@ -114,12 +114,12 @@ raygen(uniform RayGenData record) {
   screenPrev.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
   screenPrev.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
 
-  float2 motionVec = float2(0.f); //(screen - screenPrev) * dims;
+  float2 motionVec = (screen - screenPrev);
 
 
   const int fbOfs = pixelID.x + dims.x * pixelID.y;
   record.renderBuffer[fbOfs] = float4(payload.color, 1.0);
-  record.depthBuffer[fbOfs] = clamp(payload.hitT / 10.f, 0.f, 1.f); // must be a value between [0, 1]
+  record.depthBuffer[fbOfs] = clamp(1.f / payload.hitT, 0.f, 1.f); // must be a value between [0, 1]
   record.mvecBuffer[fbOfs] = motionVec;
 }
 
