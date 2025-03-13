@@ -40,8 +40,28 @@ struct TrianglesGeomData {
 
 struct RayGenData {
   SurfaceAccelerationStructure world;
-  uint *frameBuffer;
+  // #ifdef __SLANG_COMPILER__
+  // DescriptorHandle<RWTexture2D> renderBuffer;
+  // #else
+  // DescriptorHandle<Texture2D> renderBuffer;
+  float4* renderBuffer;
+  float* depthBuffer;
+  float2* mvecBuffer;
+  // #endif
   int2 fbSize;
+
+  struct Camera {
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
+    float fovy;
+  };
+  
+  Camera currCamera;
+  Camera prevCamera;
+
+  float2 jitter;
 };
 
 /* variables for the miss program */
@@ -52,18 +72,18 @@ struct MissProgData {
 
 /* Constants that change each frame */
 struct PushConstants {
-  struct Camera {
-    float3 pos;
-    float3 dir_00;
-    float3 dir_du;
-    float3 dir_dv;
-    float fovy;
-  } camera;
-
   /*! the current time */
   float now;
+  int frame;
 
   /*! array/buffer of instances to transform */
+  gprt::Instance *prevInstances; // holds previous transform data
   gprt::Instance *instances;
   int numInstances;
+};
+
+struct RenderPassParams {
+  int2 fbSize;
+  DescriptorHandle<Texture2D> resolvedColor;
+  uint32_t *frameBuffer;
 };

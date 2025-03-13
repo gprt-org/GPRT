@@ -145,6 +145,28 @@ struct DescriptorHandle
   uint2 index;
 };
 
+// Structure subject to change
+struct GPRTDenoiseParams {
+  GPRTTextureOf<float4> unresolvedColor;
+  GPRTTextureOf<float4> resolvedColor; // output
+  GPRTTextureOf<float2> diffuseMotionVectors;
+  GPRTTextureOf<float> depthBuffer;
+  float2 jitter;
+};
+
+typedef enum {
+  GPRT_DENOISE_FLAGS_IS_INVALID      = 1 << 31,
+  GPRT_DENOISE_FLAGS_NONE           = 0,
+  GPRT_DENOISE_FLAGS_IS_HDR          = 1 << 0,
+  GPRT_DENOISE_FLAGS_MVLOWRES       = 1 << 1,
+  GPRT_DENOISE_FLAGS_MVJITTERED     = 1 << 2,
+  GPRT_DENOISE_FLAGS_DEPTH_INVERTED  = 1 << 3,
+  GPRT_DENOISE_FLAGS_RESERVED_0     = 1 << 4,
+  GPRT_DENOISE_FLAGS_DO_SHARPENING   = 1 << 5,
+  GPRT_DENOISE_FLAGS_AUTO_EXPOSURE   = 1 << 6,
+  GPRT_DENOISE_FLAGS_ALPHA_UPSCALING = 1 << 7
+} GPRTDenoiseFlags;
+
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
 
@@ -286,6 +308,7 @@ typedef enum {
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
+  GPRT_FORMAT_R32G32_SFLOAT = VK_FORMAT_R32G32_SFLOAT,
   GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
   GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
@@ -548,6 +571,8 @@ GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
  */
 GPRT_API void gprtGrabAndHideCursor(GPRTContext context, bool enabled);
 
+GPRT_API void gprtGetDenoiserRenderSize(GPRTContext context, uint32_t *width, uint32_t *height);
+
 #define GPRT_RELEASE 0
 #define GPRT_PRESS   1
 #define GPRT_REPEAT  2
@@ -779,7 +804,7 @@ GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
  * Different vendors have different denoising requirements, and image 
  * quality will vary. 
  */
-GPRT_API void gprtRequestDenoiser(uint32_t flags, uint64_t reserved GPRT_IF_CPP(= 0));
+GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags);
 
 /** creates a new device context with the gives list of devices.
 
@@ -1542,6 +1567,8 @@ void
 gprtTextureClear(GPRTTextureOf<T> texture) {
   gprtTextureClear((GPRTTexture) texture);
 }
+
+GPRT_API void gprtTextureDenoise(GPRTContext context, const GPRTDenoiseParams &params);
 
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
   underlying memory*/

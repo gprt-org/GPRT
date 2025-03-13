@@ -102,6 +102,7 @@ static inline std::string getVendorString(uint32_t vendorID) {
 
 // For DLSS
 #include "nvsdk_ngx_vk.h"
+#include "nvsdk_ngx_helpers.h"
 #include "nvsdk_ngx_helpers_vk.h"
 
 /** @brief A collection of features that are requested to support before
@@ -150,8 +151,12 @@ static struct RequestedFeatures {
   bool debugPrintf = true;
 
   // An abstraction over DLSS RR, FSR4, etc
-  bool aiDenoiser = false;
-  uint32_t aiDenoiserFlags = 0;
+  struct AIDenoiserProperties {
+    bool requested = false;
+    GPRTDenoiseFlags flags = GPRT_DENOISE_FLAGS_NONE; // mirrors the create flags of DLSS
+    uint32_t outputWidth;
+    uint32_t outputHeight;
+  } aiDenoiser;
 
   /*! returns whether logging is enabled */
   inline static bool logging() {
@@ -423,6 +428,28 @@ struct Context {
   VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
   VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
+
+  struct AIDenoising {
+    const uint64_t kAppID = 231313132;
+    NVSDK_NGX_Parameter* ngxParameters = nullptr;
+    NVSDK_NGX_Handle* ngxHandle = nullptr;
+
+    struct OptimalSettings
+    {
+        float sharpness;
+        uint2 optimalRenderSize;
+        uint2 minRenderSize;
+        uint2 maxRenderSize;
+    } optimalSettings;
+
+    std::string resultToString(NVSDK_NGX_Result result)
+    {
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "(code: 0x%08x, info: %ls)", result, GetNGXResultAsString(result));
+        buf[sizeof(buf) - 1] = '\0';
+        return std::string(buf);
+    }
+  } aiDenoising;
 
   struct ImGuiData {
     uint32_t width = -1;
@@ -1252,6 +1279,8 @@ gprtFormatGetSize(GPRTFormat format) {
     return 4;
   case GPRT_FORMAT_D32_SFLOAT:
     return 4;
+  case GPRT_FORMAT_R32G32_SFLOAT:
+    return 8;
   case GPRT_FORMAT_R32G32B32A32_SFLOAT:
     return 16;
   default:
@@ -5273,6 +5302,9 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     return requiredExtensions.empty();
   };
 
+  // For -spirv-reflect support.
+  enabledDeviceExtensions.push_back(VK_GOOGLE_USER_TYPE_EXTENSION_NAME);
+
   // enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
   enabledDeviceExtensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
 
@@ -5290,6 +5322,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // Ray tracing related extensions required
   enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
   enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME);
 
   // Required by VK_KHR_acceleration_structure
   enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
@@ -5363,12 +5396,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     LOG_INFO(message);
 
     std::vector<const char *> currentExtensionsList = enabledDeviceExtensions;
-    if (requestedFeatures.aiDenoiser && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
       // If NVIDIA, these are needed to use DLSS
       currentExtensionsList.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
       currentExtensionsList.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
     }
-    else if (requestedFeatures.aiDenoiser) {
+    else if (requestedFeatures.aiDenoiser.requested) {
       LOG_WARNING("\tDevice unusable... (GPRT missing AI denoising support for vendor \"" + getVendorString(deviceProperties.vendorID) + "\")");
       continue;
     }
@@ -5433,7 +5466,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // properties
   vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
 
-  if (requestedFeatures.aiDenoiser && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+  if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
     // If NVIDIA, these are needed to use DLSS
     enabledDeviceExtensions.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
     enabledDeviceExtensions.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
@@ -6069,14 +6102,53 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   // Init denoisers
-  if (requestedFeatures.aiDenoiser) {
-    NVSDK_NGX_Result result = NVSDK_NGX_VULKAN_Init(/*?*/231313132, L".", instance, physicalDevice, logicalDevice);
+  if (requestedFeatures.aiDenoiser.requested) {
+    if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+      NVSDK_NGX_Result initResult = NVSDK_NGX_VULKAN_Init(aiDenoising.kAppID, L".", instance, physicalDevice, logicalDevice);
+      if (NVSDK_NGX_FAILED(initResult)) {
+        if (initResult == NVSDK_NGX_Result_FAIL_FeatureNotSupported || initResult == NVSDK_NGX_Result_FAIL_PlatformError) {
+          LOG_ERROR("NVIDIA NGX is not available on this hardware/platform " + aiDenoising.resultToString(initResult));
+        }
+        else {
+          LOG_ERROR("Failed to initialize NGX " + aiDenoising.resultToString(initResult));
+        }
+      }
+      NVSDK_NGX_Result paramsResult = NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters);
+      
+      NVSDK_NGX_Result optimalSettingsResult = NGX_DLSS_GET_OPTIMAL_SETTINGS
+      (
+        aiDenoising.ngxParameters,
+        requestedFeatures.aiDenoiser.outputWidth,
+        requestedFeatures.aiDenoiser.outputHeight,
+        NVSDK_NGX_PerfQuality_Value_MaxQuality,
+        &aiDenoising.optimalSettings.optimalRenderSize.x,
+        &aiDenoising.optimalSettings.optimalRenderSize.y,
+        &aiDenoising.optimalSettings.maxRenderSize.x,
+        &aiDenoising.optimalSettings.maxRenderSize.y,
+        &aiDenoising.optimalSettings.minRenderSize.x,
+        &aiDenoising.optimalSettings.minRenderSize.y,
+        &aiDenoising.optimalSettings.sharpness
+      );
 
-    NVSDK_NGX_Parameter* m_ngxParameters = nullptr;
-    result = NVSDK_NGX_VULKAN_GetCapabilityParameters(&m_ngxParameters);
+      VkCommandBuffer commandList = beginSingleTimeCommands(graphicsCommandPool);
 
-    LOG_INFO("DLSS initialized.");
-
+      NVSDK_NGX_DLSS_Create_Params dlssParams = {};
+      unsigned int creationNodeMask = 1;
+      unsigned int visibilityNodeMask = 1;      
+      
+      dlssParams.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags;
+      dlssParams.Feature.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
+      dlssParams.Feature.InHeight = aiDenoising.optimalSettings.optimalRenderSize.y;
+      dlssParams.Feature.InTargetWidth = requestedFeatures.aiDenoiser.outputWidth;
+      dlssParams.Feature.InTargetHeight = requestedFeatures.aiDenoiser.outputHeight;
+      dlssParams.Feature.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_MaxQuality; // for now, can change later.
+      
+      NVSDK_NGX_Result createResult = NGX_VULKAN_CREATE_DLSS_EXT(commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParams);
+      endSingleTimeCommands(commandList, graphicsCommandPool, graphicsQueue);
+    }
+    else {
+      LOG_ERROR("Unimplemented");
+    }
   }
 
   // Finally, setup the internal shader stages and build an initial shader binding table
@@ -6841,10 +6913,12 @@ gprtRequestMaxPayloadSize(uint32_t payloadSize) {
 
 
 GPRT_API void
-gprtRequestDenoiser(uint32_t flags, uint64_t reserved) {
+gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags) {
   LOG_API_CALL();
-  requestedFeatures.aiDenoiser = true;
-  requestedFeatures.aiDenoiserFlags = flags;
+  requestedFeatures.aiDenoiser.requested = true;
+  requestedFeatures.aiDenoiser.flags = flags;
+  requestedFeatures.aiDenoiser.outputWidth = outputWidth;
+  requestedFeatures.aiDenoiser.outputHeight = outputHeight;
 }
 
 GPRT_API void
@@ -6943,6 +7017,16 @@ gprtGetTime(GPRTContext _context) {
   if (!requestedFeatures.window)
     return 0.0;
   return glfwGetTime();
+}
+
+GPRT_API void gprtGetDenoiserRenderSize(GPRTContext _context, uint32_t *width, uint32_t *height)
+{
+  LOG_API_CALL();
+  if (!requestedFeatures.aiDenoiser.requested)
+    return;
+  Context *context = (Context *) _context;
+  *width = context->aiDenoising.optimalSettings.optimalRenderSize.x;
+  *height = context->aiDenoising.optimalSettings.optimalRenderSize.y;
 }
 
 GPRT_API void
@@ -7790,6 +7874,7 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_STORAGE_BIT |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7818,6 +7903,7 @@ gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_STORAGE_BIT |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7841,6 +7927,7 @@ gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_STORAGE_BIT |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7899,6 +7986,215 @@ gprtTextureClear(GPRTTexture _texture) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
   texture->clear();
+}
+
+GPRT_API void
+gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
+{
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+
+  if (context->deviceProperties.vendorID == VENDOR_ID_NVIDIA)
+  {
+    /* Transition resolve image to a general format */
+    // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
+    auto oldResolveLayout = ((Texture*)params.resolvedColor)->layout;
+    if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
+    {
+      VkImageSubresourceRange imageSubresource;
+      imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+      imageSubresource.baseArrayLayer = 0;
+      imageSubresource.baseMipLevel = 0;
+      imageSubresource.layerCount = 1;
+      imageSubresource.levelCount = 1;
+      
+      VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+      ((Texture*)params.resolvedColor)->setImageLayout(commandList, ((Texture*)params.resolvedColor)->image, 
+        oldResolveLayout, VK_IMAGE_LAYOUT_GENERAL, imageSubresource);
+      context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+      ((Texture*)params.resolvedColor)->layout = VK_IMAGE_LAYOUT_GENERAL;
+    }
+
+    // Buffers don't actually seem to be supported.
+    // auto getBufferResource = [](Buffer* pBuffer) -> NVSDK_NGX_Resource_VK
+    // {
+    //   if (!pBuffer) return {};
+    //   return NVSDK_NGX_Create_Buffer_Resource_VK(pBuffer->buffer, pBuffer->getSize(), true);
+    // };
+
+    // auto getAspectMaskFromFormat = [](VkFormat format) -> VkImageAspectFlags
+    // {
+    //     switch (format)
+    //     {
+    //     case VK_FORMAT_D16_UNORM_S8_UINT:
+    //     case VK_FORMAT_D24_UNORM_S8_UINT:
+    //     case VK_FORMAT_D32_SFLOAT_S8_UINT:
+    //         return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    //     case VK_FORMAT_D16_UNORM:
+    //     case VK_FORMAT_D32_SFLOAT:
+    //     case VK_FORMAT_X8_D24_UNORM_PACK32:
+    //         return VK_IMAGE_ASPECT_DEPTH_BIT;
+    //     case VK_FORMAT_S8_UINT:
+    //         return VK_IMAGE_ASPECT_STENCIL_BIT;
+    //     default:
+    //         return VK_IMAGE_ASPECT_COLOR_BIT;
+    //     }
+    // };
+
+    auto getImageView = [](Texture* pTexture, bool isReadWrite = false) -> NVSDK_NGX_Resource_VK
+    {
+        if (!pTexture)
+            return {};
+
+        VkImageView imageView = pTexture->imageView;
+        VkImage image = pTexture->image; 
+        VkFormat format = pTexture->format;
+        VkImageSubresourceRange range;
+        range.aspectMask = pTexture->aspectFlagBits;//getAspectMaskFromFormat(format);
+        range.baseMipLevel = 0;
+        range.levelCount = 1;
+        range.baseArrayLayer = 0;
+        range.layerCount = 1;
+        return NVSDK_NGX_Create_ImageView_Resource_VK(
+            imageView, image, range, format, pTexture->width, pTexture->height, isReadWrite
+        );
+    };
+
+    NVSDK_NGX_Resource_VK unresolvedColorBuffer = getImageView((Texture*)params.unresolvedColor);
+    NVSDK_NGX_Resource_VK motionVectorsBuffer = getImageView((Texture*)params.diffuseMotionVectors);
+    NVSDK_NGX_Resource_VK resolvedColorBuffer = getImageView((Texture*)params.resolvedColor, true);
+    NVSDK_NGX_Resource_VK depthBuffer = getImageView((Texture*)params.depthBuffer);
+    // NVSDK_NGX_Resource_VK exposureBuffer = getBufferResource(pExposure);
+    
+    VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+
+    NVSDK_NGX_VK_DLSS_Eval_Params evalParams = {};
+    evalParams.Feature.pInColor  = &unresolvedColorBuffer;
+    evalParams.Feature.pInOutput = &resolvedColorBuffer; 
+    evalParams.pInDepth          = &depthBuffer;
+    evalParams.pInMotionVectors  = &motionVectorsBuffer;
+    evalParams.InJitterOffsetX = params.jitter.x;
+    evalParams.InJitterOffsetY = params.jitter.y; // todo...
+    evalParams.Feature.InSharpness = context->aiDenoising.optimalSettings.sharpness;
+    evalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
+    evalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
+
+    NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSS_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &evalParams);
+    context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+
+
+    if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
+    {
+      VkImageSubresourceRange imageSubresource;
+      imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+      imageSubresource.baseArrayLayer = 0;
+      imageSubresource.baseMipLevel = 0;
+      imageSubresource.layerCount = 1;
+      imageSubresource.levelCount = 1;
+      
+      VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+      ((Texture*)params.resolvedColor)->setImageLayout(commandList, ((Texture*)params.resolvedColor)->image, 
+      VK_IMAGE_LAYOUT_GENERAL, oldResolveLayout, imageSubresource);
+      context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+      ((Texture*)params.resolvedColor)->layout = oldResolveLayout;
+    }
+
+
+
+    // if (NVSDK_NGX_FAILED(result)) {LOG_WARNING("Failed to NGX_VULKAN_EVALUATE_DLSS_EXT for DLSS: {}", context->aiDenoising.resultToString(result));}
+    
+
+
+    // Determine pass I/O sizes based on bound textures.
+    // const auto& pOutput = renderData.getTexture(kOutput);
+    // const auto& pColor = renderData.getTexture(kColorInput);
+    // FALCOR_ASSERT(pColor && pOutput);
+
+    // mPassOutputSize = {pOutput->getWidth(), pOutput->getHeight()};
+    // const uint2 inputSize = {pColor->getWidth(), pColor->getHeight()};
+
+    // if (!mEnabled || !mpScene)
+    // {
+    //     pRenderContext->blit(pColor->getSRV(), pOutput->getRTV());
+    //     return;
+    // }
+
+    // if (mExposureUpdated)
+    // {
+    //     float exposure = pow(2.f, mExposure);
+    //     pRenderContext->updateTextureData(mpExposure.get(), &exposure);
+    //     mExposureUpdated = false;
+    // }
+
+    // if (mRecreate || any(inputSize != mInputSize))
+    // {
+    //     mRecreate = false;
+    //     mInputSize = inputSize;
+
+    //     initializeDLSS(pRenderContext);
+
+    //     // If pass output is configured to be fixed to DLSS output, but the sizes don't match,
+    //     // we'll trigger a graph recompile to update the pass I/O size requirements.
+    //     // This causes a one frame delay, but unfortunately we don't know the size until after initializeDLSS().
+    //     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed && any(mPassOutputSize != mDLSSOutputSize))
+    //         requestRecompile();
+    // }
+
+    // {
+    //     // Fetch inputs and verify their dimensions.
+    //     auto getInput = [=](const std::string& name)
+    //     {
+    //         auto tex = renderData.getTexture(name);
+    //         if (!tex)
+    //             FALCOR_THROW("DLSSPass: Missing input '{}'", name);
+    //         if (tex->getWidth() != mInputSize.x || tex->getHeight() != mInputSize.y)
+    //             FALCOR_THROW("DLSSPass: Input '{}' has mismatching size. All inputs must be of the same size.", name);
+    //         return tex;
+    //     };
+
+    //     auto color = getInput(kColorInput);
+    //     auto depth = getInput(kDepthInput);
+    //     auto motionVectors = getInput(kMotionVectorsInput);
+
+    //     // Determine if we can write directly to the render pass output.
+    //     // Otherwise we'll output to an internal buffer and blit to the pass output.
+    //     FALCOR_ASSERT(mpOutput->getWidth() == mDLSSOutputSize.x && mpOutput->getHeight() == mDLSSOutputSize.y);
+    //     bool useInternalBuffer = (any(mDLSSOutputSize != mPassOutputSize) || pOutput->getFormat() != mpOutput->getFormat());
+
+    //     auto output = useInternalBuffer ? mpOutput : pOutput;
+
+    //     // In DLSS X-jitter should go left-to-right, Y-jitter should go top-to-bottom.
+    //     // Falcor is using math::perspective() that gives coordinate system with
+    //     // X from -1 to 1, left-to-right, and Y from -1 to 1, bottom-to-top.
+    //     // Therefore, we need to flip the Y-jitter only.
+    //     const auto& camera = mpScene->getCamera();
+    //     float2 jitterOffset = float2(camera->getJitterX(), -camera->getJitterY()) * float2(inputSize);
+    //     float2 motionVectorScale = float2(1.f, 1.f);
+    //     if (mMotionVectorScale == MotionVectorScale::Relative)
+    //         motionVectorScale = inputSize;
+
+    //     mpNGXWrapper->evaluateDLSS(
+    //         pRenderContext,
+    //         color.get(),
+    //         output.get(),
+    //         motionVectors.get(),
+    //         depth.get(),
+    //         mpExposure.get(),
+    //         false,
+    //         mSharpness,
+    //         jitterOffset,
+    //         motionVectorScale
+    //     );
+
+    //     // Resample the upscaled result from DLSS to the pass output if needed.
+    //     if (useInternalBuffer)
+    //         pRenderContext->blit(mpOutput->getSRV(), pOutput->getRTV());
+    // }
+  }
+  else
+  {
+    LOG_ERROR("Unimplemented");
+  }
 }
 
 GPRT_API void
@@ -8547,12 +8843,22 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
   if (!mapped)
     texture->map();
 
-  if (texture->format != VK_FORMAT_R8G8B8A8_SRGB) {
-    LOG_ERROR("Error, only GPRT_FORMAT_R8G8B8A8_SRGB format currently supported!");
+  if (texture->format != VK_FORMAT_R8G8B8A8_SRGB && texture->format != VK_FORMAT_R32G32B32A32_SFLOAT) {
+    LOG_ERROR("Error, unsupported image format!");
   }
 
-  const uint8_t *fb = (const uint8_t *) texture->mapped;
-  stbi_write_png(imageName, texture->width, texture->height, 4, fb, (uint32_t) (texture->width) * sizeof(uint32_t));
+  if (texture->format == VK_FORMAT_R8G8B8A8_SRGB) {
+    const uint8_t *fb = (const uint8_t *) texture->mapped;
+    stbi_write_png(imageName, texture->width, texture->height, 4, fb, (uint32_t) (texture->width) * sizeof(uint32_t));
+  }
+  else if (texture->format == VK_FORMAT_R32G32B32A32_SFLOAT) {
+    const float *fb = (const float *) texture->mapped;
+    for (int i = 0; i < texture->width* texture->height * 4; ++i)
+    {
+      std::cout<<fb[i]<<std::endl;
+    }
+    stbi_write_hdr(imageName, texture->width, texture->height, 4, fb);
+  }
 
   // Return mapped to previous state
   if (!mapped)

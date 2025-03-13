@@ -26,8 +26,10 @@
 PushConstants pc;
 
 struct Payload {
-  float spreadAngle;
   float3 color;
+  float3 pos;
+  float3 posPrev;
+  float hitT;
 };
 
 float3x3
@@ -56,13 +58,14 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
   int transformY = instanceID % 2;
 
   int numInstances = pc.numInstances;
-  float angle = pc.now;
+  float angle = 0.f;//pc.now;
   float3x3 aa = AngleAxis3x3(angle, float3(0.0, 1.0, 0.0));
 
-  gprt::Instance instance = pc.instances[instanceID];
+  gprt::Instance instance = pc.instances[instanceID];  
+  pc.prevInstances[instanceID] = instance; // Copy previous instance
+
   instance.transform = float3x4(float4(aa[0], lerp(-5, 5, transformX / float((numInstances / 2) - 1))),
                                 float4(aa[1], lerp(-1, 1, transformY)), float4(aa[2], 0.0));
-
   pc.instances[instanceID] = instance;
 }
 
@@ -72,19 +75,17 @@ raygen(uniform RayGenData record) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
-  float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(dims);
+  
+  // value between -.5 and .5
+  float2 screen = (float2(pixelID) + float2(.5, .5) + record.jitter) / float2(dims);
 
   // Generate ray
   RayDesc rayDesc;
-  rayDesc.Origin = pc.camera.pos;
-  rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
+  rayDesc.Origin = record.currCamera.pos;
+  rayDesc.Direction = normalize(record.currCamera.dir_00 + screen.x * record.currCamera.dir_du + screen.y * record.currCamera.dir_dv);
   rayDesc.TMin = 0.0;
-  rayDesc.TMax = 1e38f;
-
-  // compute the spreading angle of the ray to determine the sampling footprint
-  float phi = pc.camera.fovy;
-  float H = dims.y;
-  payload.spreadAngle = atan(2.f * tan(phi / 2.f) / H);
+  rayDesc.TMax = 1e38f;  
+  payload.hitT = 1e38f;
 
   // Trace ray against surface
   TraceRay(record.world,            // the tree
@@ -97,8 +98,29 @@ raygen(uniform RayGenData record) {
            payload                  // the payload IO
   );
 
+  // Determine motion vectors
+  float3 posPrev = payload.posPrev;
+  float3 pos = payload.pos;
+  float3 worldMotionVec = pos - posPrev;
+
+  // Translation of camera
+  float3 v_prev = posPrev - record.prevCamera.pos;
+
+  // Compute the “depth” along the main viewing direction.
+  float invDepth_prev = 1.0f / dot(v_prev, record.prevCamera.dir_00);
+
+  // Project onto the image plane directions.
+  float2 screenPrev;
+  screenPrev.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
+  screenPrev.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
+
+  float2 motionVec = float2(0.f); //(screen - screenPrev) * dims;
+
+
   const int fbOfs = pixelID.x + dims.x * pixelID.y;
-  record.frameBuffer[fbOfs] = gprt::make_bgra(payload.color);
+  record.renderBuffer[fbOfs] = float4(payload.color, 1.0);
+  record.depthBuffer[fbOfs] = clamp(payload.hitT / 10.f, 0.f, 1.f); // must be a value between [0, 1]
+  record.mvecBuffer[fbOfs] = motionVec;
 }
 
 [shader("closesthit")]
@@ -111,6 +133,13 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   float3 A = record.vertex[index.x];
   float3 B = record.vertex[index.y];
   float3 C = record.vertex[index.z];
+  
+  gprt::Instance prevInstance = pc.prevInstances[instanceID];
+  gprt::Instance currInstance = pc.instances[instanceID];
+  float3 P = A * bc.x + B * bc.y + C * (1.f - (bc.x + bc.y));
+  payload.posPrev = mul(prevInstance.transform, float4(P, 1.f)).xyz;
+  payload.pos = mul(currInstance.transform, float4(P, 1.f)).xyz;
+  
   float3 Ng = normalize(cross(B - A, C - A));
 
   // compute texture coordinate:
@@ -132,8 +161,9 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
 
   // Here's how you'd normally sample a texture
   color = texture.SampleGrad(sampler, TC*(InstanceIndex() + 1.f), DDX, DDY);
-  
+
   payload.color = color.rgb;
+  payload.hitT = RayTCurrent();
 }
 
 // A background with a vignette effect.
@@ -145,4 +175,20 @@ miss(uniform MissProgData record, inout Payload payload) {
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
   float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
   payload.color = col;
+}
+
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void
+RenderPass(uint3 DispatchThreadID: SV_DispatchThreadID, uniform RenderPassParams pc) {
+  int2 pixelID = DispatchThreadID.xy;
+  if (pixelID.x >= pc.fbSize.x || pixelID.y >= pc.fbSize.y) {
+    return;
+  }
+
+  const int fbOfs = pixelID.x + pc.fbSize.x * pixelID.y;
+  pc.frameBuffer[fbOfs] = gprt::make_bgra(pc.resolvedColor[pixelID]);
+
+  // pc.frameBuffer[fbOfs] = gprt::make_bgra(pc.debugBuffer[fbOfs]);
 }

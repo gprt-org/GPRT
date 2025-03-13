@@ -58,12 +58,37 @@ uint3 indices[NUM_INDICES] = {{0, 1, 2}, {1, 3, 2}};
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s09-textures.png";
+const char *outFileName = "s07-antialiasing.hdr";
 
 float3 lookFrom = {0.f, 0.0f, 10.f};
 float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, 1.f, 0.f};
 float cosFovy = 0.4f;
+
+// Computes a Halton sequence value in [0,1] for a given index and base.
+float Halton(uint index, uint base)
+{
+    float result = 0.0;
+    float f = 1.0 / base;
+    while (index > 0)
+    {
+        result += f * (index % base);
+        index /= base;
+        f /= base;
+    }
+    return result;
+}
+
+// Returns a screen-space jitter (in the range [-0.5, 0.5]) using the Halton sequence.
+float2 GetScreenJitter(uint sampleIndex)
+{
+    // Use base 2 for the x-axis and base 3 for the y-axis.
+    float x = Halton(sampleIndex, 2);
+    float y = Halton(sampleIndex, 3);
+    
+    // Remap from [0,1] to [-0.5, 0.5].
+    return float2(x - 0.5, y - 0.5);
+}
 
 int main(int ac, char **av) {
   // The output window will show comments for many of the methods called.
@@ -78,13 +103,16 @@ int main(int ac, char **av) {
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 
-  gprtRequestDenoiser(/*flags*/0);
+  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES));
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s7_0_deviceCode);
   PushConstants pc;
   pc.now = 0.f;
+
+  uint2 renderFBSize = fbSize;
+  gprtGetDenoiserRenderSize(context, &renderFBSize.x, &renderFBSize.y);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -94,6 +122,7 @@ int main(int ac, char **av) {
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
   auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
+  auto renderpassProgram = gprtComputeCreate<RenderPassParams>(context, module, "RenderPass");
 
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 
@@ -166,8 +195,11 @@ int main(int ac, char **av) {
 
   GPRTBufferOf<gprt::Instance> instancesBuffer =
       gprtDeviceBufferCreate<gprt::Instance>(context, instances.size(), instances.data());
+  GPRTBufferOf<gprt::Instance> prevInstancesBuffer =
+      gprtDeviceBufferCreate<gprt::Instance>(context, instances.size(), instances.data());
   GPRTAccel trianglesTLAS = gprtInstanceAccelCreate(context, instances.size(), instancesBuffer);
 
+  pc.prevInstances = gprtBufferGetDevicePointer(prevInstancesBuffer);
   pc.instances = gprtBufferGetDevicePointer(instancesBuffer);
   pc.numInstances = (uint32_t) instances.size();
   gprtComputeLaunch(transformProgram, {samplers.size(), 1, 1}, {1, 1, 1}, pc);
@@ -179,10 +211,21 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Setup the ray generation and miss programs
   // ------------------------------------------------------------------
+  GPRTBufferOf<float4> tmpRenderBuffer = gprtDeviceBufferCreate<float4>(context, renderFBSize.x *  renderFBSize.y);
+  GPRTBufferOf<float> tmpDepthBuffer = gprtDeviceBufferCreate<float>(context, renderFBSize.x *  renderFBSize.y);
+  GPRTBufferOf<float2> tmpMVecBuffer = gprtDeviceBufferCreate<float2>(context, renderFBSize.x *  renderFBSize.y);
+  
+  GPRTTextureOf<float4> renderBuffer = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);
+  GPRTTextureOf<float> depthBuffer = gprtDeviceTextureCreate<float>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);
+  GPRTTextureOf<float2> mvecBuffer = gprtDeviceTextureCreate<float2>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);  
+  GPRTTextureOf<float4> resolvedBuffer = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x, fbSize.y, 1, false);
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-  raygenData->frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
+  // raygenData->renderBuffer = gprtTextureGet2DHandle(renderBuffer);
+  raygenData->renderBuffer = gprtBufferGetDevicePointer(tmpRenderBuffer);
+  raygenData->depthBuffer = gprtBufferGetDevicePointer(tmpDepthBuffer);
+  raygenData->mvecBuffer = gprtBufferGetDevicePointer(tmpMVecBuffer);
   raygenData->world = gprtAccelGetDeviceAddress(trianglesTLAS);
 
   // Miss program checkerboard background colors
@@ -199,7 +242,12 @@ int main(int ac, char **av) {
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
+  pc.frame = 0;
   do {
+    float2 jitter = GetScreenJitter(pc.frame);
+    raygenData->jitter = jitter;
+
+
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
@@ -221,8 +269,8 @@ int main(int ac, char **av) {
 #endif
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
-      float deltaAngleX = (2 * M_PI / fbSize.x);
-      float deltaAngleY = (M_PI / fbSize.y);
+      float deltaAngleX = (2 * M_PI / renderFBSize.x);
+      float deltaAngleY = (M_PI / renderFBSize.y);
       float xAngle = (lastxpos - xpos) * deltaAngleX;
       float yAngle = (lastypos - ypos) * deltaAngleY;
 
@@ -236,32 +284,93 @@ int main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      pc.camera.pos = lookFrom;
-      pc.camera.dir_00 = normalize(lookAt - lookFrom);
-      float aspect = float(fbSize.x) / float(fbSize.y);
-      pc.camera.dir_du = cosFovy * aspect * normalize(cross(pc.camera.dir_00, lookUp));
-      pc.camera.dir_dv = cosFovy * normalize(cross(pc.camera.dir_du, pc.camera.dir_00));
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_du;
-      pc.camera.dir_00 -= 0.5f * pc.camera.dir_dv;
-      pc.camera.fovy = cosFovy;
+      if (!firstFrame) {
+        raygenData->prevCamera = raygenData->currCamera;
+      }
+
+      float aspect = float(renderFBSize.x) / float(renderFBSize.y);
+      float fovY = 2.0f * acos(cosFovy);
+
+      // Compute half extents of the image plane at unit distance.
+      float halfHeight = tan(0.5f * fovY);
+      float halfWidth  = aspect * halfHeight;
+
+      // Compute the world-space offset for one pixel.
+      float pixelStepX = (2.0f * halfWidth)  / float(renderFBSize.x);
+      float pixelStepY = (2.0f * halfHeight) / float(renderFBSize.y);
+
+      // Compute camera basis vectors.
+      float3 forward = normalize(lookAt - lookFrom);
+      float3 right   = normalize(cross(forward, lookUp)); // right direction
+      float3 up      = normalize(cross(right, forward));  // recomputed up
+
+      raygenData->currCamera.pos = lookFrom;
+      raygenData->currCamera.dir_00 = normalize(lookAt - lookFrom);      
+
+      raygenData->currCamera.dir_du = cosFovy * aspect * normalize(cross(raygenData->currCamera.dir_00, lookUp));
+      raygenData->currCamera.dir_dv = cosFovy * normalize(cross(raygenData->currCamera.dir_du, raygenData->currCamera.dir_00));
+      
+      // Compute the ray direction for the lower left pixel of the image plane.
+      // raygenData->currCamera.dir_00 = forward - halfWidth * right - halfHeight * up;
+
+      raygenData->currCamera.dir_00 -= 0.5f * raygenData->currCamera.dir_du;
+      raygenData->currCamera.dir_00 -= 0.5f * raygenData->currCamera.dir_dv;
+      raygenData->currCamera.fovy = cosFovy;
+
+      if (firstFrame)
+      {
+        raygenData->prevCamera = raygenData->currCamera; 
+      }
     }
+
+    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
 
     // Animate transforms
     pc.now = .5f * (float) gprtGetTime(context);
+    
     gprtComputeLaunch(transformProgram, {instances.size(), 1, 1}, {1, 1, 1}, pc);
     gprtAccelUpdate(context, trianglesTLAS);
 
     // Calls the GPU raygen kernel function
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
+    gprtRayGenLaunch2D(context, rayGen, renderFBSize.x, renderFBSize.y, pc);
+
+    gprtBufferTextureCopy(context, tmpRenderBuffer, renderBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
+    gprtBufferTextureCopy(context, tmpDepthBuffer, depthBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
+    gprtBufferTextureCopy(context, tmpMVecBuffer, mvecBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
+
+    // gprtTextureSaveImage(renderBuffer, "renderBuffer.hdr");
+
+    GPRTDenoiseParams denoiseParams = {};
+    denoiseParams.unresolvedColor = renderBuffer;
+    denoiseParams.resolvedColor = resolvedBuffer;
+    denoiseParams.depthBuffer = depthBuffer;
+    denoiseParams.diffuseMotionVectors = mvecBuffer;
+    denoiseParams.jitter = jitter;
+    gprtTextureDenoise(context, denoiseParams);
+
+
+    // gprtTextureSaveImage(resolvedBuffer, outFileName);
+
+
+    RenderPassParams rppc;
+    rppc.resolvedColor = gprtTextureGet2DHandle(resolvedBuffer);
+    // rppc.resolvedColor = gprtTextureGet2DHandle(depthBuffer);
+    rppc.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
+    rppc.fbSize = fbSize;
+    gprtComputeLaunch(renderpassProgram, {fbSize.x, fbSize.y, 1}, {1, 1, 1}, rppc);
 
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);
+
+    pc.frame = (pc.frame + 1) % 4000;
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
 
+  gprtTextureSaveImage(resolvedBuffer, outFileName);
+
   // Save final frame to an image
-  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
+  // gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
 
   // ##################################################################
   // and finally, clean up
