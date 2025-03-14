@@ -100,10 +100,13 @@ static inline std::string getVendorString(uint32_t vendorID) {
 // For software fallbacks for various primitive types
 #include "gprt_fallbacks.h"
 
-// For DLSS
+// For DLSS RR
 #include "nvsdk_ngx_vk.h"
 #include "nvsdk_ngx_helpers.h"
 #include "nvsdk_ngx_helpers_vk.h"
+
+#include "nvsdk_ngx_helpers_dlssd.h"
+#include "nvsdk_ngx_helpers_dlssd_vk.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -1270,15 +1273,14 @@ gprtFormatGetSize(GPRTFormat format) {
   case GPRT_FORMAT_R8_UINT:
     return 1;
   case GPRT_FORMAT_R16_UNORM:
+  case GPRT_FORMAT_R16_SFLOAT:
     return 2;
   case GPRT_FORMAT_R8G8B8A8_UNORM:
-    return 4;
   case GPRT_FORMAT_R8G8B8A8_SRGB:
-    return 4;
   case GPRT_FORMAT_R32_SFLOAT:
-    return 4;
   case GPRT_FORMAT_D32_SFLOAT:
     return 4;
+  case GPRT_FORMAT_R16G16B16A16_SFLOAT:
   case GPRT_FORMAT_R32G32_SFLOAT:
     return 8;
   case GPRT_FORMAT_R32G32B32A32_SFLOAT:
@@ -1902,6 +1904,9 @@ struct Texture : public ImageResource {
       return -1;
     };
 
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(context->physicalDevice, format, &props);
+
     // Create the image handle
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -1928,13 +1933,14 @@ struct Texture : public ImageResource {
     // uploading straight to texture as if it were
     //   a staging image. If we instead use a staging buffer, then this should
     //   be undefined
-    if (hostVisible)
+    if (hostVisible) {
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    }
     else
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     imageInfo.usage = usageFlags;
-    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT)
+    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT && format == GPRT_FORMAT_R8G8B8A8_SRGB)
       imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
       imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -5344,7 +5350,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
   // Required for vkCmdPushDescriptor (Now included with Vulkan 1.4)
-  // enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 
   if (requestedFeatures.window) {
     // If the device will be used for presenting to a display via a swapchain
@@ -6115,7 +6121,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       }
       NVSDK_NGX_Result paramsResult = NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters);
       
-      NVSDK_NGX_Result optimalSettingsResult = NGX_DLSS_GET_OPTIMAL_SETTINGS
+      NVSDK_NGX_Result optimalSettingsResult = NGX_DLSSD_GET_OPTIMAL_SETTINGS
       (
         aiDenoising.ngxParameters,
         requestedFeatures.aiDenoiser.outputWidth,
@@ -6132,18 +6138,24 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
       VkCommandBuffer commandList = beginSingleTimeCommands(graphicsCommandPool);
 
-      NVSDK_NGX_DLSS_Create_Params dlssParams = {};
+      NVSDK_NGX_DLSSD_Create_Params  dlssParamsd = {};
       unsigned int creationNodeMask = 1;
-      unsigned int visibilityNodeMask = 1;      
+      unsigned int visibilityNodeMask = 1;     
       
-      dlssParams.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags;
-      dlssParams.Feature.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
-      dlssParams.Feature.InHeight = aiDenoising.optimalSettings.optimalRenderSize.y;
-      dlssParams.Feature.InTargetWidth = requestedFeatures.aiDenoiser.outputWidth;
-      dlssParams.Feature.InTargetHeight = requestedFeatures.aiDenoiser.outputHeight;
-      dlssParams.Feature.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_MaxQuality; // for now, can change later.
+      dlssParamsd.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
+      dlssParamsd.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed; // wants roughness in normal.w
+      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_Linear;
       
-      NVSDK_NGX_Result createResult = NGX_VULKAN_CREATE_DLSS_EXT(commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParams);
+      dlssParamsd.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags | GPRT_DENOISE_FLAGS_IS_HDR; // seems required...
+      dlssParamsd.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
+      dlssParamsd.InHeight = aiDenoising.optimalSettings.optimalRenderSize.y;
+      dlssParamsd.InTargetWidth = requestedFeatures.aiDenoiser.outputWidth;
+      dlssParamsd.InTargetHeight = requestedFeatures.aiDenoiser.outputHeight;
+      dlssParamsd.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_MaxQuality; // for now, can change later.
+      
+      NVSDK_NGX_Result dlssdCreateResult = NGX_VULKAN_CREATE_DLSSD_EXT1(logicalDevice, commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParamsd);
+
+      // NVSDK_NGX_Result createResult = NGX_VULKAN_CREATE_DLSS_EXT(commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParams);
       endSingleTimeCommands(commandList, graphicsCommandPool, graphicsQueue);
     }
     else {
@@ -7896,14 +7908,14 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
 
 GPRT_API GPRTTexture
 gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, const void *init) {
+                        uint32_t depth, bool allocateMipmaps, bool writable, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_STORAGE_BIT |
+      (writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7998,7 +8010,7 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
   {
     /* Transition resolve image to a general format */
     // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
-    auto oldResolveLayout = ((Texture*)params.resolvedColor)->layout;
+    auto oldResolveLayout = ((Texture*)params.output)->layout;
     if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
     {
       VkImageSubresourceRange imageSubresource;
@@ -8009,10 +8021,10 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
       imageSubresource.levelCount = 1;
       
       VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-      ((Texture*)params.resolvedColor)->setImageLayout(commandList, ((Texture*)params.resolvedColor)->image, 
+      ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
         oldResolveLayout, VK_IMAGE_LAYOUT_GENERAL, imageSubresource);
       context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-      ((Texture*)params.resolvedColor)->layout = VK_IMAGE_LAYOUT_GENERAL;
+      ((Texture*)params.output)->layout = VK_IMAGE_LAYOUT_GENERAL;
     }
 
     // Buffers don't actually seem to be supported.
@@ -8060,28 +8072,74 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
         );
     };
 
-    NVSDK_NGX_Resource_VK unresolvedColorBuffer = getImageView((Texture*)params.unresolvedColor);
-    NVSDK_NGX_Resource_VK motionVectorsBuffer = getImageView((Texture*)params.diffuseMotionVectors);
-    NVSDK_NGX_Resource_VK resolvedColorBuffer = getImageView((Texture*)params.resolvedColor, true);
-    NVSDK_NGX_Resource_VK depthBuffer = getImageView((Texture*)params.depthBuffer);
-    // NVSDK_NGX_Resource_VK exposureBuffer = getBufferResource(pExposure);
+    // NVSDK_NGX_Resource_VK unresolvedColorBuffer = getImageView(pUnresolvedColor);
+    // NVSDK_NGX_Resource_VK motionVectorsBuffer = getImageView(pMotionVectors);
+    // NVSDK_NGX_Resource_VK resolvedColorBuffer = getImageView(pResolvedColor);
+    // NVSDK_NGX_Resource_VK depthBuffer = getImageView(pDepth);
+    // NVSDK_NGX_Resource_VK diffuseAlbedoBuffer = getImageView(pDiffuseAlbedo);
+    // NVSDK_NGX_Resource_VK specularAlbedoBuffer = getImageView(pSpecularAlbedo);
+    // NVSDK_NGX_Resource_VK roughnessBuffer = getImageView(pRoughness);
+    // NVSDK_NGX_Resource_VK normalBuffer = getImageView(pNormal);
+    // NVSDK_NGX_Resource_VK posWBuffer = getImageView(pPosW);
+    // NVSDK_NGX_Resource_VK emissiveBuffer = getImageView(pEmissive);
+    // NVSDK_NGX_Resource_VK exposureBuffer = getImageView(pExposure);
+    // NVSDK_NGX_Resource_VK specularHitDistance = getImageView(pSpecHitDist);
     
+    
+    NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, true);
+    NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, true);
+    NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, true);
+    NVSDK_NGX_Resource_VK color = getImageView((Texture*)params.color, true);
+    NVSDK_NGX_Resource_VK output = getImageView((Texture*)params.output, true);
+    NVSDK_NGX_Resource_VK depth = getImageView((Texture*)params.depth, true);
+    NVSDK_NGX_Resource_VK motionVectors = getImageView((Texture*)params.motionVectors, true);
+    NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, true);
+    NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, true);
     VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
 
-    NVSDK_NGX_VK_DLSS_Eval_Params evalParams = {};
-    evalParams.Feature.pInColor  = &unresolvedColorBuffer;
-    evalParams.Feature.pInOutput = &resolvedColorBuffer; 
-    evalParams.pInDepth          = &depthBuffer;
-    evalParams.pInMotionVectors  = &motionVectorsBuffer;
-    evalParams.InJitterOffsetX = params.jitter.x;
-    evalParams.InJitterOffsetY = params.jitter.y; // todo...
-    evalParams.InMVScaleX = 1.f;
-    evalParams.InMVScaleY = 1.f;
-    evalParams.Feature.InSharpness = context->aiDenoising.optimalSettings.sharpness;
-    evalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
-    evalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInNormals;
+    // NVSDK_NGX_Resource_VK*              pInRoughness;
 
-    NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSS_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &evalParams);
+    // NVSDK_NGX_Resource_VK*              pInColor;
+    // NVSDK_NGX_Resource_VK*              pInOutput;
+    // NVSDK_NGX_Resource_VK *             pInDepth;
+    // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+    // float                               InJitterOffsetX;     /* Jitter offset must be in input/render pixel space */
+    // float                               InJitterOffsetY;
+    // NVSDK_NGX_Dimensions                InRenderSubrectDimensions;
+
+    NVSDK_NGX_VK_DLSSD_Eval_Params dlssdEvalParams = {};
+    dlssdEvalParams.pInDiffuseAlbedo = &diffuseAlbedo;
+    dlssdEvalParams.pInSpecularAlbedo = &specularAlbedo;
+    dlssdEvalParams.pInNormals = &normalsAndRoughness;
+    dlssdEvalParams.pInRoughness = &normalsAndRoughness;
+    dlssdEvalParams.InDiffuseAlbedoSubrectBase = {0, 0};
+    dlssdEvalParams.InSpecularAlbedoSubrectBase = {0, 0};
+    dlssdEvalParams.pInColor = &color;
+    dlssdEvalParams.pInOutput = &output;
+    dlssdEvalParams.pInDepth = &depth;
+    dlssdEvalParams.pInMotionVectors = &motionVectors;
+    dlssdEvalParams.pInSpecularHitDistance = &specularHitDistance;
+    dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();
+    dlssdEvalParams.pInViewToClipMatrix = (float*)params.projMatrix.data();
+    dlssdEvalParams.InJitterOffsetX = params.jitter.x;
+    dlssdEvalParams.InJitterOffsetY = params.jitter.y;
+    
+    dlssdEvalParams.InReset = params.resetAccumulation ? 1 : 0;
+    dlssdEvalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
+    dlssdEvalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
+    dlssdEvalParams.InMVScaleX = float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
+    dlssdEvalParams.InMVScaleY = float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
+    dlssdEvalParams.pInExposureTexture = &exposureBuffer;
+    dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
+
+    // float4x4 viewMatrix = transpose(mpScene->getCamera()->getViewMatrix());
+    // float4x4 projMatrix = transpose(mpScene->getCamera()->getProjMatrix());
+
+    // dlssdEvalParams.pInWorldToViewMatrix
+    NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams);
     context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
 
 
@@ -8095,10 +8153,10 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
       imageSubresource.levelCount = 1;
       
       VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-      ((Texture*)params.resolvedColor)->setImageLayout(commandList, ((Texture*)params.resolvedColor)->image, 
+      ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
       VK_IMAGE_LAYOUT_GENERAL, oldResolveLayout, imageSubresource);
       context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-      ((Texture*)params.resolvedColor)->layout = oldResolveLayout;
+      ((Texture*)params.output)->layout = oldResolveLayout;
     }
 
 

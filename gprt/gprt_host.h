@@ -138,7 +138,18 @@ using GPRTProgram = std::vector<uint8_t>;
 struct Texture1D {uint placeHolder;};
 struct Texture2D {uint placeHolder;};
 struct Texture3D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture1D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture2D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture3D {uint placeHolder;};
+
 struct SamplerState {uint placeHolder;};
+
 template<typename T>
 struct DescriptorHandle
 {
@@ -147,11 +158,33 @@ struct DescriptorHandle
 
 // Structure subject to change
 struct GPRTDenoiseParams {
-  GPRTTextureOf<float4> unresolvedColor;
-  GPRTTextureOf<float4> resolvedColor; // output
-  GPRTTextureOf<float2> diffuseMotionVectors;
-  GPRTTextureOf<float> depthBuffer;
+  // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
+  GPRTTextureOf<float4> diffuseAlbedo;
+  // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
+  GPRTTextureOf<float4> specularAlbedo;
+  // NVSDK_NGX_Resource_VK*              pInNormals;
+  GPRTTextureOf<float4> normalsAndRoughness; //normal in xyz, roughness in w.
+  // NVSDK_NGX_Resource_VK*              pInRoughness;
+
+  // A single texel float32 buffer.
+  GPRTTextureOf<float> exposure;
+
+  // NVSDK_NGX_Resource_VK*              pInColor;
+  GPRTTextureOf<float4> color;
+  // NVSDK_NGX_Resource_VK*              pInOutput;
+  GPRTTextureOf<float4> output; // output
+  // NVSDK_NGX_Resource_VK *             pInDepth;
+  GPRTTextureOf<float> depth;
+  GPRTTextureOf<float> specHitDist;
+  // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+  GPRTTextureOf<float2> motionVectors;
   float2 jitter;
+
+
+  float4x4 viewMatrix;
+  float4x4 projMatrix;
+  float frameTimeDeltaInMsec;
+  bool resetAccumulation;
 };
 
 typedef enum {
@@ -307,9 +340,13 @@ typedef enum {
   GPRT_FORMAT_R16_UNORM = VK_FORMAT_R16_UNORM,
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
+  GPRT_FORMAT_R16_SFLOAT = VK_FORMAT_R16_SFLOAT,
+  GPRT_FORMAT_R16G16B16A16_SFLOAT = VK_FORMAT_R16G16B16A16_SFLOAT,
+  GPRT_FORMAT_RGBA16Float = GPRT_FORMAT_R16G16B16A16_SFLOAT,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
   GPRT_FORMAT_R32G32_SFLOAT = VK_FORMAT_R32G32_SFLOAT,
   GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
+  GPRT_FORMAT_RGBA32Float = GPRT_FORMAT_R32G32B32A32_SFLOAT,
   GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
 
@@ -1424,15 +1461,14 @@ gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format
 }
 
 GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap,
+                                             uint32_t height, uint32_t depth, bool allocateMipmap, bool writable, 
                                              const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
 gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                    (void *) init);
+                        uint32_t depth, bool allocateMipmap, bool writable, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap, writable, (void *) init);
 }
 
 GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
@@ -1499,6 +1535,30 @@ inline DescriptorHandle<Texture2D> gprtTextureGet2DHandle(GPRTTextureOf<T> textu
 template <typename T>
 inline DescriptorHandle<Texture3D> gprtTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
   DescriptorHandle<Texture3D> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T>
+inline DescriptorHandle<RWTexture1D<T>> gprtRWTextureGet1DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture1D<T>> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T>
+inline DescriptorHandle<RWTexture2D<T>> gprtRWTextureGet2DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture2D<T>> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T>
+inline DescriptorHandle<RWTexture3D<T>> gprtRWTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture3D<T>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
