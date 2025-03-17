@@ -101,18 +101,19 @@
 #define GPRT_TERMINAL_CYAN          "\e[36m"
 #define GPRT_TERMINAL_LIGHT_RED     "\033[1;31m"
 
-using GPRTContext = struct _GPRTContext *;
-using GPRTModule = struct _GPRTModule *;
-using GPRTAccel = struct _GPRTAccel *;
-using GPRTBuffer = struct _GPRTBuffer *;
-using GPRTTexture = struct _GPRTTexture *;
-using GPRTSampler = struct _GPRTSampler *;
-using GPRTGeom = struct _GPRTGeom *;
-using GPRTGeomType = struct _GPRTGeomType *;
-using GPRTRayGen = struct _GPRTRayGen *;
-using GPRTMiss = struct _GPRTMiss *;
-using GPRTCallable = struct _GPRTCallable *;
-using GPRTCompute = struct _GPRTCompute *;
+#define GPRT_DEFINE_HANDLE(object) typedef struct object##_T* object;
+GPRT_DEFINE_HANDLE(GPRTContext)
+GPRT_DEFINE_HANDLE(GPRTModule)
+GPRT_DEFINE_HANDLE(GPRTAccel)
+GPRT_DEFINE_HANDLE(GPRTBuffer)
+GPRT_DEFINE_HANDLE(GPRTTexture)
+GPRT_DEFINE_HANDLE(GPRTSampler)
+GPRT_DEFINE_HANDLE(GPRTGeom)
+GPRT_DEFINE_HANDLE(GPRTGeomType)
+GPRT_DEFINE_HANDLE(GPRTRayGen)
+GPRT_DEFINE_HANDLE(GPRTMiss)
+GPRT_DEFINE_HANDLE(GPRTCallable)
+GPRT_DEFINE_HANDLE(GPRTCompute)
 
 template <typename T> struct _GPRTBufferOf;
 template <typename T> struct _GPRTTextureOf;
@@ -591,6 +592,9 @@ GPRT_API bool gprtWindowShouldClose(GPRTContext context);
  */
 GPRT_API void gprtSetWindowTitle(GPRTContext context, const char *title);
 
+// Seems to require a swapchain rebuild.
+// GPRT_API void gprtSetWindowFullScreen(GPRTContext context, bool fullScreen);
+
 /** If a window was requested, this function returns the position of the cursor
  * in screen coordinates relative to the upper left corner.
  *
@@ -815,7 +819,7 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  *
  * @param context The GPRT context
  */
-GPRT_API void gprtGuiRasterize(GPRTContext context);
+GPRT_API uint64_t gprtGuiRasterize(GPRTContext context);
 
 /*! Requests the given size (in bytes) to reserve for parameters
   of ray tracing programs. Defaults to 256 bytes */
@@ -1628,7 +1632,7 @@ gprtTextureClear(GPRTTextureOf<T> texture) {
   gprtTextureClear((GPRTTexture) texture);
 }
 
-GPRT_API void gprtTextureDenoise(GPRTContext context, const GPRTDenoiseParams &params);
+GPRT_API uint64_t gprtTextureDenoise(GPRTContext context, const GPRTDenoiseParams &params);
 
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
   underlying memory*/
@@ -2213,12 +2217,12 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  *
  * If a window was not requested (ie headless), this function does nothing.
  */
-GPRT_API void gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
+GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 
 template <typename T>
-void
+uint64_t
 gprtBufferPresent(GPRTContext context, GPRTBufferOf<T> buffer) {
-  gprtBufferPresent(context, (GPRTBuffer) buffer);
+  return gprtBufferPresent(context, (GPRTBuffer) buffer);
 }
 
 /** This call interprets the given buffer as a B8G8R8A8 SRGB image sorted in
@@ -2232,70 +2236,70 @@ gprtBufferSaveImage(GPRTBufferOf<T> buffer, uint32_t width, uint32_t height, con
   gprtBufferSaveImage((GPRTBuffer) buffer, width, height, imageName);
 }
 
-GPRT_API void gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
+GPRT_API uint64_t gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x) {
-  gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x);
+  return gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x,
                    PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x, sizeof(PushConstantsType), &pushConstants);
 }
 
 /*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
-GPRT_API void gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
+GPRT_API uint64_t gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y) {
-  gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y);
+  return gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y, sizeof(PushConstantsType), &pushConstants);
 }
 
 /*! 3D-launch variant of \see gprtRayGenLaunch2D */
-GPRT_API void gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
+GPRT_API uint64_t gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
                                  uint32_t dims_z, size_t pushConstantsSize GPRT_IF_CPP(= 0),
                                  void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    uint32_t dims_z) {
-  gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
+  return gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    uint32_t dims_z, PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT,
                 "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
-  gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
                         std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
 // Case where compute program uniforms are not known at compilation time
 template <typename... Uniforms>
-void
+uint64_t
 gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
                 "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
@@ -2313,12 +2317,12 @@ gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniform
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
+  return _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
 }
 
 // Case where compute program has compile-time type-safe uniform arguments
 template <typename... Uniforms>
-void
+uint64_t
 gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
                 "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
@@ -2336,8 +2340,12 @@ gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 gro
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
+  return _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
 }
+
+GPRT_API uint64_t gprtComputeSynchronize(GPRTContext context);
+GPRT_API uint64_t gprtGraphicsSynchronize(GPRTContext context);
+GPRT_API uint64_t gprtDeviceSynchronize(GPRTContext context);
 
 GPRT_API void gprtBeginProfile(GPRTContext context);
 

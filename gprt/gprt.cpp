@@ -429,7 +429,6 @@ struct Context {
   std::vector<VkImage> swapchainImages;
   uint32_t currentImageIndex;
   VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
   struct AIDenoising {
@@ -503,9 +502,10 @@ struct Context {
     uint32_t transfer;
   } queueFamilyIndices;
 
-  VkCommandBuffer graphicsCommandBuffer;
-  VkCommandBuffer computeCommandBuffer;
-  VkCommandBuffer transferCommandBuffer;
+  // Ring buffer 
+  VkCommandBuffer graphicsCommandBuffers[64];
+  VkCommandBuffer computeCommandBuffers[64];
+  VkCommandBuffer transferCommandBuffers[64];
 
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
@@ -524,6 +524,14 @@ struct Context {
   VkQueue graphicsQueue;
   VkQueue computeQueue;
   VkQueue transferQueue;
+
+  // Timeline semaphore for synchronizing work
+  uint64_t GRTimelineCounter = 0;
+  uint64_t CETimelineCounter = 0;
+  uint64_t TRTimelineCounter = 0;
+  VkSemaphore GRTimelineSemaphore = VK_NULL_HANDLE;
+  VkSemaphore CETimelineSemaphore = VK_NULL_HANDLE;
+  VkSemaphore TRTimelineSemaphore = VK_NULL_HANDLE;
 
   // Depth buffer format (selected during Vulkan initialization)
   VkFormat depthFormat;
@@ -641,16 +649,26 @@ struct Context {
 
   void destroyInternalPrograms();
 
-  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool);
-
-  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue);
+  //VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool);
+  //void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue);
+  
+  VkCommandBuffer beginGraphicsCommands();
+  VkCommandBuffer beginComputeCommands();
+  VkCommandBuffer beginTransferCommands();
+  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
+  VkResult endTransferCommands(VkCommandBuffer commandBuffer);
+  VkResult synchronizeTransfer();
+  VkResult synchronizeGraphics();
+  VkResult synchronizeCompute();
+  VkResult synchronize();
 
   void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
   // For ImGui
   void setRasterAttachments(Texture *colorTexture, Texture *depthTexture);
 
-  void rasterizeGui();
+  uint64_t rasterizeGui();
 };
 
 struct Module {
@@ -790,42 +808,16 @@ struct Buffer {
       vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
       return vmaMapMemory(context->allocator, allocation, &mapped);
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
-
+      VkCommandBuffer commandBuffer = context->beginTransferCommands();
+      
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = offset;
       region.dstOffset = 0;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;
-      submitInfo.pWaitDstStageMask = nullptr;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+      context->endTransferCommands(commandBuffer);
+      context->synchronizeTransfer();
 
       vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       return vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
@@ -843,42 +835,17 @@ struct Buffer {
         mapped = nullptr;
       }
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
-
+      VkCommandBuffer commandBuffer = context->beginTransferCommands();
+      
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = 0;
       region.dstOffset = offset;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+      vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;
-      submitInfo.pWaitDstStageMask = nullptr;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      context->endTransferCommands(commandBuffer);
+      context->synchronizeTransfer();
 
       vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
@@ -966,42 +933,15 @@ struct Buffer {
         VmaAllocation newAllocation;
         VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
 
-        // Copy contents from old to new
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, newBuffer, 1, &region);
-
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
+        context->endTransferCommands(commandBuffer);
+        context->synchronizeTransfer();
 
         // Free old buffer
         vmaUnmapMemory(context->allocator, allocation);
@@ -1044,41 +984,16 @@ struct Buffer {
 
       // Copy existing contents into staging buffer
       if (preserveContents) {
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        context->endTransferCommands(commandBuffer);
+        context->synchronizeTransfer();
       }
 
       // Release old device buffer
@@ -1098,41 +1013,15 @@ struct Buffer {
 
       if (preserveContents) {
         // Copy contents from old staging buffer to new buffer
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
-
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+        context->synchronizeTransfer();
+        context->endTransferCommands(commandBuffer);
       }
 
       size = bytes;
@@ -1350,6 +1239,7 @@ struct Texture : public ImageResource {
   VkMemoryPropertyFlags memoryPropertyFlags;
 
   bool hostVisible;
+  bool writable;
 
   VkImage image = VK_NULL_HANDLE;
   VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1587,15 +1477,11 @@ struct Texture : public ImageResource {
         mapped = nullptr;
       }
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for texture map! : \n" + errorString(err));
+      VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
       // transition device to a transfer destination format
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      VkImageLayout prevLayout = layout;
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1614,35 +1500,15 @@ struct Texture : public ImageResource {
       copyRegion.imageSubresource.baseArrayLayer = 0;
       copyRegion.imageSubresource.layerCount = 1;
       copyRegion.imageSubresource.mipLevel = 0;
-      vkCmdCopyBufferToImage(context->graphicsCommandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
+      vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
 
-      // transition device to an optimal device format
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      // transition back to previous format
+      setImageLayout(commandBuffer, image, layout, prevLayout,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      layout = prevLayout;
 
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for texture map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for texture map! : \n" + errorString(err));
+      context->endGraphicsCommands(commandBuffer);
+      context->synchronize();
 
       // todo, transfer device data to device
       if (mapped) {
@@ -1654,15 +1520,10 @@ struct Texture : public ImageResource {
   }
 
   void clear() {
-    VkResult err;
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // Move to a destination optimal format
-    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
     // clear the image
@@ -1671,7 +1532,7 @@ struct Texture : public ImageResource {
       val.depth = 1.f;
       val.stencil = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearDepthStencilImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+      vkCmdClearDepthStencilImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
                                   &range);
     } else {
       VkClearColorValue val;
@@ -1679,36 +1540,15 @@ struct Texture : public ImageResource {
       val.int32[0] = val.int32[1] = val.int32[2] = val.int32[3] = 0;
       val.uint32[0] = val.uint32[1] = val.uint32[2] = val.uint32[3] = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearColorImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+      vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
                            &range);
     }
 
     // Now go back to the previous layout
-    setImageLayout(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
+    setImageLayout(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+    context->endGraphicsCommands(commandBuffer);
   }
 
   void generateMipmap() {
@@ -1726,15 +1566,11 @@ struct Texture : public ImageResource {
       LOG_ERROR("image needs transfer dst usage bit for texture mipmap "
                 "generation! \n");
 
-    VkResult err;
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // transition device to a transfer destination format
-    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    VkImageLayout prevLayout = layout;
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
     layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1763,7 +1599,7 @@ struct Texture : public ImageResource {
 
       // this will wait for level i-1 to be filled from either a
       // vkCmdCopyBufferToImae call, or the previous blit command
-      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // here, we specify the regions to use for the blit
@@ -1784,16 +1620,16 @@ struct Texture : public ImageResource {
 
       // This blit will downsample the current mip layer into the one above.
       // It also transitions the image
-      vkCmdBlitImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+      vkCmdBlitImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
-      // Now, transition the layer to VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+      // Now, transition the layer to the original layout
       barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.newLayout = prevLayout;
       barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // now, divide the current mip dimensions by two.
@@ -1809,38 +1645,18 @@ struct Texture : public ImageResource {
     // at the very end, we need one more barrier to transition the lastmip level
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = prevLayout;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Now, all layers in the mip chan have this layout
-    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    // Now, all layers in the mip chan are back to their original layout.
+    layout = prevLayout;
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+    context->endGraphicsCommands(commandBuffer);
+    context->synchronize();
   }
 
   Texture(Context *context, VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type,
@@ -1945,10 +1761,10 @@ struct Texture : public ImageResource {
     if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
       imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-    // Since this image is oonly going to be used by graphics queues, we have
-    // this set to exclusive.
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    writable = ((usageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
 
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // (might need to be concurrent...)
+    
     // If this image were to be used with MSAA as an attachment, we'd set this
     // to something other than
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -2014,39 +1830,15 @@ struct Texture : public ImageResource {
 
     // We need to transition the image into a known layout
     {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
+      VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VkImageLayout desiredLayout = (writable) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      setImageLayout(commandBuffer, image, layout, desiredLayout,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      layout = desiredLayout;
+      
+      context->endGraphicsCommands(commandBuffer);
+      context->synchronize();
     }
 
     // Now we need an image view
@@ -3130,6 +2922,7 @@ public:
 
   void freeScratchBuffer() {
     if (scratchBuffer) {
+      context->synchronizeCompute();
       scratchBuffer->destroy();
       scratchBuffer = nullptr;
     }
@@ -3137,6 +2930,7 @@ public:
 
   void resizeScratchBuffer(VkDeviceSize buildScratchSize) {
     if (scratchBuffer && scratchBuffer->size < buildScratchSize) {
+      context->synchronizeCompute();
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -3208,44 +3002,19 @@ public:
   }
 
   VkDeviceAddress queryCompactSize() {
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    VkResult err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for query compaction size! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // reset the query so we can use it again
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->compactedSizeQueryPool, 0, 1);
+    vkCmdResetQueryPool(commandBuffer, context->compactedSizeQueryPool, 0, 1);
 
-    gprt::vkCmdWriteAccelerationStructuresProperties(context->graphicsCommandBuffer, 1, &accelerationStructure,
+    gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure,
                                                      VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
                                                      context->compactedSizeQueryPool, 0);
-
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for query compaction size! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for query compaction size! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for query compaction size! : \n" + errorString(err));
-
+    context->endGraphicsCommands(commandBuffer);
+    context->synchronize();
+    
     uint64_t buffer[1] = {0};
-    err = vkGetQueryPoolResults(context->logicalDevice, context->compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize),
+    VkResult err = vkGetQueryPoolResults(context->logicalDevice, context->compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize),
                                 buffer, sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
     VkDeviceSize compactedSize = buffer[0];
 
@@ -3313,39 +3082,10 @@ public:
     copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
     copyAccelerationStructureInfo.pNext = nullptr;
 
-    VkResult err;
-    {
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for compaction! : \n" + errorString(err));
-
-      gprt::vkCmdCopyAccelerationStructure(context->graphicsCommandBuffer, &copyAccelerationStructureInfo);
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for compaction! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for compaction! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for compaction! : \n" + errorString(err));
-    }
+    VkCommandBuffer commandBuffer = context->beginComputeCommands();
+    gprt::vkCmdCopyAccelerationStructure(commandBuffer, &copyAccelerationStructureInfo);
+    context->endComputeCommands(commandBuffer);
+    context->synchronizeCompute();
   }
 
   // maxPrimitiveCounts.size() should be equal to the number of geometry going into a tree.
@@ -3411,6 +3151,7 @@ public:
 
     // Have base class resize any backing memory allocations
     resizeFullTree(accelerationStructureBuildSizesInfo);
+    context->synchronize();
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -3455,29 +3196,34 @@ public:
     // but we prefer device builds VkCommandBuffer commandBuffer =
     // vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+    {
+      VkCommandBuffer commandList = context->beginComputeCommands();
+      // VkCommandBufferBeginInfo cmdBufInfo{};
+      // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      // err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+      // if (err)
+      //   LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
-    gprt::vkCmdBuildAccelerationStructures(context->graphicsCommandBuffer, 1, &accelerationBuildGeometryInfo,
-                                           accelerationBuildStructureRangeInfoPtrs.data());
+      gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo,
+                                            accelerationBuildStructureRangeInfoPtrs.data());
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+      err = context->endComputeCommands(commandList);
+      context->synchronize();
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      if (err)
+        LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+    }
+
+    // VkSubmitInfo submitInfo{};
+    // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    // submitInfo.pNext = NULL;
+    // submitInfo.waitSemaphoreCount = 0;
+    // submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    // submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    // submitInfo.commandBufferCount = 1;
+    // submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+    // submitInfo.signalSemaphoreCount = 0;
+    // submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
     // VkFenceCreateInfo fenceInfo {};
     // fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -3487,13 +3233,13 @@ public:
     // if (err) LOG_ERROR("failed to create fence for triangle accel build! :
     // \n" + errorString(err));
 
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+    // err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    // if (err)
+    //   LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+    // err = vkQueueWaitIdle(context->graphicsQueue);
+    // if (err)
+    //   LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
 
     // Wait for the fence to signal that command buffer has finished executing
     // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000
@@ -3509,7 +3255,7 @@ public:
 
     // If we're minimizing memory usage, free scratch now
     // Otherwise, we keep it around to enable faster builts
-    if (minimizeMemory)
+    if (minimizeMemory) 
       freeScratchBuffer();
   }
 
@@ -3603,44 +3349,19 @@ public:
     accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
     accelerationBuildGeometryInfo.scratchData.deviceAddress = getScratchDeviceAddress();
 
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
-
-    gprt::vkCmdBuildAccelerationStructures(context->graphicsCommandBuffer, 1, &accelerationBuildGeometryInfo,
+    VkCommandBuffer commandBuffer = context->beginComputeCommands();
+    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
                                            accelerationBuildStructureRangeInfoPtrs.data());
-
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for AABB accel build! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
+    context->endComputeCommands(commandBuffer);
 
     // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
     // updateDeviceAddress(isCompact);
 
     // If we're minimizing memory usage, free scratch now
-    if (minimizeMemory)
+    if (minimizeMemory) {
+      context->synchronize();
       freeScratchBuffer();
+    }
   };
   virtual void compact() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
@@ -4511,14 +4232,14 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_LSS) {
           if (requestedFeatures.linearSweptSpheres) {
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
         } else if (geomType->getKind() == GPRT_SPHERES) {
           if (requestedFeatures.linearSweptSpheres) {
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
@@ -4890,6 +4611,25 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
 void
 Context::destroy() {
+  if (logicalDevice) {
+    if (requestedFeatures.aiDenoiser.requested) {
+      if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+        NVSDK_NGX_VULKAN_DestroyParameters(aiDenoising.ngxParameters);
+        NVSDK_NGX_VULKAN_ReleaseFeature(aiDenoising.ngxHandle);
+        aiDenoising.ngxParameters = nullptr;
+        aiDenoising.ngxHandle = nullptr;
+      }
+    }
+  }
+
+  if (GRTimelineSemaphore) {
+    vkDestroySemaphore(logicalDevice, GRTimelineSemaphore, nullptr);
+  }
+
+  if (CETimelineSemaphore) {
+    vkDestroySemaphore(logicalDevice, CETimelineSemaphore, nullptr);
+  }
+
   if (descriptorSet) {
     vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
     descriptorSet = nullptr;
@@ -4922,10 +4662,6 @@ Context::destroy() {
   if (imageAvailableSemaphore) {
     vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
     imageAvailableSemaphore = nullptr;
-  }
-  if (renderFinishedSemaphore) {
-    vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
-    renderFinishedSemaphore = nullptr;
   }
 
   if (inFlightFence) {
@@ -4989,9 +4725,10 @@ Context::destroy() {
 
   descriptorPoolSize = {};
 
-  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
-  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
-  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
+  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 64, graphicsCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 64, computeCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 64, transferCommandBuffers);
+
   vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
   vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
   vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
@@ -5201,9 +4938,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // todo, allow the window to resize and recreate swapchain
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // glfwSwapInterval(1);
+    // GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+    // const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
     window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
                               requestedFeatures.windowProperties.initialHeight,
-                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
+                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);    
+    // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
 
     VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
     if (err != VK_SUCCESS) {
@@ -5307,6 +5048,9 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     return requiredExtensions.empty();
   };
+
+  // For timeline semaphores
+  enabledDeviceExtensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
 
   // For -spirv-reflect support.
   enabledDeviceExtensions.push_back(VK_GOOGLE_USER_TYPE_EXTENSION_NAME);
@@ -5737,6 +5481,20 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     LOG_ERROR("Could not create logical devices : \n" + errorString(err));
   }
 
+  // Create a timeline semaphore for synchronization among queues
+  VkSemaphoreTypeCreateInfo timelineCreateInfo{};
+  timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+  timelineCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+  timelineCreateInfo.initialValue = 0;
+
+  VkSemaphoreCreateInfo semaphoreInfo{};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  semaphoreInfo.pNext = &timelineCreateInfo;
+
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &GRTimelineSemaphore);
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &CETimelineSemaphore);
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &TRTimelineSemaphore);
+
   // Create vulkan memory allocator
   VmaVulkanFunctions vulkanFunctions = {};
   vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
@@ -5784,13 +5542,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
           vkGetDeviceProcAddr(logicalDevice, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
 
-  auto createCommandPool = [&](uint32_t queueFamilyIndex,
-                               VkCommandPoolCreateFlags createFlags =
-                                   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT) -> VkCommandPool {
+  auto createCommandPool = [&](uint32_t queueFamilyIndex ) -> VkCommandPool {
     VkCommandPoolCreateInfo cmdPoolInfo = {};
     cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
-    cmdPoolInfo.flags = createFlags;
+    cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     VkCommandPool cmdPool;
     VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
     return cmdPool;
@@ -5831,20 +5587,20 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
   cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdBufAllocateInfo.commandBufferCount = 1;
+  cmdBufAllocateInfo.commandBufferCount = 64;
 
   cmdBufAllocateInfo.commandPool = graphicsCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, graphicsCommandBuffers);
   if (err)
     LOG_ERROR("Could not create graphics command buffer : \n" + errorString(err));
 
   cmdBufAllocateInfo.commandPool = computeCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, computeCommandBuffers);
   if (err)
     LOG_ERROR("Could not create compute command buffer : \n" + errorString(err));
 
   cmdBufAllocateInfo.commandPool = transferCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, transferCommandBuffers);
   if (err)
     LOG_ERROR("Could not create transfer command buffer : \n" + errorString(err));
 
@@ -5867,7 +5623,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
     if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
         vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
       LOG_ERROR("Failed to create swapchain semaphores");
     }
@@ -6120,7 +5875,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         }
       }
       NVSDK_NGX_Result paramsResult = NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters);
-      
+
       NVSDK_NGX_Result optimalSettingsResult = NGX_DLSSD_GET_OPTIMAL_SETTINGS
       (
         aiDenoising.ngxParameters,
@@ -6136,7 +5891,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         &aiDenoising.optimalSettings.sharpness
       );
 
-      VkCommandBuffer commandList = beginSingleTimeCommands(graphicsCommandPool);
 
       NVSDK_NGX_DLSSD_Create_Params  dlssParamsd = {};
       unsigned int creationNodeMask = 1;
@@ -6152,11 +5906,38 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       dlssParamsd.InTargetWidth = requestedFeatures.aiDenoiser.outputWidth;
       dlssParamsd.InTargetHeight = requestedFeatures.aiDenoiser.outputHeight;
       dlssParamsd.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_MaxQuality; // for now, can change later.
+
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_CreationNodeMask, creationNodeMask);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_VisibilityNodeMask, visibilityNodeMask);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Width, dlssParamsd.InWidth);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Height, dlssParamsd.InHeight);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_OutWidth, dlssParamsd.InTargetWidth);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_OutHeight, dlssParamsd.InTargetHeight);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_PerfQualityValue, dlssParamsd.InPerfQualityValue);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, dlssParamsd.InFeatureCreateFlags);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, dlssParamsd.InEnableOutputSubrects ? 1 : 0);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Denoise_Mode, NVSDK_NGX_DLSS_Denoise_Mode_DLUnified);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Roughness_Mode, dlssParamsd.InRoughnessMode);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Use_HW_Depth, dlssParamsd.InUseHWDepth);
+
+
+      // It seems as though outSizeInBytes is returned as 0. For now, skipping any handling 
+      {
+        size_t outSizeInBytes;
+        VkCommandBuffer commandList = beginComputeCommands();
+        NVSDK_NGX_Result dlssdScratchResult = NVSDK_NGX_VULKAN_GetScratchBufferSize(NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &outSizeInBytes);
+        endComputeCommands(commandList);
+      }
+
+      {
+        VkCommandBuffer commandList = beginComputeCommands();
+        NVSDK_NGX_Result dlssdCreateResult = NVSDK_NGX_VULKAN_CreateFeature1(logicalDevice, commandList, NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &aiDenoising.ngxHandle);
+        endComputeCommands(commandList);
+      }
       
-      NVSDK_NGX_Result dlssdCreateResult = NGX_VULKAN_CREATE_DLSSD_EXT1(logicalDevice, commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParamsd);
+      // NVSDK_NGX_Result dlssdCreateResult = NGX_VULKAN_CREATE_DLSSD_EXT1(logicalDevice, commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParamsd);
 
       // NVSDK_NGX_Result createResult = NGX_VULKAN_CREATE_DLSS_EXT(commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParams);
-      endSingleTimeCommands(commandList, graphicsCommandPool, graphicsQueue);
     }
     else {
       LOG_ERROR("Unimplemented");
@@ -6176,7 +5957,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 // Todo, refactor this code...
 void
 Context::setupInternalPrograms() {
-
   // // For filling out instance data
   // {
   //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
@@ -6612,44 +6392,270 @@ Context::destroyInternalPrograms() {
   }
 }
 
-VkCommandBuffer
-Context::beginSingleTimeCommands(VkCommandPool pool) {
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandPool = pool;
-  allocInfo.commandBufferCount = 1;
+// VkCommandBuffer
+// Context::beginSingleTimeCommands(VkCommandPool pool) {
+//   VkCommandBufferAllocateInfo allocInfo{};
+//   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+//   allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+//   allocInfo.commandPool = pool;
+//   allocInfo.commandBufferCount = 1;
 
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+//   VkCommandBuffer commandBuffer;
+//   vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+//   VkCommandBufferBeginInfo beginInfo{};
+//   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+//   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+//   vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+//   return commandBuffer;
+// }
+
+// void
+// Context::endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+//   vkEndCommandBuffer(commandBuffer);
+
+//   VkSubmitInfo submitInfo{};
+//   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+//   submitInfo.commandBufferCount = 1;
+//   submitInfo.pCommandBuffers = &commandBuffer;
+
+//   vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+//   vkQueueWaitIdle(queue);
+
+//   vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+// }
+
+VkCommandBuffer Context::beginGraphicsCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = graphicsCommandBuffers[GRTimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, GRTimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= GRTimelineCounter) {
+    err = vkQueueWaitIdle(graphicsQueue);
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
 
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
   return commandBuffer;
 }
 
-void
-Context::endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
-  vkEndCommandBuffer(commandBuffer);
+VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
+  VkResult result;
+  result = vkEndCommandBuffer(commandBuffer);
+  if (result != VK_SUCCESS) return result;
+
+  uint64_t prevCounter = GRTimelineCounter;
+  GRTimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
 
-  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  VkResult err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit graphics queue! : \n" + errorString(err));
+  return err;
+}
 
-  vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+VkCommandBuffer Context::beginComputeCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = computeCommandBuffers[CETimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, CETimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= CETimelineCounter) {
+    err = vkQueueWaitIdle(computeQueue); // Todo: consider waiting only for this command buffer...
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
+
+  return commandBuffer;
+}
+
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
+  VkResult err;
+  err = vkEndCommandBuffer(commandBuffer);
+  if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+  uint64_t prevCounter = CETimelineCounter;
+  CETimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &CETimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
+
+  err = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit compute queue! : \n" + errorString(err));
+  return err;
+}
+
+VkCommandBuffer Context::beginTransferCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = transferCommandBuffers[GRTimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, TRTimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= TRTimelineCounter) {
+    err = vkQueueWaitIdle(transferQueue);
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
+  return commandBuffer;
+}
+
+VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
+  VkResult result;
+  result = vkEndCommandBuffer(commandBuffer);
+  if (result != VK_SUCCESS) return result;
+
+  uint64_t prevCounter = TRTimelineCounter;
+  TRTimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &TRTimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
+
+  VkResult err = vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit transfer queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronizeGraphics()
+{
+  std::vector<VkSemaphore> semaphores = {GRTimelineSemaphore};
+  std::vector<uint64_t> values = {GRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronizeCompute()
+{
+  std::vector<VkSemaphore> semaphores = {CETimelineSemaphore};
+  std::vector<uint64_t> values = {CETimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  if (err) LOG_ERROR("failed to synchronize compute queue! : \n" + errorString(err));
+  return err;
+  // return vkQueueWaitIdle(computeQueue);
+}
+
+VkResult Context::synchronizeTransfer()
+{
+  std::vector<VkSemaphore> semaphores = {TRTimelineSemaphore};
+  std::vector<uint64_t> values = {TRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronize()
+{
+  std::vector<VkSemaphore> semaphores = {TRTimelineSemaphore, CETimelineSemaphore, GRTimelineSemaphore};
+  std::vector<uint64_t> values = {TRTimelineCounter, CETimelineCounter, GRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  if (err) LOG_ERROR("failed to synchronize device! : \n" + errorString(err));
+  return err;
 }
 
 void
 Context::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-  VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+  VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
   VkImageMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -6693,7 +6699,7 @@ Context::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout old
 
   vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-  endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
+  endGraphicsCommands(commandBuffer);
 }
 
 // For ImGui
@@ -6799,39 +6805,22 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
 
   // execute a gpu command to upload imgui font textures
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
-  ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
-  VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.pWaitDstStageMask = nullptr;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;
-
-  VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-  VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
+  VkCommandBuffer commandBuffer = beginGraphicsCommands();
+  ImGui_ImplVulkan_CreateFontsTexture(commandBuffer);
+  endGraphicsCommands(commandBuffer);
+  synchronizeGraphics();
 
   // clear font textures from cpu data
   ImGui_ImplVulkan_DestroyFontUploadObjects();
 }
 
-void
+uint64_t
 Context::rasterizeGui() {
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
 
   VkResult err;
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
+  
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   renderPassBeginInfo.pNext = nullptr;
@@ -6844,56 +6833,36 @@ Context::rasterizeGui() {
   renderPassBeginInfo.pClearValues = nullptr;
   renderPassBeginInfo.framebuffer = imgui.frameBuffer;
 
-  err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
+  VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
   // Transition our attachments into optimal attachment formats
-  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
+  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image,
                                         imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                         {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
 
-  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
+  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image,
                                         imgui.depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                                         {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
 
   // This will clear the color and depth attachment
-  vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
   // Record dear imgui primitives into command buffer
-  ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
+  ImGui_ImplVulkan_RenderDrawData(draw_data, commandBuffer);
 
-  vkCmdEndRenderPass(graphicsCommandBuffer);
+  vkCmdEndRenderPass(commandBuffer);
 
   // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
                                         imgui.colorAttachment->layout,
                                         {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
 
-  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
                                         imgui.depthAttachment->layout,
                                         {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
 
-  err = vkEndCommandBuffer(graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  endGraphicsCommands(commandBuffer);
+  return GRTimelineCounter;
 }
 
 GPRT_API void
@@ -6982,6 +6951,26 @@ gprtSetWindowTitle(GPRTContext _context, const char *title) {
   glfwSetWindowTitle(context->window, title);
 }
 
+// GPRT_API void
+// gprtSetWindowFullScreen(GPRTContext _context, bool fullScreen) {
+//   LOG_API_CALL();
+//   Context *context = (Context *) _context;
+//   if (!requestedFeatures.window)
+//     return;
+
+//   if (fullScreen) {
+//     // Switch back to fullscreen mode
+//     GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+//     const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
+//     glfwSetWindowMonitor(context->window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width, mode->height*/, GLFW_DONT_CARE /*mode->refreshRate*/);
+//   }
+//   else {
+//     GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+//     const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
+//     glfwSetWindowMonitor(context->window, NULL, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width, mode->height*/, GLFW_DONT_CARE);
+//   }
+// }
+
 GPRT_API void
 gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
   LOG_API_CALL();
@@ -7056,7 +7045,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   // submitInfo.signalSemaphoreCount = 1;
   // submitInfo.pSignalSemaphores = signalSemaphores;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   // transition image layout from PRESENT_SRC to TRANSFER_DST
   {
@@ -7171,7 +7160,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7193,14 +7182,15 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
-  if (!requestedFeatures.window)
-    return;
   Context *context = (Context *) _context;
+  if (!requestedFeatures.window) {
+    return context->GRTimelineCounter; 
+  }
+  
   Buffer *buffer = (Buffer *) _buffer;
-
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
@@ -7208,7 +7198,9 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   // submitInfo.signalSemaphoreCount = 1;
   // submitInfo.pSignalSemaphores = signalSemaphores;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  context->synchronize(); // temporary...
+
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   // transition image layout from PRESENT_SRC to TRANSFER_DST
   {
@@ -7307,7 +7299,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7327,6 +7319,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
                                         context->inFlightFence, &context->currentImageIndex);
   vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  return context->GRTimelineCounter;
 }
 
 GPRT_API void
@@ -7337,10 +7330,10 @@ gprtGuiSetRasterAttachments(GPRTContext _context, GPRTTexture _colorAttachment, 
   context->setRasterAttachments(colorAttachment, depthAttachment);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtGuiRasterize(GPRTContext _context) {
   Context *context = (Context *) _context;
-  context->rasterizeGui();
+  return context->rasterizeGui();
 }
 
 GPRT_API GPRTContext
@@ -8000,7 +7993,7 @@ gprtTextureClear(GPRTTexture _texture) {
   texture->clear();
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
 {
   LOG_API_CALL();
@@ -8008,50 +8001,24 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
 
   if (context->deviceProperties.vendorID == VENDOR_ID_NVIDIA)
   {
-    /* Transition resolve image to a general format */
-    // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
-    auto oldResolveLayout = ((Texture*)params.output)->layout;
-    if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
-    {
-      VkImageSubresourceRange imageSubresource;
-      imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
-      imageSubresource.baseArrayLayer = 0;
-      imageSubresource.baseMipLevel = 0;
-      imageSubresource.layerCount = 1;
-      imageSubresource.levelCount = 1;
+    // /* Transition resolve image to a general format */
+    // // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
+    // auto oldResolveLayout = ((Texture*)params.output)->layout;
+    // if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
+    // {
+    //   VkImageSubresourceRange imageSubresource;
+    //   imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+    //   imageSubresource.baseArrayLayer = 0;
+    //   imageSubresource.baseMipLevel = 0;
+    //   imageSubresource.layerCount = 1;
+    //   imageSubresource.levelCount = 1;
       
-      VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-      ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
-        oldResolveLayout, VK_IMAGE_LAYOUT_GENERAL, imageSubresource);
-      context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-      ((Texture*)params.output)->layout = VK_IMAGE_LAYOUT_GENERAL;
-    }
-
-    // Buffers don't actually seem to be supported.
-    // auto getBufferResource = [](Buffer* pBuffer) -> NVSDK_NGX_Resource_VK
-    // {
-    //   if (!pBuffer) return {};
-    //   return NVSDK_NGX_Create_Buffer_Resource_VK(pBuffer->buffer, pBuffer->getSize(), true);
-    // };
-
-    // auto getAspectMaskFromFormat = [](VkFormat format) -> VkImageAspectFlags
-    // {
-    //     switch (format)
-    //     {
-    //     case VK_FORMAT_D16_UNORM_S8_UINT:
-    //     case VK_FORMAT_D24_UNORM_S8_UINT:
-    //     case VK_FORMAT_D32_SFLOAT_S8_UINT:
-    //         return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    //     case VK_FORMAT_D16_UNORM:
-    //     case VK_FORMAT_D32_SFLOAT:
-    //     case VK_FORMAT_X8_D24_UNORM_PACK32:
-    //         return VK_IMAGE_ASPECT_DEPTH_BIT;
-    //     case VK_FORMAT_S8_UINT:
-    //         return VK_IMAGE_ASPECT_STENCIL_BIT;
-    //     default:
-    //         return VK_IMAGE_ASPECT_COLOR_BIT;
-    //     }
-    // };
+    //   VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+    //   ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
+    //     oldResolveLayout, VK_IMAGE_LAYOUT_GENERAL, imageSubresource);
+    //   context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+    //   ((Texture*)params.output)->layout = VK_IMAGE_LAYOUT_GENERAL;
+    // }
 
     auto getImageView = [](Texture* pTexture, bool isReadWrite = false) -> NVSDK_NGX_Resource_VK
     {
@@ -8072,43 +8039,18 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
         );
     };
 
-    // NVSDK_NGX_Resource_VK unresolvedColorBuffer = getImageView(pUnresolvedColor);
-    // NVSDK_NGX_Resource_VK motionVectorsBuffer = getImageView(pMotionVectors);
-    // NVSDK_NGX_Resource_VK resolvedColorBuffer = getImageView(pResolvedColor);
-    // NVSDK_NGX_Resource_VK depthBuffer = getImageView(pDepth);
-    // NVSDK_NGX_Resource_VK diffuseAlbedoBuffer = getImageView(pDiffuseAlbedo);
-    // NVSDK_NGX_Resource_VK specularAlbedoBuffer = getImageView(pSpecularAlbedo);
-    // NVSDK_NGX_Resource_VK roughnessBuffer = getImageView(pRoughness);
-    // NVSDK_NGX_Resource_VK normalBuffer = getImageView(pNormal);
-    // NVSDK_NGX_Resource_VK posWBuffer = getImageView(pPosW);
-    // NVSDK_NGX_Resource_VK emissiveBuffer = getImageView(pEmissive);
-    // NVSDK_NGX_Resource_VK exposureBuffer = getImageView(pExposure);
-    // NVSDK_NGX_Resource_VK specularHitDistance = getImageView(pSpecHitDist);
-    
-    
-    NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, true);
-    NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, true);
-    NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, true);
-    NVSDK_NGX_Resource_VK color = getImageView((Texture*)params.color, true);
+    NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, false);
+    NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, false);
+    NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, false);
+    NVSDK_NGX_Resource_VK color = getImageView((Texture*)params.color, false);
+    NVSDK_NGX_Resource_VK depth = getImageView((Texture*)params.depth, false);
+    NVSDK_NGX_Resource_VK motionVectors = getImageView((Texture*)params.motionVectors, false);
+    NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, false);
+    NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, false);
     NVSDK_NGX_Resource_VK output = getImageView((Texture*)params.output, true);
-    NVSDK_NGX_Resource_VK depth = getImageView((Texture*)params.depth, true);
-    NVSDK_NGX_Resource_VK motionVectors = getImageView((Texture*)params.motionVectors, true);
-    NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, true);
-    NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, true);
-    VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-
-    // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
-    // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
-    // NVSDK_NGX_Resource_VK*              pInNormals;
-    // NVSDK_NGX_Resource_VK*              pInRoughness;
-
-    // NVSDK_NGX_Resource_VK*              pInColor;
-    // NVSDK_NGX_Resource_VK*              pInOutput;
-    // NVSDK_NGX_Resource_VK *             pInDepth;
-    // NVSDK_NGX_Resource_VK *             pInMotionVectors;
-    // float                               InJitterOffsetX;     /* Jitter offset must be in input/render pixel space */
-    // float                               InJitterOffsetY;
-    // NVSDK_NGX_Dimensions                InRenderSubrectDimensions;
+ 
+    VkCommandBuffer commandList = context->beginComputeCommands(); // Todo: move to compute queue
+    // VkCommandBuffer commandList = context->beginSingleTimeCommands(context->ComputeCommandPool);
 
     NVSDK_NGX_VK_DLSSD_Eval_Params dlssdEvalParams = {};
     dlssdEvalParams.pInDiffuseAlbedo = &diffuseAlbedo;
@@ -8135,29 +8077,32 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.pInExposureTexture = &exposureBuffer;
     dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
 
-    // float4x4 viewMatrix = transpose(mpScene->getCamera()->getViewMatrix());
-    // float4x4 projMatrix = transpose(mpScene->getCamera()->getProjMatrix());
-
     // dlssdEvalParams.pInWorldToViewMatrix
     NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams);
-    context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+    context->endComputeCommands(commandList);
 
 
-    if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
-    {
-      VkImageSubresourceRange imageSubresource;
-      imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
-      imageSubresource.baseArrayLayer = 0;
-      imageSubresource.baseMipLevel = 0;
-      imageSubresource.layerCount = 1;
-      imageSubresource.levelCount = 1;
+
+    // context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+    // context->synchronizeGraphics();
+    // TESTING: not doing a queue wait idle here. We wait now for a subsequent command queue to pick up the semaphore.
+
+
+    // if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
+    // {
+    //   VkImageSubresourceRange imageSubresource;
+    //   imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+    //   imageSubresource.baseArrayLayer = 0;
+    //   imageSubresource.baseMipLevel = 0;
+    //   imageSubresource.layerCount = 1;
+    //   imageSubresource.levelCount = 1;
       
-      VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-      ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
-      VK_IMAGE_LAYOUT_GENERAL, oldResolveLayout, imageSubresource);
-      context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-      ((Texture*)params.output)->layout = oldResolveLayout;
-    }
+    //   VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+    //   ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
+    //   VK_IMAGE_LAYOUT_GENERAL, oldResolveLayout, imageSubresource);
+    //   context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+    //   ((Texture*)params.output)->layout = oldResolveLayout;
+    // }
 
 
 
@@ -8255,6 +8200,9 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
   {
     LOG_ERROR("Unimplemented");
   }
+
+  // Default behavior
+  return 0;
 }
 
 GPRT_API void
@@ -8445,7 +8393,7 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   Buffer *destination = (Buffer *) _destination;
   Buffer *source = (Buffer *) _source;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   VkBufferCopy region;
   region.srcOffset = srcOffset * size;
@@ -8453,7 +8401,7 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   region.size = count * size;
   vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 }
 
 void
@@ -8466,7 +8414,7 @@ gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _tex
   Texture *texture = (Texture *) _texture;
   Buffer *buffer = (Buffer *) _buffer;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   VkImageLayout originalLayout = texture->layout;
 
@@ -8496,7 +8444,7 @@ gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _tex
                           {uint32_t(texture->aspectFlagBits), 0, texture->mipLevels, 0, 1});
   texture->layout = originalLayout;
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 }
 
 void
@@ -8726,7 +8674,7 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     return bufferBarrier;
   };
 
-  VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandList = context->beginComputeCommands();
 
   // Bind the scratch descriptor sets
   vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1,
@@ -8832,7 +8780,7 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     // Swap read/write sources
     inputSet = !inputSet;
   }
-  context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+  context->endComputeCommands(commandList);
 }
 
 GPRT_API void
@@ -9066,21 +9014,21 @@ gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   context->buildSBT(flags);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, size_t pushConstantsSize,
                    void *pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1, pushConstantsSize, pushConstants);
+  return gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1, pushConstantsSize, pushConstants);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, size_t pushConstantsSize,
                    void *pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
+  return gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z,
                    size_t pushConstantsSize, void *pushConstants) {
   LOG_API_CALL();
@@ -9090,28 +9038,25 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   RayGen *raygen = (RayGen *) _rayGen;
   VkResult err;
 
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           context->raytracingPipelineLayout, 0, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
 
   if (context->queryRequested) {
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                     context->raytracingPipeline);
 
   if (pushConstantsSize > 0) {
     if (pushConstantsSize > PUSH_CONSTANTS_LIMIT)
       LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
-    vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
+    vkCmdPushConstants(commandBuffer, context->raytracingPipelineLayout,
                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                            VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR,
@@ -9186,42 +9131,22 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
 
-  gprt::vkCmdTraceRays(context->graphicsCommandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
+  gprt::vkCmdTraceRays(commandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);
 
   if (context->queryRequested)
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
 
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  context->endGraphicsCommands(commandBuffer);
+  return context->GRTimelineCounter;
 }
 
-void
+uint64_t
 _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
-  
+
   // Build / update the compute pipeline if required
   if (compute->pipeline == VK_NULL_HANDLE) {
     compute->buildPipeline(context->descriptorSetLayout);
@@ -9229,55 +9154,86 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   VkResult err;
 
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+  // Temporary... Ultimately want to move to the compute queue...
+  VkCommandBuffer commandBuffer = context->beginComputeCommands();
 
   if (context->queryRequested) {
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
   std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
 
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
+  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t) descriptorSets.size(), descriptorSets.data(), 0, nullptr);
 
   if (pushConstants.size() > 0) {
-    vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdPushConstants(commandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        PUSH_CONSTANTS_LIMIT, pushConstants.data());
   }
 
-  vkCmdDispatch(context->graphicsCommandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
+  vkCmdDispatch(commandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
 
   if (context->queryRequested)
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
 
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  err = context->endComputeCommands(commandBuffer);
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+  // Temporary...
+  // err = context->synchronizeCompute(); 
+  // if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+  // VkSubmitInfo submitInfo{};
+  // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  // submitInfo.pNext = NULL;
+  // submitInfo.waitSemaphoreCount = 0;
+  // submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+  // submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+  // submitInfo.commandBufferCount = 1;
+  // submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  // submitInfo.signalSemaphoreCount = 0;
+  // submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  // err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  // if (err)
+  //   LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+  // err = vkQueueWaitIdle(context->graphicsQueue);
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtComputeSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronizeCompute();
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtGraphicsSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronizeGraphics();
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtDeviceSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronize();
+  return 0;
 }
 
 GPRT_API void

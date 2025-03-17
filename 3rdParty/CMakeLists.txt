@@ -22,29 +22,34 @@
 
 
 # Find Vulkan
-if (NOT CMAKE_VERSION VERSION_LESS 3.7.0)
-  message(STATUS "Using module to find Vulkan")
-  find_package(Vulkan)
+message(STATUS "Using module to find Vulkan")
+find_package(Vulkan REQUIRED)
+if (Vulkan_LIBRARY)
+message(STATUS "Found Vulkan version: ${Vulkan_VERSION}")
+
+if(${Vulkan_VERSION} VERSION_LESS 1.4.309)
+  message(FATAL_ERROR "Vulkan 1.4.309 or higher is required!")
+endif()
 endif()
 
 IF(WIN32)
-  IF (NOT Vulkan_FOUND)
-    find_library(Vulkan_LIBRARY NAMES vulkan-1 vulkan PATHS ${CMAKE_SOURCE_DIR}/libs/vulkan)
-    IF (Vulkan_LIBRARY)
-      set(Vulkan_FOUND ON)
-      MESSAGE("Using bundled Vulkan library version")
-    ENDIF()
-  ENDIF()
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_WIN32_KHR")
+  # IF (NOT Vulkan_FOUND)
+  #   find_library(Vulkan_LIBRARY NAMES vulkan-1 vulkan PATHS ${CMAKE_SOURCE_DIR}/libs/vulkan)
+  #   IF (Vulkan_LIBRARY)
+  #     set(Vulkan_FOUND ON)
+  #     MESSAGE("Using bundled Vulkan library version")
+  #   ENDIF()
+  # ENDIF()
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_WIN32_KHR")
 
 ELSEIF(LINUX)
-  IF (NOT Vulkan_FOUND)
-    find_library(Vulkan_LIBRARY NAMES vulkan HINTS "$ENV{VULKAN_SDK}/lib" "${CMAKE_SOURCE_DIR}/libs/vulkan" REQUIRED)
-    IF (Vulkan_LIBRARY)
-      set(Vulkan_FOUND ON)
-      MESSAGE("Using bundled Vulkan library version")
-    ENDIF()
-  ENDIF()
+  # IF (NOT Vulkan_FOUND)
+  #   find_library(Vulkan_LIBRARY NAMES vulkan HINTS "$ENV{VULKAN_SDK}/lib" "${CMAKE_SOURCE_DIR}/libs/vulkan" REQUIRED)
+  #   IF (Vulkan_LIBRARY)
+  #     set(Vulkan_FOUND ON)
+  #     MESSAGE("Using bundled Vulkan library version")
+  #   ENDIF()
+  # ENDIF()
   find_package(Threads REQUIRED)
   IF(USE_D2D_WSI)
     MESSAGE("Using direct to display extension...")
@@ -87,26 +92,26 @@ ELSEIF(APPLE)
   # Todo : android?
 ENDIF(WIN32)
 
-IF (NOT Vulkan_FOUND)
-  message(FATAL_ERROR "Could not find Vulkan library!")
-ELSE()
+# IF (NOT Vulkan_FOUND)
+#   message(FATAL_ERROR "Could not find Vulkan library!")
+# ELSE()
   
   # Look for the Slang compiler within the Vulkan bin directory
-  message(STATUS ${Vulkan_LIBRARY})
+  # message(STATUS ${Vulkan_LIBRARY})
 
-  message(STATUS ${Vulkan_GLSLC_EXECUTABLE})
+  # message(STATUS ${Vulkan_GLSLC_EXECUTABLE})
 
-  get_filename_component(VULKAN_COMPILER_PATH ${Vulkan_GLSLC_EXECUTABLE} DIRECTORY)
-  message(STATUS ${VULKAN_COMPILER_PATH})
+get_filename_component(VULKAN_COMPILER_PATH ${Vulkan_GLSLC_EXECUTABLE} DIRECTORY)
+message(STATUS ${VULKAN_COMPILER_PATH})
 
-  find_program(CMAKE_SLANG_COMPILER slangc
-    HINTS "${VULKAN_COMPILER_PATH}"
-    # PATHS /another/path
-    # NO_DEFAULT_PATH
-  )
+find_program(CMAKE_SLANG_COMPILER slangc
+  HINTS "${VULKAN_COMPILER_PATH}"
+  # PATHS /another/path
+  # NO_DEFAULT_PATH
+)
 
-  # find_program(CMAKE_SLANG_COMPILER slangc)
-  if (CMAKE_SLANG_COMPILER)
+# find_program(CMAKE_SLANG_COMPILER slangc)
+if (CMAKE_SLANG_COMPILER) 
   message("Found slangc: ${CMAKE_SLANG_COMPILER}")
 
   # Test to see if compiler is working
@@ -116,18 +121,18 @@ ELSE()
     ERROR_VARIABLE SLANG_VERSION # Slang seems to output version to stderr, so for now we output that.
     OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-  
-  if(NOT SLANG_EXIT_CODE EQUAL 0)
-  message(ERROR "Envoking Slang compiler failed with error code: ${SLANG_EXIT_CODE}")
-  else()
-  message(STATUS "Slang version reported by envoking compiler: ${SLANG_VERSION}" )
-  endif()
-  
-  else ()
-  message(ERROR " slangc appears to be missing from ${VULKAN_COMPILER_PATH}. Please ensure your Vulkan SDK is updated to 1.3.296 or newer.")
-  endif()
 
-ENDIF()
+  if(NOT SLANG_EXIT_CODE EQUAL 0)
+    message(ERROR "Envoking Slang compiler failed with error code: ${SLANG_EXIT_CODE}")
+  else()
+    message(STATUS "Slang version reported by envoking compiler: ${SLANG_VERSION}" )
+  endif()
+  
+else ()
+  message(ERROR " slangc appears to be missing from ${VULKAN_COMPILER_PATH}. Please ensure your Vulkan SDK is updated to 1.3.296 or newer.")
+endif()
+
+# ENDIF()
 
 # Find Vulkan Memory Allocator
 add_subdirectory(vma)
@@ -163,6 +168,23 @@ add_library(imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_draw.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_widgets.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui_tables.cpp
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/GraphEditor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/GraphEditor.h
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImCurveEdit.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImCurveEdit.h
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImGradient.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImGradient.h
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImGuizmo.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImGuizmo.h
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImSequencer.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImSequencer.h
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImZoomSlider.h
 
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_vulkan.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp)
