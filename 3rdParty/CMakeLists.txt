@@ -193,6 +193,7 @@ target_include_directories(imgui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
+  ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo
   ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include
   ${Vulkan_INCLUDE_DIR}
 )

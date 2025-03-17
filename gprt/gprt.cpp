@@ -6802,16 +6802,9 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.ImageCount = 2;
   init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
-  ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
-
-  // execute a gpu command to upload imgui font textures
-  VkCommandBuffer commandBuffer = beginGraphicsCommands();
-  ImGui_ImplVulkan_CreateFontsTexture(commandBuffer);
-  endGraphicsCommands(commandBuffer);
+  
+  ImGui_ImplVulkan_Init(&init_info);
   synchronizeGraphics();
-
-  // clear font textures from cpu data
-  ImGui_ImplVulkan_DestroyFontUploadObjects();
 }
 
 uint64_t
