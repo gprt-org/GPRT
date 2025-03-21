@@ -161,10 +161,6 @@ static struct RequestedFeatures {
     uint32_t outputHeight;
   } aiDenoiser;
 
-  /*! returns whether logging is enabled */
-  inline static bool logging() {
-    return requestedFeatures.debugPrintf;
-  }
 } requestedFeatures;
 
 #if defined(_MSC_VER)
@@ -232,23 +228,19 @@ gprtRaise_impl(std::string str) {
 #endif
 
 #define LOG_VERBOSE(message)                                                                                           \
-  if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_CYAN << "#gprt verbose:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_INFO(message)                                                                                              \
-  if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_PRINTF(message) std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
-  if (RequestedFeatures::logging())                                                                                    \
   std::cout << GPRT_TERMINAL_YELLOW << "#gprt warn:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_ERROR(message)                                                                                             \
   {                                                                                                                    \
-    if (RequestedFeatures::logging())                                                                                  \
-      std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
+    std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
     GPRT_RAISE(message)                                                                                                \
   }
 
@@ -288,6 +280,14 @@ errorString(VkResult errorCode) {
   }
 }
 
+std::string ngxResultToString(NVSDK_NGX_Result result)
+{
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "(code: 0x%08x, info: %ls)", result, GetNGXResultAsString(result));
+    buf[sizeof(buf) - 1] = '\0';
+    return std::string(buf);
+}
+
 #define VK_CHECK_RESULT(f)                                                                                             \
   {                                                                                                                    \
     VkResult res = (f);                                                                                                \
@@ -297,6 +297,15 @@ errorString(VkResult errorCode) {
       assert(res == VK_SUCCESS);                                                                                       \
     }                                                                                                                  \
   }
+
+#define NGX_CHECK_RESULT(f)                                                                                         \
+{                                                                                                                   \
+  NVSDK_NGX_Result res = (f);                                                                                       \
+  if (res != NVSDK_NGX_Result_Success) {                                                                            \
+    LOG_ERROR(std::string("NGXResult is ") + ngxResultToString(res) + std::string(" in gprt.cpp, line ") + std::to_string(__LINE__));                                               \
+    assert(res == NVSDK_NGX_Result_Success);                                                                        \
+  }                                                                                                                 \
+}
 
 VKAPI_ATTR VkBool32 VKAPI_CALL
 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -443,14 +452,6 @@ struct Context {
         uint2 minRenderSize;
         uint2 maxRenderSize;
     } optimalSettings;
-
-    std::string resultToString(NVSDK_NGX_Result result)
-    {
-        char buf[1024];
-        snprintf(buf, sizeof(buf), "(code: 0x%08x, info: %ls)", result, GetNGXResultAsString(result));
-        buf[sizeof(buf) - 1] = '\0';
-        return std::string(buf);
-    }
   } aiDenoising;
 
   struct ImGuiData {
@@ -5862,18 +5863,9 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // Init denoisers
   if (requestedFeatures.aiDenoiser.requested) {
     if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
-      NVSDK_NGX_Result initResult = NVSDK_NGX_VULKAN_Init(aiDenoising.kAppID, L".", instance, physicalDevice, logicalDevice);
-      if (NVSDK_NGX_FAILED(initResult)) {
-        if (initResult == NVSDK_NGX_Result_FAIL_FeatureNotSupported || initResult == NVSDK_NGX_Result_FAIL_PlatformError) {
-          LOG_ERROR("NVIDIA NGX is not available on this hardware/platform " + aiDenoising.resultToString(initResult));
-        }
-        else {
-          LOG_ERROR("Failed to initialize NGX " + aiDenoising.resultToString(initResult));
-        }
-      }
-      NVSDK_NGX_Result paramsResult = NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters);
-
-      NVSDK_NGX_Result optimalSettingsResult = NGX_DLSSD_GET_OPTIMAL_SETTINGS
+      NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_Init(aiDenoising.kAppID, L".", instance, physicalDevice, logicalDevice));
+      NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters));
+      NGX_CHECK_RESULT(NGX_DLSSD_GET_OPTIMAL_SETTINGS
       (
         aiDenoising.ngxParameters,
         requestedFeatures.aiDenoiser.outputWidth,
@@ -5886,7 +5878,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         &aiDenoising.optimalSettings.minRenderSize.x,
         &aiDenoising.optimalSettings.minRenderSize.y,
         &aiDenoising.optimalSettings.sharpness
-      );
+      ));
 
 
       NVSDK_NGX_DLSSD_Create_Params  dlssParamsd = {};
@@ -5922,13 +5914,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       {
         size_t outSizeInBytes;
         VkCommandBuffer commandList = beginComputeCommands();
-        NVSDK_NGX_Result dlssdScratchResult = NVSDK_NGX_VULKAN_GetScratchBufferSize(NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &outSizeInBytes);
+        NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_GetScratchBufferSize(NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &outSizeInBytes));
         endComputeCommands(commandList);
       }
 
       {
         VkCommandBuffer commandList = beginComputeCommands();
-        NVSDK_NGX_Result dlssdCreateResult = NVSDK_NGX_VULKAN_CreateFeature1(logicalDevice, commandList, NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &aiDenoising.ngxHandle);
+        NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_CreateFeature1(logicalDevice, commandList, NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &aiDenoising.ngxHandle));
         endComputeCommands(commandList);
       }
       
@@ -8074,7 +8066,7 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
 
     // dlssdEvalParams.pInWorldToViewMatrix
-    NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams);
+    NGX_CHECK_RESULT(NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams));
     context->endComputeCommands(commandList);
 
 

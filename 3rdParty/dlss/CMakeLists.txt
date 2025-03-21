@@ -37,7 +37,15 @@ target_include_directories(dlss INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
 )
 
+IF(WIN32)
 target_link_libraries(dlss INTERFACE
   $<$<CONFIG:RelWithDebInfo,Release>:${CMAKE_CURRENT_LIST_DIR}/nvsdk_ngx_d.lib>
   $<$<CONFIG:Debug>:${CMAKE_CURRENT_LIST_DIR}/nvsdk_ngx_d_dbg.lib>
 )
+ELSEIF(LINUX)
+target_link_libraries(dlss INTERFACE
+  ${CMAKE_CURRENT_LIST_DIR}/libnvsdk_ngx.a
+)
+ELSE()
+message(ERROR "Unsupported platform")
+ENDIF(WIN32)
