@@ -5887,7 +5887,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       
       dlssParamsd.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
       dlssParamsd.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed; // wants roughness in normal.w
-      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_Linear;
+      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_HW;
       
       dlssParamsd.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags | GPRT_DENOISE_FLAGS_IS_HDR; // seems required...
       dlssParamsd.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
@@ -8027,6 +8027,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
         );
     };
 
+    NVSDK_NGX_Resource_VK transparencyOverlay = getImageView((Texture*)params.transparencyOverlay, false);
+    NVSDK_NGX_Resource_VK depthOfFieldGuide = getImageView((Texture*)params.depthOfFieldGuide, false);    
     NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, false);
     NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, false);
     NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, false);
@@ -8050,6 +8052,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.pInColor = &color;
     dlssdEvalParams.pInOutput = &output;
     dlssdEvalParams.pInDepth = &depth;
+    if (params.transparencyOverlay) dlssdEvalParams.pInTransparencyLayer = &transparencyOverlay;
+    if (params.depthOfFieldGuide) dlssdEvalParams.pInDepthOfFieldGuide = &depthOfFieldGuide;
     dlssdEvalParams.pInMotionVectors = &motionVectors;
     dlssdEvalParams.pInSpecularHitDistance = &specularHitDistance;
     dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();
