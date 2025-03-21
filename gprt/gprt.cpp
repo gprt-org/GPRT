@@ -5857,9 +5857,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     // this initializes imgui for SDL
     ImGui_ImplGlfw_InitForVulkan(window, true);
-
-    // Call new frame here to initialize some internal imgui data
-    ImGui_ImplGlfw_NewFrame();
   }
 
   // Init denoisers
@@ -6801,9 +6798,15 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.MinImageCount = 2;
   init_info.ImageCount = 2;
   init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.RenderPass = imgui.renderPass;
 
   
   ImGui_ImplVulkan_Init(&init_info);
+  
+  // Call new frame here to initialize some internal imgui data
+  ImGui_ImplGlfw_NewFrame();
+  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+
   synchronizeGraphics();
 }
 
@@ -6928,8 +6931,8 @@ gprtWindowShouldClose(GPRTContext _context) {
   glfwPollEvents();
 
   // Start the Dear ImGui frame
-  // ImGui_ImplVulkan_NewFrame(); // I'm not entirely convinced this is needed?
-  ImGui_ImplGlfw_NewFrame();   // if GLFW isn't available this might be odd...
+  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+  ImGui_ImplGlfw_NewFrame();
 
   return glfwWindowShouldClose(context->window);
 }
