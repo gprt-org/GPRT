@@ -5858,9 +5858,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     // this initializes imgui for SDL
     ImGui_ImplGlfw_InitForVulkan(window, true);
-
-    // Call new frame here to initialize some internal imgui data
-    ImGui_ImplGlfw_NewFrame();
   }
 
   // Init denoisers
@@ -5890,7 +5887,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       
       dlssParamsd.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
       dlssParamsd.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed; // wants roughness in normal.w
-      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_Linear;
+      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_HW;
       
       dlssParamsd.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags | GPRT_DENOISE_FLAGS_IS_HDR; // seems required...
       dlssParamsd.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
@@ -6793,9 +6790,15 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.MinImageCount = 2;
   init_info.ImageCount = 2;
   init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.RenderPass = imgui.renderPass;
 
   
   ImGui_ImplVulkan_Init(&init_info);
+  
+  // Call new frame here to initialize some internal imgui data
+  ImGui_ImplGlfw_NewFrame();
+  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+
   synchronizeGraphics();
 }
 
@@ -6920,8 +6923,8 @@ gprtWindowShouldClose(GPRTContext _context) {
   glfwPollEvents();
 
   // Start the Dear ImGui frame
-  // ImGui_ImplVulkan_NewFrame(); // I'm not entirely convinced this is needed?
-  ImGui_ImplGlfw_NewFrame();   // if GLFW isn't available this might be odd...
+  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+  ImGui_ImplGlfw_NewFrame();
 
   return glfwWindowShouldClose(context->window);
 }
@@ -8024,6 +8027,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
         );
     };
 
+    NVSDK_NGX_Resource_VK transparencyOverlay = getImageView((Texture*)params.transparencyOverlay, false);
+    NVSDK_NGX_Resource_VK depthOfFieldGuide = getImageView((Texture*)params.depthOfFieldGuide, false);    
     NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, false);
     NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, false);
     NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, false);
@@ -8047,6 +8052,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.pInColor = &color;
     dlssdEvalParams.pInOutput = &output;
     dlssdEvalParams.pInDepth = &depth;
+    if (params.transparencyOverlay) dlssdEvalParams.pInTransparencyLayer = &transparencyOverlay;
+    if (params.depthOfFieldGuide) dlssdEvalParams.pInDepthOfFieldGuide = &depthOfFieldGuide;
     dlssdEvalParams.pInMotionVectors = &motionVectors;
     dlssdEvalParams.pInSpecularHitDistance = &specularHitDistance;
     dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();

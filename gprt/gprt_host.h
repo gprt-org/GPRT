@@ -158,7 +158,10 @@ struct DescriptorHandle
 };
 
 // Structure subject to change
+// https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS_RR.md
+
 struct GPRTDenoiseParams {
+  GPRTTextureOf<float4> transparencyOverlay;
   // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
   GPRTTextureOf<float4> diffuseAlbedo;
   // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
@@ -169,6 +172,9 @@ struct GPRTDenoiseParams {
 
   // A single texel float32 buffer.
   GPRTTextureOf<float> exposure;
+
+  // Note, must be float16
+  GPRTTextureOf<float16_t> depthOfFieldGuide;
 
   // NVSDK_NGX_Resource_VK*              pInColor;
   GPRTTextureOf<float4> color;
