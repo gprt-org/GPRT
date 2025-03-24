@@ -63,7 +63,7 @@ void raygen(uniform RayGenData record) {
     rayDesc.Direction = rd;
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
-    TraceRay(record.world, RAY_FLAG_NONE, 0xff, 0, 1, 0, rayDesc, payload);
+    TraceRay(record.world, RAY_FLAG_NONE, 0xff, 0, 0, rayDesc, payload);
 
     // Accumulate the color
     tot += payload.color;

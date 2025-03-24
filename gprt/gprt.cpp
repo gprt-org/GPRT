@@ -2823,11 +2823,10 @@ struct Accel {
   bool isCompact = false;
 
   // Caching these for fast tree updates
-  std::vector<Geom *> geometries;
-  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos;
-  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
-  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
-  std::vector<uint32_t> maxPrimitiveCounts;
+  Geom* geometry;
+  VkAccelerationStructureBuildRangeInfoKHR accelerationBuildStructureRangeInfo = {};
+  VkAccelerationStructureGeometryKHR accelerationStructureGeometry = {};
+  uint32_t maxPrimitiveCount = 0;
 
 private:
   Buffer *scratchBuffer = nullptr;   // Can we make this static? That way, all trees could share the scratch...
@@ -3132,13 +3131,14 @@ public:
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
-    accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationStructureBuildGeometryInfo.geometryCount = 1;
+    accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+    accelerationStructureBuildGeometryInfo.ppGeometries = nullptr;
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
     accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     gprt::vkGetAccelerationStructureBuildSizes(context->logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                               &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                               &accelerationStructureBuildGeometryInfo, &maxPrimitiveCount,
                                                &accelerationStructureBuildSizesInfo);
 
     // for TLAS, called like this:
@@ -3186,8 +3186,8 @@ public:
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
     accelerationBuildGeometryInfo.scratchData.deviceAddress = getScratchDeviceAddress();
 
     // Build the acceleration structure on the device via a one-time command
@@ -3205,8 +3205,8 @@ public:
       // if (err)
       //   LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
-      gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo,
-                                            accelerationBuildStructureRangeInfoPtrs.data());
+      VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+      gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
 
       err = context->endComputeCommands(commandList);
       context->synchronize();
@@ -3303,14 +3303,14 @@ public:
       if (allowCompaction) {
         accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
       }
-      accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-      accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+      accelerationStructureBuildGeometryInfo.geometryCount = 1;
+      accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
       VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
       accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
       gprt::vkGetAccelerationStructureBuildSizes(
           context->logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-          &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(), &accelerationStructureBuildSizesInfo);
+          &accelerationStructureBuildGeometryInfo, &maxPrimitiveCount, &accelerationStructureBuildSizesInfo);
 
       resizeScratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize);
     }
@@ -3346,14 +3346,14 @@ public:
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure =
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
     accelerationBuildGeometryInfo.scratchData.deviceAddress = getScratchDeviceAddress();
 
-    VkCommandBuffer commandBuffer = context->beginComputeCommands();
-    gprt::vkCmdBuildAccelerationStructures(commandBuffer, 1, &accelerationBuildGeometryInfo,
-                                           accelerationBuildStructureRangeInfoPtrs.data());
-    context->endComputeCommands(commandBuffer);
+    VkCommandBuffer commandList = context->beginComputeCommands();
+    VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+    gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
+    context->endComputeCommands(commandList);
 
     // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
     // updateDeviceAddress(isCompact);
@@ -3435,9 +3435,8 @@ public:
 };
 
 struct TriangleAccel : public Accel {
-  TriangleAccel(Context *context, std::vector<TriangleGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  TriangleAccel(Context *context, TriangleGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
   };
 
   ~TriangleAccel() {};
@@ -3447,13 +3446,10 @@ struct TriangleAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      TriangleGeom *triGeom = (TriangleGeom *) geometries[gid];
+    //for (uint32_t gid = 0; gid < geometries.size(); ++gid) 
+    {
+      auto &geom = accelerationStructureGeometry;
+      TriangleGeom *triGeom = (TriangleGeom *) geometry;
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
       //   means, anyhit shader is disabled
@@ -3479,15 +3475,15 @@ struct TriangleAccel : public Accel {
       geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
       // note, offset accounted for in range
       geom.geometry.triangles.indexData.deviceAddress = triGeom->index.buffer->deviceAddress;
-      maxPrimitiveCounts[gid] = triGeom->index.count;
+      maxPrimitiveCount = triGeom->index.count;
 
       // transform data
       // note, offset accounted for in range
       geom.geometry.triangles.transformData.hostAddress = nullptr;
       // if the above is null, then that indicates identity
+      geom.pNext = nullptr;
 
-      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+      auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = triGeom->index.count;
       geomRange.primitiveOffset = triGeom->index.offset;
       geomRange.firstVertex = triGeom->index.firstVertex;
@@ -3500,20 +3496,17 @@ struct TriangleAccel : public Accel {
 
 struct SphereAccel : public Accel {
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
-  std::vector<VkAccelerationStructureGeometrySpheresDataNV> accelerationStructureGeometrySpheres;
+  VkAccelerationStructureGeometrySpheresDataNV accelerationStructureGeometrySpheres;
 #endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
-  std::vector<uint32_t> fallbackAABBOffsets;
-
-  SphereAccel(Context *context, std::vector<SphereGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  
+  SphereAccel(Context *context, SphereGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
 
     // If we don't have hardware acceleration for spheres, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3526,47 +3519,32 @@ struct SphereAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
-    maxPrimitiveCounts.resize(geometries.size());
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-#ifdef VK_NV_ray_tracing_linear_swept_spheres
-    accelerationStructureGeometrySpheres.resize(geometries.size());
-#endif
+    SphereGeom *sphereGeom = ((SphereGeom *)geometry);
+    size_t numSpheres = sphereGeom->vertex.count;
 
-    if (!requestedFeatures.linearSweptSpheres) {
-      // Do a prefix sum over the sphere counts
-      fallbackAABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
-        fallbackAABBOffsets[gid + 1] = sphereGeom->vertex.count + fallbackAABBOffsets[gid];
-      }
-
+    if (!requestedFeatures.linearSweptSpheres) {      
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * numSpheres;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, 2 * numSpheres, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto SphereBounds = (GPRTComputeOf<SphereBoundsParameters>) context->internalComputePrograms["SphereBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+      auto &geom = accelerationStructureGeometry;
+      
 
-        SphereBoundsParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
-        params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
-        params.offset = fallbackAABBOffsets[gid];
-        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
-        gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      SphereBoundsParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+      params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
+      params.offset = 0;
+      params.count = numSpheres;
+      gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+    {
+      auto &geom = accelerationStructureGeometry;
+      SphereGeom *sphereGeom = ((SphereGeom *)geometry);
 
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
@@ -3584,7 +3562,7 @@ struct SphereAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_SPHERES_NV;
 
         // Pass the sphere structure into the pNext of the geometry
-        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
+        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres;
         geom.pNext = &sphereData;
 
         // Fill out the LSS data
@@ -3606,10 +3584,9 @@ struct SphereAccel : public Accel {
         sphereData.indexStride = sizeof(uint32_t);
         sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-        maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+        maxPrimitiveCount = sphereGeom->vertex.count;
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = sphereGeom->vertex.count;
         geomRange.primitiveOffset = sphereGeom->vertex.offset;
         geomRange.firstVertex = 0;
@@ -3620,23 +3597,20 @@ struct SphereAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float3);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
-        // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = sphereGeom->vertex.count;
         // geomRange.primitiveOffset = lssGeom->aabb.offset;
-        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+      maxPrimitiveCount = sphereGeom->vertex.count;
     }
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
@@ -3646,26 +3620,23 @@ struct SphereAccel : public Accel {
 // todo, implement refit...
 struct LSSAccel : public Accel {
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
-  std::vector<VkAccelerationStructureGeometryLinearSweptSpheresDataNV> accelerationStructureGeometryLinearSweptSpheres;
+  VkAccelerationStructureGeometryLinearSweptSpheresDataNV accelerationStructureGeometryLinearSweptSpheres;
   #endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
-  std::vector<uint32_t> fallbackAABBOffsets;
 
   bool useEndCaps;
 
   bool useHWIntersector;
 
-  LSSAccel(Context *context, std::vector<LSSGeom*> geometries, GPRTLSSFlags flags) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  LSSAccel(Context *context, LSSGeom* geometry, GPRTLSSFlags flags) : Accel(context, true) {
+    this->geometry = geometry;
 
     useEndCaps = ((flags & GPRT_LSS_CHAINED_END_CAPS) != 0);
 
     // If we don't have hardware acceleration for LSS, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3682,52 +3653,32 @@ struct LSSAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
-    maxPrimitiveCounts.resize(geometries.size());
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-
-    #ifdef VK_NV_ray_tracing_linear_swept_spheres
-    accelerationStructureGeometryLinearSweptSpheres.resize(geometries.size());
-    #endif
+    LSSGeom *lssGeom = (LSSGeom *) geometry;
+    size_t numLSS = lssGeom->index.count;
 
     if (!requestedFeatures.linearSweptSpheres) {
-      // Do a prefix sum over the LSS counts
-      fallbackAABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-        fallbackAABBOffsets[gid + 1] = lssGeom->index.count + fallbackAABBOffsets[gid];
-      }
-
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * numLSS;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, numLSS * 2, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto LSSBounds = (GPRTComputeOf<LSSBoundsParameters>) context->internalComputePrograms["LSSBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-
-        LSSBoundsParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
-        params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
-        params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
-        params.offset = fallbackAABBOffsets[gid];
-        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
-        params.endcap0 = lssGeom->endcap0;
-        params.endcap1 = lssGeom->endcap1;
-        gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      
+      LSSBoundsParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+      params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
+      params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
+      params.offset = 0;
+      params.count = numLSS;
+      params.endcap0 = lssGeom->endcap0;
+      params.endcap1 = lssGeom->endcap1;
+      gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-
+    {
+      auto &geom = accelerationStructureGeometry;
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
       // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
@@ -3745,7 +3696,7 @@ struct LSSAccel : public Accel {
 
         // Pass the LSS structure into the pNext of the geometry
         VkAccelerationStructureGeometryLinearSweptSpheresDataNV &lssData =
-            accelerationStructureGeometryLinearSweptSpheres[gid];
+            accelerationStructureGeometryLinearSweptSpheres;
         geom.pNext = &lssData;
 
         // Fill out the LSS data
@@ -3771,8 +3722,7 @@ struct LSSAccel : public Accel {
         lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV : 
                                              VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_NONE_NV;
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = lssGeom->index.count;
         geomRange.primitiveOffset = lssGeom->index.offset;
         geomRange.firstVertex = lssGeom->index.firstVertex;
@@ -3785,23 +3735,21 @@ struct LSSAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float3);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
         // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = lssGeom->index.count;
         // geomRange.primitiveOffset = lssGeom->aabb.offset;
-        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = lssGeom->index.count;
+      maxPrimitiveCount = lssGeom->index.count;
     }
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
@@ -3811,17 +3759,11 @@ struct LSSAccel : public Accel {
 struct SolidAccel : public Accel {
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float4> AABBs = nullptr;
-  std::vector<uint32_t> AABBOffsets;
 
-  SolidAccel(Context *context, std::vector<SolidGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
-
-    {
-      AABBOffsets.resize(geometries.size() + 1);
-      // Placeholder. The actual allocation here will vary from build to build.
-      AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
-    }
+  SolidAccel(Context *context, SolidGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
+    // Placeholder. The actual allocation here will vary from build to build.
+    AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
   };
 
   ~SolidAccel() {};
@@ -3831,53 +3773,36 @@ struct SolidAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
+    auto &geom = accelerationStructureGeometry;
+    SolidGeom *solidGeom = (SolidGeom *) geometry;
+    size_t numSolids = solidGeom->index.count;
 
     {
-      // Do a prefix sum over the prim counts
-      AABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-        AABBOffsets[gid + 1] = solidGeom->index.count + AABBOffsets[gid];
-      }
-
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float4) * AABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float4) * numSolids;
       if (gprtBufferGetSize(AABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, AABBs, AABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, AABBs, numSolids * 2, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto SolidBounds = (GPRTComputeOf<SolidParameters>) context->internalComputePrograms["SolidBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-
-        SolidParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(AABBs);
-        params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
-        params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
-        params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
-        params.verticesOffset = solidGeom->vertex.offset;
-        params.verticesStride = solidGeom->vertex.stride;
-        params.indicesOffset = solidGeom->index.offset;
-        params.indicesStride = solidGeom->index.stride;
-        params.typesOffset = solidGeom->types.offset;
-        params.typesStride = solidGeom->types.stride;
-        params.offset = AABBOffsets[gid];
-        params.count = AABBOffsets[gid + 1] - params.offset;
-        gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      SolidParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(AABBs);
+      params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+      params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+      params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+      params.verticesOffset = solidGeom->vertex.offset;
+      params.verticesStride = solidGeom->vertex.stride;
+      params.indicesOffset = solidGeom->index.offset;
+      params.indicesStride = solidGeom->index.stride;
+      params.typesOffset = solidGeom->types.offset;
+      params.typesStride = solidGeom->types.stride;
+      params.offset = 0;
+      params.count = numSolids;
+      gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-
+    {
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
       // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
@@ -3890,23 +3815,20 @@ struct SolidAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = AABBOffsets[gid] * 2 * sizeof(float4);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float4);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(AABBs);
-        // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
-        geomRange.primitiveCount = solidGeom->index.count;
+        auto &geomRange = accelerationBuildStructureRangeInfo;
+        geomRange.primitiveCount = numSolids;
         // geomRange.primitiveOffset = solidGeom->aabb.offset;
-        geomRange.primitiveOffset = AABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = solidGeom->index.count;
+      maxPrimitiveCount = numSolids;
     }
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
@@ -3950,9 +3872,8 @@ struct SolidAccel : public Accel {
 };
 
 struct AABBAccel : public Accel {
-  AABBAccel(Context *context, std::vector<AABBGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  AABBAccel(Context *context, AABBGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
   };
 
   ~AABBAccel() {};
@@ -3962,15 +3883,10 @@ struct AABBAccel : public Accel {
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
+    auto &geom = accelerationStructureGeometry;
+    AABBGeom *aabbGeom = (AABBGeom *) geometry;
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      AABBGeom *aabbGeom = (AABBGeom *) geometries[gid];
-
+    {
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
       //   means, anyhit shader is disabled
@@ -3990,14 +3906,13 @@ struct AABBAccel : public Accel {
       geom.geometry.aabbs.data.deviceAddress = aabbGeom->aabb.buffers[0]->deviceAddress;
       geom.geometry.aabbs.stride = aabbGeom->aabb.stride;
 
-      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+      auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = aabbGeom->aabb.count;
       geomRange.primitiveOffset = aabbGeom->aabb.offset;
       geomRange.firstVertex = 0;   // unused
       geomRange.transformOffset = 0;
 
-      maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
+      maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
@@ -4010,14 +3925,6 @@ struct InstanceAccel : public Accel {
   // externally assigned
   Buffer *instancesBuffer = nullptr;
 
-  // std::vector<Accel *> instances;
-
-  // the total number of geometries referenced by this instance accel's BLASes
-  uint32_t numGeometries = 0;
-
-  // caching for faster updates
-  size_t instanceOffset = -1;
-
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
@@ -4028,54 +3935,10 @@ struct InstanceAccel : public Accel {
 
   ~InstanceAccel() {};
 
-  void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
-
-  uint32_t getNumGeometries() {
-    if (this->numGeometries == -1) {
-      LOG_ERROR("Error, numGeometries for this instance must be set by the user!");
-    }
-    return this->numGeometries;
-  }
-
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
-
-  void updateSBTOffsets() {
-    instanceOffset = 0;
-    // for (uint32_t i = 0; i < context->accels.size(); ++i) {
-    //   if (context->accels[i] == this)
-    //     break;
-    //   if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
-    //     InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
-    //     size_t numGeometry = instanceAccel->getNumGeometries();
-    //     instanceOffset += numGeometry * requestedFeatures.numRayTypes;
-    //   }
-    // }
-
-    // instancesBuffer->map();
-
-    // Populate SBT offsets one by one
-    // int numGeometriesInTLAS = numInstances;
-    // int blasOffsetWithinCurrentTLAS = 0;
-    // for (uint32_t i = 0; i < numInstances; ++i) {
-    //   gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
-    //   instance->__gprtSBTOffset = i * requestedFeatures.numRayTypes;
-      // instanceOffset + blasOffsetWithinCurrentTLAS;
-      // if (instance->__gprtAccelAddress != 0) {
-      //   Accel *accel = context->accels[instance->__gprtInstanceIndex];
-
-        // for now, this works. Eventually I'd like this to act more like a lookup / prefix sum...
-        // int numGeometriesInAccel = accel->geometries.size();
-        // numGeometriesInTLAS += accel->geometries.size();
-        // blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
-      // }
-    // }
-    // instancesBuffer->unmap();
-    setNumGeometries(numInstances);
-  }
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
-    updateSBTOffsets();
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -4092,45 +3955,38 @@ struct InstanceAccel : public Accel {
     accelerationStructureBuildRangeInfo.firstVertex = 0;
     accelerationStructureBuildRangeInfo.transformOffset = 0;
 
-    this->accelerationStructureGeometries.resize(1);
-    this->accelerationStructureGeometries[0] = accelerationStructureGeometry;
+    this->accelerationStructureGeometry = accelerationStructureGeometry;
 
-    this->maxPrimitiveCounts.resize(1);
-    this->maxPrimitiveCounts[0] = numInstances;
+    this->maxPrimitiveCount = numInstances;
 
-    this->accelerationBuildStructureRangeInfos.resize(1);
-    this->accelerationBuildStructureRangeInfos[0] = accelerationStructureBuildRangeInfo;
-
-    this->accelerationBuildStructureRangeInfoPtrs.resize(1);
-    this->accelerationBuildStructureRangeInfoPtrs[0] = &this->accelerationBuildStructureRangeInfos[0];
+    this->accelerationBuildStructureRangeInfo = accelerationStructureBuildRangeInfo;
 
     innerBuildProc(buildMode, allowCompaction, minimizeMemory);
   }
 
   void update() {
-    updateSBTOffsets();
     Accel::update();
   }
 };
 
-size_t
-Context::getNumHitRecords() {
-  // The total number of geometries is the number of geometries referenced
-  // by each top level acceleration structure.
-  int totalGeometries = 0;
-  for (int accelID = 0; accelID < accels.size(); ++accelID) {
-    Accel *accel = accels[accelID];
-    if (!accel)
-      continue;
-    if (accel->getType() == GPRT_INSTANCE_ACCEL) {
-      InstanceAccel *tlas = (InstanceAccel *) accel;
-      totalGeometries += tlas->getNumGeometries();
-    }
-  }
+// size_t
+// Context::getNumHitRecords() {
+//   // The total number of geometries is the number of geometries referenced
+//   // by each top level acceleration structure.
+//   int totalGeometries = 0;
+//   for (int accelID = 0; accelID < accels.size(); ++accelID) {
+//     Accel *accel = accels[accelID];
+//     if (!accel)
+//       continue;
+//     if (accel->getType() == GPRT_INSTANCE_ACCEL) {
+//       InstanceAccel *tlas = (InstanceAccel *) accel;
+//       totalGeometries += tlas->getNumGeometries();
+//     }
+//   }
 
-  int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
-  return numHitRecords;
-}
+//   int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
+//   return numHitRecords;
+// }
 
 void
 Context::buildSBT(GPRTBuildSBTFlags flags) {
@@ -4399,6 +4255,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       raygenTable =
           new Buffer(this, bufferUsageFlags,
                      memoryUsageFlags, raygenRecordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // allocate / resize miss table
@@ -4412,6 +4269,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       missTable = new Buffer(this, bufferUsageFlags,
                              memoryUsageFlags, missRecordSize * numMissProgs,
                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // allocate / resize callable table
@@ -4425,10 +4283,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       callableTable = new Buffer(this,
                                  bufferUsageFlags, memoryUsageFlags, callableRecordSize * numCallableProgs,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
-    // allocate / resize hit group table
-    size_t numHitRecords = getNumHitRecords();
+    // size_t numHitRecords = getNumHitRecords();
+    
+    // Allocate / resize hit group table. We currently allocate one hit record per geometry.
+    size_t numHitRecords = geoms.size() * requestedFeatures.numRayTypes;
     if (hitgroupTable && hitgroupTable->size != hitRecordSize * numHitRecords) {
       hitgroupTable->destroy();
       delete hitgroupTable;
@@ -4438,6 +4299,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable = new Buffer(this,
                                  bufferUsageFlags, memoryUsageFlags, hitRecordSize * numHitRecords,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // Raygen records
@@ -4516,95 +4378,162 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable->map();
       uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
 
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-        Accel *tlas = accels[tlasID];
-        if (!tlas)
-          continue;
-        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-          // this is an issue, because if instances can be set on device, we
-          // don't have a list of instances we can iterate through and copy the
-          // SBT data... So, if we have a bunch of instances set by reference on
-          // device, we need to eventually do something smarter here...
-          // Todo, move this setup to the device...
+      // For every geometry made...
+      for (uint32_t geomID = 0; geomID < geoms.size(); ++geomID) {
+        auto &geom = geoms[geomID];
 
-          bool previouslyMapped = (instanceAccel->instancesBuffer->mapped != nullptr);
-          if (!previouslyMapped) instanceAccel->instancesBuffer->map();
-          gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+        // For every ray type...
+        for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+          size_t recordStride = hitRecordSize;
+          size_t handleStride = handleSize;
 
-          for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-            gprt::Instance instance = instances[blasID];
-            uint64_t accelAddr = instance.__gprtAccelAddress;
-            Accel *blas = accels[instance.__gprtSBTOffset];
+          // First, copy handle
+          size_t recordOffset = recordStride * (rayType + requestedFeatures.numRayTypes * geomID);
+          size_t handleOffset =
+              handleStride * (rayType + requestedFeatures.numRayTypes * geom->geomType->address) +
+              handleStride * (numRayGens + numMissProgs + numCallableProgs);
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-            // Accel *blas = instanceAccel->instances[blasID];
-            if (blas->getType() != GPRT_INSTANCE_ACCEL) {
-              for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-                auto &geom = blas->geometries[geomID];
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t *params = mapped + recordOffset;
+          memcpy(params, geom->SBTRecord, geom->recordSize);
 
-                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-                  size_t recordStride = hitRecordSize;
-                  size_t handleStride = handleSize;
-
-                  // First, copy handle
-                  size_t recordOffset =
-                      recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
-                  size_t handleOffset =
-                      handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
-                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
-                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-                  // Then, copy params following handle
-                  recordOffset = recordOffset + handleSize;
-                  uint8_t *params = mapped + recordOffset;
-                  memcpy(params, geom->SBTRecord, geom->recordSize);
-
-                  // If implementing a software fallback, additionally memcpy data required for intersection testing
-                  uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
-                  if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
-                    LSSGeom *lss = (LSSGeom *) geom;
-                    LSSParameters isectParams;
-                    isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
-                    isectParams.endcap0 = lss->endcap0;
-                    isectParams.endcap1 = lss->endcap1;
-                    isectParams.exitTest = lss->exitTest;
-                    isectParams.numLSS = lss->index.count;
-                    memcpy(internalParams, &isectParams, sizeof(LSSParameters));
-                  }
-
-                  if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
-                    SphereGeom *s = (SphereGeom *) geom;
-                    SphereParameters isectParams;
-                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.exitTest = s->exitTest;
-                    memcpy(internalParams, &isectParams, sizeof(SphereParameters));
-                  }
-
-                  if (geom->geomType->getKind() == GPRT_SOLIDS) {
-                    SolidGeom *solidGeom = (SolidGeom *) geom;
-                    SolidParameters params;
-                    params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
-                    params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
-                    params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
-                    params.verticesOffset = solidGeom->vertex.offset;
-                    params.verticesStride = solidGeom->vertex.stride;
-                    params.indicesOffset = solidGeom->index.offset;
-                    params.indicesStride = solidGeom->index.stride;
-                    params.typesOffset = solidGeom->types.offset;
-                    params.typesStride = solidGeom->types.stride;
-                    memcpy(internalParams, &params, sizeof(SolidParameters));
-                  }
-                }
-              }
-            } else {
-              LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
-            }
+          // If implementing a software fallback, additionally memcpy data required for intersection testing
+          uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
+          if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+            LSSGeom *lss = (LSSGeom *) geom;
+            LSSParameters isectParams;
+            isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+            isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+            isectParams.endcap0 = lss->endcap0;
+            isectParams.endcap1 = lss->endcap1;
+            isectParams.exitTest = lss->exitTest;
+            isectParams.numLSS = lss->index.count;
+            memcpy(internalParams, &isectParams, sizeof(LSSParameters));
           }
 
-          if (!previouslyMapped) instanceAccel->instancesBuffer->unmap();
+          if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+            SphereGeom *s = (SphereGeom *) geom;
+            SphereParameters isectParams;
+            isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+            isectParams.exitTest = s->exitTest;
+            memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+          }
+
+          if (geom->geomType->getKind() == GPRT_SOLIDS) {
+            SolidGeom *solidGeom = (SolidGeom *) geom;
+            SolidParameters params;
+            params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+            params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+            params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+            params.verticesOffset = solidGeom->vertex.offset;
+            params.verticesStride = solidGeom->vertex.stride;
+            params.indicesOffset = solidGeom->index.offset;
+            params.indicesStride = solidGeom->index.stride;
+            params.typesOffset = solidGeom->types.offset;
+            params.typesStride = solidGeom->types.stride;
+            memcpy(internalParams, &params, sizeof(SolidParameters));
+          }
         }
       }
+
+
+
+      
+
+      // for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      //   Accel *tlas = accels[tlasID];
+      //   if (!tlas)
+      //     continue;
+      //   if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+      //     InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+      //     if (instanceAccel->disableSBT) continue;
+
+      //     // this is an issue, because if instances can be set on device, we
+      //     // don't have a list of instances we can iterate through and copy the
+      //     // SBT data... So, if we have a bunch of instances set by reference on
+      //     // device, we need to eventually do something smarter here...
+      //     // Todo, move this setup to the device...
+
+      //     // bool previouslyMapped = (instanceAccel->instancesBuffer->mapped != nullptr);
+      //     // if (!previouslyMapped) instanceAccel->instancesBuffer->map();
+      //     // gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+
+      //     for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
+      //       gprt::Instance instance = instances[blasID];
+      //       uint64_t accelAddr = instance.__gprtAccelAddress;
+      //       Accel *blas = accels[instance.__gprtSBTOffset];
+
+      //       // Accel *blas = instanceAccel->instances[blasID];
+      //       if (blas->getType() != GPRT_INSTANCE_ACCEL) {
+      //         for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
+      //           auto &geom = blas->geometries[geomID];
+
+      //           for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+      //             size_t recordStride = hitRecordSize;
+      //             size_t handleStride = handleSize;
+
+      //             // First, copy handle
+      //             size_t recordOffset =
+      //                 recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
+      //             size_t handleOffset =
+      //                 handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
+      //                 handleStride * (numRayGens + numMissProgs + numCallableProgs);
+      //             memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+      //             // Then, copy params following handle
+      //             recordOffset = recordOffset + handleSize;
+      //             uint8_t *params = mapped + recordOffset;
+      //             memcpy(params, geom->SBTRecord, geom->recordSize);
+
+      //             // If implementing a software fallback, additionally memcpy data required for intersection testing
+      //             uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
+      //             if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+      //               LSSGeom *lss = (LSSGeom *) geom;
+      //               LSSParameters isectParams;
+      //               isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+      //               isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+      //               isectParams.endcap0 = lss->endcap0;
+      //               isectParams.endcap1 = lss->endcap1;
+      //               isectParams.exitTest = lss->exitTest;
+      //               isectParams.numLSS = lss->index.count;
+      //               memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+      //             }
+
+      //             if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+      //               SphereGeom *s = (SphereGeom *) geom;
+      //               SphereParameters isectParams;
+      //               isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+      //               isectParams.exitTest = s->exitTest;
+      //               memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+      //             }
+
+      //             if (geom->geomType->getKind() == GPRT_SOLIDS) {
+      //               SolidGeom *solidGeom = (SolidGeom *) geom;
+      //               SolidParameters params;
+      //               params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+      //               params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+      //               params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+      //               params.verticesOffset = solidGeom->vertex.offset;
+      //               params.verticesStride = solidGeom->vertex.stride;
+      //               params.indicesOffset = solidGeom->index.offset;
+      //               params.indicesStride = solidGeom->index.stride;
+      //               params.typesOffset = solidGeom->types.offset;
+      //               params.typesStride = solidGeom->types.stride;
+      //               memcpy(internalParams, &params, sizeof(SolidParameters));
+      //             }
+      //           }
+      //         }
+            
+      //       } else {
+      //         LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
+      //       }
+          // }
+
+          // if (!previouslyMapped) instanceAccel->instancesBuffer->unmap();
+      //   }
+      // }
       hitgroupTable->unmap();
     }
   }
@@ -6922,9 +6851,11 @@ gprtWindowShouldClose(GPRTContext _context) {
 
   glfwPollEvents();
 
-  // Start the Dear ImGui frame
-  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
-  ImGui_ImplGlfw_NewFrame();
+  if (context->imgui.renderPass) {
+    // Start the Dear ImGui frame
+    ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+    ImGui_ImplGlfw_NewFrame();
+  }
 
   return glfwWindowShouldClose(context->window);
 }
@@ -8873,8 +8804,7 @@ gprtAABBAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   if (geom->geomType->getKind() != GPRT_AABBS) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<AABBGeom*> geo = {(AABBGeom *) _geom};
-  AABBAccel *accel = new AABBAccel(context, geo);
+  AABBAccel *accel = new AABBAccel(context, (AABBGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8887,8 +8817,7 @@ gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
 
-  std::vector<TriangleGeom*> geo = {(TriangleGeom *) _geom};
-  TriangleAccel *accel = new TriangleAccel(context, geo);
+  TriangleAccel *accel = new TriangleAccel(context, (TriangleGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8900,8 +8829,7 @@ gprtSphereAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) 
   if (geom->geomType->getKind() != GPRT_SPHERES) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<SphereGeom*> geo = {(SphereGeom *) _geom};
-  SphereAccel *accel = new SphereAccel(context, geo);
+  SphereAccel *accel = new SphereAccel(context, (SphereGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8913,8 +8841,7 @@ gprtLSSAccelCreate(GPRTContext _context, GPRTGeom _geom, GPRTLSSFlags flags) {
   if (geom->geomType->getKind() != GPRT_LSS) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<LSSGeom*> geo = {(LSSGeom *) _geom};
-  LSSAccel *accel = new LSSAccel(context, geo, flags);
+  LSSAccel *accel = new LSSAccel(context, (LSSGeom *) _geom, flags);
   return (GPRTAccel) accel;
 }
 
@@ -8926,8 +8853,7 @@ gprtSolidAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   if (geom->geomType->getKind() != GPRT_SOLIDS) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<SolidGeom*> geo = {(SolidGeom *) _geom};
-  SolidAccel *accel = new SolidAccel(context, geo);
+  SolidAccel *accel = new SolidAccel(context, (SolidGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8989,9 +8915,9 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   if (!accel->isBottomLevel)
     LOG_ERROR("Instances are only available for bottom level acceleration structures");
   gprt::Instance newInstance = gprt::Instance();
-  newInstance.__gprtAccelAddress = accel->getDeviceAddress();
+  newInstance.accelAddress = accel->getDeviceAddress();
   newInstance.instanceCustomIndex = accel->address; // our own virtual address handle.index;
-  newInstance.__gprtSBTOffset = accel->address;
+  newInstance.geometryIndex = accel->geometry->address * requestedFeatures.numRayTypes; //accel->address;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =
@@ -9116,7 +9042,8 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   }
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
-  size_t numHitRecords = context->getNumHitRecords();
+  // size_t numHitRecords = context->getNumHitRecords();
+  size_t numHitRecords = context->geoms.size() * requestedFeatures.numRayTypes;
   if (numHitRecords > 0) {
     hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
     hitShaderSbtEntry.stride = hitRecordSize;

@@ -26,7 +26,6 @@ void raygen(uniform RayGenData record) {
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
            0xff,                    // instance inclusion mask
            0,                       // ray type
-           1,                       // number of ray types
            0,                       // miss type
            rayDesc,                 // the ray to trace
            payload                  // the payload IO

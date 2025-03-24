@@ -94,10 +94,10 @@ struct Instance {
 
   uint32_t instanceCustomIndex : 24;
   uint32_t mask : 8;
-  uint32_t __gprtSBTOffset : 24;
+  uint32_t geometryIndex : 24;
   uint32_t flags : 8;
 
-  uint64_t __gprtAccelAddress;
+  uint64_t accelAddress;
 };
 
 // // https://publications.anl.gov/anlpubs/2014/12/79486.pdf

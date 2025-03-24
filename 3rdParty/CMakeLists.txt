@@ -187,7 +187,11 @@ add_library(imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo/ImZoomSlider.h
 
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_vulkan.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.cpp
+)
 
 target_include_directories(imgui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
