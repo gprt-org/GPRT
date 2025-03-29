@@ -33,7 +33,7 @@ function(embed_devicecode)
 
   unset(EMBED_DEVICECODE_OUTPUTS)
 
-  set(EMBED_DEVICECODE_DEBUG_OPT_FLAG $<$<CONFIG:Debug>:-O0>)  
+  set(EMBED_DEVICECODE_DEBUG_OPT_FLAG $<$<CONFIG:Debug>:-O0>)
   set(EMBED_DEVICECODE_RELEASE_OPT_FLAG $<$<CONFIG:RelWithDebInfo,Release>:-O3>)
 
   set(EMBED_DEVICECODE_DEBUG_DEFINES $<$<CONFIG:Debug>:-D__DEBUG__>)
@@ -43,14 +43,14 @@ function(embed_devicecode)
     COMMAND ${CMAKE_SLANG_COMPILER}
     ${EMBED_DEVICECODE_SOURCES}
     -profile sm_6_7
-    -target spirv 
+    -target spirv
     -emit-spirv-directly
     -fspv-reflect
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
     -ignore-capabilities
-    -zero-initialize # zero-initialize all variables
+    #-zero-initialize # zero-initialize all variables
     -Wno-39001 # for VK_EXT_mutable_descriptor_type, allows overlapping bindings
     -fp-mode fast
     -g3
@@ -77,7 +77,7 @@ function(embed_devicecode)
     VERBATIM
     DEPENDS ${EMBED_DEVICECODE_OUTPUT}
     )
-  
+
   add_library(${EMBED_DEVICECODE_OUTPUT_TARGET} OBJECT)
   target_sources(${EMBED_DEVICECODE_OUTPUT_TARGET} PRIVATE ${EMBED_DEVICECODE_CPP_FILE}) #${EMBED_DEVICECODE_H_FILE} #${EMBED_DEVICECODE_SOURCES}
 endfunction()
