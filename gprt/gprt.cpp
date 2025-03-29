@@ -104,10 +104,10 @@ static struct RequestedFeatures {
 
   // Setting to 4, to allow for RSTW attributes
   uint32_t maxRayHitAttributeSize = 4;
-  
+
   uint32_t internalAdditionalSize = 128;
   uint32_t raygenRecordSize = 1024;
-  
+
   uint32_t hitRecordSize = 256;
   uint32_t missRecordSize = 256;
   uint32_t callableRecordSize = 256;
@@ -128,8 +128,8 @@ static struct RequestedFeatures {
   bool debugPrintf = true;
 
   /*! returns whether logging is enabled */
-  inline static bool logging() {
-    return requestedFeatures.debugPrintf;
+  inline bool logging() {
+    return debugPrintf;
   }
 } requestedFeatures;
 
@@ -198,22 +198,22 @@ gprtRaise_impl(std::string str) {
 #endif
 
 #define LOG_VERBOSE(message)                                                                                           \
-  if (RequestedFeatures::logging())                                                                                    \
+  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_CYAN << "#gprt verbose:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_INFO(message)                                                                                              \
-  if (RequestedFeatures::logging())                                                                                    \
+  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_PRINTF(message) std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
-  if (RequestedFeatures::logging())                                                                                    \
+  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_YELLOW << "#gprt warn:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_ERROR(message)                                                                                             \
   {                                                                                                                    \
-    if (RequestedFeatures::logging())                                                                                  \
+    if (requestedFeatures.logging())                                                                                  \
       std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
     GPRT_RAISE(message)                                                                                                \
   }
@@ -703,7 +703,7 @@ struct Buffer {
   Context* context;
 
   VkPhysicalDeviceMemoryProperties memoryProperties;
-  
+
   /** @brief Usage flags to be filled by external source at buffer creation */
   VkBufferUsageFlags usageFlags;
 
@@ -1142,7 +1142,7 @@ struct Buffer {
     usageFlags = _usageFlags;
     size = _size;
     alignment = _alignment;
-    
+
     // Check if the buffer can be mapped to a host pointer.
     // If the buffer isn't host visible, this is buffer and requires
     // an additional staging buffer...
@@ -3812,7 +3812,7 @@ struct SphereAccel : public Accel {
         sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
         sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
         sphereData.vertexStride = sizeof(float4);
-        
+
         sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
         sphereData.radiusData.deviceAddress =
             sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
@@ -3985,7 +3985,7 @@ struct LSSAccel : public Accel {
         lssData.indexingMode = VK_RAY_TRACING_LSS_INDEXING_MODE_LIST_NV;   // could also be successive
 
         // Can also be
-        lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV : 
+        lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV :
                                              VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_NONE_NV;
 
         auto &geomRange = accelerationBuildStructureRangeInfos[gid];
@@ -4843,7 +4843,7 @@ Context::destroy() {
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     descriptorPool = nullptr;
   }
-  
+
   if (imguiPool) {
     vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
     imguiPool = nullptr;
@@ -5382,10 +5382,10 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
         requestedFeatures.linearSweptSpheres = false;
         enabledDeviceExtensions.erase(
-            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)), 
+            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
             enabledDeviceExtensions.end()
         );
-      
+
       }
     } else if (numRequestedDevices > 1) {
       LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
@@ -8802,7 +8802,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
-  
+
   // Build / update the compute pipeline if required
   if (compute->pipeline == VK_NULL_HANDLE) {
     compute->buildPipeline(context->descriptorSetLayout);
