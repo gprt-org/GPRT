@@ -32,7 +32,7 @@ git submodule update
 
 ## Build Instructions
 
-Install the [Vulkan SDK](https://vulkan.lunarg.com/) for your platform (version 1.3.231.1 or greater).
+Install the [Vulkan SDK](https://vulkan.lunarg.com/) for your platform (version 1.4.309.0 or greater).
 
 GPRT uses CMake for configuration. For an empty directory, `build`, in the top
 directory of this repository, the project can be configured with
