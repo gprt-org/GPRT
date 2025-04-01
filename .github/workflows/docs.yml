@@ -1,6 +1,8 @@
 name: Documentation
 
 on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+
   push:
     branches:
       - master
