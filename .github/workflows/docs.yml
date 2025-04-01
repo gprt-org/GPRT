@@ -32,7 +32,7 @@ jobs:
       - run: pip install -r ./docs/requirements.txt
 
       - name: Prepare Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.1.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: 1.4.309.0
           cache: true
