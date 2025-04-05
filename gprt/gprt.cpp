@@ -150,6 +150,7 @@ static struct RequestedFeatures {
 
   bool invocationReordering = false;
   bool linearSweptSpheres = true;
+  bool motionBlur = true;
 
   bool debugPrintf = true;
 
@@ -482,6 +483,7 @@ struct Context {
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
   VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV linearSweptSpheresFeatures;
   #endif
+  VkPhysicalDeviceRayTracingMotionBlurFeaturesNV motionBlurFeatures;
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
   VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
   VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutableDescriptorFeatures;
@@ -4146,16 +4148,15 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
 
       void* pNext = nullptr;
-      #ifdef VK_NV_ray_tracing_linear_swept_spheres
-      if (requestedFeatures.linearSweptSpheres) {
-        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags;
+      if (requestedFeatures.linearSweptSpheres || requestedFeatures.motionBlur) {
+        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags = {};
         pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
-        pipelineCreateFlags.flags = VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV ;
+        if (requestedFeatures.linearSweptSpheres) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
+        if (requestedFeatures.motionBlur) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_MOTION_BIT_NV;
         pipelineCreateFlags.pNext = nullptr;
         pNext = &pipelineCreateFlags;
       }
-      #endif
-
+      
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
       rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
       rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -5042,6 +5043,10 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
   }
 
+  if (requestedFeatures.motionBlur) {
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME);
+  }
+
   if (requestedFeatures.linearSweptSpheres) {
     #ifdef VK_NV_ray_tracing_linear_swept_spheres
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
@@ -5216,6 +5221,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     pNext = &linearSweptSpheresFeatures;
   }
   #endif
+
+  motionBlurFeatures = {};
+  motionBlurFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV;
+  if (requestedFeatures.motionBlur) {
+    motionBlurFeatures.pNext = pNext;
+    pNext = &motionBlurFeatures;
+  }
 
   accelerationStructureFeatures = {};
   accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
