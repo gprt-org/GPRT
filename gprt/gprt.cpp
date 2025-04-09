@@ -4148,9 +4148,9 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
 
       void* pNext = nullptr;
+      VkPipelineCreateFlags2CreateInfo pipelineCreateFlags = {};
+      pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
       if (requestedFeatures.linearSweptSpheres || requestedFeatures.motionBlur) {
-        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags = {};
-        pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
         if (requestedFeatures.linearSweptSpheres) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
         if (requestedFeatures.motionBlur) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_MOTION_BIT_NV;
         pipelineCreateFlags.pNext = nullptr;
