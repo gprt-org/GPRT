@@ -16,16 +16,16 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
 
     - name: Prepare Vulkan SDK
-      uses: humbletim/install-vulkan-sdk@v1.1.1
+      uses: humbletim/install-vulkan-sdk@v1.2
       with:
-        version: 1.3.296.0
+        version: 1.4.309.0
         cache: true
-      
+
     - name: Apt dependencies
       shell: bash
       run: |
@@ -37,7 +37,7 @@ jobs:
                             libglu1-mesa-dev \
                             freeglut3-dev \
                             mesa-common-dev
-                            
+
     - name: Build Shared
       shell: bash
       run: |
@@ -47,9 +47,9 @@ jobs:
         cmake --version
         cmake .. -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
-    
-    
-      
+
+
+
     - name: Build Static
       shell: bash
       run: |
@@ -59,26 +59,26 @@ jobs:
         cmake --version
         cmake ..
         make VERBOSE=1 -j4
-    
+
     # Useful for debugging
     # - name: Debug with tmate on failure
     #   if: ${{ failure() }}
     #   uses: mxschmitt/action-tmate@v3
-    
+
   windows:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
-    
+
     - name: Prepare Vulkan SDK
-      uses: humbletim/install-vulkan-sdk@v1.1.1
+      uses: humbletim/install-vulkan-sdk@v1.2
       with:
-        version: 1.3.296.0
+        version: 1.4.309.0
         cache: true
-    
+
     - name: Build
       shell: bash
       run: |

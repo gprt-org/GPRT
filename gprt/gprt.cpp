@@ -130,10 +130,10 @@ static struct RequestedFeatures {
 
   // Setting to 4, to allow for RSTW attributes
   uint32_t maxRayHitAttributeSize = 4;
-  
+
   uint32_t internalAdditionalSize = 128;
   uint32_t raygenRecordSize = 1024;
-  
+
   uint32_t hitRecordSize = 256;
   uint32_t missRecordSize = 256;
   uint32_t callableRecordSize = 256;
@@ -780,7 +780,7 @@ struct Buffer {
   Context* context;
 
   VkPhysicalDeviceMemoryProperties memoryProperties;
-  
+
   /** @brief Usage flags to be filled by external source at buffer creation */
   VkBufferUsageFlags usageFlags;
 
@@ -1090,7 +1090,7 @@ struct Buffer {
     usageFlags = _usageFlags;
     size = _size;
     alignment = _alignment;
-    
+
     // Check if the buffer can be mapped to a host pointer.
     // If the buffer isn't host visible, this is buffer and requires
     // an additional staging buffer...
@@ -3575,7 +3575,7 @@ struct SphereAccel : public Accel {
         sphereData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
         sphereData.vertexData.deviceAddress = sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset;
         sphereData.vertexStride = sizeof(float4);
-        
+
         sphereData.radiusFormat = VK_FORMAT_R32_SFLOAT;
         sphereData.radiusData.deviceAddress =
             sphereGeom->vertex.buffers[0]->deviceAddress + sphereGeom->vertex.offset + sizeof(float3);
@@ -3721,7 +3721,7 @@ struct LSSAccel : public Accel {
         lssData.indexingMode = VK_RAY_TRACING_LSS_INDEXING_MODE_LIST_NV;   // could also be successive
 
         // Can also be
-        lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV : 
+        lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV :
                                              VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_NONE_NV;
 
         auto &geomRange = accelerationBuildStructureRangeInfo;
@@ -4575,7 +4575,7 @@ Context::destroy() {
     vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
     descriptorPool = nullptr;
   }
-  
+
   if (imguiPool) {
     vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
     imguiPool = nullptr;
@@ -5128,10 +5128,10 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
         requestedFeatures.linearSweptSpheres = false;
         enabledDeviceExtensions.erase(
-            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)), 
+            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
             enabledDeviceExtensions.end()
         );
-      
+
       }
     } else if (numRequestedDevices > 1) {
       LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
