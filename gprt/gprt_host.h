@@ -1854,22 +1854,13 @@ gprtBufferGetSize(GPRTBufferOf<T> buffer) {
   return gprtBufferGetSize((GPRTBuffer) buffer);
 }
 
-/*! returns the device pointer of the given pointer for the given
-  device ID. For host-pinned or managed memory buffers (where the
-  buffer is shared across all devices) this pointer should be the
-  same across all devices (and even be accessible on the host); for
-  device buffers each device *may* see this buffer under a different
-  address, and that address is not valid on the host. Note this
-  function is paricuarly useful for CUDA-interop; allowing to
-  cudaMemcpy to/from an owl buffer directly from CUDA code
-
-  // TODO! update for Vulkan...
-  */
 GPRT_API void *gprtBufferGetHostPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+/** 
+ * WARNING, this pointer cannot be accessed from the device (even for host buffers)! Host accesses only...
+ * If you need device-side access, see "gprtBufferGetDevicePointer".
+*/
+template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtBufferGetHostPointer((GPRTBuffer) buffer, deviceID);
 }
 
@@ -1889,6 +1880,10 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
 }
 
+/** 
+ * WARNING, this pointer cannot be accessed from the host! Device accesses only...
+* If you need host-side access, see "gprtBufferGetHostPointer".
+*/
 GPRT_API void *gprtBufferGetDevicePointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>

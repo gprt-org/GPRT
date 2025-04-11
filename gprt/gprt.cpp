@@ -140,6 +140,9 @@ static struct RequestedFeatures {
 
   uint32_t maxDescriptorCount = 256;
 
+  // uint64_t syncTDR = /*1min*/uint64_t(6e10f);
+  uint64_t syncTDR = uint64_t(30000000);
+
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
   bool rayTracingPipeline = true;
@@ -6535,7 +6538,7 @@ VkResult Context::synchronizeGraphics()
   info.semaphoreCount = semaphores.size();
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
-  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
   if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
   return err;
 }
@@ -6549,7 +6552,7 @@ VkResult Context::synchronizeCompute()
   info.semaphoreCount = semaphores.size();
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
-  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
   if (err) LOG_ERROR("failed to synchronize compute queue! : \n" + errorString(err));
   return err;
   // return vkQueueWaitIdle(computeQueue);
@@ -6564,7 +6567,7 @@ VkResult Context::synchronizeTransfer()
   info.semaphoreCount = semaphores.size();
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
-  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
   if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
   return err;
 }
@@ -8007,8 +8010,9 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.InReset = params.resetAccumulation ? 1 : 0;
     dlssdEvalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
     dlssdEvalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
-    dlssdEvalParams.InMVScaleX = float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
-    dlssdEvalParams.InMVScaleY = float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
+    // Not sure why, but I seem to need to divide this by 2 for correctness...
+    dlssdEvalParams.InMVScaleX = .5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
+    dlssdEvalParams.InMVScaleY = .5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
     dlssdEvalParams.pInExposureTexture = &exposureBuffer;
     dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
 
