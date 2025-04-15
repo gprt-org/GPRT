@@ -150,6 +150,8 @@ static struct RequestedFeatures {
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
+  
+  bool rayTracingValidation = false;
 
   bool invocationReordering = false;
   bool linearSweptSpheres = true;
@@ -345,6 +347,34 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   return VK_FALSE;
 }
 
+VKAPI_ATTR VkBool32 VKAPI_CALL 
+validationMessengerCallback(
+  VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+  VkDebugUtilsMessageTypeFlagsEXT messageType,
+  const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+  void* pUserData)
+{
+  std::string prefix("");
+  if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+      prefix = "WARNING: ";
+  }
+  else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+      prefix = "ERROR: ";
+  }
+
+  // Display message to default output (console/logcat)
+  std::stringstream debugMessage;
+  debugMessage << prefix << "[" << pCallbackData->messageIdNumber << "][" << pCallbackData->pMessageIdName << "] : " << pCallbackData->pMessage;
+
+  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+      std::cout << debugMessage.str() << "\n";
+  } else {
+      std::cout << debugMessage.str() << "\n";
+  }
+  fflush(stdout);
+  return VK_FALSE;
+}
+
 // Contains definitions for internal entry points
 // extern std::vector<uint8_t> scanDeviceCode;
 extern GPRTProgram sortDeviceCode;
@@ -398,6 +428,7 @@ PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructur
 PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
 VkDebugUtilsMessengerEXT debugUtilsMessenger;
+VkDebugUtilsMessengerEXT validationMessenger;
 
 // Note, the following were deprecated and shouldn't be used
 // PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
@@ -482,6 +513,7 @@ struct Context {
   VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
   VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
+  VkPhysicalDeviceRayTracingValidationFeaturesNV rayTracingValidationFeatures;
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
   VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV linearSweptSpheresFeatures;
@@ -4178,6 +4210,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
         raytracingPipeline = VK_NULL_HANDLE;
       }
+      // Note: I've found vkCreateRayTracingPipelines to segfault on NVIDIA in some odd cases. 
+      // * When an attribute struct is passed to ReportHit, but none of the fields are populated
       VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
                                                        &rayTracingPipelineCI, nullptr, &raytracingPipeline);
       if (err) {
@@ -4740,6 +4774,10 @@ Context::freeDebugCallback(VkInstance instance) {
   if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
     gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
   }
+
+  if (gprt::validationMessenger != VK_NULL_HANDLE) {
+    gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::validationMessenger, nullptr);
+  }
 }
 
 void Context::enumerateInstanceValidationLayers()
@@ -4911,6 +4949,26 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     assert(result == VK_SUCCESS);
   }
 
+  if (requestedFeatures.debugPrintf) 
+  {
+    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+      vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debugUtilsMessengerCI.messageSeverity = 
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    debugUtilsMessengerCI.messageType =
+      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    debugUtilsMessengerCI.pfnUserCallback = validationMessengerCallback;
+    VkResult result =
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::validationMessenger);
+    assert(result == VK_SUCCESS);
+  }
+
   /// 2. Select a Physical Device
 
   // Physical device
@@ -4982,6 +5040,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     return requiredExtensions.empty();
   };
+
+  // For ray tracing validation on NVIDIA
+  if (requestedFeatures.rayTracingValidation && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME);
+  }
 
   // For timeline semaphores
   enabledDeviceExtensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
@@ -5207,6 +5270,14 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // atomicFloat2Features.shaderSharedFloat32AtomicMinMax = true;
   // atomicFloat2Features.pNext = pNext;
   // pNext = &atomicFloat2Features;
+
+  // Ray tracing validation on NVIDIA
+  if (requestedFeatures.rayTracingValidation && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    rayTracingValidationFeatures = {}; 
+    rayTracingValidationFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV;
+    rayTracingValidationFeatures.pNext = pNext;
+    pNext = &rayTracingValidationFeatures;
+  }
 
   invocationReorderFeatures = {};
   invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
@@ -7679,6 +7750,11 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   case GPRT_AABBS:
     geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    // Supply afallback intersector to handle cases where none are provided.
+    // for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+    //   gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
+    //                                   "fallbackIntersection");
+    // }
     break;
   case GPRT_SOLIDS:
     geomType = new SolidGeomType(context, requestedFeatures.numRayTypes, recordSize);
@@ -8011,8 +8087,8 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     dlssdEvalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
     dlssdEvalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
     // Not sure why, but I seem to need to divide this by 2 for correctness...
-    dlssdEvalParams.InMVScaleX = .5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
-    dlssdEvalParams.InMVScaleY = .5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
+    dlssdEvalParams.InMVScaleX = 1.0f;//.5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
+    dlssdEvalParams.InMVScaleY = 1.0f;//.5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
     dlssdEvalParams.pInExposureTexture = &exposureBuffer;
     dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
 

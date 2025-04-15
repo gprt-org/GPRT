@@ -184,6 +184,8 @@ struct GPRTDenoiseParams {
   GPRTTextureOf<float> depth;
   GPRTTextureOf<float> specHitDist;
   // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+
+  // motion vector values are expected to be in a -1 to 1 range
   GPRTTextureOf<float2> motionVectors;
   float2 jitter;
 
