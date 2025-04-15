@@ -141,7 +141,7 @@ static struct RequestedFeatures {
   uint32_t maxDescriptorCount = 256;
 
   // uint64_t syncTDR = /*1min*/uint64_t(6e10f);
-  uint64_t syncTDR = uint64_t(30000000);
+  uint64_t syncTDR = uint64_t(6000000000);
 
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
