@@ -155,7 +155,7 @@ static struct RequestedFeatures {
 
   bool invocationReordering = false;
   bool linearSweptSpheres = true;
-  bool motionBlur = true;
+  bool motionBlur = false;
 
   bool debugPrintf = true;
 
