@@ -136,8 +136,13 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 using GPRTProgram = std::vector<uint8_t>;
 
 // CPU implementation of Slang's descriptor handle type.
+template<typename T>
 struct Texture1D {uint placeHolder;};
+
+template<typename T>
 struct Texture2D {uint placeHolder;};
+
+template<typename T>
 struct Texture3D {uint placeHolder;};
 
 template<typename T>
@@ -346,7 +351,9 @@ typedef enum {
 typedef enum {
   // note, for now, values here are made to match VkFormat equivalents.
   GPRT_FORMAT_R8_UINT = VK_FORMAT_R8_UINT,
+  GPRT_FORMAT_R16G16_UINT = VK_FORMAT_R16G16_UINT,
   GPRT_FORMAT_R16_UNORM = VK_FORMAT_R16_UNORM,
+  GPRT_FORMAT_R16G16_UNORM = VK_FORMAT_R16G16_UNORM,
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
   GPRT_FORMAT_R16_SFLOAT = VK_FORMAT_R16_SFLOAT,
@@ -1528,49 +1535,49 @@ uint32_t gprtTextureGetIndex(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(
   return gprtTextureGetIndex((GPRTTexture) texture, deviceID);
 }
 
-template <typename T>
-inline DescriptorHandle<Texture1D> gprtTextureGet1DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture1D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture1D<T1>> gprtTextureGet1DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture1D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<Texture2D> gprtTextureGet2DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture2D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture2D<T1>> gprtTextureGet2DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture2D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<Texture3D> gprtTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture3D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture3D<T1>> gprtTextureGet3DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture3D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<RWTexture1D<T>> gprtRWTextureGet1DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<RWTexture1D<T>> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture1D<T1>> gprtRWTextureGet1DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture1D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<RWTexture2D<T>> gprtRWTextureGet2DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<RWTexture2D<T>> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture2D<T1>> gprtRWTextureGet2DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture2D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<RWTexture3D<T>> gprtRWTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<RWTexture3D<T>> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture3D<T1>> gprtRWTextureGet3DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture3D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
