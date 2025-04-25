@@ -157,7 +157,7 @@ static struct RequestedFeatures {
   bool linearSweptSpheres = true;
   bool motionBlur = false;
 
-  bool debugPrintf = true;
+  bool debugPrintf = false;
 
   // An abstraction over DLSS RR, FSR4, etc
   struct AIDenoiserProperties {
@@ -9147,8 +9147,9 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   gprt::vkCmdTraceRays(commandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);
 
-  if (context->queryRequested)
+  if (context->queryRequested) {
     vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  }
 
   context->endGraphicsCommands(commandBuffer);
   return context->GRTimelineCounter;
@@ -9189,8 +9190,9 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   vkCmdDispatch(commandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
 
-  if (context->queryRequested)
+  if (context->queryRequested) {
     vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  }
 
   err = context->endComputeCommands(commandBuffer);
   if (err)
