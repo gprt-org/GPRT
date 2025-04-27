@@ -201,6 +201,7 @@ target_include_directories(imgui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
   ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo
   ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/GPRT-SampleAssets/
   ${Vulkan_INCLUDE_DIR}
 )
 
