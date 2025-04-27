@@ -191,6 +191,8 @@ add_library(imgui
 
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.h
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.cpp
+
+  ${CMAKE_CURRENT_SOURCE_DIR}/GPRT-SampleAssets/OpenFontIcons.h
 )
 
 target_include_directories(imgui PUBLIC
