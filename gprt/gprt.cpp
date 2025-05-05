@@ -1927,7 +1927,7 @@ struct Texture : public ImageResource {
     writeDescriptorSet.pBufferInfo = 0;
     writeDescriptorSet.dstSet = context->descriptorSet;
     writeDescriptorSet.pImageInfo = &imageDescriptor;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;//(writable) ?  : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
@@ -2334,6 +2334,7 @@ struct GeomType : public SBTEntry {
 
   // Our own virtual "geom types address space".
   uint32_t address = -1;
+  GPRTGeomKind overrideKind = GPRT_UNKNOWN;
 
   uint32_t numRayTypes;
 
@@ -2800,7 +2801,7 @@ struct AABBGeomType : public GeomType {
   ~AABBGeomType() {}
   Geom *createGeom();
 
-  GPRTGeomKind getKind() { return GPRT_AABBS; }
+  GPRTGeomKind getKind() { if (overrideKind != GPRT_UNKNOWN) return overrideKind; else return GPRT_AABBS;}
 };
 
 struct AABBGeom : public Geom {
@@ -2843,6 +2844,20 @@ typedef enum {
   GPRT_LSS_ACCEL = 0x5,
   GPRT_SOLID_ACCEL = 0x6
 } AccelType;
+
+struct BuildOptions {
+  uint32_t allowCompaction : 1;
+  uint32_t minimizeMemory : 1;
+  uint32_t isParticle : 1;
+  uint32_t pad : 29;
+
+  BuildOptions() {
+    allowCompaction = 0;
+    minimizeMemory = 0;
+    isParticle = 0;
+    pad = 0;
+  }
+};
 
 struct Accel {
   // Our own virtual address space
@@ -3135,7 +3150,7 @@ public:
   // - std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
   // - std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
   // - std::vector<uint32_t> maxPrimitiveCounts;
-  void innerBuildProc(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void innerBuildProc(GPRTBuildMode buildMode, BuildOptions options) {
     VkResult err;
 
     // Get size info
@@ -3163,10 +3178,10 @@ public:
       LOG_ERROR("build mode not recognized!");
     }
 
-    if (minimizeMemory) {
+    if (options.minimizeMemory) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
     }
-    if (allowCompaction) {
+    if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
@@ -3217,10 +3232,10 @@ public:
       LOG_ERROR("build mode not recognized!");
     }
 
-    if (minimizeMemory) {
+    if (options.minimizeMemory) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
     }
-    if (allowCompaction) {
+    if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
@@ -3289,13 +3304,13 @@ public:
 
     // update last used build modes
     this->buildMode = buildMode;
-    this->minimizeMemory = minimizeMemory;
-    this->allowCompaction = allowCompaction;
+    this->minimizeMemory = options.minimizeMemory;
+    this->allowCompaction = options.allowCompaction;
     this->isCompact = false;
 
     // If we're minimizing memory usage, free scratch now
     // Otherwise, we keep it around to enable faster builts
-    if (minimizeMemory) 
+    if (options.minimizeMemory) 
       freeScratchBuffer();
   }
 
@@ -3529,7 +3544,10 @@ struct TriangleAccel : public Accel {
       geomRange.transformOffset = 0;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    innerBuildProc(buildMode, options);
   }
 };
 
@@ -3652,7 +3670,10 @@ struct SphereAccel : public Accel {
       maxPrimitiveCount = sphereGeom->vertex.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    innerBuildProc(buildMode, options);
   }
 };
 
@@ -3791,7 +3812,10 @@ struct LSSAccel : public Accel {
       maxPrimitiveCount = lssGeom->index.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    innerBuildProc(buildMode, options);
   }
 };
 
@@ -3870,7 +3894,10 @@ struct SolidAccel : public Accel {
       maxPrimitiveCount = numSolids;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    innerBuildProc(buildMode, options);
   }
 
   //   for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
@@ -3906,7 +3933,10 @@ struct SolidAccel : public Accel {
   //     maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
   //   }
 
-  //   innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  //   BuildOptions options;
+  //   options.allowCompaction = allowCompaction;
+  //   options.minimizeMemory = minimizeMemory;
+  //   innerBuildProc(buildMode, options);
   // }
 };
 
@@ -3937,6 +3967,15 @@ struct AABBAccel : public Accel {
       // apparently, geom.flags can't be 0, otherwise we get a device loss on
       // build...
 
+      // FLAG_NONE                            = 0x00,
+      // FLAG_OPAQUE                          = 0x01,
+      // FLAG_NO_DUPLICATE_ANYHIT_INVOCATION  = 0x02,
+      // FLAG_TRIANGLE_CULL_DISABLE           = 0x04,
+      // if (aabbGeom->geomType->getKind() == GPRT_PARTICLES) 
+      // {
+      //   geom.flags |= 0x08;
+      // }
+
       geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
 
       // aabb data
@@ -3954,7 +3993,11 @@ struct AABBAccel : public Accel {
       maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    
+    innerBuildProc(buildMode, options);
   }
 };
 
@@ -4000,7 +4043,10 @@ struct InstanceAccel : public Accel {
 
     this->accelerationBuildStructureRangeInfo = accelerationStructureBuildRangeInfo;
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+    innerBuildProc(buildMode, options);
   }
 
   void update() {
@@ -4026,6 +4072,85 @@ struct InstanceAccel : public Accel {
 //   int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
 //   return numHitRecords;
 // }
+
+// State IDs that are reserved and can't be used by user shaders.
+// These IDs are for internal functionality that must be called as
+// part of the state machine. The reserved state IDs are for future
+// features that require this method of calling a helper function.
+// If the you add a new functionality that can be called differently,
+// do it without taking a reserved state ID. The use of reserved state
+// IDs is limited because extending this range beyond state ID 15,
+// will break any captures trace that does a deep copy of the
+// application's SBT (i.e., OptiX traces). These traces will have to be
+// recaptured.
+struct ReservedStateIDs
+{
+    uint16_t RESERVED_STATE_ID_NULL_CH_MS : 1;//           =  0,
+    uint16_t RESERVED_STATE_ID_NULL_AH : 1;//              =  1,
+    uint16_t RESERVED_STATE_ID_NULL_IS : 1;//              =  2,
+    uint16_t RESERVED_STATE_ID_NULL_EX : 1;//              =  3,
+    // Note: Before touching the reserved state Ids
+    //       read the comment above.
+    uint16_t RESERVED_STATE_ID_TRAVERSAL : 1;//            =  4,
+    uint16_t RESERVED_STATE_ID_TRI : 1;//                  =  5,
+    uint16_t RESERVED_STATE_ID_DMM_IS_FALLBACK_ALPHA : 1;// =  6,
+    uint16_t RESERVED_STATE_ID_DMM_IS_FALLBACK : 1;//       =  7,
+    uint16_t RESERVED_STATE_ID_LSS_IS_FALLBACK : 1;//      = 8, // LSS version
+    uint16_t RESERVED_STATE_ID_RESERVED_9 : 1;//           =  9,
+    uint16_t RESERVED_STATE_ID_RESERVED_10 : 1;//          = 10,
+    uint16_t RESERVED_STATE_ID_RESERVED_11 : 1;//          = 11,
+    uint16_t RESERVED_STATE_ID_RESERVED_12 : 1;//          = 12,
+    uint16_t RESERVED_STATE_ID_RESERVED_13 : 1;//          = 13,
+    uint16_t RESERVED_STATE_ID_RESERVED_14 : 1;//          = 14,
+    uint16_t RESERVED_STATE_ID_RESERVED_15 : 1;//          = 15
+};
+
+// State IDs in a hit program's SBT header
+struct HitStateIds
+{
+  ReservedStateIDs stateIdCH;
+  ReservedStateIDs stateIdAH;
+  ReservedStateIDs stateIdIS;
+};
+
+struct CallableStateIds
+{
+  ReservedStateIDs stateIdCC;
+  ReservedStateIDs stateIdDC;
+};
+
+struct RecordHeaderFlags
+{
+  uint16_t RECORD_HEADER_FLAG_LIGHTWEIGHT : 1;//          = 1,  // Avoid expensive scheduling operations
+  uint16_t RECORD_HEADER_FLAG_SPECIALIZED : 1;//          = 2,
+  uint16_t RECORD_HEADER_FLAG_NO_GLOBAL_CONT_STACK : 1;// = 4,
+  uint16_t RECORD_HEADER_FLAG_NO_REORDER : 1; //          = 8,
+  uint16_t RECORD_HEADER_FLAG_NO_SETUP : 1;//            = 16,
+  // SBT type flags have inverted sense since a zeroed record header is NOP,
+  // which is compatible with everything.
+  uint16_t RECORD_HEADER_FLAG_NO_HITGROUP : 1;//         = 32,
+  uint16_t RECORD_HEADER_FLAG_NO_MISS : 1;//             = 64,
+  uint16_t RECORD_HEADER_FLAG_NO_RAYGEN : 1;//           = 128,
+  uint16_t RECORD_HEADER_FLAG_NO_CALLABLE : 1;//         = 256,
+  uint16_t RECORD_HEADER_FLAG_NO_EXCEPTION : 1;//        = 512,
+  uint16_t pad : 6;//        = 512,
+  // uint16_t  RECORD_HEADER_FLAG_TYPE_MASK            = 32 | 64 | 128 | 256 | 512,
+};
+
+// SBT header
+struct RecordHeaderType
+{
+    union
+    {
+        ReservedStateIDs stateIdGlobal;  // anything but a hit or callable program
+        CallableStateIds callable;       // A callable program
+        HitStateIds      hit;            // hit program
+    };
+    RecordHeaderFlags flags;
+    uint16_t preferredScheduler;
+    uint16_t padding[3];
+};
+
 
 void
 Context::buildSBT(GPRTBuildSBTFlags flags) {
@@ -4123,6 +4248,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         if (geomType->getKind() == GPRT_TRIANGLES)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_AABBS)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_PARTICLES)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_SOLIDS)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
@@ -4262,6 +4389,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
                                                            shaderHandleStorage.data());
+
+    std::vector<RecordHeaderType> headers(shaderGroups.size());
+    for (int i = 0; i < shaderGroups.size(); ++i) {
+      // RecordHeaderType header;
+      memcpy(&headers[i], shaderHandleStorage.data() + handleSize * i, sizeof(RecordHeaderType));
+    }
+
     if (err)
       LOG_ERROR("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
@@ -4428,11 +4562,17 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           size_t handleStride = handleSize;
 
           // First, copy handle
+          uint32_t handleIDX = ((rayType + requestedFeatures.numRayTypes * geom->geomType->address) + (numRayGens + numMissProgs + numCallableProgs));
           size_t recordOffset = recordStride * (rayType + requestedFeatures.numRayTypes * geomID);
-          size_t handleOffset =
-              handleStride * (rayType + requestedFeatures.numRayTypes * geom->geomType->address) +
-              handleStride * (numRayGens + numMissProgs + numCallableProgs);
+          size_t handleOffset = handleStride * handleIDX;
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+          if (geom->geomType->getKind() == GPRT_PARTICLES) {
+            // if geomType->getKind() == GPRT_PARTICLES
+            RecordHeaderType header = headers[handleIDX];
+            // header.stateIdGlobal.RESERVED_STATE_ID_RESERVED_10 = 1;//.stateIdIS.RESERVED_STATE_ID_NULL_IS = 1;//|= RESERVED_STATE_ID_NULL_IS;
+            memcpy(mapped + recordOffset, &header, sizeof(RecordHeaderType));
+          }
 
           // Then, copy params following handle
           recordOffset = recordOffset + handleSize;
@@ -5926,6 +6066,17 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Roughness_Mode, dlssParamsd.InRoughnessMode);
       NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Use_HW_Depth, dlssParamsd.InUseHWDepth);
 
+      // Once added, each of the below override my preset above for preset D
+      // auto preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E; // for depth of field
+
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality, preset);
+
+
 
       // It seems as though outSizeInBytes is returned as 0. For now, skipping any handling 
       {
@@ -7027,7 +7178,7 @@ gprtGetTime(GPRTContext _context) {
   return glfwGetTime();
 }
 
-GPRT_API void gprtGetDenoiserRenderSize(GPRTContext _context, uint32_t *width, uint32_t *height)
+GPRT_API void gprtGetDenoiserInputSize(GPRTContext _context, uint32_t *width, uint32_t *height)
 {
   LOG_API_CALL();
   if (!requestedFeatures.aiDenoiser.requested)
@@ -7035,6 +7186,16 @@ GPRT_API void gprtGetDenoiserRenderSize(GPRTContext _context, uint32_t *width, u
   Context *context = (Context *) _context;
   *width = context->aiDenoising.optimalSettings.optimalRenderSize.x;
   *height = context->aiDenoising.optimalSettings.optimalRenderSize.y;
+}
+
+GPRT_API void gprtGetDenoiserOutputSize(GPRTContext _context, uint32_t *width, uint32_t *height)
+{
+  LOG_API_CALL();
+  if (!requestedFeatures.aiDenoiser.requested)
+    return;
+
+  *width = requestedFeatures.aiDenoiser.outputWidth;
+  *height = requestedFeatures.aiDenoiser.outputHeight;
 }
 
 GPRT_API void
@@ -7533,7 +7694,8 @@ void
 gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   AABBGeom *aabbs = (AABBGeom *) _aabbs;
-  if (aabbs->geomType->getKind() != GPRT_AABBS) LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
+  if ((aabbs->geomType->getKind() != GPRT_AABBS) && (aabbs->geomType->getKind() != GPRT_PARTICLES)) 
+    LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
   Buffer *positions = (Buffer *) _positions;
   aabbs->setAABBs(positions, count, stride, offset);
 }
@@ -7757,6 +7919,10 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     //   gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
     //                                   "fallbackIntersection");
     // }
+    break;
+  case GPRT_PARTICLES:
+    geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    geomType->overrideKind = GPRT_PARTICLES;
     break;
   case GPRT_SOLIDS:
     geomType = new SolidGeomType(context, requestedFeatures.numRayTypes, recordSize);
@@ -8005,14 +8171,250 @@ gprtTextureClear(GPRTTexture _texture) {
   texture->clear();
 }
 
+// small helper to validate one texture field
+static bool gprtValidateTextureField(
+  std::string        fieldName,
+  Texture*           tex,
+  uint32_t           expectedW,
+  uint32_t           expectedH,
+  bool               required,
+  bool               mustBeWritable)
+{
+  if (!tex) {
+      if (required) {
+          LOG_ERROR(
+            std::string("gprtTextureDenoise field ") + fieldName +
+            " is required, but not given.");
+          return false;
+      }
+      return true;  // optional and missing => OK
+  }
+
+  if (tex->width != expectedW || tex->height != expectedH) {
+      LOG_ERROR(
+        std::string("gprtTextureDenoise field ") + fieldName +
+        " expected size " + std::to_string(expectedW) + " x " +
+        std::to_string(expectedH) +
+        ", but given texture dimensions are " +
+        std::to_string(tex->width) + " x " +
+        std::to_string(tex->height));
+      return false;
+  }
+
+  if (mustBeWritable && !tex->writable) {
+      LOG_ERROR(
+        std::string("gprtTextureDenoise field ") + fieldName +
+        " must be writable, but is marked as read only.");
+      return false;
+  }
+
+  return true;
+}
+
 GPRT_API uint64_t
 gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
 {
   LOG_API_CALL();
   Context *context = (Context *) _context;
 
+  uint32_t inputW, inputH, outputW, outputH;
+  gprtGetDenoiserInputSize(_context, &inputW, &inputH);
+  gprtGetDenoiserOutputSize(_context, &outputW, &outputH);
+
+  bool allGood = true;
   if (context->deviceProperties.vendorID == VENDOR_ID_NVIDIA)
   {
+    auto getImageView = [](Texture* pTexture) -> NVSDK_NGX_Resource_VK
+    {
+        if (!pTexture) {
+          return {};
+        }
+
+        NVSDK_NGX_Resource_VK resourceVK = {};
+        resourceVK.Type = NVSDK_NGX_RESOURCE_VK_TYPE_VK_IMAGEVIEW;
+        resourceVK.Resource.ImageViewInfo.ImageView = pTexture->imageView;
+        resourceVK.Resource.ImageViewInfo.Image = pTexture->image;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.aspectMask = pTexture->aspectFlagBits;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.baseMipLevel = 0;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.levelCount = 1;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.baseArrayLayer = 0;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.layerCount = 1;
+
+        resourceVK.Resource.ImageViewInfo.Height = pTexture->height;
+        resourceVK.Resource.ImageViewInfo.Width = pTexture->width;
+        resourceVK.Resource.ImageViewInfo.Format = pTexture->format;
+        resourceVK.ReadWrite = pTexture->writable;
+        return resourceVK;
+    };
+
+    struct FieldDesc {
+      Texture*    tex;
+      uint32_t    expW, expH;
+      bool        required;
+      bool        mustBeWritable;
+      NVSDK_NGX_Resource_VK imageView;
+    };
+
+    std::unordered_map<std::string, FieldDesc> fields = {
+      //        name           ptr                                   expW      expH      req    writable   initialImageView
+      { "denoisedOutput",      { (Texture*)params.denoisedOutput,      outputW,  outputH,  true,   true ,   NVSDK_NGX_Resource_VK{} } },
+      { "inputRadiance",       { (Texture*)params.inputRadiance,       inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "diffuseAlbedo",       { (Texture*)params.diffuseAlbedo,       inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "specularAlbedo",      { (Texture*)params.specularAlbedo,      inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "normalsAndRoughness", { (Texture*)params.normalsAndRoughness, inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "frustumDepth",        { (Texture*)params.frustumDepth,        inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "firstVertexMotion",   { (Texture*)params.firstVertexMotion,   inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "transparencyLayer",   { (Texture*)params.transparencyLayer,   inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "depthOfFieldGuide",   { (Texture*)params.depthOfFieldGuide,   inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "maxRadianceExposure", { (Texture*)params.maxRadianceExposure, inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "specularHitDistance", { (Texture*)params.specularHitDistance, inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      // can expand to additional channels here...
+    };
+
+    // NVSDK_NGX_Resource_VK transparencyOverlay = getImageView((Texture*)params.transparencyOverlay, false);
+    // NVSDK_NGX_Resource_VK depthOfFieldGuide = getImageView((Texture*)params.depthOfFieldGuide, false);    
+    // NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, false);
+    // NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, false);
+
+    for (auto &[name, desc] : fields) {
+      allGood &= gprtValidateTextureField(
+                  name, desc.tex, desc.expW, desc.expH, desc.required, desc.mustBeWritable);
+      if (allGood) {
+        desc.imageView = getImageView(desc.tex);
+      }
+    }
+
+    if (!allGood) return -1;
+
+    
+    NVSDK_NGX_VK_DLSSD_Eval_Params dlssdEvalParams = {};
+    
+    // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
+    dlssdEvalParams.pInDiffuseAlbedo = &fields["diffuseAlbedo"].imageView;// &diffuseAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
+    dlssdEvalParams.pInSpecularAlbedo = &fields["specularAlbedo"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInNormals;
+    dlssdEvalParams.pInNormals = &fields["normalsAndRoughness"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInRoughness;
+    dlssdEvalParams.pInRoughness = &fields["normalsAndRoughness"].imageView;
+    
+    // NVSDK_NGX_Resource_VK*              pInColor;
+    dlssdEvalParams.pInColor = &fields["inputRadiance"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInOutput;
+    dlssdEvalParams.pInOutput = &fields["denoisedOutput"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInDepth;
+    dlssdEvalParams.pInDepth = &fields["frustumDepth"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+    dlssdEvalParams.pInMotionVectors = &fields["firstVertexMotion"].imageView;
+    // float                               InJitterOffsetX;     /* Jitter offset must be in input/render pixel space */
+    dlssdEvalParams.InJitterOffsetX = params.jitter.x;
+    // float                               InJitterOffsetY;
+    dlssdEvalParams.InJitterOffsetY = params.jitter.y;
+    // NVSDK_NGX_Dimensions                InRenderSubrectDimensions;
+    dlssdEvalParams.InRenderSubrectDimensions.Width = inputW;
+    dlssdEvalParams.InRenderSubrectDimensions.Height = inputH;
+    // /*** OPTIONAL - leave to 0/0.0f if unused ***/
+    // int                                 InReset;             
+    dlssdEvalParams.InReset = params.resetAccumulation ? 1 : 0;
+    // float                               InMVScaleX;          /* If MVs need custom scaling to convert to pixel space */
+    dlssdEvalParams.InMVScaleX = 1.0f;
+    // float                               InMVScaleY;
+    dlssdEvalParams.InMVScaleY = 1.0f;
+    // NVSDK_NGX_Resource_VK *             pInTransparencyMask; /* Unused/Reserved for future use */
+    // NVSDK_NGX_Resource_VK *             pInExposureTexture;
+    if (params.maxRadianceExposure) dlssdEvalParams.pInExposureTexture = &fields["maxRadianceExposure"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInBiasCurrentColorMask;
+    // NVSDK_NGX_Coordinates               InDiffuseAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InNormalsSubrectBase;
+    // NVSDK_NGX_Coordinates               InRoughnessSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorSubrectBase;
+    // NVSDK_NGX_Coordinates               InDepthSubrectBase;
+    // NVSDK_NGX_Coordinates               InMVSubrectBase;
+    // NVSDK_NGX_Coordinates               InTranslucencySubrectBase;
+    // NVSDK_NGX_Coordinates               InBiasCurrentColorSubrectBase;
+    // NVSDK_NGX_Coordinates               InOutputSubrectBase;
+    // float                               InPreExposure;
+    // float                               InExposureScale;
+    // int                                 InIndicatorInvertXAxis;
+    // int                                 InIndicatorInvertYAxis;
+    // /*** OPTIONAL - only for research purposes ***/
+
+    // NVSDK_NGX_Resource_VK*              pInReflectedAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeParticles;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterParticles;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeTransparency;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterTransparency;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeFog;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterFog;
+    // NVSDK_NGX_Resource_VK*              pInScreenSpaceSubsurfaceScatteringGuide;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeScreenSpaceSubsurfaceScattering;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterScreenSpaceSubsurfaceScattering;
+    // NVSDK_NGX_Resource_VK*              pInScreenSpaceRefractionGuide;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeScreenSpaceRefraction;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterScreenSpaceRefraction;
+    // NVSDK_NGX_Resource_VK*              pInDepthOfFieldGuide;
+    if (params.depthOfFieldGuide) dlssdEvalParams.pInDepthOfFieldGuide = &fields["depthOfFieldGuide"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeDepthOfField;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterDepthOfField;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseHitDistance;
+    // NVSDK_NGX_Resource_VK*              pInSpecularHitDistance;
+    if (params.specularHitDistance) dlssdEvalParams.pInSpecularHitDistance = &fields["specularHitDistance"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseRayDirection;
+    // NVSDK_NGX_Resource_VK*              pInSpecularRayDirection;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseRayDirectionHitDistance;
+    // NVSDK_NGX_Resource_VK*              pInSpecularRayDirectionHitDistance;
+    // NVSDK_NGX_Coordinates               InReflectedAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeParticlesSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterParticlesSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeTransparencySubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterTransparencySubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeFogSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterFogSubrectBase;
+    // NVSDK_NGX_Coordinates               InScreenSpaceSubsurfaceScatteringGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeScreenSpaceSubsurfaceScatteringSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterScreenSpaceSubsurfaceScatteringSubrectBase;
+    // NVSDK_NGX_Coordinates               InScreenSpaceRefractionGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeScreenSpaceRefractionSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterScreenSpaceRefractionSubrectBase;
+    // NVSDK_NGX_Coordinates               InDepthOfFieldGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeDepthOfFieldSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterDepthOfFieldSubrectBase;    
+    // NVSDK_NGX_Coordinates               InDiffuseHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InDiffuseRayDirectionSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularRayDirectionSubrectBase;
+    // NVSDK_NGX_Coordinates               InDiffuseRayDirectionHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularRayDirectionHitDistanceSubrectBase;
+    // float*                              pInWorldToViewMatrix;
+    dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();
+    // float*                              pInViewToClipMatrix;
+    dlssdEvalParams.pInViewToClipMatrix = (float*)params.projMatrix.data();
+
+    // NVSDK_NGX_VK_GBuffer                GBufferSurface;
+    // NVSDK_NGX_ToneMapperType            InToneMapperType;
+    // NVSDK_NGX_Resource_VK *             pInMotionVectors3D;
+    // NVSDK_NGX_Resource_VK *             pInIsParticleMask; /* to identify which pixels contains particles, essentially that are not drawn as part of base pass */
+    // NVSDK_NGX_Resource_VK *             pInAnimatedTextureMask; /* a binary mask covering pixels occupied by animated textures */
+    // NVSDK_NGX_Resource_VK *             pInDepthHighRes;
+    // NVSDK_NGX_Resource_VK *             pInPositionViewSpace;
+    // float                               InFrameTimeDeltaInMsec; 
+    dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
+    // NVSDK_NGX_Resource_VK *             pInRayTracingHitDistance; /* for each effect - approximation to the amount of noise in a ray-traced color */
+    // NVSDK_NGX_Resource_VK *             pInMotionVectorsReflections; /* motion vectors of reflected objects like for mirrored surfaces */
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayer; /* optional input res particle layer */
+    if (params.transparencyLayer) dlssdEvalParams.pInTransparencyLayer = &fields["transparencyLayer"].imageView;
+    // NVSDK_NGX_Coordinates               InTransparencyLayerSubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayerOpacity; /* optional input res particle opacity layer */
+    // NVSDK_NGX_Coordinates               InTransparencyLayerOpacitySubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayerMvecs; /* optional input res transparency layer mvecs */
+    // NVSDK_NGX_Coordinates               InTransparencyLayerMvecsSubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInDisocclusionMask; /* optional input res disocclusion mask */
+    // NVSDK_NGX_Coordinates               InDisocclusionMaskSubrectBase;
+
+
+
+
     // /* Transition resolve image to a general format */
     // // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
     // auto oldResolveLayout = ((Texture*)params.output)->layout;
@@ -8032,188 +8434,22 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
     //   ((Texture*)params.output)->layout = VK_IMAGE_LAYOUT_GENERAL;
     // }
 
-    auto getImageView = [](Texture* pTexture, bool isReadWrite = false) -> NVSDK_NGX_Resource_VK
-    {
-        if (!pTexture)
-            return {};
+    
 
-        VkImageView imageView = pTexture->imageView;
-        VkImage image = pTexture->image; 
-        VkFormat format = pTexture->format;
-        VkImageSubresourceRange range;
-        range.aspectMask = pTexture->aspectFlagBits;//getAspectMaskFromFormat(format);
-        range.baseMipLevel = 0;
-        range.levelCount = 1;
-        range.baseArrayLayer = 0;
-        range.layerCount = 1;
-        return NVSDK_NGX_Create_ImageView_Resource_VK(
-            imageView, image, range, format, pTexture->width, pTexture->height, isReadWrite
-        );
-    };
+    
 
-    NVSDK_NGX_Resource_VK transparencyOverlay = getImageView((Texture*)params.transparencyOverlay, false);
-    NVSDK_NGX_Resource_VK depthOfFieldGuide = getImageView((Texture*)params.depthOfFieldGuide, false);    
-    NVSDK_NGX_Resource_VK diffuseAlbedo = getImageView((Texture*)params.diffuseAlbedo, false);
-    NVSDK_NGX_Resource_VK specularAlbedo = getImageView((Texture*)params.specularAlbedo, false);
-    NVSDK_NGX_Resource_VK normalsAndRoughness = getImageView((Texture*)params.normalsAndRoughness, false);
-    NVSDK_NGX_Resource_VK color = getImageView((Texture*)params.color, false);
-    NVSDK_NGX_Resource_VK depth = getImageView((Texture*)params.depth, false);
-    NVSDK_NGX_Resource_VK motionVectors = getImageView((Texture*)params.motionVectors, false);
-    NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, false);
-    NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, false);
-    NVSDK_NGX_Resource_VK output = getImageView((Texture*)params.output, true);
- 
     VkCommandBuffer commandList = context->beginComputeCommands(); // Todo: move to compute queue
     // VkCommandBuffer commandList = context->beginSingleTimeCommands(context->ComputeCommandPool);
 
-    NVSDK_NGX_VK_DLSSD_Eval_Params dlssdEvalParams = {};
-    dlssdEvalParams.pInDiffuseAlbedo = &diffuseAlbedo;
-    dlssdEvalParams.pInSpecularAlbedo = &specularAlbedo;
-    dlssdEvalParams.pInNormals = &normalsAndRoughness;
-    dlssdEvalParams.pInRoughness = &normalsAndRoughness;
-    dlssdEvalParams.InDiffuseAlbedoSubrectBase = {0, 0};
-    dlssdEvalParams.InSpecularAlbedoSubrectBase = {0, 0};
-    dlssdEvalParams.pInColor = &color;
-    dlssdEvalParams.pInOutput = &output;
-    dlssdEvalParams.pInDepth = &depth;
-    if (params.transparencyOverlay) dlssdEvalParams.pInTransparencyLayer = &transparencyOverlay;
-    if (params.depthOfFieldGuide) dlssdEvalParams.pInDepthOfFieldGuide = &depthOfFieldGuide;
-    dlssdEvalParams.pInMotionVectors = &motionVectors;
-    dlssdEvalParams.pInSpecularHitDistance = &specularHitDistance;
-    dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();
-    dlssdEvalParams.pInViewToClipMatrix = (float*)params.projMatrix.data();
-    dlssdEvalParams.InJitterOffsetX = params.jitter.x;
-    dlssdEvalParams.InJitterOffsetY = params.jitter.y;
     
-    dlssdEvalParams.InReset = params.resetAccumulation ? 1 : 0;
-    dlssdEvalParams.InRenderSubrectDimensions.Width = context->aiDenoising.optimalSettings.optimalRenderSize.x;//requestedFeatures.aiDenoiser.outputWidth;
-    dlssdEvalParams.InRenderSubrectDimensions.Height = context->aiDenoising.optimalSettings.optimalRenderSize.y;//requestedFeatures.aiDenoiser.outputHeight;
-    // Not sure why, but I seem to need to divide this by 2 for correctness...
-    dlssdEvalParams.InMVScaleX = 1.0f;//.5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.x);
-    dlssdEvalParams.InMVScaleY = 1.0f;//.5f * float(context->aiDenoising.optimalSettings.optimalRenderSize.y);
-    dlssdEvalParams.pInExposureTexture = &exposureBuffer;
-    dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
+
+
 
     // dlssdEvalParams.pInWorldToViewMatrix
     NGX_CHECK_RESULT(NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams));
     context->endComputeCommands(commandList);
-
-
-
-    // context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-    // context->synchronizeGraphics();
-    // TESTING: not doing a queue wait idle here. We wait now for a subsequent command queue to pick up the semaphore.
-
-
-    // if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
-    // {
-    //   VkImageSubresourceRange imageSubresource;
-    //   imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
-    //   imageSubresource.baseArrayLayer = 0;
-    //   imageSubresource.baseMipLevel = 0;
-    //   imageSubresource.layerCount = 1;
-    //   imageSubresource.levelCount = 1;
-      
-    //   VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
-    //   ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
-    //   VK_IMAGE_LAYOUT_GENERAL, oldResolveLayout, imageSubresource);
-    //   context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
-    //   ((Texture*)params.output)->layout = oldResolveLayout;
-    // }
-
-
-
-    // if (NVSDK_NGX_FAILED(result)) {LOG_WARNING("Failed to NGX_VULKAN_EVALUATE_DLSS_EXT for DLSS: {}", context->aiDenoising.resultToString(result));}
-    
-
-
-    // Determine pass I/O sizes based on bound textures.
-    // const auto& pOutput = renderData.getTexture(kOutput);
-    // const auto& pColor = renderData.getTexture(kColorInput);
-    // FALCOR_ASSERT(pColor && pOutput);
-
-    // mPassOutputSize = {pOutput->getWidth(), pOutput->getHeight()};
-    // const uint2 inputSize = {pColor->getWidth(), pColor->getHeight()};
-
-    // if (!mEnabled || !mpScene)
-    // {
-    //     pRenderContext->blit(pColor->getSRV(), pOutput->getRTV());
-    //     return;
-    // }
-
-    // if (mExposureUpdated)
-    // {
-    //     float exposure = pow(2.f, mExposure);
-    //     pRenderContext->updateTextureData(mpExposure.get(), &exposure);
-    //     mExposureUpdated = false;
-    // }
-
-    // if (mRecreate || any(inputSize != mInputSize))
-    // {
-    //     mRecreate = false;
-    //     mInputSize = inputSize;
-
-    //     initializeDLSS(pRenderContext);
-
-    //     // If pass output is configured to be fixed to DLSS output, but the sizes don't match,
-    //     // we'll trigger a graph recompile to update the pass I/O size requirements.
-    //     // This causes a one frame delay, but unfortunately we don't know the size until after initializeDLSS().
-    //     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed && any(mPassOutputSize != mDLSSOutputSize))
-    //         requestRecompile();
-    // }
-
-    // {
-    //     // Fetch inputs and verify their dimensions.
-    //     auto getInput = [=](const std::string& name)
-    //     {
-    //         auto tex = renderData.getTexture(name);
-    //         if (!tex)
-    //             FALCOR_THROW("DLSSPass: Missing input '{}'", name);
-    //         if (tex->getWidth() != mInputSize.x || tex->getHeight() != mInputSize.y)
-    //             FALCOR_THROW("DLSSPass: Input '{}' has mismatching size. All inputs must be of the same size.", name);
-    //         return tex;
-    //     };
-
-    //     auto color = getInput(kColorInput);
-    //     auto depth = getInput(kDepthInput);
-    //     auto motionVectors = getInput(kMotionVectorsInput);
-
-    //     // Determine if we can write directly to the render pass output.
-    //     // Otherwise we'll output to an internal buffer and blit to the pass output.
-    //     FALCOR_ASSERT(mpOutput->getWidth() == mDLSSOutputSize.x && mpOutput->getHeight() == mDLSSOutputSize.y);
-    //     bool useInternalBuffer = (any(mDLSSOutputSize != mPassOutputSize) || pOutput->getFormat() != mpOutput->getFormat());
-
-    //     auto output = useInternalBuffer ? mpOutput : pOutput;
-
-    //     // In DLSS X-jitter should go left-to-right, Y-jitter should go top-to-bottom.
-    //     // Falcor is using math::perspective() that gives coordinate system with
-    //     // X from -1 to 1, left-to-right, and Y from -1 to 1, bottom-to-top.
-    //     // Therefore, we need to flip the Y-jitter only.
-    //     const auto& camera = mpScene->getCamera();
-    //     float2 jitterOffset = float2(camera->getJitterX(), -camera->getJitterY()) * float2(inputSize);
-    //     float2 motionVectorScale = float2(1.f, 1.f);
-    //     if (mMotionVectorScale == MotionVectorScale::Relative)
-    //         motionVectorScale = inputSize;
-
-    //     mpNGXWrapper->evaluateDLSS(
-    //         pRenderContext,
-    //         color.get(),
-    //         output.get(),
-    //         motionVectors.get(),
-    //         depth.get(),
-    //         mpExposure.get(),
-    //         false,
-    //         mSharpness,
-    //         jitterOffset,
-    //         motionVectorScale
-    //     );
-
-    //     // Resample the upscaled result from DLSS to the pass output if needed.
-    //     if (useInternalBuffer)
-    //         pRenderContext->blit(mpOutput->getSRV(), pOutput->getRTV());
-    // }
   }
-  else
+  else 
   {
     LOG_ERROR("Unimplemented");
   }
@@ -8895,7 +9131,7 @@ gprtAABBAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Geom* geom = ((Geom*)_geom);
-  if (geom->geomType->getKind() != GPRT_AABBS) {
+  if (geom->geomType->getKind() != GPRT_AABBS && geom->geomType->getKind() != GPRT_PARTICLES) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
   AABBAccel *accel = new AABBAccel(context, (AABBGeom *) _geom);

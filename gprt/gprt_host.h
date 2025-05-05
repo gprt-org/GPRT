@@ -166,7 +166,7 @@ struct DescriptorHandle
 // https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS_RR.md
 
 struct GPRTDenoiseParams {
-  GPRTTextureOf<float4> transparencyOverlay;
+  GPRTTextureOf<float4> transparencyLayer; /* optional input res particle layer */
   // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
   GPRTTextureOf<float4> diffuseAlbedo;
   // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
@@ -176,28 +176,38 @@ struct GPRTDenoiseParams {
   // NVSDK_NGX_Resource_VK*              pInRoughness;
 
   // A single texel float32 buffer.
-  GPRTTextureOf<float> exposure;
+  GPRTTextureOf<float> maxRadianceExposure;
 
   // Note, must be float16
   GPRTTextureOf<float16_t> depthOfFieldGuide;
 
   // NVSDK_NGX_Resource_VK*              pInColor;
-  GPRTTextureOf<float4> color;
+  GPRTTextureOf<float4> inputRadiance;
   // NVSDK_NGX_Resource_VK*              pInOutput;
-  GPRTTextureOf<float4> output; // output
+  GPRTTextureOf<float4> denoisedOutput; // output
   // NVSDK_NGX_Resource_VK *             pInDepth;
-  GPRTTextureOf<float> depth;
-  GPRTTextureOf<float> specHitDist;
+  
+  // Depth computed from a pinhole camera model. 
+  // Must be values between 0 and 1, which interpolate between the near and far planes of 
+  // a pyramidal frustum. 
+  GPRTTextureOf<float> frustumDepth;
+  GPRTTextureOf<float> specularHitDistance;
   // NVSDK_NGX_Resource_VK *             pInMotionVectors;
 
-  // motion vector values are expected to be in a -1 to 1 range
-  GPRTTextureOf<float2> motionVectors;
+  // A buffer of motion vectors in normalized device coordinate space (between -1 to 1) 
+  // which describe the motion of the first path vertex (or the background motion if 
+  // the viewing ray misses)
+  GPRTTextureOf<float2> firstVertexMotion;
   float2 jitter;
 
 
   float4x4 viewMatrix;
   float4x4 projMatrix;
+
+  /* helps in determining the amount to denoise or anti-alias based on the speed of the object from motion vector magnitudes and fps as determined by this delta */
   float frameTimeDeltaInMsec;
+
+  /* Set to 1 when scene changes completely (new level etc) */
   bool resetAccumulation;
 };
 
@@ -270,7 +280,7 @@ typedef enum {
 } GPRTMatrixFormat;
 
 typedef enum { 
-  GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, /*bilinear solids?*/GPRT_SOLIDS
+  GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, /*bilinear solids?*/GPRT_SOLIDS, GPRT_PARTICLES
 } GPRTGeomKind;
 
 
@@ -627,7 +637,8 @@ GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
  */
 GPRT_API void gprtGrabAndHideCursor(GPRTContext context, bool enabled);
 
-GPRT_API void gprtGetDenoiserRenderSize(GPRTContext context, uint32_t *width, uint32_t *height);
+GPRT_API void gprtGetDenoiserInputSize(GPRTContext context, uint32_t *width, uint32_t *height);
+GPRT_API void gprtGetDenoiserOutputSize(GPRTContext context, uint32_t *width, uint32_t *height);
 
 #define GPRT_RELEASE 0
 #define GPRT_PRESS   1
