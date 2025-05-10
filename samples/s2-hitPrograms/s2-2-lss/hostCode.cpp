@@ -94,10 +94,14 @@ int main(int ac, char **av) {
     float B = (b*b) / a;
     float C = sqrt(A*A + B*B);
 
-    verts[0] = float4(-N*a,0.); //
-    verts[1] = float4(+N * B, C); //(sin(pc.time)* .5f + 0.5f); 
-    verts[2] = float4(-N * B, C); //(sin(pc.time)* .5f + 0.5f); 
-    verts[3] = float4(+N*a,0.); //(sin(pc.time)* .5f + 0.5f); 
+
+    
+    
+   
+    verts[0] = float4(-1.f, 0.0f, 0.f, 0.5f);////float4(-N*a,0.); //
+    verts[1] = float4(0.0f, 0.0f, 0.f, 0.6);////float4(+N * B, C); //(sin(pc.time)* .5f + 0.5f); 
+    // verts[2] = float4(+1.f, +1.0f, 0.f, -1.0);////float4(-N * B, C); //(sin(pc.time)* .5f + 0.5f); 
+    // verts[3] = float4(+1.f, +1.0f, 0.f, -1.0);////float4(+N*a,0.); //(sin(pc.time)* .5f + 0.5f); 
     gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
     gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
   }

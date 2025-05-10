@@ -152,7 +152,7 @@ int main(int ac, char **av) {
   planeData->index = gprtBufferGetDevicePointer(indexBuffer);
   planeData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
   planeData->texcoord = gprtBufferGetDevicePointer(texcoordBuffer);
-  planeData->texture = gprtTextureGet2DHandle(texture);
+  planeData->texture = gprtTextureGet2DHandle<float4>(texture);
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }

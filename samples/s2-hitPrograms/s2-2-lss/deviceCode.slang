@@ -61,6 +61,23 @@ void raygen(uniform RayGenData record) {
 
   float3 tot = float3(0.0);
 
+  RayDesc rayDesc;
+  rayDesc.Origin = ro;
+  rayDesc.Direction = rd;
+  rayDesc.TMin = 0.0;
+  rayDesc.TMax = 10000.0;
+
+  RayQuery rq = RayQuery<RAY_FLAG_FORCE_NON_OPAQUE>();
+  rq.TraceRayInline(record.world, RAY_FLAG_NONE, 0xff, rayDesc);
+  while (rq.Proceed()) {
+    uint status = rq.CommittedStatus();
+    if (status == triangle) {
+      // rq.CommitNonOpaqueTriangleHit();
+      rq.CommitProceduralPrimitiveHit(tHitTriangleButRoundedUp);
+    }
+  }
+
+
   for(int m = 0; m < AA; m++) {
   for (int n = 0; n < AA; n++) {
     // pixel coordinates
@@ -71,11 +88,7 @@ void raygen(uniform RayGenData record) {
     float3 rd = normalize(p.x * uu + p.y * vv + 6.0 * ww);
 
     // Trace the ray into the scene
-    RayDesc rayDesc;
-    rayDesc.Origin = ro;
-    rayDesc.Direction = rd;
-    rayDesc.TMin = 0.0;
-    rayDesc.TMax = 10000.0;
+   
     TraceRay(record.world, RAY_FLAG_NONE, 0xff, 0, 0, rayDesc, payload);
 
     // Accumulate the color

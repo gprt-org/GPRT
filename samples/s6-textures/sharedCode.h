@@ -33,7 +33,7 @@ struct TrianglesGeomData {
   /*! array/buffer of vertex positions */
   float2 *texcoord;   // vec2f *
   /*! base color texture we use for the entire mesh */
-  DescriptorHandle<Texture2D> texture;
+  DescriptorHandle<Texture2D<float4>> texture;
   /*! an array of texture samplers to use */
   DescriptorHandle<SamplerState> samplers[12];
 };

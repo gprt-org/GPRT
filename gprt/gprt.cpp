@@ -3511,7 +3511,7 @@ struct TriangleAccel : public Accel {
       // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
       //   means, anyhit should only be called once.
       //   If absent, then an anyhit shader might be called more than once...
-      geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+      geom.flags = VK_GEOMETRY_OPAQUE_BIT_NV;
       // apparently, geom.flags can't be 0, otherwise we get a device loss on
       // build...
 
