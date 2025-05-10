@@ -480,19 +480,16 @@ gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, ui
   gprtTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
 }
 
-// GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
-//                                            /*! number of vertex arrays
-//                                                passed here, the first
-//                                                of those is for t=0,
-//                                                thelast for t=1,
-//                                                everything is linearly
-//                                                interpolated
-//                                                in-between */
-//                                            size_t    numKeys,
-//                                            GPRTBuffer *vertexArrays,
-//                                            size_t count,
-//                                            size_t stride,
-//                                            size_t offset);
+GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles, GPRTBuffer t0_vertices, GPRTBuffer t1_vertices, uint32_t count,
+  uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtTrianglesSetMotionVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> t0_vertices, GPRTBufferOf<T2> t1_vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  static_assert((std::is_same_v<T2, float> || std::is_same_v<T2, float3> || std::is_same_v<T2, float4>), "Triangle vertex buffer must contain floats.");
+  gprtTrianglesSetMotionVertices((GPRTGeom) triangles, (GPRTBuffer) t0_vertices, (GPRTBuffer) t1_vertices, count, stride, offset);
+}
 
 GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
                                       uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0));
@@ -872,6 +869,10 @@ GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
  * quality will vary. 
  */
 GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags);
+
+/** Requests for GPRT to enable motion blur capabilities. If supported, GPRT will use hardware accelerated
+ * capabilities. Otherwise, GPRT will use a software intersector fallback. */
+GPRT_API void gprtRequestMotionBlur();
 
 /** creates a new device context with the gives list of devices.
 

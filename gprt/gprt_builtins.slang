@@ -135,7 +135,7 @@ public void TraceRay<payload_t>(
 /// @remarks Core ray tracing function for initiating traversal
 /// @category raytracing
 [ForceInline]
-[require(cuda_glsl_hlsl_spirv, raytracing_raygen_closesthit_miss)]
+[require(cuda_glsl_hlsl_spirv, raytracing_raygen_closesthit_miss, hlsl_nvapi)]
 public void TraceMotionRay<payload_t>(
     SurfaceAccelerationStructure    AccelerationStructure,
     uint                            RayFlags,

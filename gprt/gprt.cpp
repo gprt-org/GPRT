@@ -2571,7 +2571,8 @@ struct TriangleGeom : public Geom {
     uint32_t count = 0;    // number of vertices
     uint32_t stride = 0;   // stride between vertices
     uint32_t offset = 0;   // an offset in bytes to the first vertex
-    std::vector<Buffer *> buffers;
+    Buffer * t0_buffer;    // buffer of vertex positions at time=0
+    Buffer * t1_buffer;    // buffer of vertex positions at time=1
   } vertex;
 
   TriangleGeom(TriangleGeomType *_geomType) : Geom(_geomType->context) {
@@ -2583,10 +2584,10 @@ struct TriangleGeom : public Geom {
   };
   ~TriangleGeom() { free(this->SBTRecord); };
 
-  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
-    // assuming no motion blurred triangles for now, so we assume 1 buffer
-    vertex.buffers.resize(1);
-    vertex.buffers[0] = vertices;
+  // Set "t1_vertices" to nullptr if not used.
+  void setVertices(Buffer *t0_vertices, Buffer *t1_vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+    vertex.t0_buffer = t0_vertices;
+    vertex.t1_buffer = t1_vertices;
     vertex.count = count;
     vertex.stride = stride;
     vertex.offset = offset;
@@ -2848,12 +2849,14 @@ typedef enum {
 struct BuildOptions {
   uint32_t allowCompaction : 1;
   uint32_t minimizeMemory : 1;
+  uint32_t hasMotion : 1;
   uint32_t isParticle : 1;
-  uint32_t pad : 29;
+  uint32_t pad : 28;
 
   BuildOptions() {
     allowCompaction = 0;
     minimizeMemory = 0;
+    hasMotion = 0;
     isParticle = 0;
     pad = 0;
   }
@@ -3007,7 +3010,7 @@ public:
     }
   }
 
-  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo) {
+  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo, BuildOptions options) {
     // Destroy old accel handle
     if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(context->logicalDevice, accelerationStructure, nullptr);
@@ -3036,7 +3039,7 @@ public:
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
       accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
       accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-
+      
       if (isBottomLevel)
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
       else
@@ -3045,6 +3048,12 @@ public:
       // To enable reusing the device address...
       accelerationStructureCreateInfo.createFlags =
           VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
+      
+      // To enable motion blur
+      if (options.hasMotion) 
+      {
+        accelerationStructureCreateInfo.createFlags |= VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV ;
+      }
       accelerationStructureCreateInfo.deviceAddress = accelBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &accelerationStructure);
@@ -3184,6 +3193,10 @@ public:
     if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
+    if (options.hasMotion) 
+    {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
+    }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
     accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
@@ -3205,7 +3218,7 @@ public:
     freeCompactTree();
 
     // Have base class resize any backing memory allocations
-    resizeFullTree(accelerationStructureBuildSizesInfo);
+    resizeFullTree(accelerationStructureBuildSizesInfo, options);
     context->synchronize();
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
@@ -3237,6 +3250,10 @@ public:
     }
     if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
+    if (options.hasMotion) 
+    {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
@@ -3499,6 +3516,10 @@ struct TriangleAccel : public Accel {
 
   void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
     this->buildMode = buildMode;
+    BuildOptions options;
+    options.allowCompaction = allowCompaction;
+    options.minimizeMemory = minimizeMemory;
+
 
     //for (uint32_t gid = 0; gid < geometries.size(); ++gid) 
     {
@@ -3521,7 +3542,7 @@ struct TriangleAccel : public Accel {
       // vertex data
       geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
       geom.geometry.triangles.vertexData.deviceAddress =
-          triGeom->vertex.buffers[0]->deviceAddress + triGeom->vertex.offset;
+          triGeom->vertex.t0_buffer->deviceAddress + triGeom->vertex.offset;
       geom.geometry.triangles.vertexStride = triGeom->vertex.stride;
       geom.geometry.triangles.maxVertex = triGeom->vertex.count;
 
@@ -3537,16 +3558,22 @@ struct TriangleAccel : public Accel {
       // if the above is null, then that indicates identity
       geom.pNext = nullptr;
 
+      // TODO: accomodate GPUs without motion blur capabilities
+      VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
+      motionTriangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
+      if (requestedFeatures.motionBlur && triGeom->vertex.t1_buffer != nullptr) {
+        motionTriangles.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
+        geom.geometry.triangles.pNext       = &motionTriangles;
+        options.hasMotion = 1;
+      }
+
       auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = triGeom->index.count;
       geomRange.primitiveOffset = triGeom->index.offset;
       geomRange.firstVertex = triGeom->index.firstVertex;
       geomRange.transformOffset = 0;
     }
-
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
+    
     innerBuildProc(buildMode, options);
   }
 };
@@ -4330,6 +4357,10 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
       rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
+
+      if (requestedFeatures.motionBlur) {
+        rayTracingPipelineCI.flags |= VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+      }
       rayTracingPipelineCI.pNext = pNext;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " +
@@ -7058,6 +7089,14 @@ gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlag
   requestedFeatures.aiDenoiser.outputHeight = outputHeight;
 }
 
+GPRT_API void 
+gprtRequestMotionBlur()
+{
+  LOG_API_CALL();
+  requestedFeatures.motionBlur = true;
+}
+
+
 GPRT_API void
 gprtRequestMaxAttributeSize(uint32_t attributeSize) {
   LOG_API_CALL();
@@ -7598,25 +7637,19 @@ gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t cou
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetVertices on non-triangular geometry type!");
-  Buffer *vertices = (Buffer *) _vertices;
-  triangles->setVertices(vertices, count, stride, offset);
+  Buffer *t0_vertices = (Buffer *) _vertices;
+  triangles->setVertices(t0_vertices, nullptr, count, stride, offset);
 }
-// GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
-//                                            /*! number of vertex arrays
-//                                                passed here, the first
-//                                                of those is for t=0,
-//                                                thelast for t=1,
-//                                                everything is linearly
-//                                                interpolated
-//                                                in-between */
-//                                            size_t    numKeys,
-//                                            GPRTBuffer *vertexArrays,
-//                                            size_t count,
-//                                            size_t stride,
-//                                            size_t offset)
-// {
-//   GPRT_NOTIMPLEMENTED;
-// }
+
+GPRT_API void
+gprtTrianglesSetMotionVertices(GPRTGeom _triangles, GPRTBuffer _t0_vertices, GPRTBuffer _t1_vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  TriangleGeom *triangles = (TriangleGeom *) _triangles;
+  if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetVertices on non-triangular geometry type!");
+  Buffer *t0_vertices = (Buffer *) _t0_vertices;
+  Buffer *t1_vertices = (Buffer *) _t1_vertices;
+  triangles->setVertices(t0_vertices, t1_vertices, count, stride, offset);
+}
 
 GPRT_API void
 gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
