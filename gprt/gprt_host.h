@@ -1307,7 +1307,7 @@ GPRT_API void gprtAccelDestroy(GPRTAccel accel);
  * for memory consumption as much as possible.
  */
 GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false,
-                             bool minimizeMemory = false);
+                             bool minimizeMemory = false, bool utbs = false);
 
 /**
  * @brief Updates the structure of a tree to account for changes to the underlying primitives.

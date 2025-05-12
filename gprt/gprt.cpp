@@ -2848,13 +2848,13 @@ typedef enum {
 struct BuildOptions {
   uint32_t allowCompaction : 1;
   uint32_t minimizeMemory : 1;
-  uint32_t isParticle : 1;
+  uint32_t utbs : 1;
   uint32_t pad : 29;
 
   BuildOptions() {
     allowCompaction = 0;
     minimizeMemory = 0;
-    isParticle = 0;
+    utbs = 0;
     pad = 0;
   }
 };
@@ -3184,6 +3184,9 @@ public:
     if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
+    if (options.utbs) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x200;
+    }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
     accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
@@ -3238,6 +3241,9 @@ public:
     if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
+    if (options.utbs) {
+      accelerationBuildGeometryInfo.flags |= 0x200;
+    }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
     accelerationBuildGeometryInfo.geometryCount = 1;
@@ -3251,6 +3257,8 @@ public:
     // but we prefer device builds VkCommandBuffer commandBuffer =
     // vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
+    context->synchronize();
+    
     {
       VkCommandBuffer commandList = context->beginComputeCommands();
       // VkCommandBufferBeginInfo cmdBufInfo{};
@@ -3314,7 +3322,7 @@ public:
       freeScratchBuffer();
   }
 
-  virtual void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {};
+  virtual void build(GPRTBuildMode mode, BuildOptions options) {};
   virtual void update() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
@@ -3497,7 +3505,7 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     //for (uint32_t gid = 0; gid < geometries.size(); ++gid) 
@@ -3544,10 +3552,7 @@ struct TriangleAccel : public Accel {
       geomRange.transformOffset = 0;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 };
 
@@ -3573,7 +3578,7 @@ struct SphereAccel : public Accel {
 
   AccelType getType() { return GPRT_SPHERE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     SphereGeom *sphereGeom = ((SphereGeom *)geometry);
@@ -3670,10 +3675,7 @@ struct SphereAccel : public Accel {
       maxPrimitiveCount = sphereGeom->vertex.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 };
 
@@ -3710,7 +3712,7 @@ struct LSSAccel : public Accel {
 
   AccelType getType() { return GPRT_LSS_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     LSSGeom *lssGeom = (LSSGeom *) geometry;
@@ -3812,10 +3814,7 @@ struct LSSAccel : public Accel {
       maxPrimitiveCount = lssGeom->index.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 };
 
@@ -3833,7 +3832,7 @@ struct SolidAccel : public Accel {
 
   AccelType getType() { return GPRT_SOLID_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     auto &geom = accelerationStructureGeometry;
@@ -3894,10 +3893,7 @@ struct SolidAccel : public Accel {
       maxPrimitiveCount = numSolids;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 
   //   for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
@@ -3949,7 +3945,7 @@ struct AABBAccel : public Accel {
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     auto &geom = accelerationStructureGeometry;
@@ -3993,11 +3989,7 @@ struct AABBAccel : public Accel {
       maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 };
 
@@ -4019,7 +4011,7 @@ struct InstanceAccel : public Accel {
 
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void build(GPRTBuildMode buildMode, BuildOptions buildOptions) {
     this->buildMode = buildMode;
 
     VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
@@ -4043,10 +4035,7 @@ struct InstanceAccel : public Accel {
 
     this->accelerationBuildStructureRangeInfo = accelerationStructureBuildRangeInfo;
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildMode, buildOptions);
   }
 
   void update() {
@@ -6805,7 +6794,7 @@ VkResult Context::synchronize()
   info.semaphoreCount = semaphores.size();
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
-  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(12e10f));
   if (err) LOG_ERROR("failed to synchronize device! : \n" + errorString(err));
   return err;
 }
@@ -9205,10 +9194,14 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory, bool utbs) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
-  accel->build(mode, allowCompaction, minimizeMemory);
+  BuildOptions options;
+  options.allowCompaction = allowCompaction;
+  options.minimizeMemory = minimizeMemory;
+  options.utbs = utbs;
+  accel->build(mode, options);
 }
 
 GPRT_API void

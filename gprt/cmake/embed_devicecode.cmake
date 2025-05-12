@@ -45,7 +45,7 @@ function(embed_devicecode)
     -profile sm_6_7
     -target spirv
     -emit-spirv-directly
-    -fspv-reflect
+    # -fspv-reflect
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
