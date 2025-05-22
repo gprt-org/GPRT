@@ -2848,13 +2848,13 @@ typedef enum {
 struct BuildOptions {
   uint32_t allowCompaction : 1;
   uint32_t minimizeMemory : 1;
-  uint32_t utbs : 1;
+  uint32_t sobbs : 1;
   uint32_t pad : 29;
 
   BuildOptions() {
     allowCompaction = 0;
     minimizeMemory = 0;
-    utbs = 0;
+    sobbs = 0;
     pad = 0;
   }
 };
@@ -3152,6 +3152,8 @@ public:
   // - std::vector<uint32_t> maxPrimitiveCounts;
   void innerBuildProc(GPRTBuildMode buildMode, BuildOptions options) {
     VkResult err;
+    // options.utb = false;
+    // options.sobbs = false;
 
     // Get size info
     VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
@@ -3184,8 +3186,8 @@ public:
     if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.utbs) {
-      accelerationStructureBuildGeometryInfo.flags |= 0x200;
+    if (options.sobbs) {
+      accelerationStructureBuildGeometryInfo.flags |= (0x400 | 0x200);
     }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
@@ -3241,8 +3243,8 @@ public:
     if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.utbs) {
-      accelerationBuildGeometryInfo.flags |= 0x200;
+    if (options.sobbs) {
+      accelerationBuildGeometryInfo.flags |= (0x400 | 0x200);
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
@@ -9194,13 +9196,13 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory, bool utbs) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory, bool sobbs) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
   BuildOptions options;
   options.allowCompaction = allowCompaction;
   options.minimizeMemory = minimizeMemory;
-  options.utbs = utbs;
+  options.sobbs = sobbs;
   accel->build(mode, options);
 }
 
