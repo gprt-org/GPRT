@@ -157,7 +157,7 @@ static struct RequestedFeatures {
   bool linearSweptSpheres = true;
   bool motionBlur = false;
 
-  bool debugPrintf = false;
+  bool debugPrintf = true;
 
   // An abstraction over DLSS RR, FSR4, etc
   struct AIDenoiserProperties {
