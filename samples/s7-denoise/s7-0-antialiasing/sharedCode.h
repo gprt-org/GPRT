@@ -60,7 +60,15 @@ struct RayGenData {
   Camera currCamera;
   Camera prevCamera;
 
+  float4x4 viewPrev;
+  float4x4 viewCurr;
+  float4x4 projPrev;
+  float4x4 projCurr;
+
+  float4x4 prevViewProj;
+
   float2 jitter;
+  float2 prevJitter;
 };
 
 /* variables for the miss program */

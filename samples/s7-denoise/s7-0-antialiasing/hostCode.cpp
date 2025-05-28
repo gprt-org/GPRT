@@ -113,8 +113,8 @@ int main(int ac, char **av) {
   texParams.allocateMipmaps = true; // Enables mipmapping
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texParams.width, &texParams.height, &texParams.channels, STBI_rgb_alpha);
 
-  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES));
-
+  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES | GPRT_DENOISE_FLAGS_DEPTH_INVERTED));
+  gprtRequestRecordSizes(2048, 256, 256, 256);
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s7_0_deviceCode);
@@ -268,8 +268,16 @@ int main(int ac, char **av) {
   double lastxpos, lastypos;
   pc.frame = 0;
   do {
-    float2 jitter = GetCurrentPixelOffset(pc.frame);
-    raygenData->jitter = jitter;
+    
+    if (firstFrame) {
+      raygenData->prevJitter = {0.f, 0.f};
+      raygenData->jitter = {0.f, 0.f};
+    }
+    else
+    {
+      float2 jitter = GetCurrentPixelOffset(pc.frame);
+      raygenData->jitter = jitter;
+    }
 
 
     float speed = .001f;
@@ -308,9 +316,7 @@ int main(int ac, char **av) {
       lookFrom = ((mul(rotationMatrixY, (position - pivot))) + pivot).xyz();
 
       // ----------- compute variable values  ------------------
-      if (!firstFrame) {
-        raygenData->prevCamera = raygenData->currCamera;
-      }
+      
 
       float aspect = float(renderFBSize.x) / float(renderFBSize.y);
       float fovY = 2.0f * acos(cosFovy);
@@ -344,10 +350,78 @@ int main(int ac, char **av) {
       if (firstFrame)
       {
         raygenData->prevCamera = raygenData->currCamera; 
+        raygenData->prevJitter = raygenData->jitter; 
       }
     }
 
     gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+
+    GPRTDenoiseParams denoiseParams = {};
+    denoiseParams.inputRadiance = radiance;
+    denoiseParams.denoisedOutput = denoised;
+    denoiseParams.frustumDepth = depth;
+    denoiseParams.firstVertexMotion = mvec;
+    denoiseParams.jitter = raygenData->jitter;
+    denoiseParams.normalsAndRoughness = nrmRgh;
+    denoiseParams.diffuseAlbedo = diffAlb;
+    denoiseParams.specularAlbedo = specAlb;
+
+    {
+      auto currCamera = raygenData->currCamera;
+
+      // ---------- eye ----------
+      float3 eye = currCamera.pos;
+
+      // ---------- centre ray (looking straight ahead) ----------
+      float3 dir_centre =
+          normalize(currCamera.dir_00 + 0.5f * currCamera.dir_du + 0.5f * currCamera.dir_dv);
+
+      // ---------- right & up from the per-pixel steps ----------
+      float3 right = normalize(currCamera.dir_du);                 // X axis
+      float3   up  = normalize(cross(right, dir_centre));          // Y axis, re-orthogonalised
+      float3 forward = normalize(cross(up, right));               
+      
+      float4x4 view;        // row-major for HLSL cbuffer
+
+      view[0] = float4( right,   -dot(right,   eye) );
+      view[1] = float4(    up,   -dot(up,      eye) );
+      view[2] = float4( -forward, dot(forward, eye) ); // -Z is forward in DX
+      view[3] = float4( 0.f,0.f,0.f,1.f );
+
+      float cosHalfFovy = cos(currCamera.fovy/2.f);
+      float halfFovy    = acos(cosHalfFovy);
+      float fovY        = 2.0f * halfFovy;
+      float aspect      = length(currCamera.dir_du) / length(currCamera.dir_dv);
+
+      float znear = 0.01f; // near plane
+      float zfar = 1000.f; // far plane
+
+      float yScale = 1.0f / tan(halfFovy);  // = cos/sin
+      float xScale = yScale / aspect;
+      float zScale =  zfar / (zfar - znear);
+      float zBias  = -znear * zfar / (zfar - znear);
+
+      // Row-major (HLSL)
+      float4x4 proj = float4x4{
+          xScale, 0.f,      0.f,    0.f,
+          0.f,      yScale, 0.f,    0.f,
+          0.f,      0.f,      zScale, 1.f,
+          0.f,      0.f,      zBias,  0.f
+      };
+
+      denoiseParams.viewMatrix = view;
+      denoiseParams.projMatrix = proj;
+      raygenData->viewCurr = view;      
+      raygenData->projCurr = proj;
+
+      if (firstFrame)
+      {
+        raygenData->viewPrev = view;
+        raygenData->projPrev = proj;
+
+        raygenData->prevViewProj = mul(proj, view);
+      }
+    }
 
     // Animate transforms
     pc.now = .5f * (float) gprtGetTime(context);
@@ -358,15 +432,7 @@ int main(int ac, char **av) {
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, renderFBSize.x, renderFBSize.y, pc);
     
-    GPRTDenoiseParams denoiseParams = {};
-    denoiseParams.inputRadiance = radiance;
-    denoiseParams.denoisedOutput = denoised;
-    denoiseParams.frustumDepth = depth;
-    denoiseParams.firstVertexMotion = mvec;
-    denoiseParams.jitter = jitter;
-    denoiseParams.normalsAndRoughness = nrmRgh;
-    denoiseParams.diffuseAlbedo = diffAlb;
-    denoiseParams.specularAlbedo = specAlb;
+    
     gprtTextureDenoise(context, denoiseParams);
 
 
@@ -384,6 +450,11 @@ int main(int ac, char **av) {
     gprtBufferPresent(context, frameBuffer);
 
     pc.frame = (pc.frame + 1) % 4000;
+    raygenData->prevCamera = raygenData->currCamera;
+    raygenData->prevJitter = raygenData->jitter;
+    raygenData->viewPrev = raygenData->viewCurr;
+    raygenData->projPrev = raygenData->projCurr;
+    raygenData->prevViewProj = mul(raygenData->viewPrev, raygenData->projPrev);
   }
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));

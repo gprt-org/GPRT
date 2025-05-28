@@ -78,15 +78,16 @@ raygen(uniform RayGenData record) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
-  
-  float2 jitter = -(record.jitter / float2(dims));
-  // value between -.5 and .5
-  float2 screen = ((float2(pixelID) + float2(.5, .5)) / float2(dims)) + jitter;
-
+    
   // Generate ray
   RayDesc rayDesc;
   rayDesc.Origin = record.currCamera.pos;
-  rayDesc.Direction = normalize(record.currCamera.dir_00 + screen.x * record.currCamera.dir_du + screen.y * record.currCamera.dir_dv);
+  float2 currUV = ((float2(pixelID) + 0.5) + record.jitter) / float2(dims);
+  float2 currUV_nj   = currUV - record.jitter / float2(dims);   // no-jitter
+  rayDesc.Direction = normalize(record.currCamera.dir_00 +
+                              currUV.x * record.currCamera.dir_du +
+                              currUV.y * record.currCamera.dir_dv);
+                              
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 1e38f;  
   payload.hitT = 1e38f;
@@ -101,35 +102,51 @@ raygen(uniform RayGenData record) {
            payload                  // the payload IO
   );
 
-  // Determine motion vectors
-  float3 posPrev = payload.posPrev;
-  float3 pos = payload.pos;
-  float3 worldMotionVec = pos - posPrev;
 
-  // Translation of camera
-  float3 v_prev = posPrev - record.prevCamera.pos;
+  // ------------- previous-frame clip coordinates -------------
+  float4 clipPrev = mul(float4(payload.posPrev, 1.0), record.prevViewProj);
+  float  rcpWprev = rcp(clipPrev.w);
 
-  // Compute the "depth" along the main viewing direction.
-  float invDepth_prev = 1.0f / dot(v_prev, record.prevCamera.dir_00);
+  // NDC  (-1…+1, +Y up)  →  UV  (0…1, +Y down)
+  float2 prevUV = float2( clipPrev.x, -clipPrev.y ) * 0.5 * rcpWprev + 0.5;
+  prevUV            -= record.prevJitter / float2(dims);        // no-jitter
 
-  // Project onto the image plane directions.
-  float2 prevPix;
-  prevPix.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
-  prevPix.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
+  float2 motionVecPix = (prevUV - currUV) * float2(dims);      // perfectly uniform across screen
 
-  float2 motionVec = (prevPix - (screen - jitter));
+  if (payload.hitT == 65504.f)  motionVecPix = float2(0.f, 0.f); // no motion for background
+  record.mvec[pixelID] = motionVecPix;        
 
+
+  float znear = 0.01f; // near plane
+  // float zfar = 1000.f; // far plane
+
+  // float2 deJitteredCurr = currUV - record.jitter / float2(dims);
+
+  float3 v_curr = payload.pos - record.currCamera.pos;
+  // float3 v_prev = payload.posPrev - record.prevCamera.pos;
+
+  float zViewCurr = dot(v_curr, record.currCamera.dir_00);   // same invDepth_prev denom
+  // float zViewPrev = dot(v_prev, record.prevCamera.dir_00);   // same invDepth_prev denom
+  float depthCurr = saturate( znear / zViewCurr );     // 1/z, mapped to 0…1
+  // float depthPrev = saturate( znear / zViewPrev );     // 1/z, mapped to 0…1
+
+
+  // float  invDepth_prev = rcp(zViewPrev);//1.0 / dot(v_prev, record.prevCamera.dir_00);
+
+  // float2 prevSample = float2(0.f);
+  // prevSample.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
+  // prevSample.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
+  // prevSample   -= record.prevJitter / float2(dims);
+
+  // float2 motionVec = prevSample - deJitteredCurr;
+  // record.mvec[pixelID] = motionVec;//motionVec * .5 + .5;   // screen-space ∈ (-1…1)
 
   record.radiance[pixelID] = float4(payload.diffuseColor, 1.0);
   record.diffAlb[pixelID] = float4(payload.diffuseColor, 1.0);
   record.specAlb[pixelID] = float4(payload.specularColor, 1.0);
 
-  // wrong...
-  record.depth[pixelID] = clamp(1.f / payload.hitT, 0.f, 1.f); // must be a value between [0, 1]
+  record.depth[pixelID] = depthCurr;     // 1/z, mapped to 0…1
   record.nrmRgh[pixelID] = float4(payload.normal, payload.roughness);
-
-
-  record.mvec[pixelID] = motionVec;
 }
 
 [shader("closesthit")]
@@ -178,7 +195,7 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   float3x3 adj = adjugate(currInstance.transform);
   Ng = normalize(mul(adj, Ng));
 
-  payload.normal = .5 * Ng + .5;
+  payload.normal = 0.5 * Ng + .5;
   payload.roughness = 1.f;
 
   payload.hitT = RayTCurrent();
@@ -196,7 +213,7 @@ miss(uniform MissProgData record, inout Payload payload) {
   payload.specularColor = float3(0.f, 0.f, 0.f); // no specular
 
   // Assume the background is a flat surface facing the camera.
-  payload.normal = -.5 * normalize(-WorldRayDirection()) + .5;
+  payload.normal = 0.5 * normalize(-WorldRayDirection()) + .5;
   payload.roughness = 1.f;
   payload.hitT = 65504.f; // Set a large hitT to indicate no hit.
 
