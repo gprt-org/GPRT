@@ -136,6 +136,12 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 using GPRTProgram = std::vector<uint8_t>;
 
 // CPU implementation of Slang's descriptor handle type.
+
+// Need unorm to be defined here for slang/hlsl's "unorm float4" template type.
+#ifndef unorm
+#define unorm 
+#endif
+
 template<typename T>
 struct Texture1D {uint placeHolder;};
 
@@ -167,13 +173,11 @@ struct DescriptorHandle
 
 struct GPRTDenoiseParams {
   GPRTTextureOf<float4> transparencyLayer; /* optional input res particle layer */
-  // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
   GPRTTextureOf<float4> diffuseAlbedo;
-  // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
   GPRTTextureOf<float4> specularAlbedo;
-  // NVSDK_NGX_Resource_VK*              pInNormals;
-  GPRTTextureOf<float4> normalsAndRoughness; //normal in xyz, roughness in w.
-  // NVSDK_NGX_Resource_VK*              pInRoughness;
+
+  // Normal in xyz, roughness in w. Required.
+  GPRTTextureOf<float4> normalsAndRoughness; 
 
   // A single texel float32 buffer.
   GPRTTextureOf<float> maxRadianceExposure;
@@ -1478,39 +1482,39 @@ inline DescriptorHandle<SamplerState> gprtSamplerGetHandle(GPRTSampler sampler, 
 
 GPRT_API void gprtSamplerDestroy(GPRTSampler);
 
-GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                           uint32_t height, uint32_t depth, bool allocateMipmap,
-                                           const void *init GPRT_IF_CPP(= nullptr));
+struct GPRTTextureParams {
+  GPRTImageType type;
+  GPRTFormat format;
+  int channels;
+  int width;
+  int height;
+  int depth GPRT_IF_CPP(= 1);
+  bool allocateMipmaps GPRT_IF_CPP(= false);
+  bool writable GPRT_IF_CPP(= false);
+};
+
+GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                  (void *) init);
+gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap, bool writable, 
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, bool writable, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap, writable, (void *) init);
+gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap,
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                    (void *) init);
+gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, params, (void *) init);
 }
 
 GPRT_API void *gprtTextureGetPointer(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));

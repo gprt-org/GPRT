@@ -29,7 +29,7 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
 
   // Sample the color from the GUI texture
   SamplerState sampler = gprt::getDefaultSampler();
-  DescriptorHandle<Texture2D> guiTexture = pc.guiTexture;
+  DescriptorHandle<Texture2D<float4>> guiTexture = pc.guiTexture;
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
 
   // Gamma correction
@@ -56,12 +56,12 @@ raygen(uniform RayGenData record) {
   rayDesc.Direction = normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.001;
   rayDesc.TMax = 10000.0;
-  TraceRay(record.triangleTLAS, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 0, rayDesc, payload);
+  TraceRay(record.triangleTLAS, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, /*miss type*/ 0, rayDesc, payload);
 
   if (payload.tHit > 0.f)
     rayDesc.TMax = payload.tHit;
 
-  TraceRay(record.obbAccel, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, 1, rayDesc, payload);
+  TraceRay(record.obbAccel, RAY_FLAG_FORCE_OPAQUE, 0xff, 0, /*miss type*/ 1, rayDesc, payload);
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   record.imageBuffer[fbOfs] = float4(payload.color, 1.f);

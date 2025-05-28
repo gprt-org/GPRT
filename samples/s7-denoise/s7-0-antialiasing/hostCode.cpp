@@ -107,10 +107,13 @@ int main(int ac, char **av) {
 
 
   // Load the texture we'll display
-  int texWidth, texHeight, texChannels;
-  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  GPRTTextureParams texParams;
+  texParams.type = GPRT_IMAGE_TYPE_2D;
+  texParams.format = GPRT_FORMAT_R8G8B8A8_UNORM;
+  texParams.allocateMipmaps = true; // Enables mipmapping
+  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texParams.width, &texParams.height, &texParams.channels, STBI_rgb_alpha);
 
-  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES | GPRT_DENOISE_FLAGS_DO_SHARPENING | GPRT_DENOISE_FLAGS_AUTO_EXPOSURE | GPRT_DENOISE_FLAGS_DEPTH_INVERTED));
+  gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES));
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
   GPRTContext context = gprtContextCreate(nullptr, 1);
@@ -119,7 +122,7 @@ int main(int ac, char **av) {
   pc.now = 0.f;
 
   uint2 renderFBSize = fbSize;
-  gprtGetDenoiserRenderSize(context, &renderFBSize.x, &renderFBSize.y);
+  gprtGetDenoiserInputSize(context, &renderFBSize.x, &renderFBSize.y);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -138,10 +141,8 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Create our texture and sampler
   // ------------------------------------------------------------------
-
-  GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, /*depth*/ 1,
-      /* generate mipmaps */ true, pixels);
+  
+  GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(context, texParams, pixels);
 
   std::vector<GPRTSampler> samplers = {
       // First texture will use the default sampler
@@ -190,7 +191,7 @@ int main(int ac, char **av) {
   planeData->index = gprtBufferGetDevicePointer(indexBuffer);
   planeData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
   planeData->texcoord = gprtBufferGetDevicePointer(texcoordBuffer);
-  planeData->texture = gprtTextureGet2DHandle(texture);
+  planeData->texture = gprtTextureGet2DHandle<float4>(texture);
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }
@@ -218,21 +219,37 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Setup the ray generation and miss programs
   // ------------------------------------------------------------------
-  GPRTBufferOf<float4> tmpRenderBuffer = gprtDeviceBufferCreate<float4>(context, renderFBSize.x *  renderFBSize.y);
-  GPRTBufferOf<float> tmpDepthBuffer = gprtDeviceBufferCreate<float>(context, renderFBSize.x *  renderFBSize.y);
-  GPRTBufferOf<float2> tmpMVecBuffer = gprtDeviceBufferCreate<float2>(context, renderFBSize.x *  renderFBSize.y);
+  GPRTTextureParams f32RGBAParams, f32RParams, f32RGParams, f32RGBAOutParams;
+  f32RGBAParams.type = GPRT_IMAGE_TYPE_2D;
+  f32RGBAParams.format = GPRT_FORMAT_R32G32B32A32_SFLOAT;
+  f32RGBAParams.width = renderFBSize.x;
+  f32RGBAParams.height = renderFBSize.y;
+  f32RGBAParams.writable = true; // we want to write to this texture
   
-  GPRTTextureOf<float4> renderBuffer = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);
-  GPRTTextureOf<float> depthBuffer = gprtDeviceTextureCreate<float>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);
-  GPRTTextureOf<float2> mvecBuffer = gprtDeviceTextureCreate<float2>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32_SFLOAT, renderFBSize.x, renderFBSize.y, 1, false);  
-  GPRTTextureOf<float4> resolvedBuffer = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x, fbSize.y, 1, false);
+  // Create the texture parameters for the other formats
+  f32RParams = f32RGBAParams; f32RGParams = f32RGBAParams; f32RGBAOutParams = f32RGBAParams;
+  f32RParams.format = GPRT_FORMAT_R32_SFLOAT;
+  f32RGParams.format = GPRT_FORMAT_R32G32_SFLOAT;
+  f32RGBAOutParams.width = fbSize.x;
+  f32RGBAOutParams.height = fbSize.y;
+
+  GPRTTextureOf<float4> radiance = gprtDeviceTextureCreate<float4>(context, f32RGBAParams, nullptr);
+  GPRTTextureOf<float> depth = gprtDeviceTextureCreate<float>(context, f32RParams, nullptr);
+  GPRTTextureOf<float2> mvec = gprtDeviceTextureCreate<float2>(context, f32RGParams, nullptr);  
+  GPRTTextureOf<float4> nrmRgh = gprtDeviceTextureCreate<float4>(context, f32RGBAParams, nullptr);  
+  GPRTTextureOf<float4> diffAlb = gprtDeviceTextureCreate<float4>(context, f32RGBAParams, nullptr);  
+  GPRTTextureOf<float4> specAlb = gprtDeviceTextureCreate<float4>(context, f32RGBAParams, nullptr);  
+  GPRTTextureOf<float4> denoised = gprtDeviceTextureCreate<float4>(context, f32RGBAOutParams, nullptr);
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
   RayGenData *raygenData = gprtRayGenGetParameters(rayGen);
-  // raygenData->renderBuffer = gprtTextureGet2DHandle(renderBuffer);
-  raygenData->renderBuffer = gprtBufferGetDevicePointer(tmpRenderBuffer);
-  raygenData->depthBuffer = gprtBufferGetDevicePointer(tmpDepthBuffer);
-  raygenData->mvecBuffer = gprtBufferGetDevicePointer(tmpMVecBuffer);
+  
+  raygenData->radiance = gprtRWTextureGet2DHandle<float4>(radiance);
+  raygenData->depth = gprtRWTextureGet2DHandle<float>(depth);
+  raygenData->mvec = gprtRWTextureGet2DHandle<float2>(mvec);
+  raygenData->diffAlb = gprtRWTextureGet2DHandle<float4>(diffAlb);
+  raygenData->specAlb = gprtRWTextureGet2DHandle<float4>(specAlb);
+  raygenData->nrmRgh = gprtRWTextureGet2DHandle<float4>(nrmRgh);
   raygenData->world = gprtAccelGetDeviceAddress(trianglesTLAS);
 
   // Miss program checkerboard background colors
@@ -340,27 +357,24 @@ int main(int ac, char **av) {
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, renderFBSize.x, renderFBSize.y, pc);
-
-    gprtBufferTextureCopy(context, tmpRenderBuffer, renderBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
-    gprtBufferTextureCopy(context, tmpDepthBuffer, depthBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
-    gprtBufferTextureCopy(context, tmpMVecBuffer, mvecBuffer, 0, renderFBSize.x, renderFBSize.y, 0, 0, 0, renderFBSize.x, renderFBSize.y, 1);
-
-    // gprtTextureSaveImage(renderBuffer, "renderBuffer.hdr");
-
+    
     GPRTDenoiseParams denoiseParams = {};
-    denoiseParams.unresolvedColor = renderBuffer;
-    denoiseParams.resolvedColor = resolvedBuffer;
-    denoiseParams.depthBuffer = depthBuffer;
-    denoiseParams.diffuseMotionVectors = mvecBuffer;
+    denoiseParams.inputRadiance = radiance;
+    denoiseParams.denoisedOutput = denoised;
+    denoiseParams.frustumDepth = depth;
+    denoiseParams.firstVertexMotion = mvec;
     denoiseParams.jitter = jitter;
+    denoiseParams.normalsAndRoughness = nrmRgh;
+    denoiseParams.diffuseAlbedo = diffAlb;
+    denoiseParams.specularAlbedo = specAlb;
     gprtTextureDenoise(context, denoiseParams);
 
 
-    // gprtTextureSaveImage(resolvedBuffer, outFileName);
+    // gprtTextureSaveImage(denoised, outFileName);
 
 
     RenderPassParams rppc;
-    rppc.resolvedColor = gprtTextureGet2DHandle(resolvedBuffer);
+    rppc.resolvedColor = gprtTextureGet2DHandle<float4>(denoised);
     // rppc.resolvedColor = gprtTextureGet2DHandle(depthBuffer);
     rppc.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
     rppc.fbSize = fbSize;
@@ -374,7 +388,7 @@ int main(int ac, char **av) {
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
 
-  gprtTextureSaveImage(resolvedBuffer, outFileName);
+  gprtTextureSaveImage(denoised, outFileName);
 
   // Save final frame to an image
   // gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);

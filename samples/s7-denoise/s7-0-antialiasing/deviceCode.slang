@@ -26,7 +26,10 @@
 PushConstants pc;
 
 struct Payload {
-  float3 color;
+  float3 diffuseColor;
+  float3 specularColor;
+  float3 normal;
+  float roughness;
   float3 pos;
   float3 posPrev;
   float hitT;
@@ -76,8 +79,9 @@ raygen(uniform RayGenData record) {
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
   
+  float2 jitter = -(record.jitter / float2(dims));
   // value between -.5 and .5
-  float2 screen = (float2(pixelID) + float2(.5, .5) + record.jitter) / float2(dims);
+  float2 screen = ((float2(pixelID) + float2(.5, .5)) / float2(dims)) + jitter;
 
   // Generate ray
   RayDesc rayDesc;
@@ -105,21 +109,27 @@ raygen(uniform RayGenData record) {
   // Translation of camera
   float3 v_prev = posPrev - record.prevCamera.pos;
 
-  // Compute the “depth” along the main viewing direction.
+  // Compute the "depth" along the main viewing direction.
   float invDepth_prev = 1.0f / dot(v_prev, record.prevCamera.dir_00);
 
   // Project onto the image plane directions.
-  float2 screenPrev;
-  screenPrev.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
-  screenPrev.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
+  float2 prevPix;
+  prevPix.x = dot(v_prev, record.prevCamera.dir_du) * invDepth_prev;
+  prevPix.y = dot(v_prev, record.prevCamera.dir_dv) * invDepth_prev;
 
-  float2 motionVec = (screen - screenPrev);
+  float2 motionVec = (prevPix - (screen - jitter));
 
 
-  const int fbOfs = pixelID.x + dims.x * pixelID.y;
-  record.renderBuffer[fbOfs] = float4(payload.color, 1.0);
-  record.depthBuffer[fbOfs] = clamp(1.f / payload.hitT, 0.f, 1.f); // must be a value between [0, 1]
-  record.mvecBuffer[fbOfs] = motionVec;
+  record.radiance[pixelID] = float4(payload.diffuseColor, 1.0);
+  record.diffAlb[pixelID] = float4(payload.diffuseColor, 1.0);
+  record.specAlb[pixelID] = float4(payload.specularColor, 1.0);
+
+  // wrong...
+  record.depth[pixelID] = clamp(1.f / payload.hitT, 0.f, 1.f); // must be a value between [0, 1]
+  record.nrmRgh[pixelID] = float4(payload.normal, payload.roughness);
+
+
+  record.mvec[pixelID] = motionVec;
 }
 
 [shader("closesthit")]
@@ -148,7 +158,7 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   float2 TC = TCB * bc.x + TCC * bc.y + TCA * (1.f - (bc.x + bc.y));
 
   // fetch the texture and sampler for this plane
-  DescriptorHandle<Texture2D> texture = record.texture;
+  DescriptorHandle<Texture2D<float4>> texture = record.texture;
   DescriptorHandle<SamplerState> sampler = record.samplers[0];
 
   // For now, we're using an approximate ray cone method to drive texture sampling.
@@ -161,7 +171,16 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
   // Here's how you'd normally sample a texture
   color = texture.SampleGrad(sampler, TC*(InstanceIndex() + 1.f), DDX, DDY);
 
-  payload.color = color.rgb;
+  payload.diffuseColor = color.rgb;
+  payload.specularColor = float3(0.f, 0.f, 0.f);
+
+  // Transform normal from object space to world space using the adjugate of the instance transform. 
+  float3x3 adj = adjugate(currInstance.transform);
+  Ng = normalize(mul(adj, Ng));
+
+  payload.normal = .5 * Ng + .5;
+  payload.roughness = 1.f;
+
   payload.hitT = RayTCurrent();
 }
 
@@ -173,7 +192,16 @@ miss(uniform MissProgData record, inout Payload payload) {
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
   float3 col = float3(0.08) * (1.0 - 0.3 * length(p)) + 0.02 * WorldRayDirection().y;
-  payload.color = col;
+  payload.diffuseColor = col;
+  payload.specularColor = float3(0.f, 0.f, 0.f); // no specular
+
+  // Assume the background is a flat surface facing the camera.
+  payload.normal = -.5 * normalize(-WorldRayDirection()) + .5;
+  payload.roughness = 1.f;
+  payload.hitT = 65504.f; // Set a large hitT to indicate no hit.
+
+  payload.pos = WorldRayOrigin() + WorldRayDirection() * payload.hitT;
+  payload.posPrev = payload.pos; // No motion for the background
 }
 
 
