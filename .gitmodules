@@ -14,3 +14,6 @@
 	path = 3rdParty/imgui
 	url = https://github.com/ocornut/imgui.git
 	shallow = true
+[submodule "3rdParty/implot"]
+	path = 3rdParty/implot
+	url = https://github.com/epezent/implot.git

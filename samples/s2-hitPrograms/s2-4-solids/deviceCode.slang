@@ -86,11 +86,10 @@ void raygen(uniform RayGenData record) {
     pointDesc.Origin = ro + rd * zMin + rd * step * startRayOffset;
     for (int i = 0; i < NUM_STEPS; i++)
     {
-      TracePoint(record.world,    // the tree
+      TracePoint<Payload>(record.world,    // the tree
                  RAY_FLAG_NONE,   // ray flags
                  0xff,            // instance inclusion mask
                  0,               // "ray" type
-                 1,               // number of "ray" types
                  0,               // miss index
                 pointDesc,        // the point to query
                 payload          // the payload IO
