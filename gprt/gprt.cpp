@@ -2848,13 +2848,15 @@ typedef enum {
 struct BuildOptions {
   uint32_t allowCompaction : 1;
   uint32_t minimizeMemory : 1;
-  uint32_t sobbs : 1;
-  uint32_t pad : 29;
+  uint32_t test0 : 1; //e
+  uint32_t test1 : 1; //s
+  uint32_t pad : 28;
 
   BuildOptions() {
     allowCompaction = 0;
     minimizeMemory = 0;
-    sobbs = 0;
+    test0 = 0;
+    test1 = 0;
     pad = 0;
   }
 };
@@ -3152,8 +3154,6 @@ public:
   // - std::vector<uint32_t> maxPrimitiveCounts;
   void innerBuildProc(GPRTBuildMode buildMode, BuildOptions options) {
     VkResult err;
-    // options.utb = false;
-    // options.sobbs = false;
 
     // Get size info
     VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{};
@@ -3186,8 +3186,11 @@ public:
     if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.sobbs) {
-      accelerationStructureBuildGeometryInfo.flags |= (0x400 | 0x200);
+    if (options.test0) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x200; //e
+    }
+    if (options.test1) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x400; //s
     }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
@@ -3243,8 +3246,11 @@ public:
     if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.sobbs) {
-      accelerationBuildGeometryInfo.flags |= (0x400 | 0x200);
+    if (options.test0) {//e
+      accelerationBuildGeometryInfo.flags |= 0x200;
+    }
+    if (options.test1) {//s
+      accelerationBuildGeometryInfo.flags |= 0x400;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
@@ -9196,13 +9202,14 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory, bool sobbs) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory, bool test0, bool test1) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
   BuildOptions options;
   options.allowCompaction = allowCompaction;
   options.minimizeMemory = minimizeMemory;
-  options.sobbs = sobbs;
+  options.test0 = test0;
+  options.test1 = test1;
   accel->build(mode, options);
 }
 
