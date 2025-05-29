@@ -181,8 +181,14 @@ main(int ac, char **av) {
 
   auto imageBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
 
-  auto imageTexture = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT,
-                                                      fbSize.x, fbSize.y, 1, false, false, nullptr);
+  GPRTTextureParams texParams;
+  texParams.type = GPRT_IMAGE_TYPE_2D;
+  texParams.format = GPRT_FORMAT_R32G32B32A32_SFLOAT;
+  texParams.channels = 4;
+  texParams.width = fbSize.x;
+  texParams.height = fbSize.y;
+
+  auto imageTexture = gprtDeviceTextureCreate<float4>(context, texParams, nullptr);
 
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
@@ -197,10 +203,16 @@ main(int ac, char **av) {
 
   // This is new, setup GUI frame buffer. We'll rasterize the GUI to this texture, then composite the GUI on top of the
   // rendered scene.
-  GPRTTextureOf<uint32_t> guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, false, nullptr);
-  GPRTTextureOf<float> guiDepthAttachment = gprtDeviceTextureCreate<float>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, false, nullptr);
+  GPRTTextureParams paramsCommon;
+  paramsCommon.type = GPRT_IMAGE_TYPE_2D;
+  paramsCommon.width = fbSize.x;
+  paramsCommon.height = fbSize.y;
+
+  GPRTTextureParams srgbTexParams = paramsCommon, d32TexParams = paramsCommon;
+  srgbTexParams.format = GPRT_FORMAT_R8G8B8A8_SRGB;
+  d32TexParams.format = GPRT_FORMAT_D32_SFLOAT;
+  GPRTTextureOf<uint32_t> guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(context, srgbTexParams, nullptr);
+  GPRTTextureOf<float> guiDepthAttachment = gprtDeviceTextureCreate<float>(context, d32TexParams, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   // We begin by making one teapot mesh, storing that mesh in a bottom
@@ -282,7 +294,7 @@ main(int ac, char **av) {
   guiPC.fbSize = fbSize;
   guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
-  guiPC.guiTexture = gprtTextureGet2DHandle(guiColorAttachment);
+  guiPC.guiTexture = gprtTextureGet2DHandle<float4>(guiColorAttachment);
 
   RTPushConstants rtPC;
 

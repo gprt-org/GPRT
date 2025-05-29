@@ -75,8 +75,11 @@ int main(int ac, char **av) {
 
 
   // Load the texture we'll display
-  int texWidth, texHeight, texChannels;
-  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  GPRTTextureParams texParams;
+  texParams.type = GPRT_IMAGE_TYPE_2D;
+  texParams.format = GPRT_FORMAT_R8G8B8A8_UNORM;
+  texParams.allocateMipmaps = true; // Enables mipmapping
+  stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texParams.width, &texParams.height, &texParams.channels, STBI_rgb_alpha);
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S09 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
@@ -100,10 +103,8 @@ int main(int ac, char **av) {
   // ------------------------------------------------------------------
   // Create our texture and sampler
   // ------------------------------------------------------------------
-
-  GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, /*depth*/ 1,
-      /* generate mipmaps */ true, pixels);
+ 
+  GPRTTextureOf<stbi_uc> texture = gprtDeviceTextureCreate<stbi_uc>(context, texParams, pixels);
 
   std::vector<GPRTSampler> samplers = {
       // First texture will use the default sampler
@@ -152,7 +153,7 @@ int main(int ac, char **av) {
   planeData->index = gprtBufferGetDevicePointer(indexBuffer);
   planeData->vertex = gprtBufferGetDevicePointer(vertexBuffer);
   planeData->texcoord = gprtBufferGetDevicePointer(texcoordBuffer);
-  planeData->texture = gprtTextureGet2DHandle(texture);
+  planeData->texture = gprtTextureGet2DHandle<float4>(texture);
   for (uint32_t i = 0; i < samplers.size(); ++i) {
     planeData->samplers[i] = gprtSamplerGetHandle(samplers[i]);
   }

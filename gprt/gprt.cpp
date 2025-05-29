@@ -157,7 +157,7 @@ static struct RequestedFeatures {
   bool linearSweptSpheres = true;
   bool motionBlur = false;
 
-  bool debugPrintf = false;
+  bool debugPrintf = true;
 
   // An abstraction over DLSS RR, FSR4, etc
   struct AIDenoiserProperties {
@@ -8046,15 +8046,14 @@ gprtSamplerGetIndex(GPRTSampler _sampler, int deviceID) {
 }
 
 GPRT_API GPRTTexture
-gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtHostTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_STORAGE_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8065,8 +8064,8 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
                                               // not needed
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -8075,15 +8074,14 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
 }
 
 GPRT_API GPRTTexture
-gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, bool writable, const void *init) {
+gprtDeviceTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      (writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8092,22 +8090,21 @@ gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   return (GPRTTexture) texture;
 }
 
 GPRT_API GPRTTexture
-gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtSharedTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_STORAGE_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8120,8 +8117,8 @@ gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                // access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();

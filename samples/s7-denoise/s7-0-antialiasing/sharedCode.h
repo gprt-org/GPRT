@@ -33,21 +33,20 @@ struct TrianglesGeomData {
   /*! array/buffer of vertex positions */
   float2 *texcoord;   // vec2f *
   /*! base color texture we use for the entire mesh */
-  DescriptorHandle<Texture2D> texture;
+  DescriptorHandle<Texture2D<float4>> texture;
   /*! an array of texture samplers to use */
   DescriptorHandle<SamplerState> samplers[12];
 };
 
 struct RayGenData {
   SurfaceAccelerationStructure world;
-  // #ifdef __SLANG_COMPILER__
-  // DescriptorHandle<RWTexture2D> renderBuffer;
-  // #else
-  // DescriptorHandle<Texture2D> renderBuffer;
-  float4* renderBuffer;
-  float* depthBuffer;
-  float2* mvecBuffer;
-  // #endif
+  DescriptorHandle<RWTexture2D<float4>> radiance;
+  DescriptorHandle<RWTexture2D<float>> depth;
+  DescriptorHandle<RWTexture2D<float2>> mvec;
+  DescriptorHandle<RWTexture2D<float4>> diffAlb;
+  DescriptorHandle<RWTexture2D<float4>> specAlb;
+  DescriptorHandle<RWTexture2D<float4>> nrmRgh;
+
   int2 fbSize;
 
   struct Camera {
@@ -61,7 +60,15 @@ struct RayGenData {
   Camera currCamera;
   Camera prevCamera;
 
+  float4x4 viewPrev;
+  float4x4 viewCurr;
+  float4x4 projPrev;
+  float4x4 projCurr;
+
+  float4x4 prevViewProj;
+
   float2 jitter;
+  float2 prevJitter;
 };
 
 /* variables for the miss program */
@@ -84,6 +91,15 @@ struct PushConstants {
 
 struct RenderPassParams {
   int2 fbSize;
-  DescriptorHandle<Texture2D> resolvedColor;
+  DescriptorHandle<Texture2D<float4>> resolvedColor;
   uint32_t *frameBuffer;
 };
+
+#ifdef __SLANG_COMPILER__
+float3x3 adjugate(in float3x4 m)
+{
+    return float3x3(cross(m[1].xyz, m[2].xyz),
+                    cross(m[2].xyz, m[0].xyz),
+                    cross(m[0].xyz, m[1].xyz));
+};
+#endif
