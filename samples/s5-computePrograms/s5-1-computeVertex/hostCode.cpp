@@ -90,16 +90,19 @@ int main(int ac, char **av) {
   // Now, compute triangles in parallel with a vertex compute shader
   gprtComputeLaunch(vertexProgram, {(numTriangles + 31u) / 32u, 1, 1}, {32, 1, 1}, vertexData);
 
+  GPRTBuildParams buildParams;
+  buildParams.buildMode = GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE; // Fast trace, allows updates
+
   // Now that our vertex buffer and index buffer are filled, we can compute
   // our triangles acceleration structure.
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+  gprtAccelBuild(context, trianglesAccel, buildParams);
 
   gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+  gprtAccelBuild(context, world, buildParams);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -188,6 +191,9 @@ int main(int ac, char **av) {
     // And since the bottom level tree is part of the top level tree, we need
     // to update the top level tree as well
     gprtAccelUpdate(context, world);
+
+    // Need to synchronize the compute here, as compute by default runs concurrently to graphics
+    gprtComputeSynchronize(context);
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);

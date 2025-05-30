@@ -136,6 +136,12 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 using GPRTProgram = std::vector<uint8_t>;
 
 // CPU implementation of Slang's descriptor handle type.
+
+// Need unorm to be defined here for slang/hlsl's "unorm float4" template type.
+#ifndef unorm
+#define unorm 
+#endif
+
 template<typename T>
 struct Texture1D {uint placeHolder;};
 
@@ -167,13 +173,11 @@ struct DescriptorHandle
 
 struct GPRTDenoiseParams {
   GPRTTextureOf<float4> transparencyLayer; /* optional input res particle layer */
-  // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
   GPRTTextureOf<float4> diffuseAlbedo;
-  // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
   GPRTTextureOf<float4> specularAlbedo;
-  // NVSDK_NGX_Resource_VK*              pInNormals;
-  GPRTTextureOf<float4> normalsAndRoughness; //normal in xyz, roughness in w.
-  // NVSDK_NGX_Resource_VK*              pInRoughness;
+
+  // Normal in xyz, roughness in w. Required.
+  GPRTTextureOf<float4> normalsAndRoughness; 
 
   // A single texel float32 buffer.
   GPRTTextureOf<float> maxRadianceExposure;
@@ -846,7 +850,7 @@ GPRT_API uint64_t gprtGuiRasterize(GPRTContext context);
 
 /*! Requests the given size (in bytes) to reserve for parameters
   of ray tracing programs. Defaults to 256 bytes */
-GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
+GPRT_API void gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32_t missRecordSize, uint32_t callableRecordSize);
 
 /*! set number of ray types to be used; this should be
   done before any programs, pipelines, geometries, etc get
@@ -1273,6 +1277,55 @@ GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint numInstance
 
 GPRT_API void gprtAccelDestroy(GPRTAccel accel);
 
+struct GPRTBuildParams {
+  /**
+   * @param buildMode The build mode to use when constructing the acceleration structure.
+   * 1. GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE
+   *   Fastest possible build, but slower trace than 3 or 4. Good for fully-dynamic geometry like
+   *   particles, destruction, changing prim counts, or moving wildly (explosions) where per-frame
+   *   rebuild is required.
+   *
+   * 2. GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE
+   *   Slightly slower build than 1, but allows very fast update. Good for lower level-of-detail
+   *   dynamic objects that are unlikely to be hit by too many rays but still need to be refitted
+   *   per frame to be correct.
+   *
+   * 3. GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE
+   *   Fastest possible trace, but disallows updates. Slower to build than 1 or 2. This is a good
+   *   default choice for static geometry.
+   *
+   * 4. GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE
+   *   Fastest trace possible while still allowing for updates. Updates are slightly slower than 2.
+   *   Trace is a bit slower than 3. Good for high level-of-detail dynamic objects that are expected
+   *   to be hit by a significant number of rays.
+   */
+  GPRTBuildMode buildMode = GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE;
+
+  /** 
+   * @param allowCompaction Enables the tree to be compacted with gprtAccelCompact, potentially
+   * significantly reducing its memory footprint. Enabling this feature may take more time and
+   * memory than a normal build, and so should only be used when the compaction feature is needed.
+   */
+  bool allowCompaction = false;
+
+  /** 
+   * @param minimizeMemory Sacrifices build and trace performance to reduce memory consumption. Enable only
+   * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing
+   * for memory consumption as much as possible.
+   */
+  bool minimizeMemory = false;
+
+  /** 
+   * @param hasMotion If any of the instances of this BVH contain motion blur, "hasMotion" should be set to true.
+   * If false, the TLAS will assume a static BVH over geometry at time 0 which bounds the geometry at time 1. 
+   * If the convex hull of some instance at time 1 lies beyond the bounds of the convex hull at time 0, then
+   * that geometry will be culled (likely unintentionally).
+   */
+  bool hasMotionBlur = false;
+  bool test0 = false;/*e*/ 
+  bool test1 = false;/*s*/
+};
+
 /**
  * @brief Builds the given acceleration structure so that it can be used on the
  * device for ray tracing.
@@ -1307,8 +1360,7 @@ GPRT_API void gprtAccelDestroy(GPRTAccel accel);
  * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing
  * for memory consumption as much as possible.
  */
-GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false,
-                             bool minimizeMemory = false);
+GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildParams buildParams GPRT_IF_CPP(= GPRTBuildParams()));
 
 /**
  * @brief Updates the structure of a tree to account for changes to the underlying primitives.
@@ -1479,39 +1531,39 @@ inline DescriptorHandle<SamplerState> gprtSamplerGetHandle(GPRTSampler sampler, 
 
 GPRT_API void gprtSamplerDestroy(GPRTSampler);
 
-GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                           uint32_t height, uint32_t depth, bool allocateMipmap,
-                                           const void *init GPRT_IF_CPP(= nullptr));
+struct GPRTTextureParams {
+  GPRTImageType type;
+  GPRTFormat format;
+  int channels;
+  int width;
+  int height;
+  int depth GPRT_IF_CPP(= 1);
+  bool allocateMipmaps GPRT_IF_CPP(= false);
+  bool writable GPRT_IF_CPP(= false);
+};
+
+GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                  (void *) init);
+gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap, bool writable, 
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, bool writable, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap, writable, (void *) init);
+gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap,
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                    (void *) init);
+gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, params, (void *) init);
 }
 
 GPRT_API void *gprtTextureGetPointer(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));

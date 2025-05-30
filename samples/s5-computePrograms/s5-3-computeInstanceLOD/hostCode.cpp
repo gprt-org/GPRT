@@ -57,9 +57,13 @@ template <typename T> struct Mesh {
     geomData->index = gprtBufferGetDevicePointer(indexBuffer);
     geomData->lvlOfDetail = lvlOfDetail;
 
+    GPRTBuildParams buildParams;
+    buildParams.buildMode = GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE;
+    buildParams.allowCompaction = true;
+
     // Build the bottom level acceleration structure
     accel = gprtTriangleAccelCreate(context, geometry);
-    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
+    gprtAccelBuild(context, accel, buildParams);
     // gprtAccelCompact(context, accel);
   };
 
@@ -152,9 +156,12 @@ int main(int ac, char **av) {
   // Now, compute transforms in parallel with a transform compute shader
   gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
 
+  GPRTBuildParams buildParams;
+  buildParams.buildMode = GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE;
+
   // Now that the transforms are set, we can build our top level acceleration
   // structure
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE);
+  gprtAccelBuild(context, world, buildParams);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
@@ -233,7 +240,9 @@ int main(int ac, char **av) {
     pc.now = float(gprtGetTime(context));
     gprtComputeLaunch(transformProgram, {int((numInstances + 127) / 128), 1, 1}, {128, 1, 1}, pc);
     gprtAccelUpdate(context, world);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+
+    // Need to synchronize the compute here, as compute by default runs concurrently to graphics
+    gprtComputeSynchronize(context);
 
     // Now, trace rays
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);

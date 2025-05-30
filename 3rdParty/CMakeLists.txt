@@ -192,6 +192,10 @@ add_library(imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.h
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/misc/cpp/imgui_stdlib.cpp
 
+  ${CMAKE_CURRENT_SOURCE_DIR}/implot/implot_items.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/implot/implot.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/implot/implot.h
+
   ${CMAKE_CURRENT_SOURCE_DIR}/GPRT-SampleAssets/OpenFontIcons.h
 )
 
@@ -200,6 +204,7 @@ target_include_directories(imgui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui
   ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
   ${CMAKE_CURRENT_SOURCE_DIR}/imguizmo
+  ${CMAKE_CURRENT_SOURCE_DIR}/implot
   ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include
   ${CMAKE_CURRENT_SOURCE_DIR}/GPRT-SampleAssets/
   ${Vulkan_INCLUDE_DIR}

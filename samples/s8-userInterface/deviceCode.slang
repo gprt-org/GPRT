@@ -32,7 +32,7 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
 
   // Gamma correction
-  guiColor = pow(guiColor, 2.2f);
+  guiColor.rgb = gprt::srgb_to_linear(guiColor.rgb);
 
   // Composite the GUI on top of the scene
   float4 pixelColor = over(guiColor, imageColor);

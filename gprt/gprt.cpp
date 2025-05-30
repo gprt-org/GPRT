@@ -157,7 +157,7 @@ static struct RequestedFeatures {
   bool linearSweptSpheres = true;
   bool motionBlur = false;
 
-  bool debugPrintf = false;
+  bool debugPrintf = true;
 
   // An abstraction over DLSS RR, FSR4, etc
   struct AIDenoiserProperties {
@@ -2846,21 +2846,7 @@ typedef enum {
   GPRT_SOLID_ACCEL = 0x6
 } AccelType;
 
-struct BuildOptions {
-  uint32_t allowCompaction : 1;
-  uint32_t minimizeMemory : 1;
-  uint32_t hasMotion : 1;
-  uint32_t isParticle : 1;
-  uint32_t pad : 28;
 
-  BuildOptions() {
-    allowCompaction = 0;
-    minimizeMemory = 0;
-    hasMotion = 0;
-    isParticle = 0;
-    pad = 0;
-  }
-};
 
 struct Accel {
   // Our own virtual address space
@@ -2873,6 +2859,7 @@ struct Accel {
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
   VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties;
   GPRTBuildMode buildMode = GPRT_BUILD_MODE_UNINITIALIZED;
+  GPRTBuildParams buildParams;
   bool allowCompaction = false;
   bool minimizeMemory = false;
 
@@ -3010,7 +2997,7 @@ public:
     }
   }
 
-  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo, BuildOptions options) {
+  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo, GPRTBuildParams params) {
     // Destroy old accel handle
     if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(context->logicalDevice, accelerationStructure, nullptr);
@@ -3050,7 +3037,7 @@ public:
           VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
       
       // To enable motion blur
-      if (options.hasMotion) 
+      if (params.hasMotionBlur) 
       {
         accelerationStructureCreateInfo.createFlags |= VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV ;
       }
@@ -3159,7 +3146,8 @@ public:
   // - std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
   // - std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
   // - std::vector<uint32_t> maxPrimitiveCounts;
-  void innerBuildProc(GPRTBuildMode buildMode, BuildOptions options) {
+  void innerBuildProc(GPRTBuildParams options) {
+    GPRTBuildMode buildMode = options.buildMode;
     VkResult err;
 
     // Get size info
@@ -3193,9 +3181,15 @@ public:
     if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.hasMotion) 
+    if (options.hasMotionBlur) 
     {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
+    }
+    if (options.test0) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x200; //e
+    }
+    if (options.test1) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x400; //s
     }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
     accelerationStructureBuildGeometryInfo.geometryCount = 1;
@@ -3251,9 +3245,15 @@ public:
     if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
-    if (options.hasMotion) 
+    if (options.hasMotionBlur) 
     {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
+    }
+    if (options.test0) {//e
+      accelerationBuildGeometryInfo.flags |= 0x200;
+    }
+    if (options.test1) {//s
+      accelerationBuildGeometryInfo.flags |= 0x400;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
@@ -3268,6 +3268,8 @@ public:
     // but we prefer device builds VkCommandBuffer commandBuffer =
     // vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
+    context->synchronize();
+    
     {
       VkCommandBuffer commandList = context->beginComputeCommands();
       // VkCommandBufferBeginInfo cmdBufInfo{};
@@ -3324,6 +3326,7 @@ public:
     this->minimizeMemory = options.minimizeMemory;
     this->allowCompaction = options.allowCompaction;
     this->isCompact = false;
+    this->buildParams = buildParams;    
 
     // If we're minimizing memory usage, free scratch now
     // Otherwise, we keep it around to enable faster builts
@@ -3331,7 +3334,7 @@ public:
       freeScratchBuffer();
   }
 
-  virtual void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {};
+  virtual void build(GPRTBuildParams options) {};
   virtual void update() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
@@ -3514,12 +3517,9 @@ struct TriangleAccel : public Accel {
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode;
+    this->buildParams = buildParams;
 
     //for (uint32_t gid = 0; gid < geometries.size(); ++gid) 
     {
@@ -3558,13 +3558,13 @@ struct TriangleAccel : public Accel {
       // if the above is null, then that indicates identity
       geom.pNext = nullptr;
 
-      // TODO: accomodate GPUs without motion blur capabilities
+      // // TODO: accomodate GPUs without motion blur capabilities
       VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
       motionTriangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
       if (requestedFeatures.motionBlur && triGeom->vertex.t1_buffer != nullptr) {
         motionTriangles.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
         geom.geometry.triangles.pNext       = &motionTriangles;
-        options.hasMotion = 1;
+        buildParams.hasMotionBlur = 1;
       }
 
       auto &geomRange = accelerationBuildStructureRangeInfo;
@@ -3573,8 +3573,7 @@ struct TriangleAccel : public Accel {
       geomRange.firstVertex = triGeom->index.firstVertex;
       geomRange.transformOffset = 0;
     }
-    
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 };
 
@@ -3600,8 +3599,9 @@ struct SphereAccel : public Accel {
 
   AccelType getType() { return GPRT_SPHERE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
     SphereGeom *sphereGeom = ((SphereGeom *)geometry);
     size_t numSpheres = sphereGeom->vertex.count;
@@ -3697,10 +3697,7 @@ struct SphereAccel : public Accel {
       maxPrimitiveCount = sphereGeom->vertex.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 };
 
@@ -3737,8 +3734,9 @@ struct LSSAccel : public Accel {
 
   AccelType getType() { return GPRT_LSS_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
     LSSGeom *lssGeom = (LSSGeom *) geometry;
     size_t numLSS = lssGeom->index.count;
@@ -3839,10 +3837,7 @@ struct LSSAccel : public Accel {
       maxPrimitiveCount = lssGeom->index.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 };
 
@@ -3860,8 +3855,9 @@ struct SolidAccel : public Accel {
 
   AccelType getType() { return GPRT_SOLID_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
     auto &geom = accelerationStructureGeometry;
     SolidGeom *solidGeom = (SolidGeom *) geometry;
@@ -3921,10 +3917,7 @@ struct SolidAccel : public Accel {
       maxPrimitiveCount = numSolids;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 
   //   for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
@@ -3960,7 +3953,7 @@ struct SolidAccel : public Accel {
   //     maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
   //   }
 
-  //   BuildOptions options;
+  //   GPRTBuildParams options;
   //   options.allowCompaction = allowCompaction;
   //   options.minimizeMemory = minimizeMemory;
   //   innerBuildProc(buildMode, options);
@@ -3976,8 +3969,9 @@ struct AABBAccel : public Accel {
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
     auto &geom = accelerationStructureGeometry;
     AABBGeom *aabbGeom = (AABBGeom *) geometry;
@@ -4020,11 +4014,7 @@ struct AABBAccel : public Accel {
       maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 };
 
@@ -4033,23 +4023,28 @@ struct InstanceAccel : public Accel {
 
   // externally assigned
   Buffer *instancesBuffer = nullptr;
+  Buffer *motionInstancesBuffer = nullptr; // TODO...
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(Context *context, uint32_t numInstances, Buffer *instancesBuffer) : Accel(context, false) {
+  InstanceAccel(Context *context, uint32_t numInstances, Buffer *instancesBuffer, Buffer *motionInstancesBuffer) : Accel(context, false) {
     this->numInstances = numInstances;
     this->instancesBuffer = instancesBuffer;
+    this->motionInstancesBuffer = motionInstancesBuffer;
   }
 
   ~InstanceAccel() {};
 
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+    auto &geom = accelerationStructureGeometry;
+    geom = {};
+
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
@@ -4064,16 +4059,21 @@ struct InstanceAccel : public Accel {
     accelerationStructureBuildRangeInfo.firstVertex = 0;
     accelerationStructureBuildRangeInfo.transformOffset = 0;
 
-    this->accelerationStructureGeometry = accelerationStructureGeometry;
-
+    // // TODO: accomodate GPUs without motion blur capabilities
+    // VkAccelerationStructureMotionInstanceNV motionInstances{};
+    // if (requestedFeatures.motionBlur) {
+    //   // For now, only supporting static instances.
+    //   motionInstances.staticInstances = VK_TRUE;
+    //   motionInstances.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
+    //   geom.geometry.triangles.pNext       = &motionInstances;
+    //   buildParams.hasMotionBlur = 1;
+    // }
+    
     this->maxPrimitiveCount = numInstances;
 
     this->accelerationBuildStructureRangeInfo = accelerationStructureBuildRangeInfo;
 
-    BuildOptions options;
-    options.allowCompaction = allowCompaction;
-    options.minimizeMemory = minimizeMemory;
-    innerBuildProc(buildMode, options);
+    innerBuildProc(buildParams);
   }
 
   void update() {
@@ -6836,7 +6836,7 @@ VkResult Context::synchronize()
   info.semaphoreCount = semaphores.size();
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
-  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(6e10f));
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(12e10f));
   if (err) LOG_ERROR("failed to synchronize device! : \n" + errorString(err));
   return err;
 }
@@ -8082,15 +8082,14 @@ gprtSamplerGetIndex(GPRTSampler _sampler, int deviceID) {
 }
 
 GPRT_API GPRTTexture
-gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtHostTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_STORAGE_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8101,8 +8100,8 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
                                               // not needed
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -8111,15 +8110,14 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
 }
 
 GPRT_API GPRTTexture
-gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, bool writable, const void *init) {
+gprtDeviceTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      (writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8128,22 +8126,21 @@ gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   return (GPRTTexture) texture;
 }
 
 GPRT_API GPRTTexture
-gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtSharedTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
-      VK_IMAGE_USAGE_STORAGE_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -8156,8 +8153,8 @@ gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                // access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -9224,7 +9221,7 @@ GPRT_API GPRTAccel
 gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferOf<gprt::Instance> instancesBuffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
+  InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer, nullptr);
   return (GPRTAccel) accel;
 }
 
@@ -9238,10 +9235,10 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildParams buildParams) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
-  accel->build(mode, allowCompaction, minimizeMemory);
+  accel->build(buildParams);
 }
 
 GPRT_API void

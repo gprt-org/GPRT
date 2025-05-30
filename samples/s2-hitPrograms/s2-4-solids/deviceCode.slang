@@ -50,7 +50,7 @@ void raygen(uniform RayGenData record) {
   bool debug = all(pixelID == iResolution / 2);
 
   // 8 by 16 grid of 256x256 blue noise textures
-  DescriptorHandle<Texture2D> stbn = record.stbn;
+  DescriptorHandle<Texture2D<uint2>> stbn = record.stbn;
 
   // camera movement
   float an = pc.time * .1;
@@ -75,22 +75,23 @@ void raygen(uniform RayGenData record) {
 
     // sample a random jitter value
     uint2 stbnCoord = GetSTBNCoordinate(m, n, pc.frameID, pixelID);
-    float startRayOffset = stbn[stbnCoord].x;
+    uint2 bnData = stbn[stbnCoord].xy;
+    float startRayOffset = float(bnData.x) / 65535.0;
+    float stepJitter = float(bnData.y) / 65535.0;
 
     float4 color = float4(.0);
     float zMin = 2.0;
     float zMax = 5.0;
-    float step = (zMax - zMin) / float(NUM_STEPS);
+    float step = ((zMax - zMin) / float(NUM_STEPS)) * lerp(.99, 1.01, stepJitter);
 
     PointDesc pointDesc;
     pointDesc.Origin = ro + rd * zMin + rd * step * startRayOffset;
     for (int i = 0; i < NUM_STEPS; i++)
     {
-      TracePoint(record.world,    // the tree
+      TracePoint<Payload>(record.world,    // the tree
                  RAY_FLAG_NONE,   // ray flags
                  0xff,            // instance inclusion mask
                  0,               // "ray" type
-                 1,               // number of "ray" types
                  0,               // miss index
                 pointDesc,        // the point to query
                 payload          // the payload IO

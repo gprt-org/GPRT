@@ -96,7 +96,7 @@ main(int ac, char **av) {
 
   // Place that single cube mesh in a bottom level acceleration structure
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, trianglesAccel);
 
   // We will now create three instances of that cube mesh. On the gpu,
   // we will use the "instance ID" to determine what color each cube should be.
@@ -118,7 +118,7 @@ main(int ac, char **av) {
   GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, instanceBuffer);
 
   // With our instances fully populated, we can now build our accel.
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world);
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters, so that we can access that tree when

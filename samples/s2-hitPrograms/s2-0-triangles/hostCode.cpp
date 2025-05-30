@@ -47,14 +47,14 @@ int main(int ac, char **av) {
   // determine potential intersections, significantly speeding up ray tracing by narrowing down
   // the search to relevant geometry instead of testing every triangle.
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, trianglesAccel);
 
   // Create a single instance of the BLAS in a top-level acceleration structure (TLAS), required for ray tracing.
   // (We'll cover TLAS in more depth later)
   gprt::Instance instance = gprtAccelGetInstance(trianglesAccel);
   auto instanceBuffer = gprtDeviceBufferCreate<gprt::Instance>(context, 1, &instance);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world);
 
   // Set up ray generation and miss programs
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");

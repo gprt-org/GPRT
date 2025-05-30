@@ -47,13 +47,13 @@ int main(int ac, char **av) {
 
   // Create and build BLAS
   GPRTAccel sphereAccel = gprtSphereAccelCreate(context, sphereGeom);
-  gprtAccelBuild(context, sphereAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, sphereAccel);
 
   // Create and build TLAS
   gprt::Instance instance = gprtAccelGetInstance(sphereAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world);
 
   // Set up ray generation and miss programs
   GPRTMissOf<void> miss = gprtMissCreate<void>(context, module, "miss");

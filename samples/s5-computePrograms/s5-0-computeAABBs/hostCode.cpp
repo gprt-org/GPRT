@@ -89,13 +89,13 @@ int main(int ac, char **av) {
   // Now that the aabbPositionsBuffer is filled, we can compute our AABB
   // acceleration structure
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
-  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, aabbAccel);
 
   gprt::Instance instance = gprtAccelGetInstance(aabbAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
 
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world);
 
   // ##################################################################
   // set the parameters for the rest of our kernels
