@@ -864,6 +864,11 @@ GPRT_API void gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth);
 /*! Requests that ray queries be enabled for inline ray tracing support. */
 GPRT_API void gprtRequestRayQueries();
 
+/*! Requests that the GPRT will support hit object queries. This includes
+ * shader execution reordering capabilities.
+ */
+GPRT_API void gprtRequestHitObject();
+
 GPRT_API void gprtRequestMaxAttributeSize(uint32_t attributeSize);
 
 GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);

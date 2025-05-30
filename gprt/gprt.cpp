@@ -151,9 +151,11 @@ static struct RequestedFeatures {
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
   
+  /** Hit object api enables reordering threads before envoking SBT entry points.*/
+  bool hitObject = false;
+  
   bool rayTracingValidation = false;
 
-  bool invocationReordering = false;
   bool linearSweptSpheres = true;
   bool motionBlur = false;
 
@@ -5278,7 +5280,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     enabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
   }
 
-  if (requestedFeatures.invocationReordering) {
+  if (requestedFeatures.hitObject) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
   }
 
@@ -7071,6 +7073,12 @@ GPRT_API void
 gprtRequestRayQueries() {
   LOG_API_CALL();
   requestedFeatures.rayQueries = true;
+}
+
+GPRT_API void
+gprtRequestHitObject() {
+  LOG_API_CALL();
+  requestedFeatures.hitObject = true;
 }
 
 GPRT_API void
