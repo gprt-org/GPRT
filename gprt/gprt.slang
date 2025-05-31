@@ -31,6 +31,9 @@
 
 #include "gprt_shared.h"
 
+// workaround to make miss programs look like a unique shader stage type.
+#define traversable "miss"
+
 // [[vk::binding(0, 0)]] is reserved for global "uniform" descriptor data.
 [[vk::binding(0, 0)]] SamplerState samplers[];
 [[vk::binding(0, 0)]] Texture1D texture1Ds[];
