@@ -100,6 +100,64 @@ struct Instance {
   uint64_t accelAddress;
 };
 
+/// @brief The primitive type for a "Traversable" acceleration structure,
+/// featuring a 14-DOP structure and relevant metadata to facilitate a
+/// "TraceTraversalRay" similar to the proposed DXR feature here: 
+///  https://github.com/microsoft/DirectX-Specs/blame/90bed3c7f2bfeeb7f9f5888713d99626c882412b/Raytracing.md#L5264-L5323
+///
+/// We differ from the above by making careful use of transform pairs to keep the majority 
+/// of ray traversal on the hardware.
+///
+/// Given an OptiX multilevel traversal setup like IAS->IAS->GAS, the driver would normally use 
+/// a setup like [RTCores(A->B)]->[ComputeUnits]->RTCores(C)->[ComputeUnits]. 
+/// This only works well if the occurance of C is much smaller than B. However, that's rarely the case,
+/// as trees grow exponentially with depth. When C is larger than C, the above schema results in 
+/// overly exhaustive context switches between RT units and compute units.
+///
+/// Instead, we assume a pair-wise scheme: [RTCores(A->B)]->[ComputeUnits]->RTCores(B->C)->[ComputeUnits].
+/// In addition to being more efficient than a 2+1 level scheme, this pairwise traversal 
+/// schema can be implemented in VK/DXR by combining the recursion capabilities of TraceRay 
+/// for RTCores(B->C)->[ComputeUnits] with the flexibility of RayQuery to enable [RTCores(A->B)]->[ComputeUnits].
+///
+/// Because recursive traversals are costly, the following structure uses a tighter bounding structure called a "KDOP",
+/// which is assumed to be in centered form.
+///
+/// Note, this is a personal extension which builds upon a combination of RayTracing
+/// and RayQuery, and lives outside the VK / DXR specification.
+struct Traversable {
+  inline float dotn0(float3 v) { return v.x; }   // +/-X
+  inline float dotn1(float3 v) { return v.y; } // +/-Y
+  inline float dotn2(float3 v) { return v.z; } // +/-Z
+  inline float dotn3(float3 v) { return (v.x + v.y + v.z); } // +/- (1,1,1)
+  inline float dotn4(float3 v) { return (v.x + v.y - v.z); } // +/- (1,1,-1)
+  inline float dotn5(float3 v) { return (v.x - v.y + v.z); } // +/- (1,-1,1)
+  inline float dotn6(float3 v) { return (v.x - v.y - v.z); } // +/- (-1,1,1)
+
+  float2 n0hi;
+  float2 n1hi;
+  float2 n2hi;
+  float2 n3hi;
+  float2 n4hi;
+  float2 n5hi;
+  float2 n6hi;
+
+  float2 tmp;
+  
+  /// First three columns encode three KDOP directions, whose
+  /// magnitudes encode corresponding bounding extents. The
+  /// fourth column represents the center point of the KDOP.
+  float3x4 transform;
+
+  /// The index to a traversable 
+  uint32_t traversableLow : 24;
+  uint32_t visibilityMask : 8;
+  uint32_t traversableHigh : 24;
+  
+  /// System populated values upon build.
+  uint32_t reserved1 : 8;
+  uint64_t reserved2;
+};
+
 // // https://publications.anl.gov/anlpubs/2014/12/79486.pdf
 // // https://www.kitware.com/modeling-arbitrary-order-lagrange-finite-elements-in-the-visualization-toolkit/
 // struct Solid {
