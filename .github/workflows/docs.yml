@@ -30,9 +30,9 @@ jobs:
       - run: pip install -r ./docs/requirements.txt
 
       - name: Prepare Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.1.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
-          version: 1.3.231.1
+          version: 1.4.309.0
           cache: true
 
       - name: Apt dependencies
@@ -45,6 +45,12 @@ jobs:
                               freeglut3-dev \
                               mesa-common-dev \
                               doxygen
+      - name: Update CMake
+        uses: ssrobins/install-cmake@v1
+        with:
+          version: 3.24.3
+          cache: true
+
       - name: Build Documentation
         shell: bash
         run: |
