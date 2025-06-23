@@ -7,6 +7,21 @@ struct Payload {
   float3 color;
 };
 
+uint murmurHash12(uint2 src) {
+  const uint M = 0x5bd1e995u;
+  uint h = 1190494759u;
+  src *= M; src ^= src >> 24u; src *= M;
+  h *= M; h ^= src.x; h *= M; h ^= src.y;
+  h ^= h >> 13u; h *= M; h ^= h >> 15u;
+  return h;
+}
+
+// 1 output, 2 inputs
+float hash12(float2 src) {
+  uint h = murmurHash12(asuint(src));
+  return asfloat(h & 0x007fffffu | 0x3f800000u) - 1.0;
+}
+
 // This intersection program will be called when rays hit our axis
 // aligned bounding boxes. Here, we can fetch per-geometry data and
 // process that data, but we do not have access to the ray payload
@@ -27,12 +42,17 @@ void AABBIntersection(uniform AABBGeomData record) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   float tcur = RayTCurrent();
+  float time = RayCurrentTime();
 
   BBoxAttributes attr;
 
   // raytrace bounding box
-  float3 bbmin = record.aabbs[primID * 2 + 0];
-  float3 bbmax = record.aabbs[primID * 2 + 1];
+  float3 t0_bbmin = record.t0_aabbs[primID * 2 + 0];
+  float3 t0_bbmax = record.t0_aabbs[primID * 2 + 1];
+  float3 t1_bbmin = record.t1_aabbs[primID * 2 + 0];
+  float3 t1_bbmax = record.t1_aabbs[primID * 2 + 1];
+  float3 bbmin = lerp(t0_bbmin, t1_bbmin, time);
+  float3 bbmax = lerp(t0_bbmax, t1_bbmax, time);
 
   attr.cen = 0.5 * (bbmin + bbmax);
   attr.rad = 0.5 * (bbmax - bbmin);
@@ -131,13 +151,16 @@ void raygen(uniform RayGenData record) {
     rayDesc.Direction = rd;
     rayDesc.TMin = 0.0;
     rayDesc.TMax = 10000.0;
-    TraceRay(record.world,     // the tree
-              RAY_FLAG_NONE,   // ray flags
-              0xff,            // instance inclusion mask
-              0,               // ray type
-              0,               // miss index
-              rayDesc,         // the ray to trace
-              payload          // the payload IO
+    // float Time = hash12(p + iResolution.xy * an);
+    float Time = hash12(p + iResolution.xy * an);
+    TraceMotionRay(record.world,    // the tree
+                   RAY_FLAG_NONE,   // ray flags
+                   0xff,            // instance inclusion mask
+                   0,               // ray type
+                   0,               // miss index
+                   rayDesc,         // the ray to trace
+                   Time,
+                   payload          // the payload IO
     );
 
     tot += payload.color;

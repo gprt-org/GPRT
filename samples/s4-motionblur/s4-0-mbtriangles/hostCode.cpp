@@ -73,7 +73,7 @@ int main(int ac, char **av) {
   // the search to relevant geometry instead of testing every triangle.
   GPRTBuildParams blasParams;
   blasParams.buildMode = GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE; // Fast trace, no updates allowed
-  blasParams.hasMotionBlur = true; // Enable motion blur for the TLAS
+  blasParams.hasMotionBlur = true; // Enable motion blur for the BLAS
   GPRTAccel trianglesAccel = gprtTriangleAccelCreate(context, trianglesGeom);
   gprtAccelBuild(context, trianglesAccel, blasParams);
 

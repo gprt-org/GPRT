@@ -2810,7 +2810,8 @@ struct AABBGeom : public Geom {
     uint32_t count;
     uint32_t stride;
     uint32_t offset;
-    std::vector<Buffer *> buffers;
+    Buffer *t0_buffer;
+    Buffer *t1_buffer;
   } aabb;
 
   AABBGeom(AABBGeomType *_geomType) : Geom(_geomType->context) {
@@ -2822,10 +2823,10 @@ struct AABBGeom : public Geom {
   };
   ~AABBGeom() { free(this->SBTRecord); };
 
-  void setAABBs(Buffer *aabbs, uint32_t count, uint32_t stride, uint32_t offset) {
+  void setAABBs(Buffer *t0_aabbs, Buffer *t1_aabbs, uint32_t count, uint32_t stride, uint32_t offset) {
     // assuming no motion blurred triangles for now, so we assume 1 buffer
-    aabb.buffers.resize(1);
-    aabb.buffers[0] = aabbs;
+    aabb.t0_buffer = t0_aabbs;
+    aabb.t1_buffer = t1_aabbs;
     aabb.count = count;
     aabb.stride = stride;
     aabb.offset = offset;
@@ -3558,7 +3559,7 @@ struct TriangleAccel : public Accel {
       // if the above is null, then that indicates identity
       geom.pNext = nullptr;
 
-      // // TODO: accomodate GPUs without motion blur capabilities
+      // TODO: accommodate GPUs without motion blur capabilities
       VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
       motionTriangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
       if (requestedFeatures.motionBlur && triGeom->vertex.t1_buffer != nullptr) {
@@ -3960,6 +3961,13 @@ struct SolidAccel : public Accel {
   // }
 };
 
+#define VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_AABBS_DATA_NV ((VkStructureType)1000327003)
+typedef struct VkAccelerationStructureGeometryMotionAABBsDataNV {
+    VkStructureType                  sType;
+    const void*                      pNext;
+    VkDeviceOrHostAddressConstKHR    data;
+} VkAccelerationStructureGeometryMotionAABBsDataNV;
+
 struct AABBAccel : public Accel {
   AABBAccel(Context *context, AABBGeom* geometry) : Accel(context, true) {
     this->geometry = geometry;
@@ -3973,10 +3981,10 @@ struct AABBAccel : public Accel {
     this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
     this->buildParams = buildParams;
 
-    auto &geom = accelerationStructureGeometry;
-    AABBGeom *aabbGeom = (AABBGeom *) geometry;
-
+    
     {
+      auto &geom = accelerationStructureGeometry;
+      AABBGeom *aabbGeom = (AABBGeom *) geometry;
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
       //   means, anyhit shader is disabled
@@ -3998,20 +4006,29 @@ struct AABBAccel : public Accel {
       // }
 
       geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+      geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
 
       // aabb data
-      geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
-      geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
-      geom.geometry.aabbs.data.deviceAddress = aabbGeom->aabb.buffers[0]->deviceAddress;
+      geom.geometry.aabbs.data.deviceAddress = aabbGeom->aabb.t0_buffer->deviceAddress;
       geom.geometry.aabbs.stride = aabbGeom->aabb.stride;
+      geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
+     
+      maxPrimitiveCount = aabbGeom->aabb.count;
+
+      // TODO: accommodate GPUs without motion blur capabilities
+      VkAccelerationStructureGeometryMotionAABBsDataNV motionAABBs{};
+      motionAABBs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_AABBS_DATA_NV;
+      if (requestedFeatures.motionBlur && aabbGeom->aabb.t1_buffer != nullptr) {
+        motionAABBs.data.deviceAddress = aabbGeom->aabb.t1_buffer->deviceAddress;
+        geom.geometry.aabbs.pNext       = &motionAABBs;
+        buildParams.hasMotionBlur = 1;
+      }
 
       auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = aabbGeom->aabb.count;
       geomRange.primitiveOffset = aabbGeom->aabb.offset;
       geomRange.firstVertex = 0;   // unused
       geomRange.transformOffset = 0;
-
-      maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
     innerBuildProc(buildParams);
@@ -7730,7 +7747,18 @@ gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, ui
   if ((aabbs->geomType->getKind() != GPRT_AABBS) && (aabbs->geomType->getKind() != GPRT_PARTICLES)) 
     LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
   Buffer *positions = (Buffer *) _positions;
-  aabbs->setAABBs(positions, count, stride, offset);
+  aabbs->setAABBs(positions, nullptr, count, stride, offset);
+}
+
+void
+gprtAABBsSetMotionPositions(GPRTGeom _aabbs, GPRTBuffer _t0_positions, GPRTBuffer _t1_positions, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  AABBGeom *aabbs = (AABBGeom *) _aabbs;
+  if ((aabbs->geomType->getKind() != GPRT_AABBS) && (aabbs->geomType->getKind() != GPRT_PARTICLES)) 
+    LOG_ERROR("Calling gprtAABBsSetMotionPositions on non-AABB geometry type!");
+  Buffer *t0_positions = (Buffer *) _t0_positions;
+  Buffer *t1_positions = (Buffer *) _t1_positions;
+  aabbs->setAABBs(t0_positions, t1_positions, count, stride, offset);
 }
 
 GPRT_API GPRTRayGen

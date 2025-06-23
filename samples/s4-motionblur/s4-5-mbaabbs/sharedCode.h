@@ -6,7 +6,8 @@
 
 /* variables for the triangle mesh geometry */
 struct AABBGeomData {
-  float3 *aabbs;
+  float3 *t0_aabbs;
+  float3 *t1_aabbs;
 };
 
 struct RayGenData {

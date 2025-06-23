@@ -594,6 +594,16 @@ gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
+GPRT_API void gprtAABBsSetMotionPositions(GPRTGeom aabbs, GPRTBuffer t0_positions, GPRTBuffer t1_positions, uint32_t count,
+  uint32_t stride GPRT_IF_CPP(= 2*sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtAABBsSetMotionPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> t0_positions, GPRTBufferOf<T2> t1_positions, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= 2*sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  gprtAABBsSetMotionPositions((GPRTGeom) aabbs, (GPRTBuffer) t0_positions, (GPRTBuffer) t1_positions, count, stride, offset);
+}
+
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags flags GPRT_IF_CPP(= GPRT_SBT_ALL));
 
 /** Tells the GPRT to create a window when once the context is made.
