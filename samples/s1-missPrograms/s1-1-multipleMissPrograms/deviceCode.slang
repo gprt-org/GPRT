@@ -68,7 +68,7 @@ void raygen(uniform RayGenData record) {
   payload.uv = ((2.0 * float2(pixelID) - fbSize.xy) / float(fbSize.y)) * 1.5 - float2(0.5, 0);
 
   RayDesc Ray;   // For now, just tracing a ray that will always miss.
-  TraceRay(gprt::getNullAccelHandle(), RAY_FLAG_NONE, 0xff, 0, 1, record.secondMissIndex, Ray, payload);
+  TraceRay(gprt::getNullAccelHandle(), RAY_FLAG_NONE, 0xff, 0, 0, record.secondMissIndex, Ray, payload);
 
   // Get the results written by our miss program
   float3 color = payload.color;

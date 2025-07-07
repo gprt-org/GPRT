@@ -45,14 +45,15 @@ function(embed_devicecode)
     -profile sm_6_7
     -target spirv
     -emit-spirv-directly
-    -fspv-reflect
+    # -fspv-reflect # temporarily disabling while bugs get worked out
     -force-glsl-scalar-layout
     -fvk-use-entrypoint-name
     -matrix-layout-row-major
     -ignore-capabilities
+    # -zero-initialize # zero-initialize all variables # seems to no longer be an option
     -Wno-39001 # for VK_EXT_mutable_descriptor_type, allows overlapping bindings
     -fp-mode fast
-    -g3
+    # -g3
     ${EMBED_DEVICECODE_DEBUG_OPT_FLAG}
     ${EMBED_DEVICECODE_RELEASE_OPT_FLAG}
     -I ${GPRT_INCLUDE_DIR}

@@ -101,18 +101,19 @@
 #define GPRT_TERMINAL_CYAN          "\e[36m"
 #define GPRT_TERMINAL_LIGHT_RED     "\033[1;31m"
 
-using GPRTContext = struct _GPRTContext *;
-using GPRTModule = struct _GPRTModule *;
-using GPRTAccel = struct _GPRTAccel *;
-using GPRTBuffer = struct _GPRTBuffer *;
-using GPRTTexture = struct _GPRTTexture *;
-using GPRTSampler = struct _GPRTSampler *;
-using GPRTGeom = struct _GPRTGeom *;
-using GPRTGeomType = struct _GPRTGeomType *;
-using GPRTRayGen = struct _GPRTRayGen *;
-using GPRTMiss = struct _GPRTMiss *;
-using GPRTCallable = struct _GPRTCallable *;
-using GPRTCompute = struct _GPRTCompute *;
+#define GPRT_DEFINE_HANDLE(object) typedef struct object##_T* object;
+GPRT_DEFINE_HANDLE(GPRTContext)
+GPRT_DEFINE_HANDLE(GPRTModule)
+GPRT_DEFINE_HANDLE(GPRTAccel)
+GPRT_DEFINE_HANDLE(GPRTBuffer)
+GPRT_DEFINE_HANDLE(GPRTTexture)
+GPRT_DEFINE_HANDLE(GPRTSampler)
+GPRT_DEFINE_HANDLE(GPRTGeom)
+GPRT_DEFINE_HANDLE(GPRTGeomType)
+GPRT_DEFINE_HANDLE(GPRTRayGen)
+GPRT_DEFINE_HANDLE(GPRTMiss)
+GPRT_DEFINE_HANDLE(GPRTCallable)
+GPRT_DEFINE_HANDLE(GPRTCompute)
 
 template <typename T> struct _GPRTBufferOf;
 template <typename T> struct _GPRTTextureOf;
@@ -135,15 +136,97 @@ template <typename T> using GPRTGeomTypeOf = struct _GPRTGeomTypeOf<T> *;
 using GPRTProgram = std::vector<uint8_t>;
 
 // CPU implementation of Slang's descriptor handle type.
+
+// Need unorm to be defined here for slang/hlsl's "unorm float4" template type.
+#ifndef unorm
+#define unorm 
+#endif
+
+template<typename T>
 struct Texture1D {uint placeHolder;};
+
+template<typename T>
 struct Texture2D {uint placeHolder;};
+
+template<typename T>
 struct Texture3D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture1D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture2D {uint placeHolder;};
+
+template<typename T>
+struct RWTexture3D {uint placeHolder;};
+
 struct SamplerState {uint placeHolder;};
+
 template<typename T>
 struct DescriptorHandle
 {
   uint2 index;
 };
+
+// Structure subject to change
+// https://github.com/NVIDIAGameWorks/Streamline/blob/main/docs/ProgrammingGuideDLSS_RR.md
+
+struct GPRTDenoiseParams {
+  GPRTTextureOf<float4> transparencyLayer; /* optional input res particle layer */
+  GPRTTextureOf<float4> diffuseAlbedo;
+  GPRTTextureOf<float4> specularAlbedo;
+
+  // Normal in xyz, roughness in w. Required.
+  GPRTTextureOf<float4> normalsAndRoughness; 
+
+  // A single texel float32 buffer.
+  GPRTTextureOf<float> maxRadianceExposure;
+
+  // Note, must be float16
+  GPRTTextureOf<float16_t> depthOfFieldGuide;
+
+  // NVSDK_NGX_Resource_VK*              pInColor;
+  GPRTTextureOf<float4> inputRadiance;
+  // NVSDK_NGX_Resource_VK*              pInOutput;
+  GPRTTextureOf<float4> denoisedOutput; // output
+  // NVSDK_NGX_Resource_VK *             pInDepth;
+  
+  // Depth computed from a pinhole camera model. 
+  // Must be values between 0 and 1, which interpolate between the near and far planes of 
+  // a pyramidal frustum. 
+  GPRTTextureOf<float> frustumDepth;
+  GPRTTextureOf<float> specularHitDistance;
+  // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+
+  // A buffer of motion vectors in normalized device coordinate space (between -1 to 1) 
+  // which describe the motion of the first path vertex (or the background motion if 
+  // the viewing ray misses)
+  GPRTTextureOf<float2> firstVertexMotion;
+  float2 jitter;
+
+
+  float4x4 viewMatrix;
+  float4x4 projMatrix;
+
+  /* helps in determining the amount to denoise or anti-alias based on the speed of the object from motion vector magnitudes and fps as determined by this delta */
+  float frameTimeDeltaInMsec;
+
+  /* Set to 1 when scene changes completely (new level etc) */
+  bool resetAccumulation;
+};
+
+typedef enum {
+  GPRT_DENOISE_FLAGS_IS_INVALID      = 1 << 31,
+  GPRT_DENOISE_FLAGS_NONE           = 0,
+  GPRT_DENOISE_FLAGS_IS_HDR          = 1 << 0,
+  GPRT_DENOISE_FLAGS_MVLOWRES       = 1 << 1,
+  GPRT_DENOISE_FLAGS_MVJITTERED     = 1 << 2,
+  GPRT_DENOISE_FLAGS_DEPTH_INVERTED  = 1 << 3,
+  GPRT_DENOISE_FLAGS_RESERVED_0     = 1 << 4,
+  GPRT_DENOISE_FLAGS_DO_SHARPENING   = 1 << 5,
+  GPRT_DENOISE_FLAGS_AUTO_EXPOSURE   = 1 << 6,
+  GPRT_DENOISE_FLAGS_ALPHA_UPSCALING = 1 << 7
+} GPRTDenoiseFlags;
 
 // Shared internal data structures between GPU and CPU
 #include "gprt_shared.h"
@@ -201,7 +284,7 @@ typedef enum {
 } GPRTMatrixFormat;
 
 typedef enum { 
-  GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, /*bilinear solids?*/GPRT_SOLIDS
+  GPRT_UNKNOWN, GPRT_AABBS, GPRT_TRIANGLES, GPRT_SPHERES, GPRT_LSS, /*bilinear solids?*/GPRT_SOLIDS, GPRT_PARTICLES
 } GPRTGeomKind;
 
 
@@ -282,11 +365,18 @@ typedef enum {
 typedef enum {
   // note, for now, values here are made to match VkFormat equivalents.
   GPRT_FORMAT_R8_UINT = VK_FORMAT_R8_UINT,
+  GPRT_FORMAT_R16G16_UINT = VK_FORMAT_R16G16_UINT,
   GPRT_FORMAT_R16_UNORM = VK_FORMAT_R16_UNORM,
+  GPRT_FORMAT_R16G16_UNORM = VK_FORMAT_R16G16_UNORM,
   GPRT_FORMAT_R8G8B8A8_UNORM = VK_FORMAT_R8G8B8A8_UNORM,
   GPRT_FORMAT_R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
+  GPRT_FORMAT_R16_SFLOAT = VK_FORMAT_R16_SFLOAT,
+  GPRT_FORMAT_R16G16B16A16_SFLOAT = VK_FORMAT_R16G16B16A16_SFLOAT,
+  GPRT_FORMAT_RGBA16Float = GPRT_FORMAT_R16G16B16A16_SFLOAT,
   GPRT_FORMAT_R32_SFLOAT = VK_FORMAT_R32_SFLOAT,
+  GPRT_FORMAT_R32G32_SFLOAT = VK_FORMAT_R32G32_SFLOAT,
   GPRT_FORMAT_R32G32B32A32_SFLOAT = VK_FORMAT_R32G32B32A32_SFLOAT,
+  GPRT_FORMAT_RGBA32Float = GPRT_FORMAT_R32G32B32A32_SFLOAT,
   GPRT_FORMAT_D32_SFLOAT = VK_FORMAT_D32_SFLOAT
 } GPRTFormat;
 
@@ -394,19 +484,16 @@ gprtTrianglesSetVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> vertices, ui
   gprtTrianglesSetVertices((GPRTGeom) triangles, (GPRTBuffer) vertices, count, stride, offset);
 }
 
-// GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
-//                                            /*! number of vertex arrays
-//                                                passed here, the first
-//                                                of those is for t=0,
-//                                                thelast for t=1,
-//                                                everything is linearly
-//                                                interpolated
-//                                                in-between */
-//                                            size_t    numKeys,
-//                                            GPRTBuffer *vertexArrays,
-//                                            size_t count,
-//                                            size_t stride,
-//                                            size_t offset);
+GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles, GPRTBuffer t0_vertices, GPRTBuffer t1_vertices, uint32_t count,
+  uint32_t stride GPRT_IF_CPP(= sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0));
+
+template <typename T1, typename T2>
+void
+gprtTrianglesSetMotionVertices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> t0_vertices, GPRTBufferOf<T2> t1_vertices, uint32_t count,
+                         uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
+  static_assert((std::is_same_v<T2, float> || std::is_same_v<T2, float3> || std::is_same_v<T2, float4>), "Triangle vertex buffer must contain floats.");
+  gprtTrianglesSetMotionVertices((GPRTGeom) triangles, (GPRTBuffer) t0_vertices, (GPRTBuffer) t1_vertices, count, stride, offset);
+}
 
 GPRT_API void gprtTrianglesSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
                                       uint32_t stride GPRT_IF_CPP(= sizeof(uint3)), uint32_t offset GPRT_IF_CPP(= 0));
@@ -503,7 +590,7 @@ GPRT_API void gprtAABBsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint32
 template <typename T1, typename T2>
 void
 gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t count,
-                      uint32_t stride GPRT_IF_CPP(= sizeof(T2)), uint32_t offset GPRT_IF_CPP(= 0)) {
+                      uint32_t stride GPRT_IF_CPP(= 2*sizeof(float3)), uint32_t offset GPRT_IF_CPP(= 0)) {
   gprtAABBsSetPositions((GPRTGeom) aabbs, (GPRTBuffer) positions, count, stride, offset);
 }
 
@@ -531,6 +618,9 @@ GPRT_API bool gprtWindowShouldClose(GPRTContext context);
  */
 GPRT_API void gprtSetWindowTitle(GPRTContext context, const char *title);
 
+// Seems to require a swapchain rebuild.
+// GPRT_API void gprtSetWindowFullScreen(GPRTContext context, bool fullScreen);
+
 /** If a window was requested, this function returns the position of the cursor
  * in screen coordinates relative to the upper left corner.
  *
@@ -547,6 +637,9 @@ GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
  * set to NULL.
  */
 GPRT_API void gprtGrabAndHideCursor(GPRTContext context, bool enabled);
+
+GPRT_API void gprtGetDenoiserInputSize(GPRTContext context, uint32_t *width, uint32_t *height);
+GPRT_API void gprtGetDenoiserOutputSize(GPRTContext context, uint32_t *width, uint32_t *height);
 
 #define GPRT_RELEASE 0
 #define GPRT_PRESS   1
@@ -753,11 +846,11 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  *
  * @param context The GPRT context
  */
-GPRT_API void gprtGuiRasterize(GPRTContext context);
+GPRT_API uint64_t gprtGuiRasterize(GPRTContext context);
 
 /*! Requests the given size (in bytes) to reserve for parameters
   of ray tracing programs. Defaults to 256 bytes */
-GPRT_API void gprtRequestRecordSize(uint32_t recordSize);
+GPRT_API void gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32_t missRecordSize, uint32_t callableRecordSize);
 
 /*! set number of ray types to be used; this should be
   done before any programs, pipelines, geometries, etc get
@@ -774,6 +867,16 @@ GPRT_API void gprtRequestRayQueries();
 GPRT_API void gprtRequestMaxAttributeSize(uint32_t attributeSize);
 
 GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
+
+/** Tells the GPRT to initialize a vendor-supplied denoising model. 
+ * Different vendors have different denoising requirements, and image 
+ * quality will vary. 
+ */
+GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags);
+
+/** Requests for GPRT to enable motion blur capabilities. If supported, GPRT will use hardware accelerated
+ * capabilities. Otherwise, GPRT will use a software intersector fallback. */
+GPRT_API void gprtRequestMotionBlur();
 
 /** creates a new device context with the gives list of devices.
 
@@ -1174,6 +1277,55 @@ GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint numInstance
 
 GPRT_API void gprtAccelDestroy(GPRTAccel accel);
 
+struct GPRTBuildParams {
+  /**
+   * @param buildMode The build mode to use when constructing the acceleration structure.
+   * 1. GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE
+   *   Fastest possible build, but slower trace than 3 or 4. Good for fully-dynamic geometry like
+   *   particles, destruction, changing prim counts, or moving wildly (explosions) where per-frame
+   *   rebuild is required.
+   *
+   * 2. GPRT_BUILD_MODE_FAST_BUILD_AND_UPDATE
+   *   Slightly slower build than 1, but allows very fast update. Good for lower level-of-detail
+   *   dynamic objects that are unlikely to be hit by too many rays but still need to be refitted
+   *   per frame to be correct.
+   *
+   * 3. GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE
+   *   Fastest possible trace, but disallows updates. Slower to build than 1 or 2. This is a good
+   *   default choice for static geometry.
+   *
+   * 4. GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE
+   *   Fastest trace possible while still allowing for updates. Updates are slightly slower than 2.
+   *   Trace is a bit slower than 3. Good for high level-of-detail dynamic objects that are expected
+   *   to be hit by a significant number of rays.
+   */
+  GPRTBuildMode buildMode = GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE;
+
+  /** 
+   * @param allowCompaction Enables the tree to be compacted with gprtAccelCompact, potentially
+   * significantly reducing its memory footprint. Enabling this feature may take more time and
+   * memory than a normal build, and so should only be used when the compaction feature is needed.
+   */
+  bool allowCompaction = false;
+
+  /** 
+   * @param minimizeMemory Sacrifices build and trace performance to reduce memory consumption. Enable only
+   * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing
+   * for memory consumption as much as possible.
+   */
+  bool minimizeMemory = false;
+
+  /** 
+   * @param hasMotion If any of the instances of this BVH contain motion blur, "hasMotion" should be set to true.
+   * If false, the TLAS will assume a static BVH over geometry at time 0 which bounds the geometry at time 1. 
+   * If the convex hull of some instance at time 1 lies beyond the bounds of the convex hull at time 0, then
+   * that geometry will be culled (likely unintentionally).
+   */
+  bool hasMotionBlur = false;
+  bool test0 = false;/*e*/ 
+  bool test1 = false;/*s*/
+};
+
 /**
  * @brief Builds the given acceleration structure so that it can be used on the
  * device for ray tracing.
@@ -1208,8 +1360,7 @@ GPRT_API void gprtAccelDestroy(GPRTAccel accel);
  * when an application is under so much memory pressure that ray tracing isn't feasible without optimizing
  * for memory consumption as much as possible.
  */
-GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildMode mode, bool allowCompaction = false,
-                             bool minimizeMemory = false);
+GPRT_API void gprtAccelBuild(GPRTContext context, GPRTAccel accel, GPRTBuildParams buildParams GPRT_IF_CPP(= GPRTBuildParams()));
 
 /**
  * @brief Updates the structure of a tree to account for changes to the underlying primitives.
@@ -1380,40 +1531,39 @@ inline DescriptorHandle<SamplerState> gprtSamplerGetHandle(GPRTSampler sampler, 
 
 GPRT_API void gprtSamplerDestroy(GPRTSampler);
 
-GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                           uint32_t height, uint32_t depth, bool allocateMipmap,
-                                           const void *init GPRT_IF_CPP(= nullptr));
+struct GPRTTextureParams {
+  GPRTImageType type;
+  GPRTFormat format;
+  int channels;
+  int width;
+  int height;
+  int depth GPRT_IF_CPP(= 1);
+  bool allocateMipmaps GPRT_IF_CPP(= false);
+  bool writable GPRT_IF_CPP(= false);
+};
+
+GPRT_API GPRTTexture gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtHostTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                  (void *) init);
+gprtHostTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtHostTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap,
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtDeviceTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                    (void *) init);
+gprtDeviceTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtDeviceTextureCreate(context, params, (void *) init);
 }
 
-GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width,
-                                             uint32_t height, uint32_t depth, bool allocateMipmap,
-                                             const void *init GPRT_IF_CPP(= nullptr));
+GPRT_API GPRTTexture gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const void *init GPRT_IF_CPP(= nullptr));
 
 template <typename T>
 GPRTTextureOf<T>
-gprtSharedTextureCreate(GPRTContext context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmap, const T *init GPRT_IF_CPP(= nullptr)) {
-  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, type, format, width, height, depth, allocateMipmap,
-                                                    (void *) init);
+gprtSharedTextureCreate(GPRTContext context, GPRTTextureParams params, const T *init GPRT_IF_CPP(= nullptr)) {
+  return (GPRTTextureOf<T>) gprtSharedTextureCreate(context, params, (void *) init);
 }
 
 GPRT_API void *gprtTextureGetPointer(GPRTTexture texture, int deviceID GPRT_IF_CPP(= 0));
@@ -1449,25 +1599,49 @@ uint32_t gprtTextureGetIndex(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(
   return gprtTextureGetIndex((GPRTTexture) texture, deviceID);
 }
 
-template <typename T>
-inline DescriptorHandle<Texture1D> gprtTextureGet1DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture1D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture1D<T1>> gprtTextureGet1DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture1D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<Texture2D> gprtTextureGet2DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture2D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture2D<T1>> gprtTextureGet2DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture2D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
 }
 
-template <typename T>
-inline DescriptorHandle<Texture3D> gprtTextureGet3DHandle(GPRTTextureOf<T> texture, int deviceID GPRT_IF_CPP(= 0)) {
-  DescriptorHandle<Texture3D> handle;
+template <typename T1, typename T2>
+inline DescriptorHandle<Texture3D<T1>> gprtTextureGet3DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<Texture3D<T1>> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture1D<T1>> gprtRWTextureGet1DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture1D<T1>> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture2D<T1>> gprtRWTextureGet2DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture2D<T1>> handle;
+  handle.index.x = gprtTextureGetIndex(texture);
+  handle.index.y = 0;
+  return handle;
+}
+
+template <typename T1, typename T2>
+inline DescriptorHandle<RWTexture3D<T1>> gprtRWTextureGet3DHandle(GPRTTextureOf<T2> texture, int deviceID GPRT_IF_CPP(= 0)) {
+  DescriptorHandle<RWTexture3D<T1>> handle;
   handle.index.x = gprtTextureGetIndex(texture);
   handle.index.y = 0;
   return handle;
@@ -1536,6 +1710,8 @@ void
 gprtTextureClear(GPRTTextureOf<T> texture) {
   gprtTextureClear((GPRTTexture) texture);
 }
+
+GPRT_API uint64_t gprtTextureDenoise(GPRTContext context, const GPRTDenoiseParams &params);
 
 /*! Destroys all underlying Vulkan resources for the given texture and frees any
   underlying memory*/
@@ -1751,22 +1927,13 @@ gprtBufferGetSize(GPRTBufferOf<T> buffer) {
   return gprtBufferGetSize((GPRTBuffer) buffer);
 }
 
-/*! returns the device pointer of the given pointer for the given
-  device ID. For host-pinned or managed memory buffers (where the
-  buffer is shared across all devices) this pointer should be the
-  same across all devices (and even be accessible on the host); for
-  device buffers each device *may* see this buffer under a different
-  address, and that address is not valid on the host. Note this
-  function is paricuarly useful for CUDA-interop; allowing to
-  cudaMemcpy to/from an owl buffer directly from CUDA code
-
-  // TODO! update for Vulkan...
-  */
 GPRT_API void *gprtBufferGetHostPointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
-template <typename T>
-T *
-gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
+/** 
+ * WARNING, this pointer cannot be accessed from the device (even for host buffers)! Host accesses only...
+ * If you need device-side access, see "gprtBufferGetDevicePointer".
+*/
+template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   return (T *) gprtBufferGetHostPointer((GPRTBuffer) buffer, deviceID);
 }
 
@@ -1786,6 +1953,10 @@ gprtBufferUnmap(GPRTBufferOf<T> buffer, int deviceID GPRT_IF_CPP(= 0)) {
   gprtBufferUnmap((GPRTBuffer) buffer, deviceID);
 }
 
+/** 
+ * WARNING, this pointer cannot be accessed from the host! Device accesses only...
+* If you need host-side access, see "gprtBufferGetHostPointer".
+*/
 GPRT_API void *gprtBufferGetDevicePointer(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
@@ -2120,12 +2291,12 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  *
  * If a window was not requested (ie headless), this function does nothing.
  */
-GPRT_API void gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
+GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 
 template <typename T>
-void
+uint64_t
 gprtBufferPresent(GPRTContext context, GPRTBufferOf<T> buffer) {
-  gprtBufferPresent(context, (GPRTBuffer) buffer);
+  return gprtBufferPresent(context, (GPRTBuffer) buffer);
 }
 
 /** This call interprets the given buffer as a B8G8R8A8 SRGB image sorted in
@@ -2139,70 +2310,70 @@ gprtBufferSaveImage(GPRTBufferOf<T> buffer, uint32_t width, uint32_t height, con
   gprtBufferSaveImage((GPRTBuffer) buffer, width, height, imageName);
 }
 
-GPRT_API void gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
+GPRT_API uint64_t gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x) {
-  gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x);
+  return gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch1D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x,
                    PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch1D(context, (GPRTRayGen) rayGen, dims_x, sizeof(PushConstantsType), &pushConstants);
 }
 
 /*! Executes a ray tracing pipeline with the given raygen program.
   This call will block until the raygen program returns. */
-GPRT_API void gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
+GPRT_API uint64_t gprtRayGenLaunch2D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y) {
-  gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y);
+  return gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch2D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= 128, "Current GPRT push constant size limited to 128 bytes or less");
-  gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch2D(context, (GPRTRayGen) rayGen, dims_x, dims_y, sizeof(PushConstantsType), &pushConstants);
 }
 
 /*! 3D-launch variant of \see gprtRayGenLaunch2D */
-GPRT_API void gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
+GPRT_API uint64_t gprtRayGenLaunch3D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x, uint32_t dims_y,
                                  uint32_t dims_z, size_t pushConstantsSize GPRT_IF_CPP(= 0),
                                  void *pushConstants GPRT_IF_CPP(= 0));
 
 template <typename RecordType>
-void
+uint64_t
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    uint32_t dims_z) {
-  gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
+  return gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z);
 }
 
 template <typename RecordType, typename PushConstantsType>
-void
+uint64_t
 gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_t dims_x, uint32_t dims_y,
                    uint32_t dims_z, PushConstantsType pushConstants) {
   static_assert(sizeof(PushConstantsType) <= PUSH_CONSTANTS_LIMIT,
                 "Push constants type size exceeds PUSH_CONSTANTS_LIMIT bytes");
-  gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
+  return gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
 // declaration for internal implementation
-void _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
                         std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
 
 // Case where compute program uniforms are not known at compilation time
 template <typename... Uniforms>
-void
+uint64_t
 gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
                 "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
@@ -2220,12 +2391,12 @@ gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize, Uniform
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
+  return _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants);
 }
 
 // Case where compute program has compile-time type-safe uniform arguments
 template <typename... Uniforms>
-void
+uint64_t
 gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize, Uniforms... uniforms) {
   static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
                 "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
@@ -2243,8 +2414,12 @@ gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 gro
   // Serialize each argument into the buffer
   (handleArg(pushConstants, offset, uniforms), ...);
 
-  _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
+  return _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
 }
+
+GPRT_API uint64_t gprtComputeSynchronize(GPRTContext context);
+GPRT_API uint64_t gprtGraphicsSynchronize(GPRTContext context);
+GPRT_API uint64_t gprtDeviceSynchronize(GPRTContext context);
 
 GPRT_API void gprtBeginProfile(GPRTContext context);
 

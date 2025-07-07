@@ -1,0 +1,5 @@
+add_subdirectory(s4-0-mbtriangles)
+# add_subdirectory(s2-1-spheres)
+# add_subdirectory(s2-2-lss)
+# add_subdirectory(s2-4-solids)
+# add_subdirectory(s2-5-aabbs)

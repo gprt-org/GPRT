@@ -69,6 +69,42 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 // [[vk::binding(0, 5)]]
 
 namespace gprt {
+  
+static float3 LessThan(float3 f, float value)
+{
+    return float3(
+        (f.x < value) ? 1.0f : 0.0f,
+        (f.y < value) ? 1.0f : 0.0f,
+        (f.z < value) ? 1.0f : 0.0f);
+}
+
+//  IEC 61966-2-1:1999 standard linear to srgb definition.
+float3 linear_to_srgb(float3 rgb)
+{
+    rgb = clamp(rgb, 0.0f, 1.0f);
+    
+    return lerp(
+        pow(rgb * 1.055f, float3(1.f / 2.4f)) - 0.055f,
+        rgb * 12.92f,
+        LessThan(rgb , 0.0031308f)
+    );
+}
+
+float3 srgb_to_linear(float3 srgb)
+{
+    // 1) Clamp to [0,1]
+    srgb = clamp(srgb, 0.0f, 1.0f);
+
+    // 2) Compute the two pieces
+    float3 linear  = srgb / 12.92f;                                        // for srgb ≤ 0.04045
+    float3 expPart = pow((srgb + 0.055f) / 1.055f, float3(2.4f));         // for srgb > 0.04045
+
+    // 3) Blend based on the threshold mask
+    //    LessThan(srgb,0.04045) is 1.0 where srgb<0.04045 → picks `linear`,
+    //    else 0.0 → picks `expPart`.
+    return lerp(expPart, linear, LessThan(srgb, 0.04045f));
+}
+
 inline uint32_t
 make_8bit(const float f) {
   return min(255, max(0, int(f * 256.f)));
@@ -76,26 +112,25 @@ make_8bit(const float f) {
 
 inline uint32_t
 make_rgba(float3 color) {
-  float gamma = 2.2;
-  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
+  color = linear_to_srgb(color);
   return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.z) << 16) + (0xffU << 24);
 }
 
 inline uint32_t
 make_bgra(float3 color) {
-  float gamma = 2.2;
-  color = pow(color, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
+  color = linear_to_srgb(color);
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) + (0xffU << 24);
 }
 
+// Utility function which applies an IEC 61966-2-1:1999 linear to srgb transform, then goes to 8 bits.
 inline uint32_t
 make_bgra(float4 color) {
-  float gamma = 2.2;
-  color.rgb = pow(color.rgb, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
+  color.rgb = linear_to_srgb(color.rgb);
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) +
          (make_8bit(color.w) << 24);
 }
 
+// Make sure to use with only linear colors, not srgb!
 float4
 over(float4 a, float4 b) {
   float4 result;

@@ -35,7 +35,6 @@ void simpleRayGen(uniform RayGenData record) {
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
            0b11111111,              // instance inclusion mask
            0,                       // ray type
-           1,                       // number of ray types
            0,                       // miss type
            rayDesc,                 // the ray to trace
            payload                  // the payload IO
@@ -57,7 +56,6 @@ void simpleRayGen(uniform RayGenData record) {
              RAY_FLAG_FORCE_OPAQUE,   // ray flags
              0b11111111,             // instance inclusion mask
              0,                       // ray type
-             1,                       // number of ray types
              0,                       // miss type
              rayDesc,                 // the ray to trace
              payload                  // the payload IO
@@ -86,7 +84,6 @@ void simpleRayGen(uniform RayGenData record) {
              RAY_FLAG_FORCE_OPAQUE,   // ray flags
              0b00000001,              // instance inclusion mask
              0,                       // ray type
-             1,                       // number of ray types
              0,                       // miss type
              rayDesc,                 // the ray to trace
              payload                  // the payload IO

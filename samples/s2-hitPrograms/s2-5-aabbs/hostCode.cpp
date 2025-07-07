@@ -66,16 +66,19 @@ int main(int ac, char **av) {
   AABBGeomData *geomData = gprtGeomGetParameters(aabbGeom);
   geomData->aabbs = gprtBufferGetDevicePointer(aabbPositionsBuffer);
 
+  GPRTBuildParams buildParams;
+  buildParams.buildMode = GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE;
+
   // Note, we must create an "AABB" accel rather than a triangles accel.
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
-  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, aabbAccel, buildParams);
 
   gprt::Instance instance = gprtAccelGetInstance(aabbAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
 
   // triangle and AABB accels can be combined in a top level tree
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world, buildParams);
 
   rayGenData->world = gprtAccelGetDeviceAddress(world);
 

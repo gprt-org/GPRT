@@ -32,7 +32,7 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
 
   // Gamma correction
-  guiColor = pow(guiColor, 2.2f);
+  guiColor.rgb = gprt::srgb_to_linear(guiColor.rgb);
 
   // Composite the GUI on top of the scene
   float4 pixelColor = over(guiColor, imageColor);
@@ -59,7 +59,6 @@ raygen(uniform RayGenData record) {
            RAY_FLAG_FORCE_OPAQUE,   // ray flags
            0xff,                    // instance inclusion mask
            0,                       // ray type
-           1,                       // number of ray types
            0,                       // miss type
            rayDesc,                 // the ray to trace
            payload                  // the payload IO

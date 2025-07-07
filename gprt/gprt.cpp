@@ -70,8 +70,26 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+#define VENDOR_ID_AMD 0x1002
+#define VENDOR_ID_ImgTec 0x1010
+#define VENDOR_ID_NVIDIA 0x10DE
+#define VENDOR_ID_ARM 0x13B5
+#define VENDOR_ID_Qualcomm 0x5143
+#define VENDOR_ID_INTEL 0x8086
+static inline std::string getVendorString(uint32_t vendorID) {
+  switch(vendorID) {
+    case VENDOR_ID_AMD: return "AMD";
+    case VENDOR_ID_ImgTec: return "ImgTec";
+    case VENDOR_ID_NVIDIA: return "NVIDIA";
+    case VENDOR_ID_ARM: return "ARM";
+    case VENDOR_ID_Qualcomm: return "Qualcomm";
+    case VENDOR_ID_INTEL: return "INTEL";
+    default: return std::to_string(vendorID);
+  };
+}
+
 // For advanced vulkan memory allocation
-#define VMA_VULKAN_VERSION 1003000   // Vulkan 1.2
+#define VMA_VULKAN_VERSION 1004000   // Vulkan 1.4
 #define VMA_IMPLEMENTATION
 // #define VMA_DEBUG_LOG printf
 #include "vma/vk_mem_alloc.h"
@@ -81,6 +99,14 @@
 
 // For software fallbacks for various primitive types
 #include "gprt_fallbacks.h"
+
+// For DLSS RR
+#include "nvsdk_ngx_vk.h"
+#include "nvsdk_ngx_helpers.h"
+#include "nvsdk_ngx_helpers_vk.h"
+
+#include "nvsdk_ngx_helpers_dlssd.h"
+#include "nvsdk_ngx_helpers_dlssd_vk.h"
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -114,6 +140,9 @@ static struct RequestedFeatures {
 
   uint32_t maxDescriptorCount = 256;
 
+  // uint64_t syncTDR = /*1min*/uint64_t(6e10f);
+  uint64_t syncTDR = uint64_t(6000000000);
+
   // Not all GPUs support the RT pipeline.
   // Currently we assume this is true, but down the road would be nice to make optional.
   bool rayTracingPipeline = true;
@@ -121,16 +150,23 @@ static struct RequestedFeatures {
   /** Ray queries enable inline ray tracing.
    * Not supported by some platforms like the A100, so requesting is important. */
   bool rayQueries = false;
+  
+  bool rayTracingValidation = false;
 
   bool invocationReordering = false;
   bool linearSweptSpheres = true;
+  bool motionBlur = false;
 
   bool debugPrintf = true;
 
-  /*! returns whether logging is enabled */
-  inline bool logging() {
-    return debugPrintf;
-  }
+  // An abstraction over DLSS RR, FSR4, etc
+  struct AIDenoiserProperties {
+    bool requested = false;
+    GPRTDenoiseFlags flags = GPRT_DENOISE_FLAGS_NONE; // mirrors the create flags of DLSS
+    uint32_t outputWidth;
+    uint32_t outputHeight;
+  } aiDenoiser;
+
 } requestedFeatures;
 
 #if defined(_MSC_VER)
@@ -198,23 +234,19 @@ gprtRaise_impl(std::string str) {
 #endif
 
 #define LOG_VERBOSE(message)                                                                                           \
-  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_CYAN << "#gprt verbose:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_INFO(message)                                                                                              \
-  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_LIGHT_BLUE << "#gprt info:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_PRINTF(message) std::cout << GPRT_TERMINAL_GREEN << message << GPRT_TERMINAL_DEFAULT;
 
 #define LOG_WARNING(message)                                                                                           \
-  if (requestedFeatures.logging())                                                                                    \
   std::cout << GPRT_TERMINAL_YELLOW << "#gprt warn:  " << message << GPRT_TERMINAL_DEFAULT << std::endl
 
 #define LOG_ERROR(message)                                                                                             \
   {                                                                                                                    \
-    if (requestedFeatures.logging())                                                                                  \
-      std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
+    std::cout << GPRT_TERMINAL_RED << "#gprt error: " << message << GPRT_TERMINAL_DEFAULT << std::endl;              \
     GPRT_RAISE(message)                                                                                                \
   }
 
@@ -254,6 +286,14 @@ errorString(VkResult errorCode) {
   }
 }
 
+std::string ngxResultToString(NVSDK_NGX_Result result)
+{
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "(code: 0x%08x, info: %ls)", result, GetNGXResultAsString(result));
+    buf[sizeof(buf) - 1] = '\0';
+    return std::string(buf);
+}
+
 #define VK_CHECK_RESULT(f)                                                                                             \
   {                                                                                                                    \
     VkResult res = (f);                                                                                                \
@@ -263,6 +303,15 @@ errorString(VkResult errorCode) {
       assert(res == VK_SUCCESS);                                                                                       \
     }                                                                                                                  \
   }
+
+#define NGX_CHECK_RESULT(f)                                                                                         \
+{                                                                                                                   \
+  NVSDK_NGX_Result res = (f);                                                                                       \
+  if (res != NVSDK_NGX_Result_Success) {                                                                            \
+    LOG_ERROR(std::string("NGXResult is ") + ngxResultToString(res) + std::string(" in gprt.cpp, line ") + std::to_string(__LINE__));                                               \
+    assert(res == NVSDK_NGX_Result_Success);                                                                        \
+  }                                                                                                                 \
+}
 
 VKAPI_ATTR VkBool32 VKAPI_CALL
 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -295,6 +344,34 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
   // we DON'T want Vulkan calls that cause a validation message to abort If you
   // instead want to have calls abort, pass in VK_TRUE and the function will
   // return VK_ERROR_VALIDATION_FAILED_EXT
+  return VK_FALSE;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL 
+validationMessengerCallback(
+  VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+  VkDebugUtilsMessageTypeFlagsEXT messageType,
+  const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+  void* pUserData)
+{
+  std::string prefix("");
+  if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+      prefix = "WARNING: ";
+  }
+  else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+      prefix = "ERROR: ";
+  }
+
+  // Display message to default output (console/logcat)
+  std::stringstream debugMessage;
+  debugMessage << prefix << "[" << pCallbackData->messageIdNumber << "][" << pCallbackData->pMessageIdName << "] : " << pCallbackData->pMessage;
+
+  if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+      std::cout << debugMessage.str() << "\n";
+  } else {
+      std::cout << debugMessage.str() << "\n";
+  }
+  fflush(stdout);
   return VK_FALSE;
 }
 
@@ -351,6 +428,7 @@ PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructur
 PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
 VkDebugUtilsMessengerEXT debugUtilsMessenger;
+VkDebugUtilsMessengerEXT validationMessenger;
 
 // Note, the following were deprecated and shouldn't be used
 // PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
@@ -395,8 +473,21 @@ struct Context {
   std::vector<VkImage> swapchainImages;
   uint32_t currentImageIndex;
   VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-  VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
+
+  struct AIDenoising {
+    const uint64_t kAppID = 231313132;
+    NVSDK_NGX_Parameter* ngxParameters = nullptr;
+    NVSDK_NGX_Handle* ngxHandle = nullptr;
+
+    struct OptimalSettings
+    {
+        float sharpness;
+        uint2 optimalRenderSize;
+        uint2 minRenderSize;
+        uint2 maxRenderSize;
+    } optimalSettings;
+  } aiDenoising;
 
   struct ImGuiData {
     uint32_t width = -1;
@@ -422,10 +513,12 @@ struct Context {
   VkPhysicalDeviceVulkan11Features deviceVulkan11Features;
   VkPhysicalDeviceVulkan12Features deviceVulkan12Features;
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures;
+  VkPhysicalDeviceRayTracingValidationFeaturesNV rayTracingValidationFeatures;
   VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV invocationReorderFeatures;
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
   VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV linearSweptSpheresFeatures;
   #endif
+  VkPhysicalDeviceRayTracingMotionBlurFeaturesNV motionBlurFeatures;
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures;
   VkPhysicalDeviceRayQueryFeaturesKHR rtQueryFeatures;
   VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutableDescriptorFeatures;
@@ -447,9 +540,10 @@ struct Context {
     uint32_t transfer;
   } queueFamilyIndices;
 
-  VkCommandBuffer graphicsCommandBuffer;
-  VkCommandBuffer computeCommandBuffer;
-  VkCommandBuffer transferCommandBuffer;
+  // Ring buffer 
+  VkCommandBuffer graphicsCommandBuffers[64];
+  VkCommandBuffer computeCommandBuffers[64];
+  VkCommandBuffer transferCommandBuffers[64];
 
   /** @brief List of extensions supported by the chosen physical device */
   std::vector<std::string> supportedExtensions;
@@ -468,6 +562,14 @@ struct Context {
   VkQueue graphicsQueue;
   VkQueue computeQueue;
   VkQueue transferQueue;
+
+  // Timeline semaphore for synchronizing work
+  uint64_t GRTimelineCounter = 0;
+  uint64_t CETimelineCounter = 0;
+  uint64_t TRTimelineCounter = 0;
+  VkSemaphore GRTimelineSemaphore = VK_NULL_HANDLE;
+  VkSemaphore CETimelineSemaphore = VK_NULL_HANDLE;
+  VkSemaphore TRTimelineSemaphore = VK_NULL_HANDLE;
 
   // Depth buffer format (selected during Vulkan initialization)
   VkFormat depthFormat;
@@ -585,16 +687,26 @@ struct Context {
 
   void destroyInternalPrograms();
 
-  VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool);
-
-  void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue);
+  //VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool);
+  //void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue);
+  
+  VkCommandBuffer beginGraphicsCommands();
+  VkCommandBuffer beginComputeCommands();
+  VkCommandBuffer beginTransferCommands();
+  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
+  VkResult endTransferCommands(VkCommandBuffer commandBuffer);
+  VkResult synchronizeTransfer();
+  VkResult synchronizeGraphics();
+  VkResult synchronizeCompute();
+  VkResult synchronize();
 
   void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
   // For ImGui
   void setRasterAttachments(Texture *colorTexture, Texture *depthTexture);
 
-  void rasterizeGui();
+  uint64_t rasterizeGui();
 };
 
 struct Module {
@@ -734,42 +846,16 @@ struct Buffer {
       vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
       return vmaMapMemory(context->allocator, allocation, &mapped);
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
-
+      VkCommandBuffer commandBuffer = context->beginTransferCommands();
+      
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = offset;
       region.dstOffset = 0;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;
-      submitInfo.pWaitDstStageMask = nullptr;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+      context->endTransferCommands(commandBuffer);
+      context->synchronizeTransfer();
 
       vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       return vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
@@ -787,42 +873,17 @@ struct Buffer {
         mapped = nullptr;
       }
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
-
+      VkCommandBuffer commandBuffer = context->beginTransferCommands();
+      
       // To do, consider allowing users to specify offsets here...
       VkBufferCopy region;
       region.srcOffset = 0;
       region.dstOffset = offset;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
-      vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+      vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
 
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo;
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;
-      submitInfo.pWaitDstStageMask = nullptr;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      context->endTransferCommands(commandBuffer);
+      context->synchronizeTransfer();
 
       vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
@@ -910,42 +971,15 @@ struct Buffer {
         VmaAllocation newAllocation;
         VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
 
-        // Copy contents from old to new
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, newBuffer, 1, &region);
-
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
+        context->endTransferCommands(commandBuffer);
+        context->synchronizeTransfer();
 
         // Free old buffer
         vmaUnmapMemory(context->allocator, allocation);
@@ -988,41 +1022,16 @@ struct Buffer {
 
       // Copy existing contents into staging buffer
       if (preserveContents) {
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, buffer, stagingBuffer.buffer, 1, &region);
+        vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        context->endTransferCommands(commandBuffer);
+        context->synchronizeTransfer();
       }
 
       // Release old device buffer
@@ -1042,41 +1051,15 @@ struct Buffer {
 
       if (preserveContents) {
         // Copy contents from old staging buffer to new buffer
-        VkResult err;
-        VkCommandBufferBeginInfo cmdBufInfo{};
-        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-        if (err)
-          LOG_ERROR("failed to begin command buffer for buffer resize! : \n" + errorString(err));
+        VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
         VkBufferCopy region;
         region.srcOffset = 0;
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
-        vkCmdCopyBuffer(context->graphicsCommandBuffer, stagingBuffer.buffer, buffer, 1, &region);
-
-        err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-        if (err)
-          LOG_ERROR("failed to end command buffer for buffer resize! : \n" + errorString(err));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.pNext = NULL;
-        submitInfo.waitSemaphoreCount = 0;
-        submitInfo.pWaitSemaphores = nullptr;
-        submitInfo.pWaitDstStageMask = nullptr;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-        submitInfo.signalSemaphoreCount = 0;
-        submitInfo.pSignalSemaphores = nullptr;
-
-        err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        if (err)
-          LOG_ERROR("failed to submit to queue for buffer resize! : \n" + errorString(err));
-
-        err = vkQueueWaitIdle(context->graphicsQueue);
-        if (err)
-          LOG_ERROR("failed to wait for queue idle for buffer resize! : \n" + errorString(err));
+        vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
+        context->synchronizeTransfer();
+        context->endTransferCommands(commandBuffer);
       }
 
       size = bytes;
@@ -1217,15 +1200,18 @@ gprtFormatGetSize(GPRTFormat format) {
   case GPRT_FORMAT_R8_UINT:
     return 1;
   case GPRT_FORMAT_R16_UNORM:
+  case GPRT_FORMAT_R16_SFLOAT:
     return 2;
+  case GPRT_FORMAT_R16G16_UINT:
+  case GPRT_FORMAT_R16G16_UNORM:
   case GPRT_FORMAT_R8G8B8A8_UNORM:
-    return 4;
   case GPRT_FORMAT_R8G8B8A8_SRGB:
-    return 4;
   case GPRT_FORMAT_R32_SFLOAT:
-    return 4;
   case GPRT_FORMAT_D32_SFLOAT:
     return 4;
+  case GPRT_FORMAT_R16G16B16A16_SFLOAT:
+  case GPRT_FORMAT_R32G32_SFLOAT:
+    return 8;
   case GPRT_FORMAT_R32G32B32A32_SFLOAT:
     return 16;
   default:
@@ -1293,6 +1279,7 @@ struct Texture : public ImageResource {
   VkMemoryPropertyFlags memoryPropertyFlags;
 
   bool hostVisible;
+  bool writable;
 
   VkImage image = VK_NULL_HANDLE;
   VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1530,15 +1517,11 @@ struct Texture : public ImageResource {
         mapped = nullptr;
       }
     } else {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for texture map! : \n" + errorString(err));
+      VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
       // transition device to a transfer destination format
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      VkImageLayout prevLayout = layout;
+      setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
       layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1557,35 +1540,15 @@ struct Texture : public ImageResource {
       copyRegion.imageSubresource.baseArrayLayer = 0;
       copyRegion.imageSubresource.layerCount = 1;
       copyRegion.imageSubresource.mipLevel = 0;
-      vkCmdCopyBufferToImage(context->graphicsCommandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
+      vkCmdCopyBufferToImage(commandBuffer, stagingBuffer.buffer, image, layout, 1, &copyRegion);
 
-      // transition device to an optimal device format
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      // transition back to previous format
+      setImageLayout(commandBuffer, image, layout, prevLayout,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      layout = prevLayout;
 
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for texture map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for texture map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for texture map! : \n" + errorString(err));
+      context->endGraphicsCommands(commandBuffer);
+      context->synchronize();
 
       // todo, transfer device data to device
       if (mapped) {
@@ -1597,15 +1560,10 @@ struct Texture : public ImageResource {
   }
 
   void clear() {
-    VkResult err;
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // Move to a destination optimal format
-    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
     // clear the image
@@ -1614,7 +1572,7 @@ struct Texture : public ImageResource {
       val.depth = 1.f;
       val.stencil = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearDepthStencilImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+      vkCmdClearDepthStencilImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
                                   &range);
     } else {
       VkClearColorValue val;
@@ -1622,36 +1580,15 @@ struct Texture : public ImageResource {
       val.int32[0] = val.int32[1] = val.int32[2] = val.int32[3] = 0;
       val.uint32[0] = val.uint32[1] = val.uint32[2] = val.uint32[3] = 0;
       VkImageSubresourceRange range = {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1};
-      vkCmdClearColorImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
+      vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &val, 1,
                            &range);
     }
 
     // Now go back to the previous layout
-    setImageLayout(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
+    setImageLayout(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layout,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+    context->endGraphicsCommands(commandBuffer);
   }
 
   void generateMipmap() {
@@ -1669,15 +1606,11 @@ struct Texture : public ImageResource {
       LOG_ERROR("image needs transfer dst usage bit for texture mipmap "
                 "generation! \n");
 
-    VkResult err;
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for texture mipmap generation! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // transition device to a transfer destination format
-    setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    VkImageLayout prevLayout = layout;
+    setImageLayout(commandBuffer, image, layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
     layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -1706,7 +1639,7 @@ struct Texture : public ImageResource {
 
       // this will wait for level i-1 to be filled from either a
       // vkCmdCopyBufferToImae call, or the previous blit command
-      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // here, we specify the regions to use for the blit
@@ -1727,16 +1660,16 @@ struct Texture : public ImageResource {
 
       // This blit will downsample the current mip layer into the one above.
       // It also transitions the image
-      vkCmdBlitImage(context->graphicsCommandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+      vkCmdBlitImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
-      // Now, transition the layer to VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+      // Now, transition the layer to the original layout
       barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.newLayout = prevLayout;
       barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-      vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
       // now, divide the current mip dimensions by two.
@@ -1752,38 +1685,18 @@ struct Texture : public ImageResource {
     // at the very end, we need one more barrier to transition the lastmip level
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = prevLayout;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Now, all layers in the mip chan have this layout
-    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    // Now, all layers in the mip chan are back to their original layout.
+    layout = prevLayout;
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for texture mipmap generation! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for texture mipmap generation! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for texture mipmap generation! : \n" + errorString(err));
+    context->endGraphicsCommands(commandBuffer);
+    context->synchronize();
   }
 
   Texture(Context *context, VkImageUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkImageType type,
@@ -1847,6 +1760,9 @@ struct Texture : public ImageResource {
       return -1;
     };
 
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties(context->physicalDevice, format, &props);
+
     // Create the image handle
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -1873,21 +1789,22 @@ struct Texture : public ImageResource {
     // uploading straight to texture as if it were
     //   a staging image. If we instead use a staging buffer, then this should
     //   be undefined
-    if (hostVisible)
+    if (hostVisible) {
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    }
     else
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     imageInfo.usage = usageFlags;
-    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT)
+    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT && format == GPRT_FORMAT_R8G8B8A8_SRGB)
       imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
       imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-    // Since this image is oonly going to be used by graphics queues, we have
-    // this set to exclusive.
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    writable = ((usageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
 
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // (might need to be concurrent...)
+    
     // If this image were to be used with MSAA as an attachment, we'd set this
     // to something other than
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1953,39 +1870,15 @@ struct Texture : public ImageResource {
 
     // We need to transition the image into a known layout
     {
-      VkResult err;
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for buffer map! : \n" + errorString(err));
+      VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-      setImageLayout(context->graphicsCommandBuffer, image, layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VkImageLayout desiredLayout = (writable) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      setImageLayout(commandBuffer, image, layout, desiredLayout,
                      {uint32_t(aspectFlagBits), 0, mipLevels, 0, 1});
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for buffer map! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for buffer map! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for buffer map! : \n" + errorString(err));
+      layout = desiredLayout;
+      
+      context->endGraphicsCommands(commandBuffer);
+      context->synchronize();
     }
 
     // Now we need an image view
@@ -2034,7 +1927,7 @@ struct Texture : public ImageResource {
     writeDescriptorSet.pBufferInfo = 0;
     writeDescriptorSet.dstSet = context->descriptorSet;
     writeDescriptorSet.pImageInfo = &imageDescriptor;
-    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;//(writable) ?  : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     vkUpdateDescriptorSets(context->logicalDevice, 1, &writeDescriptorSet, 0, nullptr);
   }
 
@@ -2441,6 +2334,7 @@ struct GeomType : public SBTEntry {
 
   // Our own virtual "geom types address space".
   uint32_t address = -1;
+  GPRTGeomKind overrideKind = GPRT_UNKNOWN;
 
   uint32_t numRayTypes;
 
@@ -2677,7 +2571,8 @@ struct TriangleGeom : public Geom {
     uint32_t count = 0;    // number of vertices
     uint32_t stride = 0;   // stride between vertices
     uint32_t offset = 0;   // an offset in bytes to the first vertex
-    std::vector<Buffer *> buffers;
+    Buffer * t0_buffer;    // buffer of vertex positions at time=0
+    Buffer * t1_buffer;    // buffer of vertex positions at time=1
   } vertex;
 
   TriangleGeom(TriangleGeomType *_geomType) : Geom(_geomType->context) {
@@ -2689,10 +2584,10 @@ struct TriangleGeom : public Geom {
   };
   ~TriangleGeom() { free(this->SBTRecord); };
 
-  void setVertices(Buffer *vertices, uint32_t count, uint32_t stride, uint32_t offset) {
-    // assuming no motion blurred triangles for now, so we assume 1 buffer
-    vertex.buffers.resize(1);
-    vertex.buffers[0] = vertices;
+  // Set "t1_vertices" to nullptr if not used.
+  void setVertices(Buffer *t0_vertices, Buffer *t1_vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+    vertex.t0_buffer = t0_vertices;
+    vertex.t1_buffer = t1_vertices;
     vertex.count = count;
     vertex.stride = stride;
     vertex.offset = offset;
@@ -2907,7 +2802,7 @@ struct AABBGeomType : public GeomType {
   ~AABBGeomType() {}
   Geom *createGeom();
 
-  GPRTGeomKind getKind() { return GPRT_AABBS; }
+  GPRTGeomKind getKind() { if (overrideKind != GPRT_UNKNOWN) return overrideKind; else return GPRT_AABBS;}
 };
 
 struct AABBGeom : public Geom {
@@ -2951,6 +2846,8 @@ typedef enum {
   GPRT_SOLID_ACCEL = 0x6
 } AccelType;
 
+
+
 struct Accel {
   // Our own virtual address space
   uint32_t address = -1;
@@ -2962,6 +2859,7 @@ struct Accel {
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures;
   VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties;
   GPRTBuildMode buildMode = GPRT_BUILD_MODE_UNINITIALIZED;
+  GPRTBuildParams buildParams;
   bool allowCompaction = false;
   bool minimizeMemory = false;
 
@@ -2969,11 +2867,10 @@ struct Accel {
   bool isCompact = false;
 
   // Caching these for fast tree updates
-  std::vector<Geom *> geometries;
-  std::vector<VkAccelerationStructureBuildRangeInfoKHR> accelerationBuildStructureRangeInfos;
-  std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
-  std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
-  std::vector<uint32_t> maxPrimitiveCounts;
+  Geom* geometry;
+  VkAccelerationStructureBuildRangeInfoKHR accelerationBuildStructureRangeInfo = {};
+  VkAccelerationStructureGeometryKHR accelerationStructureGeometry = {};
+  uint32_t maxPrimitiveCount = 0;
 
 private:
   Buffer *scratchBuffer = nullptr;   // Can we make this static? That way, all trees could share the scratch...
@@ -3069,6 +2966,7 @@ public:
 
   void freeScratchBuffer() {
     if (scratchBuffer) {
+      context->synchronizeCompute();
       scratchBuffer->destroy();
       scratchBuffer = nullptr;
     }
@@ -3076,6 +2974,7 @@ public:
 
   void resizeScratchBuffer(VkDeviceSize buildScratchSize) {
     if (scratchBuffer && scratchBuffer->size < buildScratchSize) {
+      context->synchronizeCompute();
       scratchBuffer->destroy();
       delete (scratchBuffer);
       scratchBuffer = nullptr;
@@ -3098,7 +2997,7 @@ public:
     }
   }
 
-  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo) {
+  void resizeFullTree(VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo, GPRTBuildParams params) {
     // Destroy old accel handle
     if (accelBuffer && accelBuffer->size < accelerationStructureBuildSizesInfo.accelerationStructureSize) {
       gprt::vkDestroyAccelerationStructure(context->logicalDevice, accelerationStructure, nullptr);
@@ -3127,7 +3026,7 @@ public:
       accelerationStructureCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
       accelerationStructureCreateInfo.buffer = accelBuffer->buffer;
       accelerationStructureCreateInfo.size = accelerationStructureBuildSizesInfo.accelerationStructureSize;
-
+      
       if (isBottomLevel)
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
       else
@@ -3136,6 +3035,12 @@ public:
       // To enable reusing the device address...
       accelerationStructureCreateInfo.createFlags =
           VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
+      
+      // To enable motion blur
+      if (params.hasMotionBlur) 
+      {
+        accelerationStructureCreateInfo.createFlags |= VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV ;
+      }
       accelerationStructureCreateInfo.deviceAddress = accelBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &accelerationStructure);
@@ -3147,44 +3052,19 @@ public:
   }
 
   VkDeviceAddress queryCompactSize() {
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    VkResult err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for query compaction size! : \n" + errorString(err));
+    VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
     // reset the query so we can use it again
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->compactedSizeQueryPool, 0, 1);
+    vkCmdResetQueryPool(commandBuffer, context->compactedSizeQueryPool, 0, 1);
 
-    gprt::vkCmdWriteAccelerationStructuresProperties(context->graphicsCommandBuffer, 1, &accelerationStructure,
+    gprt::vkCmdWriteAccelerationStructuresProperties(commandBuffer, 1, &accelerationStructure,
                                                      VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
                                                      context->compactedSizeQueryPool, 0);
-
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for query compaction size! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for query compaction size! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for query compaction size! : \n" + errorString(err));
-
+    context->endGraphicsCommands(commandBuffer);
+    context->synchronize();
+    
     uint64_t buffer[1] = {0};
-    err = vkGetQueryPoolResults(context->logicalDevice, context->compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize),
+    VkResult err = vkGetQueryPoolResults(context->logicalDevice, context->compactedSizeQueryPool, 0, 1, sizeof(VkDeviceSize),
                                 buffer, sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
     VkDeviceSize compactedSize = buffer[0];
 
@@ -3252,39 +3132,10 @@ public:
     copyAccelerationStructureInfo.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
     copyAccelerationStructureInfo.pNext = nullptr;
 
-    VkResult err;
-    {
-      VkCommandBufferBeginInfo cmdBufInfo{};
-      cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-      err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-      if (err)
-        LOG_ERROR("failed to begin command buffer for compaction! : \n" + errorString(err));
-
-      gprt::vkCmdCopyAccelerationStructure(context->graphicsCommandBuffer, &copyAccelerationStructureInfo);
-
-      err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-      if (err)
-        LOG_ERROR("failed to end command buffer for compaction! : \n" + errorString(err));
-
-      VkSubmitInfo submitInfo{};
-      submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-      submitInfo.pNext = NULL;
-      submitInfo.waitSemaphoreCount = 0;
-      submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-      submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-      submitInfo.commandBufferCount = 1;
-      submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-      submitInfo.signalSemaphoreCount = 0;
-      submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-      err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-      if (err)
-        LOG_ERROR("failed to submit to queue for compaction! : \n" + errorString(err));
-
-      err = vkQueueWaitIdle(context->graphicsQueue);
-      if (err)
-        LOG_ERROR("failed to wait for queue idle for compaction! : \n" + errorString(err));
-    }
+    VkCommandBuffer commandBuffer = context->beginComputeCommands();
+    gprt::vkCmdCopyAccelerationStructure(commandBuffer, &copyAccelerationStructureInfo);
+    context->endComputeCommands(commandBuffer);
+    context->synchronizeCompute();
   }
 
   // maxPrimitiveCounts.size() should be equal to the number of geometry going into a tree.
@@ -3295,7 +3146,8 @@ public:
   // - std::vector<VkAccelerationStructureBuildRangeInfoKHR *> accelerationBuildStructureRangeInfoPtrs;
   // - std::vector<VkAccelerationStructureGeometryKHR> accelerationStructureGeometries;
   // - std::vector<uint32_t> maxPrimitiveCounts;
-  void innerBuildProc(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
+  void innerBuildProc(GPRTBuildParams options) {
+    GPRTBuildMode buildMode = options.buildMode;
     VkResult err;
 
     // Get size info
@@ -3323,20 +3175,31 @@ public:
       LOG_ERROR("build mode not recognized!");
     }
 
-    if (minimizeMemory) {
+    if (options.minimizeMemory) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
     }
-    if (allowCompaction) {
+    if (options.allowCompaction) {
       accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     }
+    if (options.hasMotionBlur) 
+    {
+      accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
+    }
+    if (options.test0) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x200; //e
+    }
+    if (options.test1) {
+      accelerationStructureBuildGeometryInfo.flags |= 0x400; //s
+    }
     accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR;
-    accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationStructureBuildGeometryInfo.geometryCount = 1;
+    accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
+    accelerationStructureBuildGeometryInfo.ppGeometries = nullptr;
 
     VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
     accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
     gprt::vkGetAccelerationStructureBuildSizes(context->logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                               &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(),
+                                               &accelerationStructureBuildGeometryInfo, &maxPrimitiveCount,
                                                &accelerationStructureBuildSizesInfo);
 
     // for TLAS, called like this:
@@ -3349,7 +3212,8 @@ public:
     freeCompactTree();
 
     // Have base class resize any backing memory allocations
-    resizeFullTree(accelerationStructureBuildSizesInfo);
+    resizeFullTree(accelerationStructureBuildSizesInfo, options);
+    context->synchronize();
 
     VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{};
     accelerationBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -3375,16 +3239,26 @@ public:
       LOG_ERROR("build mode not recognized!");
     }
 
-    if (minimizeMemory) {
+    if (options.minimizeMemory) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
     }
-    if (allowCompaction) {
+    if (options.allowCompaction) {
       accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    }
+    if (options.hasMotionBlur) 
+    {
+      accelerationBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_MOTION_BIT_NV;
+    }
+    if (options.test0) {//e
+      accelerationBuildGeometryInfo.flags |= 0x200;
+    }
+    if (options.test1) {//s
+      accelerationBuildGeometryInfo.flags |= 0x400;
     }
     accelerationBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     accelerationBuildGeometryInfo.dstAccelerationStructure = accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
     accelerationBuildGeometryInfo.scratchData.deviceAddress = getScratchDeviceAddress();
 
     // Build the acceleration structure on the device via a one-time command
@@ -3394,29 +3268,36 @@ public:
     // but we prefer device builds VkCommandBuffer commandBuffer =
     // vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
 
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
+    context->synchronize();
+    
+    {
+      VkCommandBuffer commandList = context->beginComputeCommands();
+      // VkCommandBufferBeginInfo cmdBufInfo{};
+      // cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      // err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+      // if (err)
+      //   LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
-    gprt::vkCmdBuildAccelerationStructures(context->graphicsCommandBuffer, 1, &accelerationBuildGeometryInfo,
-                                           accelerationBuildStructureRangeInfoPtrs.data());
+      VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+      gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
 
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+      err = context->endComputeCommands(commandList);
+      context->synchronize();
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+      if (err)
+        LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
+    }
+
+    // VkSubmitInfo submitInfo{};
+    // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    // submitInfo.pNext = NULL;
+    // submitInfo.waitSemaphoreCount = 0;
+    // submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+    // submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+    // submitInfo.commandBufferCount = 1;
+    // submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+    // submitInfo.signalSemaphoreCount = 0;
+    // submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
     // VkFenceCreateInfo fenceInfo {};
     // fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -3426,13 +3307,13 @@ public:
     // if (err) LOG_ERROR("failed to create fence for triangle accel build! :
     // \n" + errorString(err));
 
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
+    // err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    // if (err)
+    //   LOG_ERROR("failed to submit to queue for triangle accel build! : \n" + errorString(err));
 
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
+    // err = vkQueueWaitIdle(context->graphicsQueue);
+    // if (err)
+    //   LOG_ERROR("failed to wait for queue idle for triangle accel build! : \n" + errorString(err));
 
     // Wait for the fence to signal that command buffer has finished executing
     // err = vkWaitForFences(logicalDevice, 1, &fence, VK_TRUE, 100000000000
@@ -3442,17 +3323,18 @@ public:
 
     // update last used build modes
     this->buildMode = buildMode;
-    this->minimizeMemory = minimizeMemory;
-    this->allowCompaction = allowCompaction;
+    this->minimizeMemory = options.minimizeMemory;
+    this->allowCompaction = options.allowCompaction;
     this->isCompact = false;
+    this->buildParams = buildParams;    
 
     // If we're minimizing memory usage, free scratch now
     // Otherwise, we keep it around to enable faster builts
-    if (minimizeMemory)
+    if (options.minimizeMemory) 
       freeScratchBuffer();
   }
 
-  virtual void build(GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {};
+  virtual void build(GPRTBuildParams options) {};
   virtual void update() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
@@ -3495,14 +3377,14 @@ public:
       if (allowCompaction) {
         accelerationStructureBuildGeometryInfo.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
       }
-      accelerationStructureBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-      accelerationStructureBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+      accelerationStructureBuildGeometryInfo.geometryCount = 1;
+      accelerationStructureBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
 
       VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
       accelerationStructureBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
       gprt::vkGetAccelerationStructureBuildSizes(
           context->logicalDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-          &accelerationStructureBuildGeometryInfo, maxPrimitiveCounts.data(), &accelerationStructureBuildSizesInfo);
+          &accelerationStructureBuildGeometryInfo, &maxPrimitiveCount, &accelerationStructureBuildSizesInfo);
 
       resizeScratchBuffer(accelerationStructureBuildSizesInfo.buildScratchSize);
     }
@@ -3538,48 +3420,23 @@ public:
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
     accelerationBuildGeometryInfo.dstAccelerationStructure =
         (isCompact) ? compactAccelerationStructure : accelerationStructure;
-    accelerationBuildGeometryInfo.geometryCount = (uint32_t) accelerationStructureGeometries.size();
-    accelerationBuildGeometryInfo.pGeometries = accelerationStructureGeometries.data();
+    accelerationBuildGeometryInfo.geometryCount = 1;
+    accelerationBuildGeometryInfo.pGeometries = &accelerationStructureGeometry;
     accelerationBuildGeometryInfo.scratchData.deviceAddress = getScratchDeviceAddress();
 
-    VkCommandBufferBeginInfo cmdBufInfo{};
-    cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
-    if (err)
-      LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
-
-    gprt::vkCmdBuildAccelerationStructures(context->graphicsCommandBuffer, 1, &accelerationBuildGeometryInfo,
-                                           accelerationBuildStructureRangeInfoPtrs.data());
-
-    err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-    if (err)
-      LOG_ERROR("failed to end command buffer for triangle accel build! : \n" + errorString(err));
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = NULL;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-    submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-    err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    if (err)
-      LOG_ERROR("failed to submit to queue for AABB accel build! : \n" + errorString(err));
-
-    err = vkQueueWaitIdle(context->graphicsQueue);
-    if (err)
-      LOG_ERROR("failed to wait for queue idle for AABB accel build! : \n" + errorString(err));
+    VkCommandBuffer commandList = context->beginComputeCommands();
+    VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+    gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
+    context->endComputeCommands(commandList);
 
     // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
     // updateDeviceAddress(isCompact);
 
     // If we're minimizing memory usage, free scratch now
-    if (minimizeMemory)
+    if (minimizeMemory) {
+      context->synchronize();
       freeScratchBuffer();
+    }
   };
   virtual void compact() {
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
@@ -3652,25 +3509,22 @@ public:
 };
 
 struct TriangleAccel : public Accel {
-  TriangleAccel(Context *context, std::vector<TriangleGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  TriangleAccel(Context *context, TriangleGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
   };
 
   ~TriangleAccel() {};
 
   AccelType getType() { return GPRT_TRIANGLE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode;
+    this->buildParams = buildParams;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      TriangleGeom *triGeom = (TriangleGeom *) geometries[gid];
+    //for (uint32_t gid = 0; gid < geometries.size(); ++gid) 
+    {
+      auto &geom = accelerationStructureGeometry;
+      TriangleGeom *triGeom = (TriangleGeom *) geometry;
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
       //   means, anyhit shader is disabled
@@ -3688,7 +3542,7 @@ struct TriangleAccel : public Accel {
       // vertex data
       geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
       geom.geometry.triangles.vertexData.deviceAddress =
-          triGeom->vertex.buffers[0]->deviceAddress + triGeom->vertex.offset;
+          triGeom->vertex.t0_buffer->deviceAddress + triGeom->vertex.offset;
       geom.geometry.triangles.vertexStride = triGeom->vertex.stride;
       geom.geometry.triangles.maxVertex = triGeom->vertex.count;
 
@@ -3696,41 +3550,46 @@ struct TriangleAccel : public Accel {
       geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
       // note, offset accounted for in range
       geom.geometry.triangles.indexData.deviceAddress = triGeom->index.buffer->deviceAddress;
-      maxPrimitiveCounts[gid] = triGeom->index.count;
+      maxPrimitiveCount = triGeom->index.count;
 
       // transform data
       // note, offset accounted for in range
       geom.geometry.triangles.transformData.hostAddress = nullptr;
       // if the above is null, then that indicates identity
+      geom.pNext = nullptr;
 
-      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+      // // TODO: accomodate GPUs without motion blur capabilities
+      VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
+      motionTriangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
+      if (requestedFeatures.motionBlur && triGeom->vertex.t1_buffer != nullptr) {
+        motionTriangles.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
+        geom.geometry.triangles.pNext       = &motionTriangles;
+        buildParams.hasMotionBlur = 1;
+      }
+
+      auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = triGeom->index.count;
       geomRange.primitiveOffset = triGeom->index.offset;
       geomRange.firstVertex = triGeom->index.firstVertex;
       geomRange.transformOffset = 0;
     }
-
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 };
 
 struct SphereAccel : public Accel {
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
-  std::vector<VkAccelerationStructureGeometrySpheresDataNV> accelerationStructureGeometrySpheres;
+  VkAccelerationStructureGeometrySpheresDataNV accelerationStructureGeometrySpheres;
 #endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
-  std::vector<uint32_t> fallbackAABBOffsets;
-
-  SphereAccel(Context *context, std::vector<SphereGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  
+  SphereAccel(Context *context, SphereGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
 
     // If we don't have hardware acceleration for spheres, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3740,50 +3599,36 @@ struct SphereAccel : public Accel {
 
   AccelType getType() { return GPRT_SPHERE_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    maxPrimitiveCounts.resize(geometries.size());
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-#ifdef VK_NV_ray_tracing_linear_swept_spheres
-    accelerationStructureGeometrySpheres.resize(geometries.size());
-#endif
+    SphereGeom *sphereGeom = ((SphereGeom *)geometry);
+    size_t numSpheres = sphereGeom->vertex.count;
 
-    if (!requestedFeatures.linearSweptSpheres) {
-      // Do a prefix sum over the sphere counts
-      fallbackAABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
-        fallbackAABBOffsets[gid + 1] = sphereGeom->vertex.count + fallbackAABBOffsets[gid];
-      }
-
+    if (!requestedFeatures.linearSweptSpheres) {      
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * numSpheres;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, 2 * numSpheres, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto SphereBounds = (GPRTComputeOf<SphereBoundsParameters>) context->internalComputePrograms["SphereBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+      auto &geom = accelerationStructureGeometry;
+      
 
-        SphereBoundsParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
-        params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
-        params.offset = fallbackAABBOffsets[gid];
-        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
-        gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      SphereBoundsParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+      params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
+      params.offset = 0;
+      params.count = numSpheres;
+      gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      SphereGeom *sphereGeom = (SphereGeom *) geometries[gid];
+    {
+      auto &geom = accelerationStructureGeometry;
+      SphereGeom *sphereGeom = ((SphereGeom *)geometry);
 
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
@@ -3801,7 +3646,7 @@ struct SphereAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_SPHERES_NV;
 
         // Pass the sphere structure into the pNext of the geometry
-        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres[gid];
+        VkAccelerationStructureGeometrySpheresDataNV &sphereData = accelerationStructureGeometrySpheres;
         geom.pNext = &sphereData;
 
         // Fill out the LSS data
@@ -3823,10 +3668,9 @@ struct SphereAccel : public Accel {
         sphereData.indexStride = sizeof(uint32_t);
         sphereData.indexType = VK_INDEX_TYPE_NONE_KHR;
 
-        maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+        maxPrimitiveCount = sphereGeom->vertex.count;
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = sphereGeom->vertex.count;
         geomRange.primitiveOffset = sphereGeom->vertex.offset;
         geomRange.firstVertex = 0;
@@ -3837,52 +3681,46 @@ struct SphereAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float3);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
-        // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = sphereGeom->vertex.count;
         // geomRange.primitiveOffset = lssGeom->aabb.offset;
-        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = sphereGeom->vertex.count;
+      maxPrimitiveCount = sphereGeom->vertex.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 };
 
 // todo, implement refit...
 struct LSSAccel : public Accel {
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
-  std::vector<VkAccelerationStructureGeometryLinearSweptSpheresDataNV> accelerationStructureGeometryLinearSweptSpheres;
+  VkAccelerationStructureGeometryLinearSweptSpheresDataNV accelerationStructureGeometryLinearSweptSpheres;
   #endif
 
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float3> fallbackAABBs = nullptr;
-  std::vector<uint32_t> fallbackAABBOffsets;
 
   bool useEndCaps;
 
   bool useHWIntersector;
 
-  LSSAccel(Context *context, std::vector<LSSGeom*> geometries, GPRTLSSFlags flags) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  LSSAccel(Context *context, LSSGeom* geometry, GPRTLSSFlags flags) : Accel(context, true) {
+    this->geometry = geometry;
 
     useEndCaps = ((flags & GPRT_LSS_CHAINED_END_CAPS) != 0);
 
     // If we don't have hardware acceleration for LSS, fall back to AABBs
     if (!requestedFeatures.linearSweptSpheres) {
-      fallbackAABBOffsets.resize(geometries.size() + 1);
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3896,55 +3734,36 @@ struct LSSAccel : public Accel {
 
   AccelType getType() { return GPRT_LSS_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    maxPrimitiveCounts.resize(geometries.size());
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-
-    #ifdef VK_NV_ray_tracing_linear_swept_spheres
-    accelerationStructureGeometryLinearSweptSpheres.resize(geometries.size());
-    #endif
+    LSSGeom *lssGeom = (LSSGeom *) geometry;
+    size_t numLSS = lssGeom->index.count;
 
     if (!requestedFeatures.linearSweptSpheres) {
-      // Do a prefix sum over the LSS counts
-      fallbackAABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-        fallbackAABBOffsets[gid + 1] = lssGeom->index.count + fallbackAABBOffsets[gid];
-      }
-
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float3) * fallbackAABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float3) * numLSS;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, fallbackAABBs, fallbackAABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, fallbackAABBs, numLSS * 2, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto LSSBounds = (GPRTComputeOf<LSSBoundsParameters>) context->internalComputePrograms["LSSBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-
-        LSSBoundsParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
-        params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
-        params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
-        params.offset = fallbackAABBOffsets[gid];
-        params.count = fallbackAABBOffsets[gid + 1] - params.offset;
-        params.endcap0 = lssGeom->endcap0;
-        params.endcap1 = lssGeom->endcap1;
-        gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      
+      LSSBoundsParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
+      params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
+      params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
+      params.offset = 0;
+      params.count = numLSS;
+      params.endcap0 = lssGeom->endcap0;
+      params.endcap1 = lssGeom->endcap1;
+      gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      LSSGeom *lssGeom = (LSSGeom *) geometries[gid];
-
+    {
+      auto &geom = accelerationStructureGeometry;
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
       // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
@@ -3962,7 +3781,7 @@ struct LSSAccel : public Accel {
 
         // Pass the LSS structure into the pNext of the geometry
         VkAccelerationStructureGeometryLinearSweptSpheresDataNV &lssData =
-            accelerationStructureGeometryLinearSweptSpheres[gid];
+            accelerationStructureGeometryLinearSweptSpheres;
         geom.pNext = &lssData;
 
         // Fill out the LSS data
@@ -3988,8 +3807,7 @@ struct LSSAccel : public Accel {
         lssData.endCapsMode = (useEndCaps) ? VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_CHAINED_NV :
                                              VK_RAY_TRACING_LSS_PRIMITIVE_END_CAPS_MODE_NONE_NV;
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = lssGeom->index.count;
         geomRange.primitiveOffset = lssGeom->index.offset;
         geomRange.firstVertex = lssGeom->index.firstVertex;
@@ -4002,99 +3820,75 @@ struct LSSAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = fallbackAABBOffsets[gid] * 2 * sizeof(float3);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float3);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(fallbackAABBs);
         // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+        auto &geomRange = accelerationBuildStructureRangeInfo;
         geomRange.primitiveCount = lssGeom->index.count;
         // geomRange.primitiveOffset = lssGeom->aabb.offset;
-        geomRange.primitiveOffset = fallbackAABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = lssGeom->index.count;
+      maxPrimitiveCount = lssGeom->index.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 };
 
 struct SolidAccel : public Accel {
   // AABBs for when we need to fall back to a software implementation
   GPRTBufferOf<float4> AABBs = nullptr;
-  std::vector<uint32_t> AABBOffsets;
 
-  SolidAccel(Context *context, std::vector<SolidGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
-
-    {
-      AABBOffsets.resize(geometries.size() + 1);
-      // Placeholder. The actual allocation here will vary from build to build.
-      AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
-    }
+  SolidAccel(Context *context, SolidGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
+    // Placeholder. The actual allocation here will vary from build to build.
+    AABBs = gprtDeviceBufferCreate<float4>((GPRTContext) context, 1, nullptr);
   };
 
   ~SolidAccel() {};
 
   AccelType getType() { return GPRT_SOLID_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
+    auto &geom = accelerationStructureGeometry;
+    SolidGeom *solidGeom = (SolidGeom *) geometry;
+    size_t numSolids = solidGeom->index.count;
 
     {
-      // Do a prefix sum over the prim counts
-      AABBOffsets[0] = 0;
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-        AABBOffsets[gid + 1] = solidGeom->index.count + AABBOffsets[gid];
-      }
-
       // Resize the AABB buffer if needed...
-      size_t requiredBytesForAABBs = 2 * sizeof(float4) * AABBOffsets[geometries.size()];
+      size_t requiredBytesForAABBs = 2 * sizeof(float4) * numSolids;
       if (gprtBufferGetSize(AABBs) != requiredBytesForAABBs) {
-        gprtBufferResize((GPRTContext) context, AABBs, AABBOffsets[geometries.size()] * 2, false);
+        gprtBufferResize((GPRTContext) context, AABBs, numSolids * 2, false);
       }
 
       // Now populate the AABB buffer using the fallback bounds kernel
       auto SolidBounds = (GPRTComputeOf<SolidParameters>) context->internalComputePrograms["SolidBounds"];
-      for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-        auto &geom = accelerationStructureGeometries[gid];
-        SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-
-        SolidParameters params;
-        params.aabbs = gprtBufferGetDevicePointer(AABBs);
-        params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
-        params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
-        params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
-        params.verticesOffset = solidGeom->vertex.offset;
-        params.verticesStride = solidGeom->vertex.stride;
-        params.indicesOffset = solidGeom->index.offset;
-        params.indicesStride = solidGeom->index.stride;
-        params.typesOffset = solidGeom->types.offset;
-        params.typesStride = solidGeom->types.stride;
-        params.offset = AABBOffsets[gid];
-        params.count = AABBOffsets[gid + 1] - params.offset;
-        gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
-      }
+      SolidParameters params;
+      params.aabbs = gprtBufferGetDevicePointer(AABBs);
+      params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+      params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+      params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+      params.verticesOffset = solidGeom->vertex.offset;
+      params.verticesStride = solidGeom->vertex.stride;
+      params.indicesOffset = solidGeom->index.offset;
+      params.indicesStride = solidGeom->index.stride;
+      params.typesOffset = solidGeom->types.offset;
+      params.typesStride = solidGeom->types.stride;
+      params.offset = 0;
+      params.count = numSolids;
+      gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      SolidGeom *solidGeom = (SolidGeom *) geometries[gid];
-
+    {
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 
       // geom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
@@ -4107,26 +3901,23 @@ struct SolidAccel : public Accel {
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_AABBS_KHR;
 
         // aabb data
-        size_t offsetInBytes = AABBOffsets[gid] * 2 * sizeof(float4);
         geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
         geom.geometry.aabbs.pNext = VK_NULL_HANDLE;
         geom.geometry.aabbs.stride = 2 * sizeof(float4);
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(AABBs);
-        // ((VkDeviceAddress) ( + offsetInBytes));
 
-        auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-        accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
-        geomRange.primitiveCount = solidGeom->index.count;
+        auto &geomRange = accelerationBuildStructureRangeInfo;
+        geomRange.primitiveCount = numSolids;
         // geomRange.primitiveOffset = solidGeom->aabb.offset;
-        geomRange.primitiveOffset = AABBOffsets[gid];
+        geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCounts[gid] = solidGeom->index.count;
+      maxPrimitiveCount = numSolids;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 
   //   for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
@@ -4162,32 +3953,30 @@ struct SolidAccel : public Accel {
   //     maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
   //   }
 
-  //   innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+  //   GPRTBuildParams options;
+  //   options.allowCompaction = allowCompaction;
+  //   options.minimizeMemory = minimizeMemory;
+  //   innerBuildProc(buildMode, options);
   // }
 };
 
 struct AABBAccel : public Accel {
-  AABBAccel(Context *context, std::vector<AABBGeom*> geometries) : Accel(context, true) {
-    this->geometries.resize(geometries.size());
-    memcpy(this->geometries.data(), geometries.data(), sizeof(GPRTGeom *) * geometries.size());
+  AABBAccel(Context *context, AABBGeom* geometry) : Accel(context, true) {
+    this->geometry = geometry;
   };
 
   ~AABBAccel() {};
 
   AccelType getType() { return GPRT_AABB_ACCEL; }
 
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    accelerationBuildStructureRangeInfos.resize(geometries.size());
-    accelerationBuildStructureRangeInfoPtrs.resize(geometries.size());
-    accelerationStructureGeometries.resize(geometries.size());
-    maxPrimitiveCounts.resize(geometries.size());
+    auto &geom = accelerationStructureGeometry;
+    AABBGeom *aabbGeom = (AABBGeom *) geometry;
 
-    for (uint32_t gid = 0; gid < geometries.size(); ++gid) {
-      auto &geom = accelerationStructureGeometries[gid];
-      AABBGeom *aabbGeom = (AABBGeom *) geometries[gid];
-
+    {
       geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
       // geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
       //   means, anyhit shader is disabled
@@ -4199,6 +3988,15 @@ struct AABBAccel : public Accel {
       // apparently, geom.flags can't be 0, otherwise we get a device loss on
       // build...
 
+      // FLAG_NONE                            = 0x00,
+      // FLAG_OPAQUE                          = 0x01,
+      // FLAG_NO_DUPLICATE_ANYHIT_INVOCATION  = 0x02,
+      // FLAG_TRIANGLE_CULL_DISABLE           = 0x04,
+      // if (aabbGeom->geomType->getKind() == GPRT_PARTICLES) 
+      // {
+      //   geom.flags |= 0x08;
+      // }
+
       geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
 
       // aabb data
@@ -4207,17 +4005,16 @@ struct AABBAccel : public Accel {
       geom.geometry.aabbs.data.deviceAddress = aabbGeom->aabb.buffers[0]->deviceAddress;
       geom.geometry.aabbs.stride = aabbGeom->aabb.stride;
 
-      auto &geomRange = accelerationBuildStructureRangeInfos[gid];
-      accelerationBuildStructureRangeInfoPtrs[gid] = &accelerationBuildStructureRangeInfos[gid];
+      auto &geomRange = accelerationBuildStructureRangeInfo;
       geomRange.primitiveCount = aabbGeom->aabb.count;
       geomRange.primitiveOffset = aabbGeom->aabb.offset;
       geomRange.firstVertex = 0;   // unused
       geomRange.transformOffset = 0;
 
-      maxPrimitiveCounts[gid] = aabbGeom->aabb.count;
+      maxPrimitiveCount = aabbGeom->aabb.count;
     }
 
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 };
 
@@ -4226,75 +4023,28 @@ struct InstanceAccel : public Accel {
 
   // externally assigned
   Buffer *instancesBuffer = nullptr;
-
-  // std::vector<Accel *> instances;
-
-  // the total number of geometries referenced by this instance accel's BLASes
-  uint32_t numGeometries = 0;
-
-  // caching for faster updates
-  size_t instanceOffset = -1;
+  Buffer *motionInstancesBuffer = nullptr; // TODO...
 
   // todo, accept this in constructor
   VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 
-  InstanceAccel(Context *context, uint32_t numInstances, Buffer *instancesBuffer) : Accel(context, false) {
+  InstanceAccel(Context *context, uint32_t numInstances, Buffer *instancesBuffer, Buffer *motionInstancesBuffer) : Accel(context, false) {
     this->numInstances = numInstances;
     this->instancesBuffer = instancesBuffer;
+    this->motionInstancesBuffer = motionInstancesBuffer;
   }
 
   ~InstanceAccel() {};
 
-  void setNumGeometries(uint32_t numGeometries) { this->numGeometries = numGeometries; }
-
-  uint32_t getNumGeometries() {
-    if (this->numGeometries == -1) {
-      LOG_ERROR("Error, numGeometries for this instance must be set by the user!");
-    }
-    return this->numGeometries;
-  }
-
   AccelType getType() { return GPRT_INSTANCE_ACCEL; }
 
-  void updateSBTOffsets() {
-    instanceOffset = 0;
-    // for (uint32_t i = 0; i < context->accels.size(); ++i) {
-    //   if (context->accels[i] == this)
-    //     break;
-    //   if (context->accels[i]->getType() == GPRT_INSTANCE_ACCEL) {
-    //     InstanceAccel *instanceAccel = (InstanceAccel *) context->accels[i];
-    //     size_t numGeometry = instanceAccel->getNumGeometries();
-    //     instanceOffset += numGeometry * requestedFeatures.numRayTypes;
-    //   }
-    // }
+  void build(GPRTBuildParams buildParams) {
+    this->buildMode = buildParams.buildMode; // todo: unify with buildOptions
+    this->buildParams = buildParams;
 
-    // instancesBuffer->map();
+    auto &geom = accelerationStructureGeometry;
+    geom = {};
 
-    // Populate SBT offsets one by one
-    // int numGeometriesInTLAS = numInstances;
-    // int blasOffsetWithinCurrentTLAS = 0;
-    // for (uint32_t i = 0; i < numInstances; ++i) {
-    //   gprt::Instance *instance = &((gprt::Instance *) instancesBuffer->mapped)[i];
-    //   instance->__gprtSBTOffset = i * requestedFeatures.numRayTypes;
-      // instanceOffset + blasOffsetWithinCurrentTLAS;
-      // if (instance->__gprtAccelAddress != 0) {
-      //   Accel *accel = context->accels[instance->__gprtInstanceIndex];
-
-        // for now, this works. Eventually I'd like this to act more like a lookup / prefix sum...
-        // int numGeometriesInAccel = accel->geometries.size();
-        // numGeometriesInTLAS += accel->geometries.size();
-        // blasOffsetWithinCurrentTLAS += numGeometriesInAccel * requestedFeatures.numRayTypes;
-      // }
-    // }
-    // instancesBuffer->unmap();
-    setNumGeometries(numInstances);
-  }
-
-  void build(GPRTBuildMode buildMode, bool allowCompaction, bool minimizeMemory) {
-    this->buildMode = buildMode;
-    updateSBTOffsets();
-
-    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
     accelerationStructureGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     accelerationStructureGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     accelerationStructureGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
@@ -4309,45 +4059,125 @@ struct InstanceAccel : public Accel {
     accelerationStructureBuildRangeInfo.firstVertex = 0;
     accelerationStructureBuildRangeInfo.transformOffset = 0;
 
-    this->accelerationStructureGeometries.resize(1);
-    this->accelerationStructureGeometries[0] = accelerationStructureGeometry;
+    // // TODO: accomodate GPUs without motion blur capabilities
+    // VkAccelerationStructureMotionInstanceNV motionInstances{};
+    // if (requestedFeatures.motionBlur) {
+    //   // For now, only supporting static instances.
+    //   motionInstances.staticInstances = VK_TRUE;
+    //   motionInstances.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
+    //   geom.geometry.triangles.pNext       = &motionInstances;
+    //   buildParams.hasMotionBlur = 1;
+    // }
+    
+    this->maxPrimitiveCount = numInstances;
 
-    this->maxPrimitiveCounts.resize(1);
-    this->maxPrimitiveCounts[0] = numInstances;
+    this->accelerationBuildStructureRangeInfo = accelerationStructureBuildRangeInfo;
 
-    this->accelerationBuildStructureRangeInfos.resize(1);
-    this->accelerationBuildStructureRangeInfos[0] = accelerationStructureBuildRangeInfo;
-
-    this->accelerationBuildStructureRangeInfoPtrs.resize(1);
-    this->accelerationBuildStructureRangeInfoPtrs[0] = &this->accelerationBuildStructureRangeInfos[0];
-
-    innerBuildProc(buildMode, allowCompaction, minimizeMemory);
+    innerBuildProc(buildParams);
   }
 
   void update() {
-    updateSBTOffsets();
     Accel::update();
   }
 };
 
-size_t
-Context::getNumHitRecords() {
-  // The total number of geometries is the number of geometries referenced
-  // by each top level acceleration structure.
-  int totalGeometries = 0;
-  for (int accelID = 0; accelID < accels.size(); ++accelID) {
-    Accel *accel = accels[accelID];
-    if (!accel)
-      continue;
-    if (accel->getType() == GPRT_INSTANCE_ACCEL) {
-      InstanceAccel *tlas = (InstanceAccel *) accel;
-      totalGeometries += tlas->getNumGeometries();
-    }
-  }
+// size_t
+// Context::getNumHitRecords() {
+//   // The total number of geometries is the number of geometries referenced
+//   // by each top level acceleration structure.
+//   int totalGeometries = 0;
+//   for (int accelID = 0; accelID < accels.size(); ++accelID) {
+//     Accel *accel = accels[accelID];
+//     if (!accel)
+//       continue;
+//     if (accel->getType() == GPRT_INSTANCE_ACCEL) {
+//       InstanceAccel *tlas = (InstanceAccel *) accel;
+//       totalGeometries += tlas->getNumGeometries();
+//     }
+//   }
 
-  int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
-  return numHitRecords;
-}
+//   int numHitRecords = totalGeometries * requestedFeatures.numRayTypes;
+//   return numHitRecords;
+// }
+
+// State IDs that are reserved and can't be used by user shaders.
+// These IDs are for internal functionality that must be called as
+// part of the state machine. The reserved state IDs are for future
+// features that require this method of calling a helper function.
+// If the you add a new functionality that can be called differently,
+// do it without taking a reserved state ID. The use of reserved state
+// IDs is limited because extending this range beyond state ID 15,
+// will break any captures trace that does a deep copy of the
+// application's SBT (i.e., OptiX traces). These traces will have to be
+// recaptured.
+struct ReservedStateIDs
+{
+    uint16_t RESERVED_STATE_ID_NULL_CH_MS : 1;//           =  0,
+    uint16_t RESERVED_STATE_ID_NULL_AH : 1;//              =  1,
+    uint16_t RESERVED_STATE_ID_NULL_IS : 1;//              =  2,
+    uint16_t RESERVED_STATE_ID_NULL_EX : 1;//              =  3,
+    // Note: Before touching the reserved state Ids
+    //       read the comment above.
+    uint16_t RESERVED_STATE_ID_TRAVERSAL : 1;//            =  4,
+    uint16_t RESERVED_STATE_ID_TRI : 1;//                  =  5,
+    uint16_t RESERVED_STATE_ID_DMM_IS_FALLBACK_ALPHA : 1;// =  6,
+    uint16_t RESERVED_STATE_ID_DMM_IS_FALLBACK : 1;//       =  7,
+    uint16_t RESERVED_STATE_ID_LSS_IS_FALLBACK : 1;//      = 8, // LSS version
+    uint16_t RESERVED_STATE_ID_RESERVED_9 : 1;//           =  9,
+    uint16_t RESERVED_STATE_ID_RESERVED_10 : 1;//          = 10,
+    uint16_t RESERVED_STATE_ID_RESERVED_11 : 1;//          = 11,
+    uint16_t RESERVED_STATE_ID_RESERVED_12 : 1;//          = 12,
+    uint16_t RESERVED_STATE_ID_RESERVED_13 : 1;//          = 13,
+    uint16_t RESERVED_STATE_ID_RESERVED_14 : 1;//          = 14,
+    uint16_t RESERVED_STATE_ID_RESERVED_15 : 1;//          = 15
+};
+
+// State IDs in a hit program's SBT header
+struct HitStateIds
+{
+  ReservedStateIDs stateIdCH;
+  ReservedStateIDs stateIdAH;
+  ReservedStateIDs stateIdIS;
+};
+
+struct CallableStateIds
+{
+  ReservedStateIDs stateIdCC;
+  ReservedStateIDs stateIdDC;
+};
+
+struct RecordHeaderFlags
+{
+  uint16_t RECORD_HEADER_FLAG_LIGHTWEIGHT : 1;//          = 1,  // Avoid expensive scheduling operations
+  uint16_t RECORD_HEADER_FLAG_SPECIALIZED : 1;//          = 2,
+  uint16_t RECORD_HEADER_FLAG_NO_GLOBAL_CONT_STACK : 1;// = 4,
+  uint16_t RECORD_HEADER_FLAG_NO_REORDER : 1; //          = 8,
+  uint16_t RECORD_HEADER_FLAG_NO_SETUP : 1;//            = 16,
+  // SBT type flags have inverted sense since a zeroed record header is NOP,
+  // which is compatible with everything.
+  uint16_t RECORD_HEADER_FLAG_NO_HITGROUP : 1;//         = 32,
+  uint16_t RECORD_HEADER_FLAG_NO_MISS : 1;//             = 64,
+  uint16_t RECORD_HEADER_FLAG_NO_RAYGEN : 1;//           = 128,
+  uint16_t RECORD_HEADER_FLAG_NO_CALLABLE : 1;//         = 256,
+  uint16_t RECORD_HEADER_FLAG_NO_EXCEPTION : 1;//        = 512,
+  uint16_t pad : 6;//        = 512,
+  // uint16_t  RECORD_HEADER_FLAG_TYPE_MASK            = 32 | 64 | 128 | 256 | 512,
+};
+
+// SBT header
+struct RecordHeaderType
+{
+    union
+    {
+        ReservedStateIDs stateIdGlobal;  // anything but a hit or callable program
+        CallableStateIds callable;       // A callable program
+        HitStateIds      hit;            // hit program
+    };
+    RecordHeaderFlags flags;
+    uint16_t preferredScheduler;
+    uint16_t padding[3];
+};
+
 
 void
 Context::buildSBT(GPRTBuildSBTFlags flags) {
@@ -4446,18 +4276,20 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_AABBS)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        else if (geomType->getKind() == GPRT_PARTICLES)
+          shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_SOLIDS)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_LSS) {
           if (requestedFeatures.linearSweptSpheres) {
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
         } else if (geomType->getKind() == GPRT_SPHERES) {
           if (requestedFeatures.linearSweptSpheres) {
-            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;   // ?
+            shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
@@ -4507,16 +4339,15 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       pipelineInterfaceCreateInfo.maxPipelineRayHitAttributeSize = requestedFeatures.maxRayHitAttributeSize;
 
       void* pNext = nullptr;
-      #ifdef VK_NV_ray_tracing_linear_swept_spheres
-      if (requestedFeatures.linearSweptSpheres) {
-        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags;
-        pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
-        pipelineCreateFlags.flags = VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV ;
+      VkPipelineCreateFlags2CreateInfo pipelineCreateFlags = {};
+      pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
+      if (requestedFeatures.linearSweptSpheres || requestedFeatures.motionBlur) {
+        if (requestedFeatures.linearSweptSpheres) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
+        if (requestedFeatures.motionBlur) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_MOTION_BIT_NV;
         pipelineCreateFlags.pNext = nullptr;
         pNext = &pipelineCreateFlags;
       }
-      #endif
-
+      
       VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCI{};
       rayTracingPipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
       rayTracingPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
@@ -4526,6 +4357,10 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       rayTracingPipelineCI.maxPipelineRayRecursionDepth = requestedFeatures.rayRecursionDepth;
       rayTracingPipelineCI.layout = raytracingPipelineLayout;
       rayTracingPipelineCI.pLibraryInterface = &pipelineInterfaceCreateInfo;
+
+      if (requestedFeatures.motionBlur) {
+        rayTracingPipelineCI.flags |= VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+      }
       rayTracingPipelineCI.pNext = pNext;
 
       LOG_INFO("Creating VkRayTracingPipelineCreateInfoKHR with max recursion depth of " +
@@ -4535,6 +4370,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         vkDestroyPipeline(logicalDevice, raytracingPipeline, nullptr);
         raytracingPipeline = VK_NULL_HANDLE;
       }
+      // Note: I've found vkCreateRayTracingPipelines to segfault on NVIDIA in some odd cases. 
+      // * When an attribute struct is passed to ReportHit, but none of the fields are populated
       VkResult err = gprt::vkCreateRayTracingPipelines(logicalDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1,
                                                        &rayTracingPipelineCI, nullptr, &raytracingPipeline);
       if (err) {
@@ -4583,6 +4420,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     VkResult err = gprt::vkGetRayTracingShaderGroupHandles(logicalDevice, raytracingPipeline, 0, groupCount, sbtSize,
                                                            shaderHandleStorage.data());
+
+    std::vector<RecordHeaderType> headers(shaderGroups.size());
+    for (int i = 0; i < shaderGroups.size(); ++i) {
+      // RecordHeaderType header;
+      memcpy(&headers[i], shaderHandleStorage.data() + handleSize * i, sizeof(RecordHeaderType));
+    }
+
     if (err)
       LOG_ERROR("failed to get ray tracing shader group handles! : \n" + errorString(err));
 
@@ -4616,6 +4460,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       raygenTable =
           new Buffer(this, bufferUsageFlags,
                      memoryUsageFlags, raygenRecordSize * numRayGens, rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // allocate / resize miss table
@@ -4629,6 +4474,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       missTable = new Buffer(this, bufferUsageFlags,
                              memoryUsageFlags, missRecordSize * numMissProgs,
                              rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // allocate / resize callable table
@@ -4642,10 +4488,13 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       callableTable = new Buffer(this,
                                  bufferUsageFlags, memoryUsageFlags, callableRecordSize * numCallableProgs,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
-    // allocate / resize hit group table
-    size_t numHitRecords = getNumHitRecords();
+    // size_t numHitRecords = getNumHitRecords();
+    
+    // Allocate / resize hit group table. We currently allocate one hit record per geometry.
+    size_t numHitRecords = geoms.size() * requestedFeatures.numRayTypes;
     if (hitgroupTable && hitgroupTable->size != hitRecordSize * numHitRecords) {
       hitgroupTable->destroy();
       delete hitgroupTable;
@@ -4655,6 +4504,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable = new Buffer(this,
                                  bufferUsageFlags, memoryUsageFlags, hitRecordSize * numHitRecords,
                                  rayTracingPipelineProperties.shaderGroupBaseAlignment);
+      synchronize();
     }
 
     // Raygen records
@@ -4733,95 +4583,168 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       hitgroupTable->map();
       uint8_t *mapped = ((uint8_t *) (hitgroupTable->mapped));
 
-      for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
-        Accel *tlas = accels[tlasID];
-        if (!tlas)
-          continue;
-        if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
-          InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
-          // this is an issue, because if instances can be set on device, we
-          // don't have a list of instances we can iterate through and copy the
-          // SBT data... So, if we have a bunch of instances set by reference on
-          // device, we need to eventually do something smarter here...
-          // Todo, move this setup to the device...
+      // For every geometry made...
+      for (uint32_t geomID = 0; geomID < geoms.size(); ++geomID) {
+        auto &geom = geoms[geomID];
 
-          bool previouslyMapped = (instanceAccel->instancesBuffer->mapped != nullptr);
-          if (!previouslyMapped) instanceAccel->instancesBuffer->map();
-          gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+        // For every ray type...
+        for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+          size_t recordStride = hitRecordSize;
+          size_t handleStride = handleSize;
 
-          for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
-            gprt::Instance instance = instances[blasID];
-            uint64_t accelAddr = instance.__gprtAccelAddress;
-            Accel *blas = accels[instance.__gprtSBTOffset];
+          // First, copy handle
+          uint32_t handleIDX = ((rayType + requestedFeatures.numRayTypes * geom->geomType->address) + (numRayGens + numMissProgs + numCallableProgs));
+          size_t recordOffset = recordStride * (rayType + requestedFeatures.numRayTypes * geomID);
+          size_t handleOffset = handleStride * handleIDX;
+          memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
-            // Accel *blas = instanceAccel->instances[blasID];
-            if (blas->getType() != GPRT_INSTANCE_ACCEL) {
-              for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
-                auto &geom = blas->geometries[geomID];
-
-                for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
-                  size_t recordStride = hitRecordSize;
-                  size_t handleStride = handleSize;
-
-                  // First, copy handle
-                  size_t recordOffset =
-                      recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
-                  size_t handleOffset =
-                      handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
-                      handleStride * (numRayGens + numMissProgs + numCallableProgs);
-                  memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
-
-                  // Then, copy params following handle
-                  recordOffset = recordOffset + handleSize;
-                  uint8_t *params = mapped + recordOffset;
-                  memcpy(params, geom->SBTRecord, geom->recordSize);
-
-                  // If implementing a software fallback, additionally memcpy data required for intersection testing
-                  uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
-                  if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
-                    LSSGeom *lss = (LSSGeom *) geom;
-                    LSSParameters isectParams;
-                    isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
-                    isectParams.endcap0 = lss->endcap0;
-                    isectParams.endcap1 = lss->endcap1;
-                    isectParams.exitTest = lss->exitTest;
-                    isectParams.numLSS = lss->index.count;
-                    memcpy(internalParams, &isectParams, sizeof(LSSParameters));
-                  }
-
-                  if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
-                    SphereGeom *s = (SphereGeom *) geom;
-                    SphereParameters isectParams;
-                    isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
-                    isectParams.exitTest = s->exitTest;
-                    memcpy(internalParams, &isectParams, sizeof(SphereParameters));
-                  }
-
-                  if (geom->geomType->getKind() == GPRT_SOLIDS) {
-                    SolidGeom *solidGeom = (SolidGeom *) geom;
-                    SolidParameters params;
-                    params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
-                    params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
-                    params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
-                    params.verticesOffset = solidGeom->vertex.offset;
-                    params.verticesStride = solidGeom->vertex.stride;
-                    params.indicesOffset = solidGeom->index.offset;
-                    params.indicesStride = solidGeom->index.stride;
-                    params.typesOffset = solidGeom->types.offset;
-                    params.typesStride = solidGeom->types.stride;
-                    memcpy(internalParams, &params, sizeof(SolidParameters));
-                  }
-                }
-              }
-            } else {
-              LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
-            }
+          if (geom->geomType->getKind() == GPRT_PARTICLES) {
+            // if geomType->getKind() == GPRT_PARTICLES
+            RecordHeaderType header = headers[handleIDX];
+            // header.stateIdGlobal.RESERVED_STATE_ID_RESERVED_10 = 1;//.stateIdIS.RESERVED_STATE_ID_NULL_IS = 1;//|= RESERVED_STATE_ID_NULL_IS;
+            memcpy(mapped + recordOffset, &header, sizeof(RecordHeaderType));
           }
 
-          if (!previouslyMapped) instanceAccel->instancesBuffer->unmap();
+          // Then, copy params following handle
+          recordOffset = recordOffset + handleSize;
+          uint8_t *params = mapped + recordOffset;
+          memcpy(params, geom->SBTRecord, geom->recordSize);
+
+          // If implementing a software fallback, additionally memcpy data required for intersection testing
+          uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
+          if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+            LSSGeom *lss = (LSSGeom *) geom;
+            LSSParameters isectParams;
+            isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+            isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+            isectParams.endcap0 = lss->endcap0;
+            isectParams.endcap1 = lss->endcap1;
+            isectParams.exitTest = lss->exitTest;
+            isectParams.numLSS = lss->index.count;
+            memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+          }
+
+          if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+            SphereGeom *s = (SphereGeom *) geom;
+            SphereParameters isectParams;
+            isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+            isectParams.exitTest = s->exitTest;
+            memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+          }
+
+          if (geom->geomType->getKind() == GPRT_SOLIDS) {
+            SolidGeom *solidGeom = (SolidGeom *) geom;
+            SolidParameters params;
+            params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+            params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+            params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+            params.verticesOffset = solidGeom->vertex.offset;
+            params.verticesStride = solidGeom->vertex.stride;
+            params.indicesOffset = solidGeom->index.offset;
+            params.indicesStride = solidGeom->index.stride;
+            params.typesOffset = solidGeom->types.offset;
+            params.typesStride = solidGeom->types.stride;
+            memcpy(internalParams, &params, sizeof(SolidParameters));
+          }
         }
       }
+
+
+
+      
+
+      // for (int tlasID = 0; tlasID < accels.size(); ++tlasID) {
+      //   Accel *tlas = accels[tlasID];
+      //   if (!tlas)
+      //     continue;
+      //   if (tlas->getType() == GPRT_INSTANCE_ACCEL) {
+      //     InstanceAccel *instanceAccel = (InstanceAccel *) tlas;
+      //     if (instanceAccel->disableSBT) continue;
+
+      //     // this is an issue, because if instances can be set on device, we
+      //     // don't have a list of instances we can iterate through and copy the
+      //     // SBT data... So, if we have a bunch of instances set by reference on
+      //     // device, we need to eventually do something smarter here...
+      //     // Todo, move this setup to the device...
+
+      //     // bool previouslyMapped = (instanceAccel->instancesBuffer->mapped != nullptr);
+      //     // if (!previouslyMapped) instanceAccel->instancesBuffer->map();
+      //     // gprt::Instance *instances = (gprt::Instance *) instanceAccel->instancesBuffer->mapped;
+
+      //     for (uint32_t blasID = 0; blasID < instanceAccel->numInstances; ++blasID) {
+      //       gprt::Instance instance = instances[blasID];
+      //       uint64_t accelAddr = instance.__gprtAccelAddress;
+      //       Accel *blas = accels[instance.__gprtSBTOffset];
+
+      //       // Accel *blas = instanceAccel->instances[blasID];
+      //       if (blas->getType() != GPRT_INSTANCE_ACCEL) {
+      //         for (uint32_t geomID = 0; geomID < blas->geometries.size(); ++geomID) {
+      //           auto &geom = blas->geometries[geomID];
+
+      //           for (uint32_t rayType = 0; rayType < requestedFeatures.numRayTypes; ++rayType) {
+      //             size_t recordStride = hitRecordSize;
+      //             size_t handleStride = handleSize;
+
+      //             // First, copy handle
+      //             size_t recordOffset =
+      //                 recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
+      //             size_t handleOffset =
+      //                 handleStride * (geom->geomType->address * requestedFeatures.numRayTypes + rayType) +
+      //                 handleStride * (numRayGens + numMissProgs + numCallableProgs);
+      //             memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
+
+      //             // Then, copy params following handle
+      //             recordOffset = recordOffset + handleSize;
+      //             uint8_t *params = mapped + recordOffset;
+      //             memcpy(params, geom->SBTRecord, geom->recordSize);
+
+      //             // If implementing a software fallback, additionally memcpy data required for intersection testing
+      //             uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
+      //             if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+      //               LSSGeom *lss = (LSSGeom *) geom;
+      //               LSSParameters isectParams;
+      //               isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
+      //               isectParams.indices = (uint2 *) lss->index.buffer->getDeviceAddress();
+      //               isectParams.endcap0 = lss->endcap0;
+      //               isectParams.endcap1 = lss->endcap1;
+      //               isectParams.exitTest = lss->exitTest;
+      //               isectParams.numLSS = lss->index.count;
+      //               memcpy(internalParams, &isectParams, sizeof(LSSParameters));
+      //             }
+
+      //             if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+      //               SphereGeom *s = (SphereGeom *) geom;
+      //               SphereParameters isectParams;
+      //               isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
+      //               isectParams.exitTest = s->exitTest;
+      //               memcpy(internalParams, &isectParams, sizeof(SphereParameters));
+      //             }
+
+      //             if (geom->geomType->getKind() == GPRT_SOLIDS) {
+      //               SolidGeom *solidGeom = (SolidGeom *) geom;
+      //               SolidParameters params;
+      //               params.vertices = (float4 *) solidGeom->vertex.buffers[0]->getDeviceAddress();
+      //               params.indices = (uint4 *) solidGeom->index.buffer->getDeviceAddress();
+      //               params.types = (uint8_t *) solidGeom->types.buffer->getDeviceAddress();
+      //               params.verticesOffset = solidGeom->vertex.offset;
+      //               params.verticesStride = solidGeom->vertex.stride;
+      //               params.indicesOffset = solidGeom->index.offset;
+      //               params.indicesStride = solidGeom->index.stride;
+      //               params.typesOffset = solidGeom->types.offset;
+      //               params.typesStride = solidGeom->types.stride;
+      //               memcpy(internalParams, &params, sizeof(SolidParameters));
+      //             }
+      //           }
+      //         }
+            
+      //       } else {
+      //         LOG_ERROR("Instance accels referenced by other instance accels is currently unsupported.");
+      //       }
+          // }
+
+          // if (!previouslyMapped) instanceAccel->instancesBuffer->unmap();
+      //   }
+      // }
       hitgroupTable->unmap();
     }
   }
@@ -4829,6 +4752,25 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
 void
 Context::destroy() {
+  if (logicalDevice) {
+    if (requestedFeatures.aiDenoiser.requested) {
+      if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+        NVSDK_NGX_VULKAN_DestroyParameters(aiDenoising.ngxParameters);
+        NVSDK_NGX_VULKAN_ReleaseFeature(aiDenoising.ngxHandle);
+        aiDenoising.ngxParameters = nullptr;
+        aiDenoising.ngxHandle = nullptr;
+      }
+    }
+  }
+
+  if (GRTimelineSemaphore) {
+    vkDestroySemaphore(logicalDevice, GRTimelineSemaphore, nullptr);
+  }
+
+  if (CETimelineSemaphore) {
+    vkDestroySemaphore(logicalDevice, CETimelineSemaphore, nullptr);
+  }
+
   if (descriptorSet) {
     vkFreeDescriptorSets(logicalDevice, descriptorPool, 1, &descriptorSet);
     descriptorSet = nullptr;
@@ -4861,10 +4803,6 @@ Context::destroy() {
   if (imageAvailableSemaphore) {
     vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
     imageAvailableSemaphore = nullptr;
-  }
-  if (renderFinishedSemaphore) {
-    vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
-    renderFinishedSemaphore = nullptr;
   }
 
   if (inFlightFence) {
@@ -4928,9 +4866,10 @@ Context::destroy() {
 
   descriptorPoolSize = {};
 
-  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 1, &graphicsCommandBuffer);
-  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 1, &computeCommandBuffer);
-  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 1, &transferCommandBuffer);
+  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 64, graphicsCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 64, computeCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 64, transferCommandBuffers);
+
   vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
   vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
   vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
@@ -5008,6 +4947,10 @@ Context::freeDebugCallback(VkInstance instance) {
   if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
     gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
   }
+
+  if (gprt::validationMessenger != VK_NULL_HANDLE) {
+    gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::validationMessenger, nullptr);
+  }
 }
 
 void Context::enumerateInstanceValidationLayers()
@@ -5052,7 +4995,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "GPRT";
   appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-  appInfo.apiVersion = VK_API_VERSION_1_2;
+  appInfo.apiVersion = VK_API_VERSION_1_4;
   appInfo.pNext = VK_NULL_HANDLE;
 
   /// 1. Create Instance
@@ -5061,18 +5004,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
   instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #endif
-
-  // Enabled requested instance extensions
-  if (enabledInstanceExtensions.size() > 0) {
-    for (const char *enabledExtension : enabledInstanceExtensions) {
-      // Output message if requested extension is not available
-      if (std::find(supportedInstanceExtensionNames.begin(), supportedInstanceExtensionNames.end(), enabledExtension) ==
-          supportedInstanceExtensionNames.end()) {
-        std::cerr << "Enabled instance extension \"" << enabledExtension << "\" is not present at instance level\n";
-      }
-      instanceExtensions.push_back(enabledExtension);
-    }
-  }
 
   VkValidationFeatureEnableEXT enabled[] = {VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT};
   VkValidationFeaturesEXT validationFeatures{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
@@ -5152,9 +5083,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // todo, allow the window to resize and recreate swapchain
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // glfwSwapInterval(1);
+    // GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+    // const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
     window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
                               requestedFeatures.windowProperties.initialHeight,
-                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
+                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);    
+    // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
 
     VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
     if (err != VK_SUCCESS) {
@@ -5184,6 +5119,26 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
     VkResult result =
         gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+    assert(result == VK_SUCCESS);
+  }
+
+  if (requestedFeatures.debugPrintf) 
+  {
+    gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+      vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    gprt::vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+        vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+    VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
+    debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debugUtilsMessengerCI.messageSeverity = 
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    debugUtilsMessengerCI.messageType =
+      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    debugUtilsMessengerCI.pfnUserCallback = validationMessengerCallback;
+    VkResult result =
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::validationMessenger);
     assert(result == VK_SUCCESS);
   }
 
@@ -5259,6 +5214,17 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     return requiredExtensions.empty();
   };
 
+  // For ray tracing validation on NVIDIA
+  if (requestedFeatures.rayTracingValidation && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME);
+  }
+
+  // For timeline semaphores
+  enabledDeviceExtensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+
+  // For -spirv-reflect support.
+  enabledDeviceExtensions.push_back(VK_GOOGLE_USER_TYPE_EXTENSION_NAME);
+
   // enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
   enabledDeviceExtensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
 
@@ -5276,6 +5242,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // Ray tracing related extensions required
   enabledDeviceExtensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
   enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+  enabledDeviceExtensions.push_back(VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME);
 
   // Required by VK_KHR_acceleration_structure
   enabledDeviceExtensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
@@ -5296,6 +5263,9 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // Required for floating point atomics
   enabledDeviceExtensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+  // Required for vkCmdPushDescriptor (Now included with Vulkan 1.4)
+  enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+
   if (requestedFeatures.window) {
     // If the device will be used for presenting to a display via a swapchain
     // we need to request the swapchain extension
@@ -5310,6 +5280,10 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
   if (requestedFeatures.invocationReordering) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+  }
+
+  if (requestedFeatures.motionBlur) {
+    enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME);
   }
 
   if (requestedFeatures.linearSweptSpheres) {
@@ -5336,6 +5310,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   for (uint32_t i = 0; i < gpuCount; i++) {
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+
     std::string message =
         std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
     message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
@@ -5344,9 +5319,19 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
                std::to_string(deviceProperties.apiVersion & 0xfff);
     LOG_INFO(message);
 
+    std::vector<const char *> currentExtensionsList = enabledDeviceExtensions;
+    if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+      // If NVIDIA, these are needed to use DLSS
+      currentExtensionsList.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
+      currentExtensionsList.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
+    }
+    else if (requestedFeatures.aiDenoiser.requested) {
+      LOG_WARNING("\tDevice unusable... (GPRT missing AI denoising support for vendor \"" + getVendorString(deviceProperties.vendorID) + "\")");
+      continue;
+    }
+    
     FallbackRequests fallbackRequests;
-
-    if (checkDeviceExtensionSupport(physicalDevices[i], enabledDeviceExtensions, fallbackRequests)) {
+    if (checkDeviceExtensionSupport(physicalDevices[i], currentExtensionsList, fallbackRequests)) {
       usableDevices.push_back(i);
       usableDeviceFallbackRequests.push_back(fallbackRequests);
       LOG_INFO("\tFound usable device");
@@ -5363,7 +5348,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         }
       }
 
-      for (const char *enabledExtension : enabledDeviceExtensions) {
+      for (const char *enabledExtension : currentExtensionsList) {
         if (!extensionSupported(enabledExtension, supportedExtensions)) {
           LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
         }
@@ -5404,6 +5389,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // the physical device Device properties also contain limits and sparse
   // properties
   vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+
+  if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    // If NVIDIA, these are needed to use DLSS
+    enabledDeviceExtensions.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
+    enabledDeviceExtensions.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
+  }
 
   subgroupProperties = {};
   subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
@@ -5453,6 +5444,14 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // atomicFloat2Features.pNext = pNext;
   // pNext = &atomicFloat2Features;
 
+  // Ray tracing validation on NVIDIA
+  if (requestedFeatures.rayTracingValidation && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+    rayTracingValidationFeatures = {}; 
+    rayTracingValidationFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV;
+    rayTracingValidationFeatures.pNext = pNext;
+    pNext = &rayTracingValidationFeatures;
+  }
+
   invocationReorderFeatures = {};
   invocationReorderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV;
   if (requestedFeatures.rayQueries) {
@@ -5469,6 +5468,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     pNext = &linearSweptSpheresFeatures;
   }
   #endif
+
+  motionBlurFeatures = {};
+  motionBlurFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV;
+  if (requestedFeatures.motionBlur) {
+    motionBlurFeatures.pNext = pNext;
+    pNext = &motionBlurFeatures;
+  }
 
   accelerationStructureFeatures = {};
   accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -5664,6 +5670,20 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     LOG_ERROR("Could not create logical devices : \n" + errorString(err));
   }
 
+  // Create a timeline semaphore for synchronization among queues
+  VkSemaphoreTypeCreateInfo timelineCreateInfo{};
+  timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+  timelineCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+  timelineCreateInfo.initialValue = 0;
+
+  VkSemaphoreCreateInfo semaphoreInfo{};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  semaphoreInfo.pNext = &timelineCreateInfo;
+
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &GRTimelineSemaphore);
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &CETimelineSemaphore);
+  vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &TRTimelineSemaphore);
+
   // Create vulkan memory allocator
   VmaVulkanFunctions vulkanFunctions = {};
   vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
@@ -5711,13 +5731,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
           vkGetDeviceProcAddr(logicalDevice, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
 
-  auto createCommandPool = [&](uint32_t queueFamilyIndex,
-                               VkCommandPoolCreateFlags createFlags =
-                                   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT) -> VkCommandPool {
+  auto createCommandPool = [&](uint32_t queueFamilyIndex ) -> VkCommandPool {
     VkCommandPoolCreateInfo cmdPoolInfo = {};
     cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
-    cmdPoolInfo.flags = createFlags;
+    cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     VkCommandPool cmdPool;
     VK_CHECK_RESULT(vkCreateCommandPool(logicalDevice, &cmdPoolInfo, nullptr, &cmdPool));
     return cmdPool;
@@ -5758,20 +5776,20 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   VkCommandBufferAllocateInfo cmdBufAllocateInfo{};
   cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   cmdBufAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdBufAllocateInfo.commandBufferCount = 1;
+  cmdBufAllocateInfo.commandBufferCount = 64;
 
   cmdBufAllocateInfo.commandPool = graphicsCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &graphicsCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, graphicsCommandBuffers);
   if (err)
     LOG_ERROR("Could not create graphics command buffer : \n" + errorString(err));
 
   cmdBufAllocateInfo.commandPool = computeCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &computeCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, computeCommandBuffers);
   if (err)
     LOG_ERROR("Could not create compute command buffer : \n" + errorString(err));
 
   cmdBufAllocateInfo.commandPool = transferCommandPool;
-  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, &transferCommandBuffer);
+  err = vkAllocateCommandBuffers(logicalDevice, &cmdBufAllocateInfo, transferCommandBuffers);
   if (err)
     LOG_ERROR("Could not create transfer command buffer : \n" + errorString(err));
 
@@ -5794,7 +5812,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
     if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
         vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
       LOG_ERROR("Failed to create swapchain semaphores");
     }
@@ -6029,9 +6046,90 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 
     // this initializes imgui for SDL
     ImGui_ImplGlfw_InitForVulkan(window, true);
+  }
 
-    // Call new frame here to initialize some internal imgui data
-    ImGui_ImplGlfw_NewFrame();
+  // Init denoisers
+  if (requestedFeatures.aiDenoiser.requested) {
+    if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+      NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_Init(aiDenoising.kAppID, L".", instance, physicalDevice, logicalDevice));
+      NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_GetCapabilityParameters(&aiDenoising.ngxParameters));
+      NGX_CHECK_RESULT(NGX_DLSSD_GET_OPTIMAL_SETTINGS
+      (
+        aiDenoising.ngxParameters,
+        requestedFeatures.aiDenoiser.outputWidth,
+        requestedFeatures.aiDenoiser.outputHeight,
+        NVSDK_NGX_PerfQuality_Value_MaxQuality,
+        &aiDenoising.optimalSettings.optimalRenderSize.x,
+        &aiDenoising.optimalSettings.optimalRenderSize.y,
+        &aiDenoising.optimalSettings.maxRenderSize.x,
+        &aiDenoising.optimalSettings.maxRenderSize.y,
+        &aiDenoising.optimalSettings.minRenderSize.x,
+        &aiDenoising.optimalSettings.minRenderSize.y,
+        &aiDenoising.optimalSettings.sharpness
+      ));
+
+
+      NVSDK_NGX_DLSSD_Create_Params  dlssParamsd = {};
+      unsigned int creationNodeMask = 1;
+      unsigned int visibilityNodeMask = 1;     
+      
+      dlssParamsd.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
+      dlssParamsd.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed; // wants roughness in normal.w
+      dlssParamsd.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_HW;
+      
+      dlssParamsd.InFeatureCreateFlags = requestedFeatures.aiDenoiser.flags | GPRT_DENOISE_FLAGS_IS_HDR; // seems required...
+      dlssParamsd.InWidth = aiDenoising.optimalSettings.optimalRenderSize.x;
+      dlssParamsd.InHeight = aiDenoising.optimalSettings.optimalRenderSize.y;
+      dlssParamsd.InTargetWidth = requestedFeatures.aiDenoiser.outputWidth;
+      dlssParamsd.InTargetHeight = requestedFeatures.aiDenoiser.outputHeight;
+      dlssParamsd.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_MaxQuality; // for now, can change later.
+
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_CreationNodeMask, creationNodeMask);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_VisibilityNodeMask, visibilityNodeMask);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Width, dlssParamsd.InWidth);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Height, dlssParamsd.InHeight);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_OutWidth, dlssParamsd.InTargetWidth);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_OutHeight, dlssParamsd.InTargetHeight);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_PerfQualityValue, dlssParamsd.InPerfQualityValue);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, dlssParamsd.InFeatureCreateFlags);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, dlssParamsd.InEnableOutputSubrects ? 1 : 0);
+      NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Denoise_Mode, NVSDK_NGX_DLSS_Denoise_Mode_DLUnified);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_DLSS_Roughness_Mode, dlssParamsd.InRoughnessMode);
+      NVSDK_NGX_Parameter_SetUI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_Use_HW_Depth, dlssParamsd.InUseHWDepth);
+
+      // Once added, each of the below override my preset above for preset D
+      // auto preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E; // for depth of field
+
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance, preset);
+      // NVSDK_NGX_Parameter_SetI(aiDenoising.ngxParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality, preset);
+
+
+
+      // It seems as though outSizeInBytes is returned as 0. For now, skipping any handling 
+      {
+        size_t outSizeInBytes;
+        VkCommandBuffer commandList = beginComputeCommands();
+        NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_GetScratchBufferSize(NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &outSizeInBytes));
+        endComputeCommands(commandList);
+      }
+
+      {
+        VkCommandBuffer commandList = beginComputeCommands();
+        NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_CreateFeature1(logicalDevice, commandList, NVSDK_NGX_Feature_RayReconstruction, aiDenoising.ngxParameters, &aiDenoising.ngxHandle));
+        endComputeCommands(commandList);
+      }
+      
+      // NVSDK_NGX_Result dlssdCreateResult = NGX_VULKAN_CREATE_DLSSD_EXT1(logicalDevice, commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParamsd);
+
+      // NVSDK_NGX_Result createResult = NGX_VULKAN_CREATE_DLSS_EXT(commandList, creationNodeMask, visibilityNodeMask, &aiDenoising.ngxHandle, aiDenoising.ngxParameters, &dlssParams);
+    }
+    else {
+      LOG_ERROR("Unimplemented");
+    }
   }
 
   // Finally, setup the internal shader stages and build an initial shader binding table
@@ -6047,7 +6145,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
 // Todo, refactor this code...
 void
 Context::setupInternalPrograms() {
-
   // // For filling out instance data
   // {
   //   fillInstanceDataStage.entryPoint = "gprtFillInstanceData";
@@ -6483,44 +6580,270 @@ Context::destroyInternalPrograms() {
   }
 }
 
-VkCommandBuffer
-Context::beginSingleTimeCommands(VkCommandPool pool) {
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandPool = pool;
-  allocInfo.commandBufferCount = 1;
+// VkCommandBuffer
+// Context::beginSingleTimeCommands(VkCommandPool pool) {
+//   VkCommandBufferAllocateInfo allocInfo{};
+//   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+//   allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+//   allocInfo.commandPool = pool;
+//   allocInfo.commandBufferCount = 1;
 
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+//   VkCommandBuffer commandBuffer;
+//   vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+//   VkCommandBufferBeginInfo beginInfo{};
+//   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+//   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+//   vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+//   return commandBuffer;
+// }
+
+// void
+// Context::endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
+//   vkEndCommandBuffer(commandBuffer);
+
+//   VkSubmitInfo submitInfo{};
+//   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+//   submitInfo.commandBufferCount = 1;
+//   submitInfo.pCommandBuffers = &commandBuffer;
+
+//   vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+//   vkQueueWaitIdle(queue);
+
+//   vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+// }
+
+VkCommandBuffer Context::beginGraphicsCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = graphicsCommandBuffers[GRTimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, GRTimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= GRTimelineCounter) {
+    err = vkQueueWaitIdle(graphicsQueue);
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
 
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
   return commandBuffer;
 }
 
-void
-Context::endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool pool, VkQueue queue) {
-  vkEndCommandBuffer(commandBuffer);
+VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
+  VkResult result;
+  result = vkEndCommandBuffer(commandBuffer);
+  if (result != VK_SUCCESS) return result;
+
+  uint64_t prevCounter = GRTimelineCounter;
+  GRTimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
 
-  vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  VkResult err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit graphics queue! : \n" + errorString(err));
+  return err;
+}
 
-  vkFreeCommandBuffers(logicalDevice, pool, 1, &commandBuffer);
+VkCommandBuffer Context::beginComputeCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = computeCommandBuffers[CETimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, CETimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= CETimelineCounter) {
+    err = vkQueueWaitIdle(computeQueue); // Todo: consider waiting only for this command buffer...
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
+
+  return commandBuffer;
+}
+
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
+  VkResult err;
+  err = vkEndCommandBuffer(commandBuffer);
+  if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
+
+  uint64_t prevCounter = CETimelineCounter;
+  CETimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &CETimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
+
+  err = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit compute queue! : \n" + errorString(err));
+  return err;
+}
+
+VkCommandBuffer Context::beginTransferCommands() {
+  VkResult err;
+  VkCommandBuffer commandBuffer = transferCommandBuffers[GRTimelineCounter % 64];
+
+  uint64_t currentCounterValue;
+  err = vkGetSemaphoreCounterValue(logicalDevice, TRTimelineSemaphore, &currentCounterValue);
+  if (err) LOG_ERROR("failed to get semaphore counter value! : \n" + errorString(err));
+
+  // The command buffer picked from the ring buffer must not be in a pending state.
+  // If it is, we must wait for it to become ready.
+  if (currentCounterValue + 64 <= TRTimelineCounter) {
+    err = vkQueueWaitIdle(transferQueue);
+    if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  }
+
+  err = vkResetCommandBuffer(commandBuffer, 0);
+  if (err) LOG_ERROR("failed to reset command buffer! : \n" + errorString(err));
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  err = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  if (err) LOG_ERROR("failed to begin command buffer! : \n" + errorString(err));
+  return commandBuffer;
+}
+
+VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
+  VkResult result;
+  result = vkEndCommandBuffer(commandBuffer);
+  if (result != VK_SUCCESS) return result;
+
+  uint64_t prevCounter = TRTimelineCounter;
+  TRTimelineCounter++;
+
+  VkTimelineSemaphoreSubmitInfo timelineInfo{};
+  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timelineInfo.waitSemaphoreValueCount = 1;
+  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.signalSemaphoreValueCount = 1;
+  timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+  submitInfo.waitSemaphoreCount = 0;
+  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.signalSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &TRTimelineSemaphore;
+  submitInfo.pNext = &timelineInfo;
+
+  VkResult err = vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err) LOG_ERROR("failed to submit transfer queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronizeGraphics()
+{
+  std::vector<VkSemaphore> semaphores = {GRTimelineSemaphore};
+  std::vector<uint64_t> values = {GRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
+  if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronizeCompute()
+{
+  std::vector<VkSemaphore> semaphores = {CETimelineSemaphore};
+  std::vector<uint64_t> values = {CETimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
+  if (err) LOG_ERROR("failed to synchronize compute queue! : \n" + errorString(err));
+  return err;
+  // return vkQueueWaitIdle(computeQueue);
+}
+
+VkResult Context::synchronizeTransfer()
+{
+  std::vector<VkSemaphore> semaphores = {TRTimelineSemaphore};
+  std::vector<uint64_t> values = {TRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
+  if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
+  return err;
+}
+
+VkResult Context::synchronize()
+{
+  std::vector<VkSemaphore> semaphores = {TRTimelineSemaphore, CETimelineSemaphore, GRTimelineSemaphore};
+  std::vector<uint64_t> values = {TRTimelineCounter, CETimelineCounter, GRTimelineCounter};
+  VkSemaphoreWaitInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  info.semaphoreCount = semaphores.size();
+  info.pSemaphores = semaphores.data();
+  info.pValues = values.data();
+  VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(12e10f));
+  if (err) LOG_ERROR("failed to synchronize device! : \n" + errorString(err));
+  return err;
 }
 
 void
 Context::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-  VkCommandBuffer commandBuffer = beginSingleTimeCommands(graphicsCommandPool);
+  VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
   VkImageMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -6564,7 +6887,7 @@ Context::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout old
 
   vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-  endSingleTimeCommands(commandBuffer, graphicsCommandPool, graphicsQueue);
+  endGraphicsCommands(commandBuffer);
 }
 
 // For ImGui
@@ -6666,43 +6989,25 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.MinImageCount = 2;
   init_info.ImageCount = 2;
   init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.RenderPass = imgui.renderPass;
 
-  ImGui_ImplVulkan_Init(&init_info, imgui.renderPass);
+  
+  ImGui_ImplVulkan_Init(&init_info);
+  
+  // Call new frame here to initialize some internal imgui data
+  ImGui_ImplGlfw_NewFrame();
+  ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
 
-  // execute a gpu command to upload imgui font textures
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  VK_CHECK_RESULT(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
-  ImGui_ImplVulkan_CreateFontsTexture(graphicsCommandBuffer);
-  VK_CHECK_RESULT(vkEndCommandBuffer(graphicsCommandBuffer));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.pWaitDstStageMask = nullptr;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;
-
-  VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-  VK_CHECK_RESULT(vkQueueWaitIdle(graphicsQueue));
-
-  // clear font textures from cpu data
-  ImGui_ImplVulkan_DestroyFontUploadObjects();
+  synchronizeGraphics();
 }
 
-void
+uint64_t
 Context::rasterizeGui() {
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
 
   VkResult err;
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
+  
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   renderPassBeginInfo.pNext = nullptr;
@@ -6715,56 +7020,36 @@ Context::rasterizeGui() {
   renderPassBeginInfo.pClearValues = nullptr;
   renderPassBeginInfo.framebuffer = imgui.frameBuffer;
 
-  err = vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo);
+  VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
   // Transition our attachments into optimal attachment formats
-  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image,
+  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image,
                                         imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                         {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
 
-  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image,
+  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image,
                                         imgui.depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                                         {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
 
   // This will clear the color and depth attachment
-  vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
   // Record dear imgui primitives into command buffer
-  ImGui_ImplVulkan_RenderDrawData(draw_data, graphicsCommandBuffer);
+  ImGui_ImplVulkan_RenderDrawData(draw_data, commandBuffer);
 
-  vkCmdEndRenderPass(graphicsCommandBuffer);
+  vkCmdEndRenderPass(commandBuffer);
 
   // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  imgui.colorAttachment->setImageLayout(graphicsCommandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
                                         imgui.colorAttachment->layout,
                                         {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
 
-  imgui.depthAttachment->setImageLayout(graphicsCommandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
+  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
                                         imgui.depthAttachment->layout,
                                         {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
 
-  err = vkEndCommandBuffer(graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  endGraphicsCommands(commandBuffer);
+  return GRTimelineCounter;
 }
 
 GPRT_API void
@@ -6793,6 +7078,24 @@ gprtRequestMaxPayloadSize(uint32_t payloadSize) {
   LOG_API_CALL();
   requestedFeatures.maxRayPayloadSize = payloadSize;
 }
+
+
+GPRT_API void
+gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags) {
+  LOG_API_CALL();
+  requestedFeatures.aiDenoiser.requested = true;
+  requestedFeatures.aiDenoiser.flags = flags;
+  requestedFeatures.aiDenoiser.outputWidth = outputWidth;
+  requestedFeatures.aiDenoiser.outputHeight = outputHeight;
+}
+
+GPRT_API void 
+gprtRequestMotionBlur()
+{
+  LOG_API_CALL();
+  requestedFeatures.motionBlur = true;
+}
+
 
 GPRT_API void
 gprtRequestMaxAttributeSize(uint32_t attributeSize) {
@@ -6826,9 +7129,11 @@ gprtWindowShouldClose(GPRTContext _context) {
 
   glfwPollEvents();
 
-  // Start the Dear ImGui frame
-  // ImGui_ImplVulkan_NewFrame(); // I'm not entirely convinced this is needed?
-  ImGui_ImplGlfw_NewFrame();   // if GLFW isn't available this might be odd...
+  if (context->imgui.renderPass) {
+    // Start the Dear ImGui frame
+    ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
+    ImGui_ImplGlfw_NewFrame();
+  }
 
   return glfwWindowShouldClose(context->window);
 }
@@ -6842,6 +7147,26 @@ gprtSetWindowTitle(GPRTContext _context, const char *title) {
 
   glfwSetWindowTitle(context->window, title);
 }
+
+// GPRT_API void
+// gprtSetWindowFullScreen(GPRTContext _context, bool fullScreen) {
+//   LOG_API_CALL();
+//   Context *context = (Context *) _context;
+//   if (!requestedFeatures.window)
+//     return;
+
+//   if (fullScreen) {
+//     // Switch back to fullscreen mode
+//     GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+//     const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
+//     glfwSetWindowMonitor(context->window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width, mode->height*/, GLFW_DONT_CARE /*mode->refreshRate*/);
+//   }
+//   else {
+//     GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+//     const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
+//     glfwSetWindowMonitor(context->window, NULL, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width, mode->height*/, GLFW_DONT_CARE);
+//   }
+// }
 
 GPRT_API void
 gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
@@ -6892,6 +7217,26 @@ gprtGetTime(GPRTContext _context) {
   return glfwGetTime();
 }
 
+GPRT_API void gprtGetDenoiserInputSize(GPRTContext _context, uint32_t *width, uint32_t *height)
+{
+  LOG_API_CALL();
+  if (!requestedFeatures.aiDenoiser.requested)
+    return;
+  Context *context = (Context *) _context;
+  *width = context->aiDenoising.optimalSettings.optimalRenderSize.x;
+  *height = context->aiDenoising.optimalSettings.optimalRenderSize.y;
+}
+
+GPRT_API void gprtGetDenoiserOutputSize(GPRTContext _context, uint32_t *width, uint32_t *height)
+{
+  LOG_API_CALL();
+  if (!requestedFeatures.aiDenoiser.requested)
+    return;
+
+  *width = requestedFeatures.aiDenoiser.outputWidth;
+  *height = requestedFeatures.aiDenoiser.outputHeight;
+}
+
 GPRT_API void
 gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   LOG_API_CALL();
@@ -6907,7 +7252,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   // submitInfo.signalSemaphoreCount = 1;
   // submitInfo.pSignalSemaphores = signalSemaphores;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   // transition image layout from PRESENT_SRC to TRANSFER_DST
   {
@@ -7022,7 +7367,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7044,14 +7389,15 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
-  if (!requestedFeatures.window)
-    return;
   Context *context = (Context *) _context;
+  if (!requestedFeatures.window) {
+    return context->GRTimelineCounter; 
+  }
+  
   Buffer *buffer = (Buffer *) _buffer;
-
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
@@ -7059,7 +7405,9 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   // submitInfo.signalSemaphoreCount = 1;
   // submitInfo.pSignalSemaphores = signalSemaphores;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  context->synchronize(); // temporary...
+
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   // transition image layout from PRESENT_SRC to TRANSFER_DST
   {
@@ -7158,7 +7506,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7178,6 +7526,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
                                         context->inFlightFence, &context->currentImageIndex);
   vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
   vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  return context->GRTimelineCounter;
 }
 
 GPRT_API void
@@ -7188,10 +7537,10 @@ gprtGuiSetRasterAttachments(GPRTContext _context, GPRTTexture _colorAttachment, 
   context->setRasterAttachments(colorAttachment, depthAttachment);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtGuiRasterize(GPRTContext _context) {
   Context *context = (Context *) _context;
-  context->rasterizeGui();
+  return context->rasterizeGui();
 }
 
 GPRT_API GPRTContext
@@ -7288,25 +7637,19 @@ gprtTrianglesSetVertices(GPRTGeom _triangles, GPRTBuffer _vertices, uint32_t cou
   LOG_API_CALL();
   TriangleGeom *triangles = (TriangleGeom *) _triangles;
   if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetVertices on non-triangular geometry type!");
-  Buffer *vertices = (Buffer *) _vertices;
-  triangles->setVertices(vertices, count, stride, offset);
+  Buffer *t0_vertices = (Buffer *) _vertices;
+  triangles->setVertices(t0_vertices, nullptr, count, stride, offset);
 }
-// GPRT_API void gprtTrianglesSetMotionVertices(GPRTGeom triangles,
-//                                            /*! number of vertex arrays
-//                                                passed here, the first
-//                                                of those is for t=0,
-//                                                thelast for t=1,
-//                                                everything is linearly
-//                                                interpolated
-//                                                in-between */
-//                                            size_t    numKeys,
-//                                            GPRTBuffer *vertexArrays,
-//                                            size_t count,
-//                                            size_t stride,
-//                                            size_t offset)
-// {
-//   GPRT_NOTIMPLEMENTED;
-// }
+
+GPRT_API void
+gprtTrianglesSetMotionVertices(GPRTGeom _triangles, GPRTBuffer _t0_vertices, GPRTBuffer _t1_vertices, uint32_t count, uint32_t stride, uint32_t offset) {
+  LOG_API_CALL();
+  TriangleGeom *triangles = (TriangleGeom *) _triangles;
+  if (triangles->geomType->getKind() != GPRT_TRIANGLES) LOG_ERROR("Calling gprtTrianglesSetVertices on non-triangular geometry type!");
+  Buffer *t0_vertices = (Buffer *) _t0_vertices;
+  Buffer *t1_vertices = (Buffer *) _t1_vertices;
+  triangles->setVertices(t0_vertices, t1_vertices, count, stride, offset);
+}
 
 GPRT_API void
 gprtTrianglesSetIndices(GPRTGeom _triangles, GPRTBuffer _indices, uint32_t count, uint32_t stride, uint32_t offset) {
@@ -7384,7 +7727,8 @@ void
 gprtAABBsSetPositions(GPRTGeom _aabbs, GPRTBuffer _positions, uint32_t count, uint32_t stride, uint32_t offset) {
   LOG_API_CALL();
   AABBGeom *aabbs = (AABBGeom *) _aabbs;
-  if (aabbs->geomType->getKind() != GPRT_AABBS) LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
+  if ((aabbs->geomType->getKind() != GPRT_AABBS) && (aabbs->geomType->getKind() != GPRT_PARTICLES)) 
+    LOG_ERROR("Calling gprtAABBsSetPositions on non-AABB geometry type!");
   Buffer *positions = (Buffer *) _positions;
   aabbs->setAABBs(positions, count, stride, offset);
 }
@@ -7603,6 +7947,15 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     break;
   case GPRT_AABBS:
     geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    // Supply afallback intersector to handle cases where none are provided.
+    // for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+    //   gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
+    //                                   "fallbackIntersection");
+    // }
+    break;
+  case GPRT_PARTICLES:
+    geomType = new AABBGeomType(context, requestedFeatures.numRayTypes, recordSize);
+    geomType->overrideKind = GPRT_PARTICLES;
     break;
   case GPRT_SOLIDS:
     geomType = new SolidGeomType(context, requestedFeatures.numRayTypes, recordSize);
@@ -7729,14 +8082,14 @@ gprtSamplerGetIndex(GPRTSampler _sampler, int deviceID) {
 }
 
 GPRT_API GPRTTexture
-gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                      uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtHostTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7747,8 +8100,8 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
                                               // not needed
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -7757,14 +8110,14 @@ gprtHostTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat forma
 }
 
 GPRT_API GPRTTexture
-gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtDeviceTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7773,21 +8126,21 @@ gprtDeviceTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                                                         // device access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   return (GPRTTexture) texture;
 }
 
 GPRT_API GPRTTexture
-gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat format, uint32_t width, uint32_t height,
-                        uint32_t depth, bool allocateMipmaps, const void *init) {
+gprtSharedTextureCreate(GPRTContext _context, GPRTTextureParams params, const void *init) {
   LOG_API_CALL();
 
   const VkImageUsageFlags imageUsageFlags =
       // means we can make an image view required to assign this image to a
       // descriptor
       VK_IMAGE_USAGE_SAMPLED_BIT |
+      (params.writable ? VK_IMAGE_USAGE_STORAGE_BIT : 0) |
       // means we can use this image to transfer into another
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       // means we can use this image to receive data transferred from another
@@ -7800,8 +8153,8 @@ gprtSharedTextureCreate(GPRTContext _context, GPRTImageType type, GPRTFormat for
                                                // access
 
   Context *context = (Context *) _context;
-  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) type, (VkFormat) format,
-                                 width, height, depth, allocateMipmaps, init);
+  Texture *texture = new Texture(context, imageUsageFlags, memoryUsageFlags, (VkImageType) params.type, (VkFormat) params.format,
+                                 params.width, params.height, params.depth, params.allocateMipmaps, init);
 
   // Pin the texture to the host
   texture->map();
@@ -7846,6 +8199,293 @@ gprtTextureClear(GPRTTexture _texture) {
   LOG_API_CALL();
   Texture *texture = (Texture *) _texture;
   texture->clear();
+}
+
+// small helper to validate one texture field
+static bool gprtValidateTextureField(
+  std::string        fieldName,
+  Texture*           tex,
+  uint32_t           expectedW,
+  uint32_t           expectedH,
+  bool               required,
+  bool               mustBeWritable)
+{
+  if (!tex) {
+      if (required) {
+          LOG_ERROR(
+            std::string("gprtTextureDenoise field ") + fieldName +
+            " is required, but not given.");
+          return false;
+      }
+      return true;  // optional and missing => OK
+  }
+
+  if (tex->width != expectedW || tex->height != expectedH) {
+      LOG_ERROR(
+        std::string("gprtTextureDenoise field ") + fieldName +
+        " expected size " + std::to_string(expectedW) + " x " +
+        std::to_string(expectedH) +
+        ", but given texture dimensions are " +
+        std::to_string(tex->width) + " x " +
+        std::to_string(tex->height));
+      return false;
+  }
+
+  if (mustBeWritable && !tex->writable) {
+      LOG_ERROR(
+        std::string("gprtTextureDenoise field ") + fieldName +
+        " must be writable, but is marked as read only.");
+      return false;
+  }
+
+  return true;
+}
+
+GPRT_API uint64_t
+gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
+{
+  LOG_API_CALL();
+  Context *context = (Context *) _context;
+
+  uint32_t inputW, inputH, outputW, outputH;
+  gprtGetDenoiserInputSize(_context, &inputW, &inputH);
+  gprtGetDenoiserOutputSize(_context, &outputW, &outputH);
+
+  bool allGood = true;
+  if (context->deviceProperties.vendorID == VENDOR_ID_NVIDIA)
+  {
+    auto getImageView = [](Texture* pTexture) -> NVSDK_NGX_Resource_VK
+    {
+        if (!pTexture) {
+          return {};
+        }
+
+        NVSDK_NGX_Resource_VK resourceVK = {};
+        resourceVK.Type = NVSDK_NGX_RESOURCE_VK_TYPE_VK_IMAGEVIEW;
+        resourceVK.Resource.ImageViewInfo.ImageView = pTexture->imageView;
+        resourceVK.Resource.ImageViewInfo.Image = pTexture->image;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.aspectMask = pTexture->aspectFlagBits;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.baseMipLevel = 0;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.levelCount = 1;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.baseArrayLayer = 0;
+        resourceVK.Resource.ImageViewInfo.SubresourceRange.layerCount = 1;
+
+        resourceVK.Resource.ImageViewInfo.Height = pTexture->height;
+        resourceVK.Resource.ImageViewInfo.Width = pTexture->width;
+        resourceVK.Resource.ImageViewInfo.Format = pTexture->format;
+        resourceVK.ReadWrite = pTexture->writable;
+        return resourceVK;
+    };
+
+    struct FieldDesc {
+      Texture*    tex;
+      uint32_t    expW, expH;
+      bool        required;
+      bool        mustBeWritable;
+      NVSDK_NGX_Resource_VK imageView;
+    };
+
+    std::unordered_map<std::string, FieldDesc> fields = {
+      //        name           ptr                                   expW      expH      req    writable   initialImageView
+      { "denoisedOutput",      { (Texture*)params.denoisedOutput,      outputW,  outputH,  true,   true ,   NVSDK_NGX_Resource_VK{} } },
+      { "inputRadiance",       { (Texture*)params.inputRadiance,       inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "diffuseAlbedo",       { (Texture*)params.diffuseAlbedo,       inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "specularAlbedo",      { (Texture*)params.specularAlbedo,      inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "normalsAndRoughness", { (Texture*)params.normalsAndRoughness, inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "frustumDepth",        { (Texture*)params.frustumDepth,        inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "firstVertexMotion",   { (Texture*)params.firstVertexMotion,   inputW,   inputH,   true,   false,   NVSDK_NGX_Resource_VK{} } },
+      { "transparencyLayer",   { (Texture*)params.transparencyLayer,   inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "depthOfFieldGuide",   { (Texture*)params.depthOfFieldGuide,   inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "maxRadianceExposure", { (Texture*)params.maxRadianceExposure, inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      { "specularHitDistance", { (Texture*)params.specularHitDistance, inputW,   inputH,   false,  false,   NVSDK_NGX_Resource_VK{} } },
+      // can expand to additional channels here...
+    };
+
+    // NVSDK_NGX_Resource_VK transparencyOverlay = getImageView((Texture*)params.transparencyOverlay, false);
+    // NVSDK_NGX_Resource_VK depthOfFieldGuide = getImageView((Texture*)params.depthOfFieldGuide, false);    
+    // NVSDK_NGX_Resource_VK exposureBuffer = getImageView((Texture*)params.exposure, false);
+    // NVSDK_NGX_Resource_VK specularHitDistance = getImageView((Texture*)params.depth, false);
+
+    for (auto &[name, desc] : fields) {
+      allGood &= gprtValidateTextureField(
+                  name, desc.tex, desc.expW, desc.expH, desc.required, desc.mustBeWritable);
+      if (allGood) {
+        desc.imageView = getImageView(desc.tex);
+      }
+    }
+
+    if (!allGood) return -1;
+
+    
+    NVSDK_NGX_VK_DLSSD_Eval_Params dlssdEvalParams = {};
+    
+    // NVSDK_NGX_Resource_VK*              pInDiffuseAlbedo;
+    dlssdEvalParams.pInDiffuseAlbedo = &fields["diffuseAlbedo"].imageView;// &diffuseAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInSpecularAlbedo;
+    dlssdEvalParams.pInSpecularAlbedo = &fields["specularAlbedo"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInNormals;
+    dlssdEvalParams.pInNormals = &fields["normalsAndRoughness"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInRoughness;
+    dlssdEvalParams.pInRoughness = &fields["normalsAndRoughness"].imageView;
+    
+    // NVSDK_NGX_Resource_VK*              pInColor;
+    dlssdEvalParams.pInColor = &fields["inputRadiance"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInOutput;
+    dlssdEvalParams.pInOutput = &fields["denoisedOutput"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInDepth;
+    dlssdEvalParams.pInDepth = &fields["frustumDepth"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInMotionVectors;
+    dlssdEvalParams.pInMotionVectors = &fields["firstVertexMotion"].imageView;
+    // float                               InJitterOffsetX;     /* Jitter offset must be in input/render pixel space */
+    dlssdEvalParams.InJitterOffsetX = params.jitter.x;
+    // float                               InJitterOffsetY;
+    dlssdEvalParams.InJitterOffsetY = params.jitter.y;
+    // NVSDK_NGX_Dimensions                InRenderSubrectDimensions;
+    dlssdEvalParams.InRenderSubrectDimensions.Width = inputW;
+    dlssdEvalParams.InRenderSubrectDimensions.Height = inputH;
+    // /*** OPTIONAL - leave to 0/0.0f if unused ***/
+    // int                                 InReset;             
+    dlssdEvalParams.InReset = params.resetAccumulation ? 1 : 0;
+    // float                               InMVScaleX;          /* If MVs need custom scaling to convert to pixel space */
+    dlssdEvalParams.InMVScaleX = 1.0f;
+    // float                               InMVScaleY;
+    dlssdEvalParams.InMVScaleY = 1.0f;
+    // NVSDK_NGX_Resource_VK *             pInTransparencyMask; /* Unused/Reserved for future use */
+    // NVSDK_NGX_Resource_VK *             pInExposureTexture;
+    if (params.maxRadianceExposure) dlssdEvalParams.pInExposureTexture = &fields["maxRadianceExposure"].imageView;
+    // NVSDK_NGX_Resource_VK *             pInBiasCurrentColorMask;
+    // NVSDK_NGX_Coordinates               InDiffuseAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InNormalsSubrectBase;
+    // NVSDK_NGX_Coordinates               InRoughnessSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorSubrectBase;
+    // NVSDK_NGX_Coordinates               InDepthSubrectBase;
+    // NVSDK_NGX_Coordinates               InMVSubrectBase;
+    // NVSDK_NGX_Coordinates               InTranslucencySubrectBase;
+    // NVSDK_NGX_Coordinates               InBiasCurrentColorSubrectBase;
+    // NVSDK_NGX_Coordinates               InOutputSubrectBase;
+    // float                               InPreExposure;
+    // float                               InExposureScale;
+    // int                                 InIndicatorInvertXAxis;
+    // int                                 InIndicatorInvertYAxis;
+    // /*** OPTIONAL - only for research purposes ***/
+
+    // NVSDK_NGX_Resource_VK*              pInReflectedAlbedo;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeParticles;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterParticles;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeTransparency;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterTransparency;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeFog;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterFog;
+    // NVSDK_NGX_Resource_VK*              pInScreenSpaceSubsurfaceScatteringGuide;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeScreenSpaceSubsurfaceScattering;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterScreenSpaceSubsurfaceScattering;
+    // NVSDK_NGX_Resource_VK*              pInScreenSpaceRefractionGuide;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeScreenSpaceRefraction;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterScreenSpaceRefraction;
+    // NVSDK_NGX_Resource_VK*              pInDepthOfFieldGuide;
+    if (params.depthOfFieldGuide) dlssdEvalParams.pInDepthOfFieldGuide = &fields["depthOfFieldGuide"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInColorBeforeDepthOfField;
+    // NVSDK_NGX_Resource_VK*              pInColorAfterDepthOfField;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseHitDistance;
+    // NVSDK_NGX_Resource_VK*              pInSpecularHitDistance;
+    if (params.specularHitDistance) dlssdEvalParams.pInSpecularHitDistance = &fields["specularHitDistance"].imageView;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseRayDirection;
+    // NVSDK_NGX_Resource_VK*              pInSpecularRayDirection;
+    // NVSDK_NGX_Resource_VK*              pInDiffuseRayDirectionHitDistance;
+    // NVSDK_NGX_Resource_VK*              pInSpecularRayDirectionHitDistance;
+    // NVSDK_NGX_Coordinates               InReflectedAlbedoSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeParticlesSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterParticlesSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeTransparencySubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterTransparencySubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeFogSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterFogSubrectBase;
+    // NVSDK_NGX_Coordinates               InScreenSpaceSubsurfaceScatteringGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeScreenSpaceSubsurfaceScatteringSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterScreenSpaceSubsurfaceScatteringSubrectBase;
+    // NVSDK_NGX_Coordinates               InScreenSpaceRefractionGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeScreenSpaceRefractionSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterScreenSpaceRefractionSubrectBase;
+    // NVSDK_NGX_Coordinates               InDepthOfFieldGuideSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorBeforeDepthOfFieldSubrectBase;
+    // NVSDK_NGX_Coordinates               InColorAfterDepthOfFieldSubrectBase;    
+    // NVSDK_NGX_Coordinates               InDiffuseHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InDiffuseRayDirectionSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularRayDirectionSubrectBase;
+    // NVSDK_NGX_Coordinates               InDiffuseRayDirectionHitDistanceSubrectBase;
+    // NVSDK_NGX_Coordinates               InSpecularRayDirectionHitDistanceSubrectBase;
+    // float*                              pInWorldToViewMatrix;
+    dlssdEvalParams.pInWorldToViewMatrix = (float*)params.viewMatrix.data();
+    // float*                              pInViewToClipMatrix;
+    dlssdEvalParams.pInViewToClipMatrix = (float*)params.projMatrix.data();
+
+    // NVSDK_NGX_VK_GBuffer                GBufferSurface;
+    // NVSDK_NGX_ToneMapperType            InToneMapperType;
+    // NVSDK_NGX_Resource_VK *             pInMotionVectors3D;
+    // NVSDK_NGX_Resource_VK *             pInIsParticleMask; /* to identify which pixels contains particles, essentially that are not drawn as part of base pass */
+    // NVSDK_NGX_Resource_VK *             pInAnimatedTextureMask; /* a binary mask covering pixels occupied by animated textures */
+    // NVSDK_NGX_Resource_VK *             pInDepthHighRes;
+    // NVSDK_NGX_Resource_VK *             pInPositionViewSpace;
+    // float                               InFrameTimeDeltaInMsec; 
+    dlssdEvalParams.InFrameTimeDeltaInMsec = params.frameTimeDeltaInMsec; // 1000.f / 60.f;
+    // NVSDK_NGX_Resource_VK *             pInRayTracingHitDistance; /* for each effect - approximation to the amount of noise in a ray-traced color */
+    // NVSDK_NGX_Resource_VK *             pInMotionVectorsReflections; /* motion vectors of reflected objects like for mirrored surfaces */
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayer; /* optional input res particle layer */
+    if (params.transparencyLayer) dlssdEvalParams.pInTransparencyLayer = &fields["transparencyLayer"].imageView;
+    // NVSDK_NGX_Coordinates               InTransparencyLayerSubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayerOpacity; /* optional input res particle opacity layer */
+    // NVSDK_NGX_Coordinates               InTransparencyLayerOpacitySubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInTransparencyLayerMvecs; /* optional input res transparency layer mvecs */
+    // NVSDK_NGX_Coordinates               InTransparencyLayerMvecsSubrectBase;
+    // NVSDK_NGX_Resource_VK*              pInDisocclusionMask; /* optional input res disocclusion mask */
+    // NVSDK_NGX_Coordinates               InDisocclusionMaskSubrectBase;
+
+
+
+
+    // /* Transition resolve image to a general format */
+    // // We need to carve out an API to allow textures to transition from readonly to readwrite by the end user
+    // auto oldResolveLayout = ((Texture*)params.output)->layout;
+    // if (oldResolveLayout != VK_IMAGE_LAYOUT_GENERAL)
+    // {
+    //   VkImageSubresourceRange imageSubresource;
+    //   imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;   // temporary, just assuming color for now.
+    //   imageSubresource.baseArrayLayer = 0;
+    //   imageSubresource.baseMipLevel = 0;
+    //   imageSubresource.layerCount = 1;
+    //   imageSubresource.levelCount = 1;
+      
+    //   VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+    //   ((Texture*)params.output)->setImageLayout(commandList, ((Texture*)params.output)->image, 
+    //     oldResolveLayout, VK_IMAGE_LAYOUT_GENERAL, imageSubresource);
+    //   context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+    //   ((Texture*)params.output)->layout = VK_IMAGE_LAYOUT_GENERAL;
+    // }
+
+    
+
+    
+
+    VkCommandBuffer commandList = context->beginComputeCommands(); // Todo: move to compute queue
+    // VkCommandBuffer commandList = context->beginSingleTimeCommands(context->ComputeCommandPool);
+
+    
+
+
+
+    // dlssdEvalParams.pInWorldToViewMatrix
+    NGX_CHECK_RESULT(NGX_VULKAN_EVALUATE_DLSSD_EXT(commandList, context->aiDenoising.ngxHandle, context->aiDenoising.ngxParameters, &dlssdEvalParams));
+    context->endComputeCommands(commandList);
+  }
+  else 
+  {
+    LOG_ERROR("Unimplemented");
+  }
+
+  // Default behavior
+  return 0;
 }
 
 GPRT_API void
@@ -8036,7 +8676,7 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   Buffer *destination = (Buffer *) _destination;
   Buffer *source = (Buffer *) _source;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   VkBufferCopy region;
   region.srcOffset = srcOffset * size;
@@ -8044,7 +8684,7 @@ gprtBufferCopy(GPRTContext _context, GPRTBuffer _source, GPRTBuffer _destination
   region.size = count * size;
   vkCmdCopyBuffer(commandBuffer, source->buffer, destination->buffer, 1, &region);
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 }
 
 void
@@ -8057,7 +8697,7 @@ gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _tex
   Texture *texture = (Texture *) _texture;
   Buffer *buffer = (Buffer *) _buffer;
 
-  VkCommandBuffer commandBuffer = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   VkImageLayout originalLayout = texture->layout;
 
@@ -8087,7 +8727,7 @@ gprtBufferTextureCopy(GPRTContext _context, GPRTBuffer _buffer, GPRTTexture _tex
                           {uint32_t(texture->aspectFlagBits), 0, texture->mipLevels, 0, 1});
   texture->layout = originalLayout;
 
-  context->endSingleTimeCommands(commandBuffer, context->graphicsCommandPool, context->graphicsQueue);
+  context->endGraphicsCommands(commandBuffer);
 }
 
 void
@@ -8317,7 +8957,7 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     return bufferBarrier;
   };
 
-  VkCommandBuffer commandList = context->beginSingleTimeCommands(context->graphicsCommandPool);
+  VkCommandBuffer commandList = context->beginComputeCommands();
 
   // Bind the scratch descriptor sets
   vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1,
@@ -8423,7 +9063,7 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     // Swap read/write sources
     inputSet = !inputSet;
   }
-  context->endSingleTimeCommands(commandList, context->graphicsCommandPool, context->graphicsQueue);
+  context->endComputeCommands(commandList);
 }
 
 GPRT_API void
@@ -8494,12 +9134,22 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
   if (!mapped)
     texture->map();
 
-  if (texture->format != VK_FORMAT_R8G8B8A8_SRGB) {
-    LOG_ERROR("Error, only GPRT_FORMAT_R8G8B8A8_SRGB format currently supported!");
+  if (texture->format != VK_FORMAT_R8G8B8A8_SRGB && texture->format != VK_FORMAT_R32G32B32A32_SFLOAT) {
+    LOG_ERROR("Error, unsupported image format!");
   }
 
-  const uint8_t *fb = (const uint8_t *) texture->mapped;
-  stbi_write_png(imageName, texture->width, texture->height, 4, fb, (uint32_t) (texture->width) * sizeof(uint32_t));
+  if (texture->format == VK_FORMAT_R8G8B8A8_SRGB) {
+    const uint8_t *fb = (const uint8_t *) texture->mapped;
+    stbi_write_png(imageName, texture->width, texture->height, 4, fb, (uint32_t) (texture->width) * sizeof(uint32_t));
+  }
+  else if (texture->format == VK_FORMAT_R32G32B32A32_SFLOAT) {
+    const float *fb = (const float *) texture->mapped;
+    for (int i = 0; i < texture->width* texture->height * 4; ++i)
+    {
+      std::cout<<fb[i]<<std::endl;
+    }
+    stbi_write_hdr(imageName, texture->width, texture->height, 4, fb);
+  }
 
   // Return mapped to previous state
   if (!mapped)
@@ -8511,11 +9161,10 @@ gprtAABBAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
   Geom* geom = ((Geom*)_geom);
-  if (geom->geomType->getKind() != GPRT_AABBS) {
+  if (geom->geomType->getKind() != GPRT_AABBS && geom->geomType->getKind() != GPRT_PARTICLES) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<AABBGeom*> geo = {(AABBGeom *) _geom};
-  AABBAccel *accel = new AABBAccel(context, geo);
+  AABBAccel *accel = new AABBAccel(context, (AABBGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8528,8 +9177,7 @@ gprtTriangleAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
 
-  std::vector<TriangleGeom*> geo = {(TriangleGeom *) _geom};
-  TriangleAccel *accel = new TriangleAccel(context, geo);
+  TriangleAccel *accel = new TriangleAccel(context, (TriangleGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8541,8 +9189,7 @@ gprtSphereAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) 
   if (geom->geomType->getKind() != GPRT_SPHERES) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<SphereGeom*> geo = {(SphereGeom *) _geom};
-  SphereAccel *accel = new SphereAccel(context, geo);
+  SphereAccel *accel = new SphereAccel(context, (SphereGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8554,8 +9201,7 @@ gprtLSSAccelCreate(GPRTContext _context, GPRTGeom _geom, GPRTLSSFlags flags) {
   if (geom->geomType->getKind() != GPRT_LSS) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<LSSGeom*> geo = {(LSSGeom *) _geom};
-  LSSAccel *accel = new LSSAccel(context, geo, flags);
+  LSSAccel *accel = new LSSAccel(context, (LSSGeom *) _geom, flags);
   return (GPRTAccel) accel;
 }
 
@@ -8567,8 +9213,7 @@ gprtSolidAccelCreate(GPRTContext _context, GPRTGeom _geom, unsigned int flags) {
   if (geom->geomType->getKind() != GPRT_SOLIDS) {
     LOG_ERROR("Given geometry was made from an incompatible geometry type.");
   }
-  std::vector<SolidGeom*> geo = {(SolidGeom *) _geom};
-  SolidAccel *accel = new SolidAccel(context, geo);
+  SolidAccel *accel = new SolidAccel(context, (SolidGeom *) _geom);
   return (GPRTAccel) accel;
 }
 
@@ -8576,7 +9221,7 @@ GPRT_API GPRTAccel
 gprtInstanceAccelCreate(GPRTContext _context, uint32_t numInstances, GPRTBufferOf<gprt::Instance> instancesBuffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer);
+  InstanceAccel *accel = new InstanceAccel(context, numInstances, (Buffer *) instancesBuffer, nullptr);
   return (GPRTAccel) accel;
 }
 
@@ -8590,10 +9235,10 @@ gprtAccelDestroy(GPRTAccel _accel) {
 }
 
 GPRT_API void
-gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildMode mode, bool allowCompaction, bool minimizeMemory) {
+gprtAccelBuild(GPRTContext _context, GPRTAccel _accel, GPRTBuildParams buildParams) {
   Accel *accel = (Accel *) _accel;
   Context *context = (Context *) _context;
-  accel->build(mode, allowCompaction, minimizeMemory);
+  accel->build(buildParams);
 }
 
 GPRT_API void
@@ -8630,9 +9275,9 @@ gprtAccelGetInstance(GPRTAccel _accel) {
   if (!accel->isBottomLevel)
     LOG_ERROR("Instances are only available for bottom level acceleration structures");
   gprt::Instance newInstance = gprt::Instance();
-  newInstance.__gprtAccelAddress = accel->getDeviceAddress();
+  newInstance.accelAddress = accel->getDeviceAddress();
   newInstance.instanceCustomIndex = accel->address; // our own virtual address handle.index;
-  newInstance.__gprtSBTOffset = accel->address;
+  newInstance.geometryIndex = accel->geometry->address * requestedFeatures.numRayTypes; //accel->address;
   newInstance.flags = 0;
   newInstance.mask = 0b11111111;
   newInstance.transform =
@@ -8647,21 +9292,21 @@ gprtBuildShaderBindingTable(GPRTContext _context, GPRTBuildSBTFlags flags) {
   context->buildSBT(flags);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch1D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, size_t pushConstantsSize,
                    void *pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1, pushConstantsSize, pushConstants);
+  return gprtRayGenLaunch2D(_context, _rayGen, dims_x, 1, pushConstantsSize, pushConstants);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch2D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, size_t pushConstantsSize,
                    void *pushConstants) {
   LOG_API_CALL();
-  gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
+  return gprtRayGenLaunch3D(_context, _rayGen, dims_x, dims_y, 1, pushConstantsSize, pushConstants);
 }
 
-GPRT_API void
+GPRT_API uint64_t
 gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, uint32_t dims_y, uint32_t dims_z,
                    size_t pushConstantsSize, void *pushConstants) {
   LOG_API_CALL();
@@ -8671,28 +9316,25 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   RayGen *raygen = (RayGen *) _rayGen;
   VkResult err;
 
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+  VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
   std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           context->raytracingPipelineLayout, 0, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
 
   if (context->queryRequested) {
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                     context->raytracingPipeline);
 
   if (pushConstantsSize > 0) {
     if (pushConstantsSize > PUSH_CONSTANTS_LIMIT)
       LOG_ERROR("Push constants size exceeds maximum PUSH_CONSTANTS_LIMIT byte limit!");
-    vkCmdPushConstants(context->graphicsCommandBuffer, context->raytracingPipelineLayout,
+    vkCmdPushConstants(commandBuffer, context->raytracingPipelineLayout,
                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                            VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR,
@@ -8760,44 +9402,26 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   }
 
   VkStridedDeviceAddressRegionKHR hitShaderSbtEntry{};
-  size_t numHitRecords = context->getNumHitRecords();
+  // size_t numHitRecords = context->getNumHitRecords();
+  size_t numHitRecords = context->geoms.size() * requestedFeatures.numRayTypes;
   if (numHitRecords > 0) {
     hitShaderSbtEntry.deviceAddress = hitgroupBaseAddr;
     hitShaderSbtEntry.stride = hitRecordSize;
     hitShaderSbtEntry.size = hitShaderSbtEntry.stride * numHitRecords;
   }
 
-  gprt::vkCmdTraceRays(context->graphicsCommandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
+  gprt::vkCmdTraceRays(commandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);
 
-  if (context->queryRequested)
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  if (context->queryRequested) {
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  }
 
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
-  if (err)
-    LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
-
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
-
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  context->endGraphicsCommands(commandBuffer);
+  return context->GRTimelineCounter;
 }
 
-void
+uint64_t
 _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
   Compute *compute = (Compute *) _compute;
@@ -8810,55 +9434,87 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   VkResult err;
 
-  VkCommandBufferBeginInfo cmdBufInfo{};
-  cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-  err = vkBeginCommandBuffer(context->graphicsCommandBuffer, &cmdBufInfo);
+  // Temporary... Ultimately want to move to the compute queue...
+  VkCommandBuffer commandBuffer = context->beginComputeCommands();
 
   if (context->queryRequested) {
-    vkCmdResetQueryPool(context->graphicsCommandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
+    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
   }
 
-  vkCmdBindPipeline(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
+  vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
   std::vector<VkDescriptorSet> descriptorSets = {context->descriptorSet};
 
-  vkCmdBindDescriptorSets(context->graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
+  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipelineLayout, 0,
                           (uint32_t) descriptorSets.size(), descriptorSets.data(), 0, nullptr);
 
   if (pushConstants.size() > 0) {
-    vkCmdPushConstants(context->graphicsCommandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdPushConstants(commandBuffer, compute->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        PUSH_CONSTANTS_LIMIT, pushConstants.data());
   }
 
-  vkCmdDispatch(context->graphicsCommandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
+  vkCmdDispatch(commandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
 
-  if (context->queryRequested)
-    vkCmdWriteTimestamp(context->graphicsCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  if (context->queryRequested) {
+    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+  }
 
-  err = vkEndCommandBuffer(context->graphicsCommandBuffer);
+  err = context->endComputeCommands(commandBuffer);
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.pNext = NULL;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
-  submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
-  submitInfo.signalSemaphoreCount = 0;
-  submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
+  // Temporary...
+  // err = context->synchronizeCompute(); 
+  // if (err) LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
 
-  err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err)
-    LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+  // VkSubmitInfo submitInfo{};
+  // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  // submitInfo.pNext = NULL;
+  // submitInfo.waitSemaphoreCount = 0;
+  // submitInfo.pWaitSemaphores = nullptr;     //&acquireImageSemaphoreHandleList[currentFrame];
+  // submitInfo.pWaitDstStageMask = nullptr;   //&pipelineStageFlags;
+  // submitInfo.commandBufferCount = 1;
+  // submitInfo.pCommandBuffers = &context->graphicsCommandBuffer;
+  // submitInfo.signalSemaphoreCount = 0;
+  // submitInfo.pSignalSemaphores = nullptr;   //&writeImageSemaphoreHandleList[currentImageIndex]};
 
-  err = vkQueueWaitIdle(context->graphicsQueue);
-  if (err)
-    LOG_ERROR("failed to wait for queue idle! : \n" + errorString(err));
+  // err = vkQueueSubmit(context->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  // if (err)
+  //   LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
+
+  // err = vkQueueWaitIdle(context->graphicsQueue);
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtComputeSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronizeCompute();
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtGraphicsSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronizeGraphics();
+  return 0;
+}
+
+GPRT_API uint64_t 
+gprtDeviceSynchronize(GPRTContext _context)
+{
+  LOG_API_CALL();
+  assert(_context);
+  Context *context = (Context *) _context;
+  context->synchronize();
+  return 0;
 }
 
 GPRT_API void

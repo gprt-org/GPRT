@@ -16,6 +16,7 @@ uint2 indices[NUM_INDICES] = {{0, 1}};
 
 // Initial image resolution
 const int2 fbSize = {1400, 460};
+// const int2 fbSize = {1024, 1024};
 
 // Output file name for the rendered image
 const char *outFileName = "s2-3-lss.png";
@@ -34,7 +35,7 @@ int main(int ac, char **av) {
   gprtGeomTypeSetClosestHitProg(lssGeomType, 0, module, "LSSClosestHit");
 
   // Upload vertex and index data to GPU buffers
-  GPRTBufferOf<float4> vertexBuffer = gprtDeviceBufferCreate<float4>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float4> vertexBuffer = gprtHostBufferCreate<float4>(context, NUM_VERTICES, vertices);
   GPRTBufferOf<uint2> indexBuffer = gprtDeviceBufferCreate<uint2>(context, NUM_INDICES, indices);
 
   // New: Create geometry instance and set vertex and index buffers
@@ -51,13 +52,13 @@ int main(int ac, char **av) {
 
   // Create and build BLAS
   GPRTAccel lssAccel = gprtLSSAccelCreate(context, lssGeom);
-  gprtAccelBuild(context, lssAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, lssAccel);
 
   // Create and build TLAS
   gprt::Instance instance = gprtAccelGetInstance(lssAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world);
 
   // Set up ray generation and miss programs
   GPRTMissOf<void> miss = gprtMissCreate<void>(context, module, "miss");

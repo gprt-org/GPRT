@@ -70,7 +70,6 @@ public struct PointDesc
 /// @param RayFlags Flags controlling ray behavior
 /// @param InstanceInclusionMask Mask for filtering instance visibility
 /// @param RayContributionToHitGroupIndex Offset for hit group indexing
-/// @param MultiplierForGeometryContributionToHitGroupIndex Multiplier for geometry-based hit group indexing
 /// @param MissShaderIndex Index of the miss shader to execute if no hit is found
 /// @param Point The query point origin to trace
 /// @param Payload Structure for passing data between shaders
@@ -83,21 +82,19 @@ public void TracePoint<payload_t>(
     uint                          RayFlags,
     uint                          InstanceInclusionMask,
     uint                          RayContributionToHitGroupIndex,
-    uint                          MultiplierForGeometryContributionToHitGroupIndex,
     uint                          MissShaderIndex,
     PointDesc                     Point,
     inout payload_t               Payload)
 {
   RaytracingAccelerationStructure accel = getAccelFromAddress(AccelerationStructure.address);
-  TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, MultiplierForGeometryContributionToHitGroupIndex, MissShaderIndex, { Point.Origin, 0.0, float3(1.0), 0.0 }, Payload);
+  TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, 0, MissShaderIndex, { Point.Origin, 0.0, float3(1.0), 0.0 }, Payload);
 }
 
-/// Traces a point through the acceleration structure.
+/// Traces a ray through the acceleration structure.
 /// @param AccelerationStructure The acceleration structure to traverse
 /// @param RayFlags Flags controlling ray behavior
 /// @param InstanceInclusionMask Mask for filtering instance visibility
 /// @param RayContributionToHitGroupIndex Offset for hit group indexing
-/// @param MultiplierForGeometryContributionToHitGroupIndex Multiplier for geometry-based hit group indexing
 /// @param MissShaderIndex Index of the miss shader to execute if no hit is found
 /// @param Ray Description of the ray to trace
 /// @param Payload Structure for passing data between shaders
@@ -110,7 +107,6 @@ public void TraceRay<payload_t>(
     uint                            RayFlags,
     uint                            InstanceInclusionMask,
     uint                            RayContributionToHitGroupIndex,
-    uint                            MultiplierForGeometryContributionToHitGroupIndex,
     uint                            MissShaderIndex,
     RayDesc                         Ray,
     inout payload_t                 Payload)
@@ -124,6 +120,41 @@ public void TraceRay<payload_t>(
       if (any(isnan(Ray.Direction))) printf("(Thread Index: %d %d %d): ERROR in TraceRay, RayDesc::Direction contans a nan component!\n", RayIndex.x, RayIndex.y, RayIndex.z);
     }
 #endif
-    TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, MultiplierForGeometryContributionToHitGroupIndex, MissShaderIndex, Ray, Payload);
+    TraceRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, 0, MissShaderIndex, Ray, Payload);
+}
+
+
+/// Traces a point through the acceleration structure.
+/// @param AccelerationStructure The acceleration structure to traverse
+/// @param RayFlags Flags controlling ray behavior
+/// @param InstanceInclusionMask Mask for filtering instance visibility
+/// @param RayContributionToHitGroupIndex Offset for hit group indexing
+/// @param MissShaderIndex Index of the miss shader to execute if no hit is found
+/// @param Ray Description of the ray to trace
+/// @param Payload Structure for passing data between shaders
+/// @remarks Core ray tracing function for initiating traversal
+/// @category raytracing
+[ForceInline]
+[require(cuda_glsl_hlsl_spirv, raytracing_raygen_closesthit_miss, hlsl_nvapi)]
+public void TraceMotionRay<payload_t>(
+    SurfaceAccelerationStructure    AccelerationStructure,
+    uint                            RayFlags,
+    uint                            InstanceInclusionMask,
+    uint                            RayContributionToHitGroupIndex,
+    uint                            MissShaderIndex,
+    RayDesc                         Ray,
+    float                           Time,
+    inout payload_t                 Payload)
+{
+    RaytracingAccelerationStructure accel = getAccelFromAddress(AccelerationStructure.address);
+#ifdef __DEBUG__
+    {
+      uint3 RayIndex = DispatchRaysIndex();
+      // uint3 DispatchDims = DispatchRaysDimensions();
+      if (all(Ray.Direction == 0.f)) printf("(Thread Index: %d %d %d): ERROR in TraceRay, RayDesc::Direction is all zero!\n", RayIndex.x, RayIndex.y, RayIndex.z);
+      if (any(isnan(Ray.Direction))) printf("(Thread Index: %d %d %d): ERROR in TraceRay, RayDesc::Direction contans a nan component!\n", RayIndex.x, RayIndex.y, RayIndex.z);
+    }
+#endif
+    TraceMotionRay(accel, RayFlags, InstanceInclusionMask, RayContributionToHitGroupIndex, 0, MissShaderIndex, Ray, Time, Payload);
 }
 #endif

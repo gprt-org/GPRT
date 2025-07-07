@@ -107,8 +107,10 @@ template <typename T> struct Mesh {
     geomData->index = gprtBufferGetDevicePointer(indexBuffer);
 
     // Build the bottom level acceleration structure
+    GPRTBuildParams buildParams;
+    buildParams.buildMode = GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE;
     accel = gprtTriangleAccelCreate(context, geometry);
-    gprtAccelBuild(context, accel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, /*allow compaction*/ true);
+    gprtAccelBuild(context, accel, buildParams);
     // gprtAccelCompact(context, accel);
   };
 
@@ -181,8 +183,14 @@ main(int ac, char **av) {
 
   auto imageBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
 
-  auto imageTexture = gprtDeviceTextureCreate<float4>(context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT,
-                                                      fbSize.x, fbSize.y, 1, false, nullptr);
+  GPRTTextureParams texParams;
+  texParams.type = GPRT_IMAGE_TYPE_2D;
+  texParams.format = GPRT_FORMAT_R32G32B32A32_SFLOAT;
+  texParams.channels = 4;
+  texParams.width = fbSize.x;
+  texParams.height = fbSize.y;
+
+  auto imageTexture = gprtDeviceTextureCreate<float4>(context, texParams, nullptr);
 
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
 
@@ -197,10 +205,16 @@ main(int ac, char **av) {
 
   // This is new, setup GUI frame buffer. We'll rasterize the GUI to this texture, then composite the GUI on top of the
   // rendered scene.
-  GPRTTextureOf<uint32_t> guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
-  GPRTTextureOf<float> guiDepthAttachment = gprtDeviceTextureCreate<float>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
+  GPRTTextureParams paramsCommon;
+  paramsCommon.type = GPRT_IMAGE_TYPE_2D;
+  paramsCommon.width = fbSize.x;
+  paramsCommon.height = fbSize.y;
+
+  GPRTTextureParams srgbTexParams = paramsCommon, d32TexParams = paramsCommon;
+  srgbTexParams.format = GPRT_FORMAT_R8G8B8A8_SRGB;
+  d32TexParams.format = GPRT_FORMAT_D32_SFLOAT;
+  GPRTTextureOf<uint32_t> guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(context, srgbTexParams, nullptr);
+  GPRTTextureOf<float> guiDepthAttachment = gprtDeviceTextureCreate<float>(context, d32TexParams, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   // We begin by making one teapot mesh, storing that mesh in a bottom
@@ -233,7 +247,7 @@ main(int ac, char **av) {
   // GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &mesh.accel);
   // gprtAccelBuild(context, trianglesAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
-  gprtAccelBuild(context, triangleTLAS, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, triangleTLAS);
 
   // Create initial aabb geometry
   GPRTGeomOf<BoundingBoxData> aabbGeom = gprtGeomCreate<BoundingBoxData>(context, aabbType);
@@ -241,15 +255,18 @@ main(int ac, char **av) {
   aabbGeomData->aabbs = gprtBufferGetDevicePointer(aabbPositions);
   gprtAABBsSetPositions(aabbGeom, aabbPositions, 1);
 
+  GPRTBuildParams buildParams;
+  buildParams.buildMode = GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE;
+
   // Place that geometry into an AABB BLAS.
   GPRTAccel aabbAccel = gprtAABBAccelCreate(context, aabbGeom);
-  gprtAccelBuild(context, aabbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+  gprtAccelBuild(context, aabbAccel, buildParams);
 
   // Placing that AABB BLAS into a TLAS.
   gprt::Instance aabbInstance = gprtAccelGetInstance(aabbAccel);
   GPRTBufferOf<gprt::Instance> aabbInstanceBuffer = gprtDeviceBufferCreate(context, 1, &aabbInstance);
   GPRTAccel obbAccel = gprtInstanceAccelCreate(context, 1, aabbInstanceBuffer);
-  gprtAccelBuild(context, obbAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+  gprtAccelBuild(context, obbAccel, buildParams);
 
   // Here, we place a reference to our TLAS in the ray generation
   // kernel's parameters
@@ -282,7 +299,7 @@ main(int ac, char **av) {
   guiPC.fbSize = fbSize;
   guiPC.frameBuffer = gprtBufferGetDevicePointer(frameBuffer);
   guiPC.imageBuffer = gprtBufferGetDevicePointer(imageBuffer);
-  guiPC.guiTexture = gprtTextureGet2DHandle(guiColorAttachment);
+  guiPC.guiTexture = gprtTextureGet2DHandle<float4>(guiColorAttachment);
 
   RTPushConstants rtPC;
 
@@ -384,9 +401,11 @@ main(int ac, char **av) {
     gprtAccelUpdate(context, obbAccel);
 
     gprtTrianglesSetIndices(mesh.geometry, mesh.indexBuffer, obbPC.numTrisToInclude);
-    gprtAccelBuild(context, mesh.accel, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE);
-    gprtAccelBuild(context, triangleTLAS, GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE);
+    gprtAccelBuild(context, mesh.accel);
+    gprtAccelBuild(context, triangleTLAS);
     rayGenData->triangleTLAS = gprtAccelGetDeviceAddress(triangleTLAS);
+
+    gprtComputeSynchronize(context);
 
     // Call the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, rtPC);

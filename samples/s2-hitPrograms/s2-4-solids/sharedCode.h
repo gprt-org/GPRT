@@ -14,7 +14,7 @@ struct SolidGeomData {
 struct RayGenData {
   uint *frameBuffer;
   SolidAccelerationStructure world;
-  DescriptorHandle<Texture2D> stbn;
+  DescriptorHandle<Texture2D<uint2>> stbn;
 };
 
 /* Constants that change each frame */
@@ -75,11 +75,18 @@ void GetHexWeights(float3 rst, out float4 w0, out float4 w1) {
 }
 
 uint2 GetSTBNCoordinate(int m, int n, int frameID, int2 pixelID) {
-  int frame = (frameID * AA * AA + m * AA + n) % 128;
-  uint2 gridCoord = int2(frame % 8, (frame / 8) % 16);
-  uint2 texCoord = int2(pixelID.x % 256, pixelID.y % 256);
-  uint2 coord = gridCoord * 256 + texCoord;
+  static const uint2 tileSize = uint2(256,256);
+  uint bnPhase = (frameID * AA * AA + m * AA + n) % 128;
+  uint2 grid   = uint2(bnPhase % 8, bnPhase / 8);
+  uint2 local = pixelID % tileSize;
+  uint2 coord = grid * tileSize + local;
   return coord;
+
+  // int frame = (frameID * AA * AA + m * AA + n) % 128;
+  // uint2 gridCoord = int2(frame % 8, (frame / 8) % 16);
+  // uint2 texCoord = int2(pixelID.x % 256, pixelID.y % 256);
+  // uint2 coord = gridCoord * 256 + texCoord;
+  // return coord;
 }
 
 #else

@@ -48,15 +48,18 @@ int main(int ac, char **av) {
   GPRTBufferOf<uint8_t> solidTypes = gprtDeviceBufferCreate<uint8_t>(context, types.size(), types.data());
   gprtSolidsSetTypes(solidGeom, solidTypes, types.size(), /*types stride. Set to 0 if we only have one type*/ 1);
 
+  GPRTBuildParams buildParams;
+  buildParams.buildMode = GPRT_BUILD_MODE_FAST_BUILD_NO_UPDATE;
+
   // Place the geometry into a BLAS. Note, we must create a "Solid" accel rather than a triangles accel.
   GPRTAccel solidAccel = gprtSolidAccelCreate(context, solidGeom);
-  gprtAccelBuild(context, solidAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, solidAccel, buildParams);
   
   // Multiple different BLAS instances can be combined in a top level tree
   gprt::Instance instance = gprtAccelGetInstance(solidAccel);
   GPRTBufferOf<gprt::Instance> instanceBuffer = gprtDeviceBufferCreate(context, 1, &instance);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, instanceBuffer);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+  gprtAccelBuild(context, world, buildParams);
 
   // Set up ray generation and miss programs
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
@@ -73,19 +76,12 @@ int main(int ac, char **av) {
   // To render the solids volumetrically, we'll use the spatiotemporal blue noise texture below.
   // At a high level, this texture tells us how to randomly jitter our ray during ray marching, 
   // such that the noise is well stratified and "nice to look at".
-  int x, y, comp;
-  stbi_us *pixels = stbi_load_16(ASSETS_DIRECTORY "256x256_l128_s16.png", &x, &y, &comp, 0);
-  std::vector<stbi_us> stbn(x * y);
-  for (int yi = 0; yi < y; ++yi) {
-    for (int xi = 0; xi < x; ++xi) {
-      stbn[yi * x + xi] = pixels[(yi * x + xi) * comp + 0];
-    }
-  }
-  
-  GPRTTextureOf<stbi_us> stbnTex = gprtDeviceTextureCreate<stbi_us>(
-      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R16_UNORM, x, y, /*depth*/ 1,
-      /* generate mipmaps */ false, stbn.data());
-  rayGenData->stbn = gprtTextureGet2DHandle(stbnTex);
+  GPRTTextureParams texParams;
+  uint16_t  *pixels = stbi_load_16(ASSETS_DIRECTORY "256x256_l128_s16.png", &texParams.width, &texParams.height, &texParams.channels, STBI_grey_alpha);
+  texParams.type = GPRT_IMAGE_TYPE_2D;
+  texParams.format = GPRT_FORMAT_R16G16_UINT; // 16-bit unsigned integers for the blue noise texture
+  GPRTTextureOf<uint2> stbnTex = gprtDeviceTextureCreate(context, texParams, (uint2*)pixels);
+  rayGenData->stbn = gprtTextureGet2DHandle<uint2>(stbnTex);
 
   // Build the Shader Binding Table (SBT), updating all parameters.
   gprtBuildShaderBindingTable(context);
