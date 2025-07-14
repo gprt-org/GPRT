@@ -7,6 +7,25 @@ GPRT is a ray tracing API that wraps the Vulkan ray tracing interface.
 
 ![Sample "Attribute Aware RBFs" images](docs/source/images/papers/vis2023.jpg)
 
+## Project Overview
+
+The repository is organized into several key directories:
+
+- **`gprt/`** – the core library. Host APIs are implemented in
+  `gprt_host.h`/`gprt.cpp` while device-side shaders live in
+  `gprt.slang`.  Math helpers are under `gprt/math/`.
+- **`samples/`** – tutorial-style examples showing how to build ray
+  tracing applications with GPRT.
+- **`tests/`** – host-side tests for buffers and acceleration
+  structures.
+- **`docs/`** – Sphinx documentation sources.
+- **`3rdParty/`** – external dependencies pulled in as submodules.
+
+GPRT uses CMake to compile the host code and the Slang/HLSL toolchain
+for device shaders. After buffers and programs are set up, the shader
+binding table is built with `gprtBuildShaderBindingTable` before
+launching work on the GPU.
+
 ## Dependencies
 
   - CMake
@@ -58,3 +77,12 @@ sudo apt install xorg-dev libxinerama-dev libglu1-mesa-dev freeglut3-dev mesa-co
 along with the [Vulkan SDK](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started_ubuntu.html).
 
 Note: if using Ubuntu 22 with Wayland (or other distros for that matter), the above x11 dev packages still work via xwayland.
+
+## Learning More
+
+The [documentation](https://gprt-org.github.io/GPRT/) lists every host
+and device API call. The samples are arranged as a progression of small
+programs starting from `samples/s0-rayGenPrograms`; reading them is the
+best way to become familiar with the API. The tests under `tests/`
+provide additional usage examples for buffer and acceleration structure
+operations.
