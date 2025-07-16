@@ -641,6 +641,10 @@ using float16_t1 = vector<float16_t, 1>;
 using float16_t2 = vector<float16_t, 2>;
 using float16_t3 = vector<float16_t, 3>;
 using float16_t4 = vector<float16_t, 4>;
+using double1 = vector<double, 1>;
+using double2 = vector<double, 2>;
+using double3 = vector<double, 3>;
+using double4 = vector<double, 4>;
 
 } // namespace math
 
@@ -664,3 +668,7 @@ using float16_t1 = math::float16_t1;
 using float16_t2 = math::float16_t2;
 using float16_t3 = math::float16_t3;
 using float16_t4 = math::float16_t4;
+using double1 = math::double1;
+using double2 = math::double2;
+using double3 = math::double3; 
+using double4 = math::double4;
