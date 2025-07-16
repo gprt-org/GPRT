@@ -38,6 +38,12 @@ jobs:
                             freeglut3-dev \
                             mesa-common-dev
 
+    - name: Update CMake
+      uses: ssrobins/install-cmake@v1
+      with:
+        version: 3.24.3
+        cache: true
+
     - name: Build Shared
       shell: bash
       run: |
@@ -47,8 +53,6 @@ jobs:
         cmake --version
         cmake .. -DGPRT_BUILD_SHARED=ON
         make VERBOSE=1 -j4
-
-
 
     - name: Build Static
       shell: bash
@@ -77,6 +81,12 @@ jobs:
       uses: humbletim/install-vulkan-sdk@v1.2
       with:
         version: 1.4.309.0
+        cache: true
+
+    - name: Update CMake
+      uses: ssrobins/install-cmake@v1
+      with:
+        version: 3.24.3
         cache: true
 
     - name: Build
