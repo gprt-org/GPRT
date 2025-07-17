@@ -42,3 +42,4 @@ pictures
 *.xf
 *.imgui.ini
 gprt/imgui.ini
+.claud*
