@@ -1167,19 +1167,22 @@ gprtCallableSetParameters(GPRTCallableOf<T> callable, T &parameters, int deviceI
   gprtCallableSetParameters((GPRTCallable) callable, (void *) &parameters, deviceID);
 }
 
-// ------------------------------------------------------------------
-/*! create a new acceleration structure for AABB geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms An array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_GEOM_USER
-  type.
-
-  \param flags reserved for future use
-*/
+/**
+ * @brief Creates a new bottom-level acceleration structure (BLAS) for AABB geometry.
+ *
+ * This function creates an acceleration structure that can be used to accelerate
+ * ray tracing against axis-aligned bounding boxes (AABBs). The AABB positions must
+ * be set on the geometry before building this acceleration structure.
+ *
+ * @param context The GPRT context
+ * @param geom The AABB geometry to create an acceleration structure for. Must be
+ *             created with gprtGeomCreate using GPRT_AABBS geometry kind.
+ * @param flags Reserved for future use (currently unused, pass 0)
+ * @returns A handle to the created acceleration structure
+ *
+ * @see gprtAABBsSetPositions to set AABB positions before building
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtAABBAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
