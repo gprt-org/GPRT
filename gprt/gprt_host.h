@@ -526,14 +526,27 @@ gprtLSSSetVertices(GPRTGeomOf<T1> lssGeom, GPRTBufferOf<T2> vertices, uint32_t c
   gprtLSSSetVertices((GPRTGeom) lssGeom, (GPRTBuffer) vertices, count, stride, offset);
 }
 
-GPRT_API void gprtLSSSetIndices(GPRTGeom triangles, GPRTBuffer indices, uint32_t count,
+/**
+ * @brief Sets the index buffer for line swept sphere (LSS) geometry.
+ * 
+ * LSS indices define line segments by specifying pairs of vertex indices.
+ * Each index pair (uint2) connects two vertices to form a line segment
+ * that will be swept with spheres of varying radii.
+ * 
+ * @param lssGeom The LSS geometry to set indices for
+ * @param indices Buffer containing vertex index pairs (uint2)
+ * @param count Number of line segments (index pairs)
+ * @param stride Byte stride between consecutive index pairs (default: sizeof(uint2))
+ * @param offset Byte offset to the first index pair in the buffer (default: 0)
+ */
+GPRT_API void gprtLSSSetIndices(GPRTGeom lssGeom, GPRTBuffer indices, uint32_t count,
                                 uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0));
 
 template <typename T1, typename T2>
 void
-gprtLSSSetIndices(GPRTGeomOf<T1> triangles, GPRTBufferOf<T2> indices, uint32_t count,
+gprtLSSSetIndices(GPRTGeomOf<T1> lssGeom, GPRTBufferOf<T2> indices, uint32_t count,
                   uint32_t stride GPRT_IF_CPP(= sizeof(uint2)), uint32_t offset GPRT_IF_CPP(= 0)) {
-  gprtLSSSetIndices((GPRTGeom) triangles, (GPRTBuffer) indices, count, stride, offset);
+  gprtLSSSetIndices((GPRTGeom) lssGeom, (GPRTBuffer) indices, count, stride, offset);
 }
 
 GPRT_API void gprtSolidsSetVertices(GPRTGeom solidsGeom, GPRTBuffer vertices, uint32_t count,
@@ -566,9 +579,24 @@ gprtSolidsSetTypes(GPRTGeomOf<T1> solidsGeom, GPRTBufferOf<T2> types, uint32_t c
   gprtSolidsSetTypes((GPRTGeom) solidsGeom, (GPRTBuffer) types, count, stride, offset);
 }
 
-/*! set the aabb positions (minX, minY, minZ, maxX, maxY, maxZ)
-  for the given AABB geometry. This _has_ to be set before the accel(s)
-  that this geom is used in get built. */
+/**
+ * @brief Sets the vertex positions buffer for the given solids geometry.
+ * 
+ * Solids are finite elements (tetrahedra, hexahedra, wedges, pyramids) used 
+ * for volume rendering. Each vertex is stored as a float4 (x, y, z, w).
+ * The actual vertices used by each solid are specified through index buffers.
+ * This must be set before the acceleration structure(s) that use this 
+ * geometry are built.
+ * 
+ * @param solids The solids geometry to set positions for
+ * @param positions Buffer containing vertex positions (float4 per vertex)
+ * @param count Number of vertices in the buffer
+ * @param stride Byte stride between consecutive vertices (default: sizeof(float4))
+ * @param offset Byte offset to the first vertex in the buffer (default: 0)
+ * 
+ * @note Different solid types require different numbers of vertices:
+ *       tetrahedron (4), pyramid (5), wedge (6), hexahedron (8)
+ */
 GPRT_API void gprtSolidsSetPositions(GPRTGeom aabbs, GPRTBuffer positions, uint32_t count,
                                     uint32_t stride GPRT_IF_CPP(= 8 * sizeof(float4)),
                                     uint32_t offset GPRT_IF_CPP(= 0));
@@ -848,24 +876,92 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
  */
 GPRT_API uint64_t gprtGuiRasterize(GPRTContext context);
 
-/*! Requests the given size (in bytes) to reserve for parameters
-  of ray tracing programs. Defaults to 256 bytes */
+/**
+ * @brief Requests the record sizes (in bytes) to reserve for parameters of ray tracing programs.
+ * 
+ * This function sets the maximum size of parameter records that can be passed to
+ * different types of ray tracing programs. This must be called before creating any
+ * programs, pipelines, or geometries that use these record types.
+ * 
+ * @param raygenRecordSize Size in bytes for ray generation program parameters (default: 256)
+ * @param hitRecordSize Size in bytes for hit group program parameters (default: 256)
+ * @param missRecordSize Size in bytes for miss program parameters (default: 256)
+ * @param callableRecordSize Size in bytes for callable program parameters (default: 256)
+ * 
+ * @note This function should be called early in initialization, before creating programs.
+ */
 GPRT_API void gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32_t missRecordSize, uint32_t callableRecordSize);
 
-/*! set number of ray types to be used; this should be
-  done before any programs, pipelines, geometries, etc get
-  created */
+/**
+ * @brief Sets the number of ray types to be used in ray tracing.
+ * 
+ * Ray types allow you to have different intersection, any-hit, and closest-hit 
+ * programs for the same geometry based on the type of ray being traced. For 
+ * example, you might have different shaders for primary rays vs shadow rays 
+ * hitting the same geometry.
+ * 
+ * @param numRayTypes The number of ray types to support. Each geometry type can
+ *                    have up to numRayTypes different hit programs.
+ * 
+ * @note Must be called before context creation with gprtContextCreate()
+ */
 GPRT_API void gprtRequestRayTypeCount(uint32_t numRayTypes);
 
-/*! set maximum recursion depth available in a ray tracing pipeline.
- Currently defaults to 1, ie no recursion. */
+/**
+ * @brief Sets the maximum recursion depth available in a ray tracing pipeline.
+ * 
+ * This controls how many times rays can be recursively traced (e.g., for
+ * reflections, refractions, or other recursive effects). A value of 1 means
+ * no recursion - only primary rays can be traced.
+ * 
+ * Recursion can be more convenient than iterative ray tracing loops in raygen
+ * for complex shading graphs, as it allows natural expression of recursive
+ * phenomena and automatic management of ray payload data across trace calls.
+ * However, it may use more GPU resources than iterative approaches.
+ * 
+ * @param rayRecursionDepth Maximum recursion depth (default: 1, meaning no recursion)
+ * 
+ * @note Must be called before context creation with gprtContextCreate()
+ */
 GPRT_API void gprtRequestRayRecursionDepth(uint32_t rayRecursionDepth);
 
 /*! Requests that ray queries be enabled for inline ray tracing support. */
 GPRT_API void gprtRequestRayQueries();
 
+/**
+ * @brief Sets the maximum size of attributes that can be passed between shaders.
+ * 
+ * Attributes are used to pass data from intersection shaders to hit shaders
+ * for custom primitives (like spheres, curves, etc). The size must accommodate
+ * the largest attribute structure used by any custom intersection shader.
+ * 
+ * @param attributeSize Maximum size in 4-byte registers for intersection attributes 
+ *                      (default: 4 registers = 16 bytes, maximum: 8 registers = 32 bytes). 
+ *                      The default is sufficient for RSTW interpolants used by solids.
+ * 
+ * @note Must be called before context creation with gprtContextCreate()
+ * @warning The size is specified in 4-byte registers, not bytes
+ */
 GPRT_API void gprtRequestMaxAttributeSize(uint32_t attributeSize);
 
+/**
+ * @brief Sets the maximum size of ray payload data that can be passed between shaders.
+ * 
+ * The ray payload carries data between ray generation, closest hit, miss, any hit,
+ * and callable shaders during ray traversal. Payload data up to this size will be
+ * kept in registers for optimal performance.
+ * 
+ * If shaders use more payload registers than requested here, the excess will spill
+ * to local memory, reducing performance. However, requesting more registers than
+ * needed can reduce occupancy and limit the number of concurrent ray tracing threads.
+ * For best performance, set this to the minimum size required by your shaders.
+ * 
+ * @param payloadSize Maximum size in 4-byte registers for ray payload data 
+ *                    (default: 32 registers = 128 bytes)
+ * 
+ * @note Must be called before context creation with gprtContextCreate()
+ * @warning The size is specified in 4-byte registers, not bytes
+ */
 GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
 
 /** Tells the GPRT to initialize a vendor-supplied denoising model. 
@@ -1192,18 +1288,23 @@ gprtAABBAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flags
 }
 
 // ------------------------------------------------------------------
-/*! create a new acceleration structure for triangle geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms An array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_TRIANGLES
-  type.
-
-  \param flags reserved for future use
-*/
+/**
+ * @brief Creates a new bottom-level acceleration structure (BLAS) for triangle geometry.
+ * 
+ * This function creates an acceleration structure that can be used to accelerate
+ * ray tracing against triangle meshes. The triangle vertices and indices must
+ * be set on the geometry before building this acceleration structure.
+ * 
+ * @param context The GPRT context
+ * @param geom The triangle geometry to create an acceleration structure for. Must be
+ *             created with gprtGeomCreate using GPRT_TRIANGLES geometry kind.
+ * @param flags Reserved for future use (currently unused, pass 0)
+ * @returns A handle to the created acceleration structure
+ * 
+ * @see gprtTrianglesSetVertices to set triangle vertices before building
+ * @see gprtTrianglesSetIndices to set triangle indices before building
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtTriangleAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
@@ -1213,18 +1314,22 @@ gprtTriangleAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int f
 }
 
 // ------------------------------------------------------------------
-/*! create a new acceleration structure for sphere geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms An array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_SPHERES
-  type.
-
-  \param flags reserved for future use
-*/
+/**
+ * @brief Creates a new bottom-level acceleration structure (BLAS) for sphere geometry.
+ * 
+ * This function creates an acceleration structure that can be used to accelerate
+ * ray tracing against spheres. The sphere vertices (center + radius) must be set
+ * on the geometry before building this acceleration structure.
+ * 
+ * @param context The GPRT context
+ * @param geom The sphere geometry to create an acceleration structure for. Must be
+ *             created with gprtGeomCreate using GPRT_SPHERES geometry kind.
+ * @param flags Reserved for future use (currently unused, pass 0)
+ * @returns A handle to the created acceleration structure
+ * 
+ * @see gprtSpheresSetVertices to set sphere centers and radii before building
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtSphereAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
@@ -1234,18 +1339,28 @@ gprtSphereAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int fla
 }
 
 // ------------------------------------------------------------------
-/*! create a new acceleration structure for line swept sphere geometries.
-
-  \param numGeometries Number of geometries in this acceleration structure, must
-  be non-zero.
-
-  \param arrayOfChildGeoms An array of 'numGeometries' child
-  geometries. Every geom in this array must be a valid gprt geometry
-  created with gprtGeomCreate, and must be of a GPRT_LSS
-  type.
-
-  \param flags reserved for future use
-*/
+/**
+ * @brief Creates a new bottom-level acceleration structure (BLAS) for line swept sphere geometry.
+ * 
+ * This function creates an acceleration structure that can be used to accelerate
+ * ray tracing against line swept spheres (LSS). LSS are useful for rendering
+ * hair, fur, or other thin cylindrical objects. Each LSS segment connects two
+ * vertices with potentially different radii, creating a cone-like midsection
+ * when radii differ. The vertices and indices must be set on the geometry 
+ * before building this acceleration structure.
+ * 
+ * @param context The GPRT context
+ * @param geom The LSS geometry to create an acceleration structure for. Must be
+ *             created with gprtGeomCreate using GPRT_LSS geometry kind.
+ * @param flags LSS-specific flags controlling end cap behavior:
+ *              - GPRT_LSS_CHAINED_END_CAPS: Include end caps for chained segments
+ *              - GPRT_LSS_NO_END_CAPS: No end caps
+ * @returns A handle to the created acceleration structure
+ * 
+ * @see gprtLSSSetVertices to set LSS vertices before building
+ * @see gprtLSSSetIndices to set LSS indices before building
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtLSSAccelCreate(GPRTContext context, GPRTGeom geom, GPRTLSSFlags flags GPRT_IF_CPP( = GPRT_LSS_CHAINED_END_CAPS));
 
 template <typename T>
@@ -1255,9 +1370,26 @@ gprtLSSAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, GPRTLSSFlags flags 
 }
 
 // ------------------------------------------------------------------
-/*! create a new acceleration structure for solid geometries.
-  \param flags reserved for future use
-*/
+/**
+ * @brief Creates a new bottom-level acceleration structure (BLAS) for solid geometry.
+ * 
+ * This function creates an acceleration structure that can be used to accelerate
+ * ray tracing against solid finite elements (tetrahedra, hexahedra, wedges, 
+ * pyramids, tetrahedral pairs) used for volume rendering. The vertices, indices,
+ * and types must be set on the geometry before building this acceleration structure.
+ * 
+ * @param context The GPRT context
+ * @param geom The solid geometry to create an acceleration structure for. Must be
+ *             created with gprtGeomCreate using GPRT_SOLIDS geometry kind.
+ * @param flags Reserved for future use (currently unused, pass 0)
+ * @returns A handle to the created acceleration structure
+ * 
+ * @see gprtSolidsSetVertices to set solid vertices before building
+ * @see gprtSolidsSetIndices to set solid indices before building
+ * @see gprtSolidsSetTypes to set solid types before building
+ * @see gprtSolidsSetPositions to set vertex positions before building
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtSolidAccelCreate(GPRTContext context, GPRTGeom geom, unsigned int flags GPRT_IF_CPP(= 0));
 
 template <typename T>
@@ -1267,14 +1399,22 @@ gprtSolidAccelCreate(GPRTContext context, GPRTGeomOf<T> &geom, unsigned int flag
 }
 
 // ------------------------------------------------------------------
-/*! create a new instance acceleration structure with given number of
-  instances.
-
-  \param numInstances Number of acceleration structures instantiated in the leaves
-  of this acceleration structure, must be non-zero.
-
-  \param instances A buffer of 'numInstances' instances.
-*/
+/**
+ * @brief Creates a new top-level acceleration structure (TLAS) for instances.
+ * 
+ * This function creates an instance acceleration structure that references
+ * bottom-level acceleration structures (BLAS) with transforms, creating a
+ * two-level hierarchy. Each instance can have its own transformation matrix
+ * and visibility mask.
+ * 
+ * @param context The GPRT context
+ * @param numInstances Number of instances in this acceleration structure, must be non-zero
+ * @param instances A buffer containing 'numInstances' instance data structures
+ * @returns A handle to the created acceleration structure
+ * 
+ * @see gprtAccelGetInstance to get instance data from a built BLAS
+ * @see gprtAccelBuild to build the acceleration structure after creation
+ */
 GPRT_API GPRTAccel gprtInstanceAccelCreate(GPRTContext context, uint numInstances,
                                            GPRTBufferOf<gprt::Instance> instances);
 
@@ -1522,8 +1662,17 @@ gprtSamplerCreate(GPRTContext context, GPRTFilter magFilter GPRT_IF_CPP(= GPRT_F
                   GPRTSamplerAddressMode addressMode GPRT_IF_CPP(= GPRT_SAMPLER_ADDRESS_MODE_REPEAT),
                   GPRTBorderColor borderColor GPRT_IF_CPP(= GPRT_BORDER_COLOR_OPAQUE_BLACK));
 
-// Returns the unique gprt-managed index for the given texture sampler.
-GPRT_API uint32_t gprtSamplerGetIndex(GPRTSampler texture, int deviceID GPRT_IF_CPP(= 0));
+/**
+ * @brief Returns the unique GPRT-managed index for the given sampler.
+ * 
+ * This function returns the index that can be used to access the sampler
+ * on the device through descriptor handles.
+ * 
+ * @param sampler The sampler to get the index for
+ * @param deviceID The device ID to get the index for (default: 0)
+ * @returns The unique index for the sampler on the specified device
+ */
+GPRT_API uint32_t gprtSamplerGetIndex(GPRTSampler sampler, int deviceID GPRT_IF_CPP(= 0));
 
 inline DescriptorHandle<SamplerState> gprtSamplerGetHandle(GPRTSampler sampler, int deviceID GPRT_IF_CPP(= 0)) {
   DescriptorHandle<SamplerState> handle;
@@ -1940,6 +2089,22 @@ template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int d
   return (T *) gprtBufferGetHostPointer((GPRTBuffer) buffer, deviceID);
 }
 
+/**
+ * @brief Maps a device buffer for host CPU access.
+ * 
+ * This function makes a device buffer's memory accessible to the CPU for 
+ * reading and/or writing. After mapping, use gprtBufferGetHostPointer() to 
+ * get a CPU-accessible pointer to the buffer data. When finished, call
+ * gprtBufferUnmap() to make the changes visible to the device.
+ * 
+ * @param buffer The buffer to map for CPU access
+ * @param deviceID The device ID containing the buffer (default: 0)
+ * 
+ * @note Only device buffers and shared buffers can be mapped. Host buffers
+ *       are always accessible and don't need mapping.
+ * @see gprtBufferUnmap() to unmap after modifications
+ * @see gprtBufferGetHostPointer() to get the mapped pointer
+ */
 GPRT_API void gprtBufferMap(GPRTBuffer buffer, int deviceID GPRT_IF_CPP(= 0));
 
 template <typename T>
