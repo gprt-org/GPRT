@@ -22,9 +22,6 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 diffuseColor;
   float3 specularColor;
@@ -51,8 +48,7 @@ AngleAxis3x3(float angle, float3 axis) {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
+void Transform(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<Constants> pc) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
   int instanceID = DispatchThreadID.x;
@@ -73,8 +69,7 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
 }
 
 [shader("raygeneration")]
-void
-raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -111,7 +106,7 @@ raygen(uniform RayGenData record) {
   float2 prevUV = float2( clipPrev.x, -clipPrev.y ) * 0.5 * rcpWprev + 0.5;
   prevUV            -= record.prevJitter / float2(dims);        // no-jitter
 
-  float2 motionVecPix = (prevUV - currUV) * float2(dims);      // perfectly uniform across screen
+  float2 motionVecPix = (prevUV - currUV) * float2(dims);      // perfectly constant across screen
 
   if (payload.hitT == 65504.f)  motionVecPix = float2(0.f, 0.f); // no motion for background
   record.mvec[pixelID] = motionVecPix;        
@@ -150,8 +145,7 @@ raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void
-closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
+void closesthit(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc, PushConstant<Constants> pc) {
   // compute normal:
   uint instanceID = InstanceIndex();
   uint primID = PrimitiveIndex();
@@ -203,8 +197,7 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
@@ -224,8 +217,7 @@ miss(uniform MissProgData record, inout Payload payload) {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-RenderPass(uint3 DispatchThreadID: SV_DispatchThreadID, uniform RenderPassParams pc) {
+void RenderPass(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<RenderPassParams> pc) {
   int2 pixelID = DispatchThreadID.xy;
   if (pixelID.x >= pc.fbSize.x || pixelID.y >= pc.fbSize.y) {
     return;

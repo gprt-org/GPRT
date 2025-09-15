@@ -22,13 +22,9 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 [shader("compute")]
 [numthreads(512, 1, 1)]
-void
-Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
+void Transform(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<Constants> pc) {
   int instanceID = DispatchThreadID.x;
   gprt::Instance instance = pc.instances[instanceID];
 
@@ -61,8 +57,7 @@ struct Payload {
 };
 
 [shader("raygeneration")]
-void
-RayGen(uniform RayGenData record) {
+void RayGen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -85,8 +80,7 @@ hsv2rgb(float3 input) {
 }
 
 [shader("closesthit")]
-void
-ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
+void ClosestHit(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
   uint3 index = record.index[primID];
@@ -102,8 +96,7 @@ ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;

@@ -1,10 +1,11 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
-struct Payload {
+struct ColorPayload {
   float3 color;
+};
+
+struct TriangleAttributes {
+  float2 bc;
 };
 
 // This closest hit shader runs when a ray hits a triangle.
@@ -14,15 +15,18 @@ struct Payload {
 // - The third is the intersection attributes. For triangles, these are two "barycentrics", used 
 //   for interpolating per-vertex values.
 [shader("closesthit")]
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
-  payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
+void TriangleMesh(
+  ShaderRecord<TrianglesGeomData> record, 
+  HitAttribute<TriangleAttributes> tri,
+  PayloadState<ColorPayload> payload) {
+  payload.color = float3(tri.bc.x, tri.bc.y, 1.0 - (tri.bc.x + tri.bc.y));
 }
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
-  Payload payload;
+void raygen(PushConstant<RTConstants> pc, ShaderRecord<RayGenData> record) {
+  ColorPayload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
 
@@ -66,6 +70,6 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
-  payload.color = float3(0.0);
+void miss(PushConstant<RTConstants> pc, PayloadState<ColorPayload> payload) {
+  payload.color = float3(0.f);
 }

@@ -16,8 +16,7 @@ over(float4 a, float4 b) {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiConstants pc) {
+void CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<CompositeGuiConstants> pc) {
   int2 pixelID = DispatchThreadID.xy;
   const int fbOfs = pixelID.x + pc.fbSize.x * pixelID.y;
   float2 fragCoord = pixelID + float2(.5f, .5f);
@@ -39,12 +38,8 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
   pc.frameBuffer[fbOfs] = gprt::make_bgra(pixelColor);
 }
 
-[[vk::push_constant]]
-RTPushConstants pc;
-
 [shader("raygeneration")]
-void
-raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<RTPushConstants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -69,15 +64,13 @@ raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void
-closesthit(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+void closesthit(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;

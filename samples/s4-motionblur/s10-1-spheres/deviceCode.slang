@@ -1,14 +1,11 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
 };
 
 [shader("closesthit")]
-void SphereClosestHit(uniform SphereGeomData record, inout Payload payload) {
+void SphereClosestHit(ShaderRecord<SphereGeomData> record, PayloadState<Payload> payload) {
   uint primID = PrimitiveIndex();
   float4 p = record.posAndRadius[primID];
 
@@ -31,7 +28,7 @@ void SphereClosestHit(uniform SphereGeomData record, inout Payload payload) {
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
@@ -77,6 +74,6 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

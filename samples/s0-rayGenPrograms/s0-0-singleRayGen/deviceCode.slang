@@ -7,7 +7,7 @@
 
 // Entry points with "raygeneration" initiate rays to trace into the scene. 
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record) {
+void simpleRayGen(ShaderRecord<RayGenData> record) {
   uint2 pixelID = DispatchRaysIndex().xy; // Which thread is currently running?
   uint2 fbSize = DispatchRaysDimensions().xy; // How many threads were launched together?
 

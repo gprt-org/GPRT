@@ -1,15 +1,18 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
   float density;
 };
 
 [shader("closesthit")]
-void SolidClosestHit(uniform SolidGeomData record, inout Payload payload, in float4 rstw) {
+void SolidClosestHit(
+  ShaderRecord<SolidGeomData> record, 
+  PushConstant<Constants> pc,
+  PayloadState<Payload> payload, 
+  HitAttribute<float4> rstw
+)
+{
   // Per-vertex values are interpolated within the built-in intersector
   payload.density = rstw.w * 2.0;
   
@@ -34,14 +37,14 @@ void SolidClosestHit(uniform SolidGeomData record, inout Payload payload, in flo
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.density = 0.0;
 }
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;

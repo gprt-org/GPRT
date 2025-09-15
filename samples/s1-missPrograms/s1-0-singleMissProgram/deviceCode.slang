@@ -10,7 +10,7 @@ struct Payload {
 // When our rays "miss", then this miss program will be called. 
 // We'll return a color using the ray's payload.
 [shader("miss")]
-void miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   // Read the uv parameter passed in by the program that called "TraceRay"
   float2 uv = payload.uv;
   float3 C = genSMPTETestPattern(uv);
@@ -34,7 +34,7 @@ void miss(uniform MissProgData record, inout Payload payload) {
 // To keep things simple, we'll use this ray generation program to trace a ray that will always miss. 
 // Then, we'll store the color returned by our miss program into the image.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
 

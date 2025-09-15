@@ -118,7 +118,7 @@ int main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s7_0_deviceCode);
-  PushConstants pc;
+  Constants pc;
   pc.now = 0.f;
 
   uint2 renderFBSize = fbSize;
@@ -131,7 +131,7 @@ int main(int ac, char **av) {
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
+  auto transformProgram = gprtComputeCreate<Constants>(context, module, "Transform");
   auto renderpassProgram = gprtComputeCreate<RenderPassParams>(context, module, "RenderPass");
 
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");

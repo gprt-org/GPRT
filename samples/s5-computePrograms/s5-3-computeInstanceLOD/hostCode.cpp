@@ -87,7 +87,7 @@ int main(int ac, char **av) {
 
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
-  PushConstants pc;
+  Constants pc;
   pc.now = 0.f;
 
   // ##################################################################
@@ -104,7 +104,7 @@ int main(int ac, char **av) {
   // -------------------------------------------------------
   // set up instance transform program to animate instances
   // -------------------------------------------------------
-  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
+  auto transformProgram = gprtComputeCreate<Constants>(context, module, "Transform");
 
   // -------------------------------------------------------
   // set up ray gen program

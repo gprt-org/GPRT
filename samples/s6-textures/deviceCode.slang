@@ -22,9 +22,6 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float spreadAngle;
   float3 color;
@@ -46,8 +43,7 @@ AngleAxis3x3(float angle, float3 axis) {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
+void Transform(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<Constants> pc) {
   // This kernel animates the texture planes, rotating them in a circle
   // and placing them in a grid.
   int instanceID = DispatchThreadID.x;
@@ -67,8 +63,7 @@ Transform(uint3 DispatchThreadID: SV_DispatchThreadID) {
 }
 
 [shader("raygeneration")]
-void
-raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = DispatchRaysIndex().xy;
@@ -101,8 +96,7 @@ raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void
-closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
+void closesthit(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc, PushConstant<Constants> pc) {
   // compute normal:
   uint instanceID = InstanceIndex();
   uint primID = PrimitiveIndex();
@@ -181,8 +175,7 @@ closesthit(uniform TrianglesGeomData record, inout Payload payload, float2 bc) {
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;

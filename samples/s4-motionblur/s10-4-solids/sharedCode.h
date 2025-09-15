@@ -18,7 +18,7 @@ struct RayGenData {
 };
 
 /* Constants that change each frame */
-struct PushConstants {
+struct Constants {
   float time;
   uint frameID;
 };

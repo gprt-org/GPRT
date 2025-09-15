@@ -1,14 +1,11 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
 };
 
 [shader("closesthit")]
-void LSSClosestHit(uniform LSSGeomData record, inout Payload payload, in float attr) {
+void LSSClosestHit(ShaderRecord<LSSGeomData> record, PayloadState<Payload> payload, HitAttribute<float> attr) {
   uint primID = PrimitiveIndex();
   uint2 indices = record.indices[primID];
   float4 pa = record.vertices[indices.x];
@@ -44,7 +41,7 @@ void LSSClosestHit(uniform LSSGeomData record, inout Payload payload, in float a
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
@@ -90,6 +87,6 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

@@ -1,8 +1,5 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
 };
@@ -29,14 +26,14 @@ float hash12(float2 src) {
 // - The third is the intersection attributes. For triangles, these are two "barycentrics", used 
 //   for interpolating per-vertex values.
 [shader("closesthit")]
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+void TriangleMesh(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
 }
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
@@ -82,6 +79,6 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

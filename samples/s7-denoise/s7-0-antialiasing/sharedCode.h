@@ -78,7 +78,7 @@ struct MissProgData {
 };
 
 /* Constants that change each frame */
-struct PushConstants {
+struct Constants {
   /*! the current time */
   float now;
   int frame;

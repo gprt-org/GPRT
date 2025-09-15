@@ -3,7 +3,7 @@
 #include "sharedCode.h"
 
 [shader("raygeneration")]
-void firstRayGen(uniform RayGenData record) {
+void firstRayGen(ShaderRecord<RayGenData> record) {
   uint2 threadID = DispatchRaysIndex().xy;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = threadID + uint2(0, 0); // First, have these threads write to the left of the image...
@@ -20,7 +20,7 @@ void firstRayGen(uniform RayGenData record) {
 }
 
 [shader("raygeneration")]
-void secondRayGen(uniform RayGenData record) {
+void secondRayGen(ShaderRecord<RayGenData> record) {
   uint2 threadID = DispatchRaysIndex().xy;
   uint2 dims = DispatchRaysDimensions().xy;
   uint2 pixelID = threadID + uint2(dims.x, 0);   // ...Then have these threads write to the right of the image

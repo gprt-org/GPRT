@@ -86,7 +86,7 @@ int main(int ac, char **av) {
   GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s3_1_deviceCode);
 
-  PushConstants pc;
+  Constants pc;
 
   // ##################################################################
   // set up all the GPU kernels we want to run

@@ -26,12 +26,9 @@ struct Payload {
   float3 color;
 };
 
-[[vk::push_constant]]
-PushConstants pc;
-
 [shader("raygeneration")]
 void
-simpleRayGen(uniform RayGenData record) {
+simpleRayGen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -58,14 +55,14 @@ simpleRayGen(uniform RayGenData record) {
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void
-ComputeBounds(uint3 DispatchThreadID: SV_DispatchThreadID, uniform AABBGeomData record) {
+ComputeBounds(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<AABBGeomData> pc) {
   int primID = DispatchThreadID.x;
-  float3 position = record.vertex[primID];
-  float radius = record.radius[primID];
+  float3 position = pc.vertex[primID];
+  float radius = pc.radius[primID];
   float3 aabbMin = position - float3(radius, radius, radius);
   float3 aabbMax = position + float3(radius, radius, radius);
-  record.aabbs[2 * primID] = aabbMin;
-  record.aabbs[2 * primID + 1] = aabbMax;
+  pc.aabbs[2 * primID] = aabbMin;
+  pc.aabbs[2 * primID + 1] = aabbMax;
 }
 
 struct BBoxAttributes {
@@ -77,7 +74,7 @@ struct BBoxAttributes {
 
 [shader("intersection")]
 void
-AABBIntersection(uniform AABBGeomData record) {
+AABBIntersection(ShaderRecord<AABBGeomData> record) {
   uint32_t primID = PrimitiveIndex();
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
@@ -131,7 +128,7 @@ AABBIntersection(uniform AABBGeomData record) {
 // called and we can conclude which reported hit is closest.
 [shader("closesthit")]
 void
-AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttributes attr) {
+AABBClosestHit(ShaderRecord<AABBGeomData> record, PayloadState<Payload> payload, HitAttribute<BBoxAttributes> attr) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   int hitKind = HitKind();
@@ -156,7 +153,7 @@ AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttrib
 // A background with a vignette effect.
 [shader("miss")]
 void
-miss(uniform MissProgData record, inout Payload payload) {
+miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;

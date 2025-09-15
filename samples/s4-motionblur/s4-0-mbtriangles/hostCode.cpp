@@ -104,7 +104,7 @@ int main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // Main render loop
-  PushConstants pc;
+  Constants pc;
   do {
     pc.time = float(gprtGetTime(context));
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);

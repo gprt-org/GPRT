@@ -91,7 +91,7 @@ int main(int ac, char **av) {
   gprtBuildShaderBindingTable(context);
 
   // Main render loop
-  PushConstants pc;
+  Constants pc;
   pc.frameID = 0;
   do {
     pc.time = float(gprtGetTime(context));

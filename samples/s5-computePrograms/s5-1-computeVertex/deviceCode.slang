@@ -33,9 +33,8 @@ getPos(float px, float py, float k, float width, float depth, float height, floa
 
 [shader("compute")]
 [numthreads(32, 1, 1)]
-void
-Vertex(uint3 DispatchThreadID: SV_DispatchThreadID, uniform TrianglesGeomData uniforms) {
-  int gridSize = uniforms.gridSize;
+void Vertex(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<TrianglesGeomData> pc) {
+  int gridSize = pc.gridSize;
   int TriID = DispatchThreadID.x;
 
   bool even = (TriID % 2) == 0;
@@ -55,31 +54,28 @@ Vertex(uint3 DispatchThreadID: SV_DispatchThreadID, uniform TrianglesGeomData un
   float k = 20.f;
 
   if (even) {
-    v0 = getPos(gx, gy, k, width, depth, height, uniforms.now);
-    v1 = getPos(gx + dx, gy, k, width, depth, height, uniforms.now);
-    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, uniforms.now);
+    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
+    v1 = getPos(gx + dx, gy, k, width, depth, height, pc.now);
+    v2 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
   } else {
-    v0 = getPos(gx, gy, k, width, depth, height, uniforms.now);
-    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, uniforms.now);
-    v2 = getPos(gx, gy + dy, k, width, depth, height, uniforms.now);
+    v0 = getPos(gx, gy, k, width, depth, height, pc.now);
+    v1 = getPos(gx + dx, gy + dy, k, width, depth, height, pc.now);
+    v2 = getPos(gx, gy + dy, k, width, depth, height, pc.now);
   }
 
-  uniforms.index[TriID] = index;
-  uniforms.vertex[index.x] = v0;
-  uniforms.vertex[index.y] = v1;
-  uniforms.vertex[index.z] = v2;
+  pc.index[TriID] = index;
+  pc.vertex[index.x] = v0;
+  pc.vertex[index.y] = v1;
+  pc.vertex[index.z] = v2;
 }
 
 struct Payload {
   float3 color;
 };
 
-[[vk::push_constant]]
-PushConstants pc;
-
 [shader("raygeneration")]
 void
-RayGen(uniform RayGenData record) {
+RayGen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -102,8 +98,7 @@ hsv2rgb(float3 input) {
 }
 
 [shader("closesthit")]
-void
-ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
+void ClosestHit(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload) {
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
   uint3 index = record.index[primID];
@@ -120,8 +115,7 @@ ClosestHit(uniform TrianglesGeomData record, inout Payload payload) {
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-miss(uniform MissProgData record, inout Payload payload) {
+void miss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;

@@ -1,8 +1,5 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float4 color;
   float3 normal;
@@ -18,7 +15,7 @@ over(float4 a, float4 b) {
 }
 
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record) {
+void simpleRayGen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -106,7 +103,7 @@ void simpleRayGen(uniform RayGenData record) {
 
 [shader("closesthit")]
 void
-TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
+TriangleMesh(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
@@ -124,7 +121,7 @@ TriangleMesh(uniform TrianglesGeomData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.hitT = -1.0;
   payload.color = float4(0.0);
 }

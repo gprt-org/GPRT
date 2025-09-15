@@ -1,8 +1,5 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
 };
@@ -22,7 +19,7 @@ struct BBoxAttributes {
 };
 
 [shader("intersection")]
-void AABBIntersection(uniform AABBGeomData record) {
+void AABBIntersection(ShaderRecord<AABBGeomData> record) {
   uint primID = PrimitiveIndex();
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
@@ -75,7 +72,7 @@ void AABBIntersection(uniform AABBGeomData record) {
 // Also note, this program is also called after all ReportHit's have been
 // called and we can conclude which reported hit is closest.
 [shader("closesthit")]
-void AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxAttributes attr) {
+void AABBClosestHit(ShaderRecord<AABBGeomData> record, PayloadState<Payload> payload, HitAttribute<BBoxAttributes> attr) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   int hitKind = HitKind();
@@ -100,7 +97,7 @@ void AABBClosestHit(uniform AABBGeomData record, inout Payload payload, in BBoxA
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 iResolution = DispatchRaysDimensions().xy;
@@ -151,6 +148,6 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

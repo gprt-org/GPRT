@@ -123,7 +123,7 @@ int main(int ac, char **av) {
 
   // Structure of parameters that change each frame. We can edit these
   // without rebuilding the shader binding table.
-  PushConstants pc;
+  Constants pc;
 
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;

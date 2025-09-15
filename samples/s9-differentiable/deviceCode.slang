@@ -17,8 +17,7 @@ over(float4 a, float4 b) {
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiConstants pc) {
+void CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<CompositeGuiConstants> pc) {
   int2 pixelID = DispatchThreadID.xy;
   const int fbOfs = pixelID.x + pc.fbSize.x * pixelID.y;
   float2 fragCoord = pixelID + float2(.5f, .5f);
@@ -40,12 +39,8 @@ CompositeGui(uint3 DispatchThreadID: SV_DispatchThreadID, uniform CompositeGuiCo
   pc.frameBuffer[fbOfs] = gprt::make_bgra(pixelColor);
 }
 
-[[vk::push_constant]]
-RTPushConstants pc;
-
 [shader("raygeneration")]
-void
-raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<RTPushConstants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -68,15 +63,13 @@ raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void
-hitTriangle(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+void hitTriangle(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc) {
   payload.color = float3(bc.x, bc.y, 1.0 - (bc.x + bc.y));
   payload.tHit = RayTCurrent();
 }
 
 [Differentiable]
-float
-getSurfaceArea(float3 aabbMin, float3 aabbMax) {
+float getSurfaceArea(float3 aabbMin, float3 aabbMax) {
   float w = aabbMax.x - aabbMin.x;
   float h = aabbMax.y - aabbMin.y;
   float d = aabbMax.z - aabbMin.z;
@@ -84,8 +77,7 @@ getSurfaceArea(float3 aabbMin, float3 aabbMax) {
 }
 
 [Differentiable]
-float
-getVolume(float3 aabbMin, float3 aabbMax) {
+float getVolume(float3 aabbMin, float3 aabbMax) {
   float w = aabbMax.x - aabbMin.x;
   float h = aabbMax.y - aabbMin.y;
   float d = aabbMax.z - aabbMin.z;
@@ -93,8 +85,7 @@ getVolume(float3 aabbMin, float3 aabbMax) {
 }
 
 [Differentiable]
-float3x3
-eul_to_mat3(float3 eul) {
+float3x3 eul_to_mat3(float3 eul) {
   float3x3 mat;
   float ci, cj, ch, si, sj, sh, cc, cs, sc, ss;
 
@@ -118,8 +109,7 @@ eul_to_mat3(float3 eul) {
   return mat;
 }
 
-void
-atomicAccumulate(float *derivBufferPtr, uint idx, float val) {
+void atomicAccumulate(float *derivBufferPtr, uint idx, float val) {
   // No need to accumulate zeros.
   if (val == 0.f)
     return;
@@ -151,8 +141,7 @@ atomicAccumulate(float *derivBufferPtr, uint idx, float val) {
 //   return asfloat(ret_i);
 // }
 
-no_diff float
-atomicMin(no_diff uint64_t bufferAddr, no_diff uint idx, inout float val) {
+no_diff float atomicMin(no_diff uint64_t bufferAddr, no_diff uint idx, inout float val) {
   Atomic<uint> *buffer = (Atomic<uint> *) (((float *) bufferAddr));
 
   // Loop for as long as the compareExchange() fails, which means another thread
@@ -202,8 +191,7 @@ atomicMax(uint64_t bufferAddr, uint idx, inout float val) {
 // Derivative of an atomic max is discontinuous, where only an exact match between value
 // and the currently stored max is non-zero
 [BackwardDerivativeOf(atomicMin)]
-void
-atomicMin(in uint64_t bufferAddr, uint32_t index, inout DifferentialPair<float> value) {
+void atomicMin(in uint64_t bufferAddr, uint32_t index, inout DifferentialPair<float> value) {
   float *buffer = (float *) bufferAddr;
   float ret = buffer[index];
   value = diffPair(value.p, abs(value.p - ret) < .000001f ? ret : 0.f);
@@ -251,8 +239,7 @@ computeOBB(float3 eul, no_diff float3 a, no_diff float3 b, no_diff float3 c, no_
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
-void
-ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+void ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<ComputeOBBConstants> params) {
   if (DispatchThreadID.x >= 1)
     return;
   params.aabbs[0] = float3(+1e38f);
@@ -264,8 +251,7 @@ ClearOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstant
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
-void
-ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+void ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<ComputeOBBConstants> params) {
   if (DispatchThreadID.x >= params.numTrisToInclude)
     return;   // temp
   int triID = DispatchThreadID.x;
@@ -288,8 +274,7 @@ ComputeOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConsta
 
 [shader("compute")]
 [numthreads(128, 1, 1)]
-void
-BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, uniform ComputeOBBConstants params) {
+void BackPropOBB(uint3 DispatchThreadID: SV_DispatchThreadID, PushConstant<ComputeOBBConstants> params) {
   if (DispatchThreadID.x >= params.numTrisToInclude)
     return;   // temp
   int triID = DispatchThreadID.x;
@@ -329,8 +314,7 @@ struct BBoxAttributes {
 };
 
 [shader("intersection")]
-void
-intersectBoundingBox(uniform BoundingBoxData record) {
+void intersectBoundingBox(ShaderRecord<BoundingBoxData> record) {
 
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
@@ -373,8 +357,7 @@ intersectBoundingBox(uniform BoundingBoxData record) {
 }
 
 [shader("closesthit")]
-void
-hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BBoxAttributes attr) {
+void hitBoundingBox(ShaderRecord<BoundingBoxData> record, PayloadState<Payload> payload, in BBoxAttributes attr) {
   float3 ro = ObjectRayOrigin();
   float3 rd = ObjectRayDirection();
   int hitKind = HitKind();
@@ -398,8 +381,7 @@ hitBoundingBox(uniform BoundingBoxData record, inout Payload payload, in BBoxAtt
 
 // A background with a vignette effect.
 [shader("miss")]
-void
-triMiss(uniform MissProgData record, inout Payload payload) {
+void triMiss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {
   float2 resolution = DispatchRaysDimensions().xy;
   float2 fragCoord = DispatchRaysIndex().xy;
   float2 p = (-resolution.xy + 2.0 * fragCoord) / resolution.y;
@@ -409,6 +391,5 @@ triMiss(uniform MissProgData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void
-obbMiss(uniform MissProgData record, inout Payload payload) {}
+void obbMiss(ShaderRecord<MissProgData> record, PayloadState<Payload> payload) {}
 

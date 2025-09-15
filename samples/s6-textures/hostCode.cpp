@@ -84,7 +84,7 @@ int main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "S09 Single Texture");
   GPRTContext context = gprtContextCreate(nullptr, 1);
   GPRTModule module = gprtModuleCreate(context, s6_0_deviceCode);
-  PushConstants pc;
+  Constants pc;
   pc.now = 0.f;
 
   // ##################################################################
@@ -94,7 +94,7 @@ int main(int ac, char **av) {
   GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
   gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "closesthit");
 
-  auto transformProgram = gprtComputeCreate<PushConstants>(context, module, "Transform");
+  auto transformProgram = gprtComputeCreate<Constants>(context, module, "Transform");
 
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "raygen");
 

@@ -1,7 +1,5 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
 
 struct Payload {
   float3 color;
@@ -10,7 +8,7 @@ struct Payload {
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
 [shader("raygeneration")]
-void simpleRayGen(uniform RayGenData record) {
+void simpleRayGen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -45,7 +43,7 @@ hsv2rgb(float3 input) {
 // Here, we can fetch per-geometry data, process that data, and send
 // it back to our ray generation program.
 [shader("closesthit")]
-void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in float2 bc) {
+void TriangleMesh(ShaderRecord<TrianglesGeomData> record, PayloadState<Payload> payload, HitAttribute<float2> bc) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint instanceID = InstanceIndex();
@@ -61,6 +59,6 @@ void TriangleMesh(uniform TrianglesGeomData record, inout Payload payload, in fl
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

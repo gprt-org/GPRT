@@ -22,7 +22,7 @@ struct MissProgData {
 };
 
 /* Constants that change each frame */
-struct PushConstants {
+struct Constants {
   float time;
 };
 

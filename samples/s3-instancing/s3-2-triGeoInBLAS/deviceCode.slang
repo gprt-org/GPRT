@@ -1,14 +1,11 @@
 #include "sharedCode.h"
 
-[[vk::push_constant]]
-PushConstants pc;
-
 struct Payload {
   float3 color;
 };
 
 [shader("raygeneration")]
-void raygen(uniform RayGenData record) {
+void raygen(ShaderRecord<RayGenData> record, PushConstant<Constants> pc) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -36,7 +33,7 @@ void raygen(uniform RayGenData record) {
 }
 
 [shader("closesthit")]
-void closesthit(uniform TrianglesGeomData record, inout Payload payload) {
+void closesthit(uniform TrianglesGeomData record, PayloadState<Payload> payload) {
   // compute normal:
   uint primID = PrimitiveIndex();
   uint3 index = record.index[primID];
@@ -49,6 +46,6 @@ void closesthit(uniform TrianglesGeomData record, inout Payload payload) {
 }
 
 [shader("miss")]
-void miss(inout Payload payload) {
+void miss(PayloadState<Payload> payload) {
   payload.color = float3(0.0);
 }

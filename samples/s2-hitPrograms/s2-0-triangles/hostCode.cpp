@@ -2,6 +2,7 @@
 #include "sharedCode.h" // Shared data between host and device
 
 extern GPRTProgram s2_0_deviceCode;
+extern GPRTProgram s2_0_missCode;
 
 // Vertices defining the triangle
 const int NUM_VERTICES = 3;
@@ -73,10 +74,10 @@ int main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // Main render loop
-  PushConstants pc;
+  RTConstants constants;
   do {
-    pc.time = float(gprtGetTime(context));
-    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, pc);
+    constants.time = float(gprtGetTime(context));
+    gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y, constants);
     gprtBufferPresent(context, frameBuffer);
   }
   while (!gprtWindowShouldClose(context));

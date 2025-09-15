@@ -22,6 +22,6 @@ struct MissProgData {
 
 /* A small structure of constants that can change every frame without rebuilding the
   shader binding table. (must be 128 bytes or less) */
-struct PushConstants {
+struct Constants {
   float time;
 };
