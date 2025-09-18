@@ -3346,8 +3346,6 @@ public:
       LOG_ERROR("Previous build mode must support updates!");
     }
 
-    VkResult err;
-
     // if we previously minimized memory, we need to reallocate our scratch buffer...
     if (minimizeMemory) {
       // Get size info
@@ -3622,7 +3620,7 @@ struct SphereAccel : public Accel {
       params.aabbs = gprtBufferGetDevicePointer(fallbackAABBs);
       params.vertices = (float4 *) sphereGeom->vertex.buffers[0]->getDeviceAddress();
       params.offset = 0;
-      params.count = numSpheres;
+      params.count = (uint32_t)numSpheres;
       gprtComputeLaunch(SphereBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
@@ -3756,7 +3754,7 @@ struct LSSAccel : public Accel {
       params.vertices = (float4 *) lssGeom->vertex.buffers[0]->getDeviceAddress();
       params.indices = (uint2 *) lssGeom->index.buffer->getDeviceAddress();
       params.offset = 0;
-      params.count = numLSS;
+      params.count = (uint32_t)numLSS;
       params.endcap0 = lssGeom->endcap0;
       params.endcap1 = lssGeom->endcap1;
       gprtComputeLaunch(LSSBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
@@ -3884,7 +3882,7 @@ struct SolidAccel : public Accel {
       params.typesOffset = solidGeom->types.offset;
       params.typesStride = solidGeom->types.stride;
       params.offset = 0;
-      params.count = numSolids;
+      params.count = (uint32_t)numSolids;
       gprtComputeLaunch(SolidBounds, uint3(((params.count + 255) / 256), 1, 1), uint3(256, 1, 1), params);
     }
 
@@ -3907,14 +3905,14 @@ struct SolidAccel : public Accel {
         geom.geometry.aabbs.data.deviceAddress = (VkDeviceAddress) gprtBufferGetDevicePointer(AABBs);
 
         auto &geomRange = accelerationBuildStructureRangeInfo;
-        geomRange.primitiveCount = numSolids;
+        geomRange.primitiveCount = (uint32_t)numSolids;
         // geomRange.primitiveOffset = solidGeom->aabb.offset;
         geomRange.primitiveOffset = 0;
         geomRange.firstVertex = 0;   // unused
         geomRange.transformOffset = 0;
       }
 
-      maxPrimitiveCount = numSolids;
+      maxPrimitiveCount = (uint32_t)numSolids;
     }
 
     innerBuildProc(buildParams);
@@ -4593,9 +4591,9 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           size_t handleStride = handleSize;
 
           // First, copy handle
-          uint32_t handleIDX = ((rayType + requestedFeatures.numRayTypes * geom->geomType->address) + (numRayGens + numMissProgs + numCallableProgs));
+          uint32_t handleIDX = ((rayType + requestedFeatures.numRayTypes * geom->geomType->address) + uint32_t(numRayGens + numMissProgs + numCallableProgs));
           size_t recordOffset = recordStride * (rayType + requestedFeatures.numRayTypes * geomID);
-          size_t handleOffset = handleStride * handleIDX;
+          size_t handleOffset = handleStride * size_t(handleIDX);
           memcpy(mapped + recordOffset, shaderHandleStorage.data() + handleOffset, handleSize);
 
           if (geom->geomType->getKind() == GPRT_PARTICLES) {
@@ -6790,9 +6788,9 @@ VkResult Context::synchronizeGraphics()
   std::vector<uint64_t> values = {GRTimelineCounter};
   VkSemaphoreWaitInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-  info.semaphoreCount = semaphores.size();
+  info.semaphoreCount = uint32_t(semaphores.size());
   info.pSemaphores = semaphores.data();
-  info.pValues = values.data();
+  info.pValues = reinterpret_cast<const uint64_t*>(values.data());
   VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
   if (err) LOG_ERROR("failed to synchronize graphics queue! : \n" + errorString(err));
   return err;
@@ -6804,7 +6802,7 @@ VkResult Context::synchronizeCompute()
   std::vector<uint64_t> values = {CETimelineCounter};
   VkSemaphoreWaitInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-  info.semaphoreCount = semaphores.size();
+  info.semaphoreCount = uint32_t(semaphores.size());
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
   VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
@@ -6819,7 +6817,7 @@ VkResult Context::synchronizeTransfer()
   std::vector<uint64_t> values = {TRTimelineCounter};
   VkSemaphoreWaitInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-  info.semaphoreCount = semaphores.size();
+  info.semaphoreCount = uint32_t(semaphores.size());
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
   VkResult err = vkWaitSemaphores(logicalDevice, &info, requestedFeatures.syncTDR);
@@ -6833,7 +6831,7 @@ VkResult Context::synchronize()
   std::vector<uint64_t> values = {TRTimelineCounter, CETimelineCounter, GRTimelineCounter};
   VkSemaphoreWaitInfo info = {};
   info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-  info.semaphoreCount = semaphores.size();
+  info.semaphoreCount = uint32_t(semaphores.size());
   info.pSemaphores = semaphores.data();
   info.pValues = values.data();
   VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(12e10f));
@@ -7006,8 +7004,6 @@ Context::rasterizeGui() {
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
 
-  VkResult err;
-  
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   renderPassBeginInfo.pNext = nullptr;
@@ -7960,7 +7956,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
   case GPRT_SOLIDS:
     geomType = new SolidGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a built-in software intersector
-    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+    for (int i = 0; i < int(requestedFeatures.numRayTypes); i++) {
       gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
                                       "SolidIntersection");
     }
@@ -7968,7 +7964,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
   case GPRT_LSS:
     geomType = new LSSGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
-    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+    for (int i = 0; i < int(requestedFeatures.numRayTypes); i++) {
       if (!requestedFeatures.linearSweptSpheres) {
         gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
                                         "LSSIntersection");
@@ -7978,7 +7974,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
   case GPRT_SPHERES:
     geomType = new SphereGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
-    for (int i = 0; i < requestedFeatures.numRayTypes; i++) {
+    for (int i = 0; i < int(requestedFeatures.numRayTypes); i++) {
       if (!requestedFeatures.linearSweptSpheres) {
         gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
                                         "SphereIntersection");
@@ -9144,10 +9140,6 @@ gprtTextureSaveImage(GPRTTexture _texture, const char *imageName) {
   }
   else if (texture->format == VK_FORMAT_R32G32B32A32_SFLOAT) {
     const float *fb = (const float *) texture->mapped;
-    for (int i = 0; i < texture->width* texture->height * 4; ++i)
-    {
-      std::cout<<fb[i]<<std::endl;
-    }
     stbi_write_hdr(imageName, texture->width, texture->height, 4, fb);
   }
 
@@ -9314,7 +9306,6 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 
   Context *context = (Context *) _context;
   RayGen *raygen = (RayGen *) _rayGen;
-  VkResult err;
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
@@ -9338,7 +9329,7 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                            VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                            VK_SHADER_STAGE_CALLABLE_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR,
-                       0, pushConstantsSize, pushConstants);
+                       0, uint32_t(pushConstantsSize), pushConstants);
   }
 
   auto getBufferDeviceAddress = [](VkDevice device, VkBuffer buffer) -> uint64_t {

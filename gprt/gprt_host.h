@@ -96,9 +96,9 @@
 #define GPRT_TERMINAL_RESET         "\033[0m"
 #define GPRT_TERMINAL_DEFAULT       GPRT_TERMINAL_RESET
 #define GPRT_TERMINAL_BOLD          "\033[1;1m"
-#define GPRT_TERMINAL_MAGENTA       "\e[35m"
-#define GPRT_TERMINAL_LIGHT_MAGENTA "\e[95m"
-#define GPRT_TERMINAL_CYAN          "\e[36m"
+#define GPRT_TERMINAL_MAGENTA       "\033[35m"
+#define GPRT_TERMINAL_LIGHT_MAGENTA "\033[95m"
+#define GPRT_TERMINAL_CYAN          "\033[36m"
 #define GPRT_TERMINAL_LIGHT_RED     "\033[1;31m"
 
 #define GPRT_DEFINE_HANDLE(object) typedef struct object##_T* object;

@@ -62,7 +62,7 @@ public struct PointDesc
   // /// Maximum radius away from the sphere origin to consider intersections.
   // public float TMax;
 
-  public __init() {};
+  public __init() {Origin = float3(0.f);};
 };
 
 /// Traces a point through the acceleration structure.
