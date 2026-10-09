@@ -23,5 +23,7 @@
 add_subdirectory(t00-bufferCopy)
 add_subdirectory(t01-bufferResize)
 add_subdirectory(t02-bufferSort)
+add_executable(t06_contextDestroy t06-contextDestroy.cpp)
+target_link_libraries(t06_contextDestroy PRIVATE gprt::gprt)
 # add_subdirectory(t03-bufferScans)
 # add_subdirectory(t04-swBVH)
