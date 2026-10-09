@@ -104,6 +104,8 @@ int main(int ac, char **av) {
   // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
 
+  gprtDeviceSynchronize(context);
+
   // Save final frame to an image
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
 
