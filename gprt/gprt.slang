@@ -84,7 +84,7 @@ float3 linear_to_srgb(float3 rgb)
     rgb = clamp(rgb, 0.0f, 1.0f);
     
     return lerp(
-        pow(rgb * 1.055f, float3(1.f / 2.4f)) - 0.055f,
+        1.055f * pow(rgb, float3(1.f / 2.4f)) - 0.055f,
         rgb * 12.92f,
         LessThan(rgb , 0.0031308f)
     );
@@ -116,6 +116,7 @@ make_rgba(float3 color) {
   return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.z) << 16) + (0xffU << 24);
 }
 
+// Encode linear RGB as sRGB before packing BGRA bytes.
 inline uint32_t
 make_bgra(float3 color) {
   color = linear_to_srgb(color);
@@ -126,6 +127,18 @@ make_bgra(float3 color) {
 inline uint32_t
 make_bgra(float4 color) {
   color.rgb = linear_to_srgb(color.rgb);
+  return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) +
+         (make_8bit(color.w) << 24);
+}
+
+// Pack already encoded sRGB colors; alpha remains linear.
+inline uint32_t
+make_srgb_bgra(float3 color) {
+  return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) + (0xffU << 24);
+}
+
+inline uint32_t
+make_srgb_bgra(float4 color) {
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) +
          (make_8bit(color.w) << 24);
 }
