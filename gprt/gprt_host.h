@@ -2101,7 +2101,7 @@ template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int d
 }
 
 /**
- * @brief Maps a device buffer for host CPU access.
+ * @brief Waits for pending context work and maps a buffer for host CPU access.
  * 
  * This function makes a device buffer's memory accessible to the CPU for 
  * reading and/or writing. After mapping, use gprtBufferGetHostPointer() to 
@@ -2111,8 +2111,8 @@ template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int d
  * @param buffer The buffer to map for CPU access
  * @param deviceID The device ID containing the buffer (default: 0)
  * 
- * @note Only device buffers and shared buffers can be mapped. Host buffers
- *       are always accessible and don't need mapping.
+ * @note Device buffers use staging memory for host access. Host and shared
+ *       buffers are mapped directly. An existing mapping is reused.
  * @see gprtBufferUnmap() to unmap after modifications
  * @see gprtBufferGetHostPointer() to get the mapped pointer
  */
