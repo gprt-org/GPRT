@@ -30,6 +30,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 
 #include <regex>
 
@@ -5349,8 +5350,30 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   std::vector<uint32_t> usableDevices;
   std::vector<FallbackRequests> usableDeviceFallbackRequests;
 
+  std::vector<uint32_t> visibleDevices;
+  if (const char *selection = std::getenv("GPRT_VISIBLE_DEVICES")) {
+    std::string list(selection);
+    if (!list.empty() && list != "-1") {
+      if (list.back() == ',') throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains an empty ordinal");
+      std::istringstream entries(list);
+      std::string entry;
+      while (std::getline(entries, entry, ',')) {
+        std::istringstream value(entry);
+        uint32_t ordinal;
+        char trailing;
+        if (!(value >> ordinal) || (value >> trailing) || ordinal >= gpuCount)
+          throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains an invalid Vulkan device ordinal");
+        if (std::find(visibleDevices.begin(), visibleDevices.end(), ordinal) != visibleDevices.end())
+          throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains a duplicate ordinal");
+        visibleDevices.push_back(ordinal);
+      }
+    }
+  } else {
+    for (uint32_t i = 0; i < gpuCount; ++i) visibleDevices.push_back(i);
+  }
+
   LOG_INFO("Searching for usable Vulkan physical device...");
-  for (uint32_t i = 0; i < gpuCount; i++) {
+  for (uint32_t i : visibleDevices) {
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
 
@@ -5400,30 +5423,29 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   if (usableDevices.size() == 0) {
-    LOG_ERROR("Unable to find physical device meeting requirements");
+    throw std::runtime_error("Unable to find physical device meeting requirements");
   } else {
     uint32_t requestedDevice = 0;
 
     if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
       LOG_INFO("Selecting first usable device");
-      if (usableDeviceFallbackRequests[0].lss ) {
-        LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
-        requestedFeatures.linearSweptSpheres = false;
-        enabledDeviceExtensions.erase(
-            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
-            enabledDeviceExtensions.end()
-        );
-
-      }
-    } else if (numRequestedDevices > 1) {
-      LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
+    } else if (numRequestedDevices != 1) {
+      throw std::invalid_argument("A context supports exactly one selected device");
     } else {
       requestedDevice = requestedDeviceIDs[0];
-      if (requestedDevice > usableDevices.size()) {
-        LOG_ERROR("Requested device is out of range!");
+      if (requestedDevice >= usableDevices.size()) {
+        throw std::out_of_range("Requested device is out of range");
       }
     }
     selectedDevice = usableDevices[requestedDevice];
+    if (usableDeviceFallbackRequests[requestedDevice].lss) {
+      LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
+      requestedFeatures.linearSweptSpheres = false;
+      enabledDeviceExtensions.erase(
+          std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
+                      std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
+          enabledDeviceExtensions.end());
+    }
   }
 
   physicalDevice = physicalDevices[selectedDevice];
