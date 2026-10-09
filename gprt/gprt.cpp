@@ -4700,7 +4700,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       //             size_t recordStride = hitRecordSize;
       //             size_t handleStride = handleSize;
 
-      //             // Clear the record, including padding, then copy the shader handle.
+      //             // First, copy handle
       //             size_t recordOffset =
       //                 recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
       //             size_t handleOffset =
