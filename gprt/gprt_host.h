@@ -2403,7 +2403,7 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
  *
- * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T1 The key type (uint64_t)
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
