@@ -15,6 +15,8 @@ const int2 fbSize = {1400, 460};
 const char *outFileName = "s2_4-solids.png";
 
 int main(int ac, char **av) {
+  gprtRequestMaxAttributeSize(sizeof(float4));
+
   // Create a rendering window
   gprtRequestWindow(fbSize.x, fbSize.y, "S2_4 Solids");
   
