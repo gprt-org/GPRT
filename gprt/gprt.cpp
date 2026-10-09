@@ -3520,6 +3520,8 @@ public:
 };
 
 struct TriangleAccel : public Accel {
+  VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
+
   TriangleAccel(Context *context, TriangleGeom* geometry) : Accel(context, true) {
     this->geometry = geometry;
   };
@@ -3570,8 +3572,9 @@ struct TriangleAccel : public Accel {
       geom.pNext = nullptr;
 
       // // TODO: accomodate GPUs without motion blur capabilities
-      VkAccelerationStructureGeometryMotionTrianglesDataNV motionTriangles{};
+      motionTriangles = {};
       motionTriangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
+      geom.geometry.triangles.pNext = nullptr;
       if (requestedFeatures.motionBlur && triGeom->vertex.t1_buffer != nullptr) {
         motionTriangles.vertexData.deviceAddress = triGeom->vertex.t1_buffer->deviceAddress + triGeom->vertex.offset;
         geom.geometry.triangles.pNext       = &motionTriangles;
