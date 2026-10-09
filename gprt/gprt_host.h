@@ -2494,6 +2494,8 @@ gprtBufferSaveImage(GPRTBufferOf<T> buffer, uint32_t width, uint32_t height, con
   gprtBufferSaveImage((GPRTBuffer) buffer, width, height, imageName);
 }
 
+// Ray-generation launches wait for previously submitted compute work and return
+// a graphics timeline value. These semantics also apply to the 2D and 3D variants.
 GPRT_API uint64_t gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
@@ -2551,17 +2553,20 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
   return gprtRayGenLaunch3D(context, (GPRTRayGen) rayGen, dims_x, dims_y, dims_z, sizeof(PushConstantsType), &pushConstants);
 }
 
-// declaration for internal implementation
 // Values must come from the matching queue in the same context. Zero means no wait.
+// Values beyond the last submitted value are rejected.
 struct GPRTLaunchDependencies {
   uint64_t compute = 0;
   uint64_t graphics = 0;
 };
 
+// Declaration for the internal compute launch implementation.
 uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
                         std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants,
                         GPRTLaunchDependencies dependencies = {});
 
+// Launch asynchronously and return a compute timeline value. Use
+// gprtComputeLaunchAfter to order access to data produced by earlier launches.
 // Case where compute program uniforms are not known at compilation time
 template <typename... Uniforms>
 uint64_t
@@ -2608,6 +2613,7 @@ gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 gro
   return _gprtComputeLaunch((GPRTCompute) compute, numGroups, groupSize, pushConstants);
 }
 
+// Wait for submitted compute work and return its completed timeline value.
 GPRT_API uint64_t gprtComputeSynchronize(GPRTContext context);
 // Launch after the specified submissions complete on the GPU. Independent
 // gprtComputeLaunch calls remain asynchronous. The return value is a compute
@@ -2633,6 +2639,7 @@ uint64_t gprtComputeLaunchAfter(GPRTComputeOf<Uniforms...> compute, uint3 numGro
   return gprtComputeLaunchAfter((GPRTCompute)compute, numGroups, groupSize, dependencies, uniforms...);
 }
 
+// Wait for submitted graphics work and return its completed timeline value.
 GPRT_API uint64_t gprtGraphicsSynchronize(GPRTContext context);
 GPRT_API uint64_t gprtDeviceSynchronize(GPRTContext context);
 

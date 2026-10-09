@@ -9492,7 +9492,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   VkResult err;
 
-  // Temporary... Ultimately want to move to the compute queue...
+  // Record this dispatch on the compute queue.
   VkCommandBuffer commandBuffer = context->beginComputeCommands();
 
   if (context->queryRequested) {
