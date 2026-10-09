@@ -987,8 +987,6 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
-        std::array<uint32_t, 3> families;
-        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1203,8 +1201,6 @@ struct Buffer {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
-      std::array<uint32_t, 3> stagingFamilies;
-      context->setQueueSharing(bufferCreateInfo, stagingFamilies);
       // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
       // VmaAllocationCreateInfo allocInfo = {};
@@ -1878,8 +1874,6 @@ struct Texture : public ImageResource {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
-      std::array<uint32_t, 3> stagingFamilies;
-      context->setQueueSharing(bufferCreateInfo, stagingFamilies);
       VK_CHECK_RESULT(vkCreateBuffer(context->logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
     }
 
