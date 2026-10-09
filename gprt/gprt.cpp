@@ -2888,6 +2888,17 @@ struct Accel {
   VkAccelerationStructureGeometryKHR accelerationStructureGeometry = {};
   uint32_t maxPrimitiveCount = 0;
 
+  void recordBuildDependency(VkCommandBuffer commandBuffer) {
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                            VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+  }
+
 private:
   Buffer *scratchBuffer = nullptr;   // Can we make this static? That way, all trees could share the scratch...
   Buffer *accelBuffer = nullptr;
@@ -3295,6 +3306,7 @@ public:
       //   LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
       VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+      recordBuildDependency(commandList);
       gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
 
       err = context->endComputeCommands(commandList);
@@ -3352,6 +3364,7 @@ public:
 
   virtual void build(GPRTBuildParams options) {};
   virtual void update() {
+    VK_CHECK_RESULT(context->synchronizeGraphics());
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
     }
@@ -3440,6 +3453,7 @@ public:
 
     VkCommandBuffer commandList = context->beginComputeCommands();
     VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+    recordBuildDependency(commandList);
     gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
     context->endComputeCommands(commandList);
 
