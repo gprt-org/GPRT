@@ -88,6 +88,9 @@ void raygen(uniform RayGenData record) {
     pointDesc.Origin = ro + rd * zMin + rd * step * startRayOffset;
     for (int i = 0; i < NUM_STEPS; i++)
     {
+      payload.color = float3(0.0);
+      payload.density = 0.0;
+
       TracePoint<Payload>(record.world,    // the tree
                  RAY_FLAG_NONE,   // ray flags
                  0xff,            // instance inclusion mask
