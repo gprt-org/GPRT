@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 // Run with GPRT_HEADLESS_SURFACE=1 and GPRT_HEADLESS_FRAME_LIMIT=3.
-int main() {
+int main(int argc, char **) {
   uint32_t pixels[] = {0xff000000, 0xffffffff};
   auto color = gprt::terminal::filteredColor((const uint8_t *)pixels, 2, 1, 1, 1, 0, 0);
   if (color != std::array<uint8_t, 3>{188, 188, 188})
@@ -34,4 +34,14 @@ int main() {
     if (gprtWindowShouldClose(context) != (poll == 3)) throw std::runtime_error("Polling-only loop is unbounded");
   gprtContextDestroy(context);
   if (!gprtWindowShouldClose(nullptr)) throw std::runtime_error("Null context should close");
+  if (argc > 1) {
+#ifdef _WIN32
+    _putenv_s("GPRT_HEADLESS_SURFACE", "");
+#else
+    unsetenv("GPRT_HEADLESS_SURFACE");
+#endif
+    context = gprtContextCreate();
+    if (gprtContextIsHeadless(context)) throw std::runtime_error("Headless override changed later context defaults");
+    gprtContextDestroy(context);
+  }
 }
