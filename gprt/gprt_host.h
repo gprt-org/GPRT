@@ -637,9 +637,9 @@ GPRT_API bool gprtContextIsHeadless(GPRTContext context);
 
 /** If the context has a window, returns whether its close button was clicked.
  *
- * Headless buffer presentations and calls to this function are counted separately.
- * Returns true when either count reaches 1440. GPRT_HEADLESS_FRAME_LIMIT overrides
- * this positive limit; invalid values use the default. Null contexts and contexts
+ * Headless execution closes after 1440 buffer presentations. Before the first
+ * presentation, it permits 1440 polls that return false. GPRT_HEADLESS_FRAME_LIMIT
+ * overrides this positive limit; invalid values use the default. Null contexts and contexts
  * without framebuffer dimensions return true immediately.
  */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);

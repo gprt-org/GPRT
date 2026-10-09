@@ -5164,10 +5164,11 @@ Context::requestPhysicalDevice(int32_t requestedDevice) {
 }
 
 Context::Context(int32_t requestedDevice) {
+  bool windowRequested = requestedFeatures.window;
   headlessFrameLimit = gprt::terminal::environmentCount("GPRT_HEADLESS_FRAME_LIMIT", 1440);
   windowExtent = {requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight};
   if (const char *headless = std::getenv("GPRT_HEADLESS_SURFACE"))
-    if (std::string(headless) == "1") requestedFeatures.window = false;
+    if (std::string(headless) == "1") windowRequested = false;
   enumerateInstanceValidationLayers();
   enumerateInstanceExtensions();
 
@@ -5207,10 +5208,10 @@ Context::Context(int32_t requestedDevice) {
 
   uint32_t glfwExtensionCount = 0;
   const char **glfwExtensions;
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     if (!glfwInit()) {
       LOG_WARNING("Unable to create window. Falling back to headless mode.");
-      requestedFeatures.window = false;
+      windowRequested = false;
     } else {
       if (!glfwVulkanSupported()) {
         LOG_ERROR("Window requested but unsupported!");
@@ -5361,7 +5362,7 @@ Context::Context(int32_t requestedDevice) {
   // Required for vkCmdPushDescriptor (Now included with Vulkan 1.4)
   enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     // If the device will be used for presenting to a display via a swapchain
     // we need to request the swapchain extension
     enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -5397,7 +5398,7 @@ Context::Context(int32_t requestedDevice) {
   err = requestPhysicalDevice(requestedDevice);
   if (err != VK_SUCCESS) {
     // GLFW supplies instance extensions before selection, but no window exists yet.
-    if (requestedFeatures.window) glfwTerminate();
+    if (windowRequested) glfwTerminate();
     freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
     LOG_ERROR("failed to select physical device! : \n" + errorString(err));
@@ -5405,7 +5406,7 @@ Context::Context(int32_t requestedDevice) {
   }
 
   /// 2.5 - create a window and surface if requested
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // todo, allow the window to resize and recreate swapchain
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -5426,7 +5427,7 @@ Context::Context(int32_t requestedDevice) {
       glfwPollEvents();
     } else {
       LOG_WARNING("Unable to create window. Falling back to headless mode.");
-      requestedFeatures.window = false;
+      windowRequested = false;
       glfwTerminate();
     }
   }
@@ -5863,7 +5864,7 @@ Context::Context(int32_t requestedDevice) {
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
   // Swapchain setup
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
 
@@ -7179,7 +7180,8 @@ gprtWindowShouldClose(GPRTContext _context) {
   if (!context) return true;
   if (!context->window) {
     bool close = !context->windowExtent.width || !context->windowExtent.height ||
-                 std::max(context->headlessPresentCount, ++context->headlessPollCount) >= context->headlessFrameLimit;
+                 (context->headlessPresentCount ? context->headlessPresentCount >= context->headlessFrameLimit
+                                                : ++context->headlessPollCount > context->headlessFrameLimit);
     if (!close && context->imgui.renderPass) ImGui_ImplVulkan_NewFrame();
     return close;
   }
@@ -7495,7 +7497,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     }
     VK_CHECK_RESULT(context->synchronize());
     bool wasMapped = buffer->mapped != nullptr;
-    if (wasMapped && !buffer->hostVisible) buffer->unmapReadOnly();
+    // An existing device mapping may contain unflushed edits; preserve its pointer and contents.
     if (!buffer->mapped) VK_CHECK_RESULT(buffer->map());
     if (buffer->hostVisible) buffer->invalidate();
     context->terminalPreview.present((const uint8_t *)buffer->mapped, width, height);
