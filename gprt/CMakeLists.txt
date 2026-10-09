@@ -22,9 +22,11 @@
 
 add_subdirectory(math)
 
-add_library(gprt)
 if (GPRT_BUILD_SHARED)
+  add_library(gprt SHARED)
   set_property(TARGET gprt PROPERTY POSITION_INDEPENDENT_CODE ON)
+else()
+  add_library(gprt STATIC)
 endif()
 include(cmake/embed_devicecode.cmake)
 
