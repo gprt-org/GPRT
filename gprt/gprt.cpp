@@ -6959,8 +6959,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   VkAttachmentDescription colorAttachment{};
   colorAttachment.format = colorTexture->format;
   colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  // clear here says to clear the values to a constant at start.
-  // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  // Clear to transparent black using the value supplied by rasterizeGui.
   colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   // save rasterized fragments to memory
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -7087,7 +7086,7 @@ Context::rasterizeGui() {
 
   VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
-  // Transition our attachments into optimal attachment formats
+  // Transition our attachments into the layouts required by the render pass.
   imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image,
                                         imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                         {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
@@ -7104,8 +7103,7 @@ Context::rasterizeGui() {
 
   vkCmdEndRenderPass(commandBuffer);
 
-  // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  // The render pass final layouts perform these transitions.
+  // The render pass final layouts restore each attachment's tracked layout.
 
   endGraphicsCommands(commandBuffer);
   VK_CHECK_RESULT(synchronizeGraphics());
