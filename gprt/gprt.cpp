@@ -971,7 +971,8 @@ struct Buffer {
 
         VkBuffer newBuffer;
         VmaAllocation newAllocation;
-        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &newBuffer, &newAllocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment,
+                                                    &newBuffer, &newAllocation, nullptr));
 
         VkCommandBuffer commandBuffer = context->beginTransferCommands();
 
@@ -1011,7 +1012,8 @@ struct Buffer {
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
 
-        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment,
+                                                    &buffer, &allocation, nullptr));
         vmaMapMemory(context->allocator, allocation, &mapped);
         size = bytes;
         deviceAddress = getDeviceAddress();
@@ -1048,7 +1050,8 @@ struct Buffer {
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-        VK_CHECK_RESULT(vmaCreateBuffer(context->allocator, &bufferCreateInfo, &allocInfo, &buffer, &allocation, nullptr));
+        VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment,
+                                                    &buffer, &allocation, nullptr));
       }
 
       if (preserveContents) {
@@ -1060,8 +1063,8 @@ struct Buffer {
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
-        context->synchronizeTransfer();
         context->endTransferCommands(commandBuffer);
+        context->synchronizeTransfer();
       }
 
       size = bytes;
