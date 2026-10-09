@@ -849,6 +849,7 @@ struct Buffer {
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
+    VK_CHECK_RESULT(context->synchronize());
     if (mapped)
       return VK_SUCCESS;
 
@@ -883,6 +884,7 @@ struct Buffer {
         mapped = nullptr;
       }
     } else {
+      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       VkCommandBuffer commandBuffer = context->beginTransferCommands();
       
       // To do, consider allowing users to specify offsets here...
@@ -895,7 +897,6 @@ struct Buffer {
       context->endTransferCommands(commandBuffer);
       context->synchronizeTransfer();
 
-      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       mapped = nullptr;
     }
@@ -6782,7 +6783,7 @@ VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
 
 VkCommandBuffer Context::beginTransferCommands() {
   VkResult err;
-  VkCommandBuffer commandBuffer = transferCommandBuffers[GRTimelineCounter % 64];
+  VkCommandBuffer commandBuffer = transferCommandBuffers[TRTimelineCounter % 64];
 
   uint64_t currentCounterValue;
   err = vkGetSemaphoreCounterValue(logicalDevice, TRTimelineSemaphore, &currentCounterValue);
@@ -6811,13 +6812,16 @@ VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
 
-  uint64_t prevCounter = TRTimelineCounter;
   TRTimelineCounter++;
+
+  VkSemaphore waits[] = {GRTimelineSemaphore, CETimelineSemaphore};
+  uint64_t values[] = {GRTimelineCounter, CETimelineCounter};
+  VkPipelineStageFlags stages[] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = 2;
+  timelineInfo.pWaitSemaphoreValues = values;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
 
@@ -6825,8 +6829,9 @@ VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.waitSemaphoreCount = 2;
+  submitInfo.pWaitSemaphores = waits;
+  submitInfo.pWaitDstStageMask = stages;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &TRTimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
