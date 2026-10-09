@@ -6,13 +6,14 @@
 // and indicate that rejection is expected.
 int main(int argc, char **argv) {
   bool expectFailure = argc > 2;
-  try {
+  for (int attempt = 0; attempt < 3; ++attempt) try {
     int32_t index = argc > 1 ? std::stoi(argv[1]) : 0;
     auto context = gprtContextCreate(&index, 1);
     gprtContextDestroy(context);
+    if (expectFailure) return 1;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
-    return expectFailure ? 0 : 1;
+    if (!expectFailure) return 1;
   }
-  return expectFailure ? 1 : 0;
+  return 0;
 }

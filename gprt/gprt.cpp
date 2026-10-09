@@ -456,6 +456,7 @@ struct Stage {
 };
 
 struct Context {
+  bool linearSweptSpheres = requestedFeatures.linearSweptSpheres;
   // For convenience, an opaque handle to the context
   GPRTContext context = (GPRTContext) this;
 
@@ -3618,7 +3619,7 @@ struct SphereAccel : public Accel {
     this->geometry = geometry;
 
     // If we don't have hardware acceleration for spheres, fall back to AABBs
-    if (!requestedFeatures.linearSweptSpheres) {
+    if (!context->linearSweptSpheres) {
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3635,7 +3636,7 @@ struct SphereAccel : public Accel {
     SphereGeom *sphereGeom = ((SphereGeom *)geometry);
     size_t numSpheres = sphereGeom->vertex.count;
 
-    if (!requestedFeatures.linearSweptSpheres) {      
+    if (!context->linearSweptSpheres) {
       // Resize the AABB buffer if needed...
       size_t requiredBytesForAABBs = 2 * sizeof(float3) * numSpheres;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
@@ -3670,7 +3671,7 @@ struct SphereAccel : public Accel {
 
       #ifdef VK_NV_ray_tracing_linear_swept_spheres
       // If we have hardware accelerated support for LSS, use the built-in type
-      if (requestedFeatures.linearSweptSpheres) {
+      if (context->linearSweptSpheres) {
         // Specify that the geometry type is LSS
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_SPHERES_NV;
 
@@ -3749,7 +3750,7 @@ struct LSSAccel : public Accel {
     useEndCaps = ((flags & GPRT_LSS_CHAINED_END_CAPS) != 0);
 
     // If we don't have hardware acceleration for LSS, fall back to AABBs
-    if (!requestedFeatures.linearSweptSpheres) {
+    if (!context->linearSweptSpheres) {
       // Placeholder. The actual allocation here will vary from build to build.
       fallbackAABBs = gprtDeviceBufferCreate<float3>((GPRTContext) context, 1, nullptr);
     }
@@ -3770,7 +3771,7 @@ struct LSSAccel : public Accel {
     LSSGeom *lssGeom = (LSSGeom *) geometry;
     size_t numLSS = lssGeom->index.count;
 
-    if (!requestedFeatures.linearSweptSpheres) {
+    if (!context->linearSweptSpheres) {
       // Resize the AABB buffer if needed...
       size_t requiredBytesForAABBs = 2 * sizeof(float3) * numLSS;
       if (gprtBufferGetSize(fallbackAABBs) != requiredBytesForAABBs) {
@@ -3804,7 +3805,7 @@ struct LSSAccel : public Accel {
 
 #ifdef VK_NV_ray_tracing_linear_swept_spheres
       // If we have hardware accelerated support for LSS, use the built-in type
-      if (requestedFeatures.linearSweptSpheres) {
+      if (context->linearSweptSpheres) {
         // Specify that the geometry type is LSS
         geom.geometryType = VkGeometryTypeKHR::VK_GEOMETRY_TYPE_LINEAR_SWEPT_SPHERES_NV;
 
@@ -4310,14 +4311,14 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         else if (geomType->getKind() == GPRT_SOLIDS)
           shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
         else if (geomType->getKind() == GPRT_LSS) {
-          if (requestedFeatures.linearSweptSpheres) {
+          if (linearSweptSpheres) {
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
           }
         } else if (geomType->getKind() == GPRT_SPHERES) {
-          if (requestedFeatures.linearSweptSpheres) {
+          if (linearSweptSpheres) {
             shaderGroupType = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;   // ?
           } else {
             // AABB fallback
@@ -4370,8 +4371,8 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       void* pNext = nullptr;
       VkPipelineCreateFlags2CreateInfo pipelineCreateFlags = {};
       pipelineCreateFlags.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
-      if (requestedFeatures.linearSweptSpheres || requestedFeatures.motionBlur) {
-        if (requestedFeatures.linearSweptSpheres) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
+      if (linearSweptSpheres || requestedFeatures.motionBlur) {
+        if (linearSweptSpheres) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
         if (requestedFeatures.motionBlur) pipelineCreateFlags.flags |= VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_MOTION_BIT_NV;
         pipelineCreateFlags.pNext = nullptr;
         pNext = &pipelineCreateFlags;
@@ -4645,7 +4646,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
           // If implementing a software fallback, additionally memcpy data required for intersection testing
           uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
-          if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+          if (geom->geomType->getKind() == GPRT_LSS && !linearSweptSpheres) {
             LSSGeom *lss = (LSSGeom *) geom;
             LSSParameters isectParams;
             isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
@@ -4657,7 +4658,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
             memcpy(internalParams, &isectParams, sizeof(LSSParameters));
           }
 
-          if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+          if (geom->geomType->getKind() == GPRT_SPHERES && !linearSweptSpheres) {
             SphereGeom *s = (SphereGeom *) geom;
             SphereParameters isectParams;
             isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
@@ -4733,7 +4734,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 
       //             // If implementing a software fallback, additionally memcpy data required for intersection testing
       //             uint8_t *internalParams = params + (requestedFeatures.hitRecordSize);
-      //             if (geom->geomType->getKind() == GPRT_LSS && !requestedFeatures.linearSweptSpheres) {
+      //             if (geom->geomType->getKind() == GPRT_LSS && !linearSweptSpheres) {
       //               LSSGeom *lss = (LSSGeom *) geom;
       //               LSSParameters isectParams;
       //               isectParams.vertices = (float4 *) lss->vertex.buffers[0]->getDeviceAddress();
@@ -4745,7 +4746,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       //               memcpy(internalParams, &isectParams, sizeof(LSSParameters));
       //             }
 
-      //             if (geom->geomType->getKind() == GPRT_SPHERES && !requestedFeatures.linearSweptSpheres) {
+      //             if (geom->geomType->getKind() == GPRT_SPHERES && !linearSweptSpheres) {
       //               SphereGeom *s = (SphereGeom *) geom;
       //               SphereParameters isectParams;
       //               isectParams.vertices = (float4 *) s->vertex.buffers[0]->getDeviceAddress();
@@ -4987,10 +4988,12 @@ void
 Context::freeDebugCallback(VkInstance instance) {
   if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
     gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
+    gprt::debugUtilsMessenger = VK_NULL_HANDLE;
   }
 
   if (gprt::validationMessenger != VK_NULL_HANDLE) {
     gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::validationMessenger, nullptr);
+    gprt::validationMessenger = VK_NULL_HANDLE;
   }
 }
 
@@ -5227,7 +5230,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     bool lss = false;
   };
 
-  auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions, FallbackRequests &fallbackRequests) -> bool {
+  auto checkDeviceExtensionSupport = [&](VkPhysicalDevice device, std::vector<const char *> deviceExtensions, FallbackRequests &fallbackRequests) -> bool {
     uint32_t extensionCount;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
@@ -5243,7 +5246,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       requiredExtensions.erase(extension.extensionName);
     }
 
-    if (requestedFeatures.linearSweptSpheres) {
+    if (linearSweptSpheres) {
       if (requiredExtensions.find(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME) != requiredExtensions.end()) {
         if (requiredExtensions.find(VK_NV_RAY_TRACING_EXTENSION_NAME) == requiredExtensions.end()) {
           requiredExtensions.erase(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
@@ -5330,12 +5333,12 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME);
   }
 
-  if (requestedFeatures.linearSweptSpheres) {
+  if (linearSweptSpheres) {
     #ifdef VK_NV_ray_tracing_linear_swept_spheres
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
     #else
     LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
-    requestedFeatures.linearSweptSpheres = false;
+    linearSweptSpheres = false;
     #endif
   }
 
@@ -5350,21 +5353,31 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   std::vector<uint32_t> usableDevices;
   std::vector<FallbackRequests> usableDeviceFallbackRequests;
 
+  auto rejectSelection = [&](const auto &error) {
+    // Selection fails before a logical device exists.
+    if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
+    if (window) { glfwDestroyWindow(window); glfwTerminate(); }
+    freeDebugCallback(instance);
+    vkDestroyInstance(instance, nullptr);
+    throw error;
+  };
   std::vector<uint32_t> visibleDevices;
   if (const char *selection = std::getenv("GPRT_VISIBLE_DEVICES")) {
     std::string list(selection);
     if (!list.empty() && list != "-1") {
-      if (list.back() == ',') throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains an empty ordinal");
+      if (list.back() == ',') rejectSelection(std::invalid_argument("GPRT_VISIBLE_DEVICES contains an empty ordinal"));
       std::istringstream entries(list);
       std::string entry;
       while (std::getline(entries, entry, ',')) {
+        if (entry.empty() || entry.find_first_not_of("0123456789") != std::string::npos)
+          rejectSelection(std::invalid_argument("GPRT_VISIBLE_DEVICES requires unsigned decimal ordinals"));
         std::istringstream value(entry);
         uint32_t ordinal;
         char trailing;
         if (!(value >> ordinal) || (value >> trailing) || ordinal >= gpuCount)
-          throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains an invalid Vulkan device ordinal");
+          rejectSelection(std::invalid_argument("GPRT_VISIBLE_DEVICES contains an invalid Vulkan device ordinal"));
         if (std::find(visibleDevices.begin(), visibleDevices.end(), ordinal) != visibleDevices.end())
-          throw std::invalid_argument("GPRT_VISIBLE_DEVICES contains a duplicate ordinal");
+          rejectSelection(std::invalid_argument("GPRT_VISIBLE_DEVICES contains a duplicate ordinal"));
         visibleDevices.push_back(ordinal);
       }
     }
@@ -5423,24 +5436,24 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   if (usableDevices.size() == 0) {
-    throw std::runtime_error("Unable to find physical device meeting requirements");
+    rejectSelection(std::runtime_error("Unable to find physical device meeting requirements"));
   } else {
     uint32_t requestedDevice = 0;
 
     if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
       LOG_INFO("Selecting first usable device");
     } else if (numRequestedDevices != 1) {
-      throw std::invalid_argument("A context supports exactly one selected device");
+      rejectSelection(std::invalid_argument("A context supports exactly one selected device"));
     } else {
       requestedDevice = requestedDeviceIDs[0];
       if (requestedDevice >= usableDevices.size()) {
-        throw std::out_of_range("Requested device is out of range");
+        rejectSelection(std::out_of_range("Requested device is out of range"));
       }
     }
     selectedDevice = usableDevices[requestedDevice];
     if (usableDeviceFallbackRequests[requestedDevice].lss) {
       LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
-      requestedFeatures.linearSweptSpheres = false;
+      linearSweptSpheres = false;
       enabledDeviceExtensions.erase(
           std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
                       std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
@@ -5528,7 +5541,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   #ifdef VK_NV_ray_tracing_linear_swept_spheres
   linearSweptSpheresFeatures = {};
   linearSweptSpheresFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_LINEAR_SWEPT_SPHERES_FEATURES_NV;
-  if (requestedFeatures.linearSweptSpheres) {
+  if (linearSweptSpheres) {
     linearSweptSpheresFeatures.pNext = pNext;
     pNext = &linearSweptSpheresFeatures;
   }
@@ -8046,7 +8059,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     geomType = new LSSGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
     for (int i = 0; i < int(requestedFeatures.numRayTypes); i++) {
-      if (!requestedFeatures.linearSweptSpheres) {
+      if (!context->linearSweptSpheres) {
         gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
                                         "LSSIntersection");
       }
@@ -8056,7 +8069,7 @@ gprtGeomTypeCreate(GPRTContext _context, GPRTGeomKind kind, size_t recordSize) {
     geomType = new SphereGeomType(context, requestedFeatures.numRayTypes, recordSize);
     // Supply a software fallback intersectors when hardware support is missing
     for (int i = 0; i < int(requestedFeatures.numRayTypes); i++) {
-      if (!requestedFeatures.linearSweptSpheres) {
+      if (!context->linearSweptSpheres) {
         gprtGeomTypeSetIntersectionProg((GPRTGeomType) geomType, i, (GPRTModule) context->fallbacksModule,
                                         "SphereIntersection");
       }
