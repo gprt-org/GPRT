@@ -26,19 +26,41 @@
 
 int
 main(int ac, char **av) {
+  // Exercise aligned growth and shrinkage without exceeding device allocation limits.
+  for (bool deviceLocal : {false, true}) {
+    GPRTContext context = gprtContextCreate(nullptr, 1);
+    uint32_t initial[64];
+    for (uint32_t i = 0; i < 64; ++i) initial[i] = i + 1;
+    auto buffer = deviceLocal ? gprtDeviceBufferCreate<uint32_t>(context, 64, initial, 4096)
+                              : gprtHostBufferCreate<uint32_t>(context, 64, initial, 4096);
+    for (size_t count : {size_t(128), size_t(32)}) {
+      gprtBufferResize(context, buffer, count, true);
+      if (gprtBufferGetSize(buffer) != count * sizeof(uint32_t)
+          || uint64_t(gprtBufferGetDevicePointer(buffer)) % 4096 != 0)
+        throw std::runtime_error("Resized buffer has incorrect size or alignment");
+      gprtBufferMap(buffer);
+      auto ptr = gprtBufferGetHostPointer(buffer);
+      for (size_t i = 0; i < std::min(count, size_t(64)); ++i)
+        if (ptr[i] != initial[i]) throw std::runtime_error("Resized buffer lost contents");
+      gprtBufferUnmap(buffer);
+    }
+    gprtBufferDestroy(buffer);
+    gprtContextDestroy(context);
+  }
+  const uint32_t resizeCount = 65536;
   // Resize, but don't preserve contents (host)
   {
     // Arrange
     GPRTContext context = gprtContextCreate(nullptr, 1);
-    GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, 1000000000 / 2);
+    GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, resizeCount / 2);
 
     // Act
-    gprtBufferResize(context, buffer, 1000000000, false);
+    gprtBufferResize(context, buffer, resizeCount, false);
 
     // Assert
     {
       // Size should be correct
-      if (gprtBufferGetSize(buffer) != 1000000000 * sizeof(uint32_t)) 
+      if (gprtBufferGetSize(buffer) != resizeCount * sizeof(uint32_t))
         throw std::runtime_error("Error, buffer not properly resized!");
     }
 
@@ -51,15 +73,15 @@ main(int ac, char **av) {
   {
     // Arrange
     GPRTContext context = gprtContextCreate(nullptr, 1);
-    GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, 1000000000 / 2);
+    GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, resizeCount / 2);
 
     // Act
-    gprtBufferResize(context, buffer, 1000000000, false);
+    gprtBufferResize(context, buffer, resizeCount, false);
 
     // Assert
     {
       // Size should be correct
-      if (gprtBufferGetSize(buffer) != 1000000000 * sizeof(uint32_t)) 
+      if (gprtBufferGetSize(buffer) != resizeCount * sizeof(uint32_t))
         throw std::runtime_error("Error, buffer not properly resized!");
     }
 
@@ -73,27 +95,27 @@ main(int ac, char **av) {
   {
     // Arrange
     GPRTContext context = gprtContextCreate(nullptr, 1);
-    GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, 1000000000 / 2);
+    GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, resizeCount / 2);
 
     {
       uint32_t* ptr = gprtBufferGetHostPointer(buffer);
-      for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
+      for (uint32_t i = 0; i < resizeCount / 2; ++i) {
         ptr[i] = i;
       }
     }
 
     // Act
-    gprtBufferResize(context, buffer, 1000000000, true);
+    gprtBufferResize(context, buffer, resizeCount, true);
 
     // Assert
     {
       // Size should be correct
-      if (gprtBufferGetSize(buffer) != 1000000000 * sizeof(uint32_t)) 
+      if (gprtBufferGetSize(buffer) != resizeCount * sizeof(uint32_t))
         throw std::runtime_error("Error, buffer not properly resized!");
 
       // Initial values should be preserved
       uint32_t* ptr = gprtBufferGetHostPointer(buffer);
-      for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
+      for (uint32_t i = 0; i < resizeCount / 2; ++i) {
         if (ptr[i] != i) {
             throw std::runtime_error("Error, buffer values not preserved!");
         }
@@ -109,30 +131,30 @@ main(int ac, char **av) {
   {
     // Arrange
     GPRTContext context = gprtContextCreate(nullptr, 1);
-    GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, 1000000000 / 2);
+    GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, resizeCount / 2);
 
     {
       gprtBufferMap(buffer);
       uint32_t* ptr = gprtBufferGetHostPointer(buffer);
-      for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
+      for (uint32_t i = 0; i < resizeCount / 2; ++i) {
         ptr[i] = i;
       }
       gprtBufferUnmap(buffer);
     }
 
     // Act
-    gprtBufferResize(context, buffer, 1000000000, true);
+    gprtBufferResize(context, buffer, resizeCount, true);
 
     // Assert
     {
       // Size should be correct
-      if (gprtBufferGetSize(buffer) != 1000000000 * sizeof(uint32_t)) 
+      if (gprtBufferGetSize(buffer) != resizeCount * sizeof(uint32_t))
         throw std::runtime_error("Error, buffer not properly resized!");
 
       // Initial values should be preserved
       gprtBufferMap(buffer);
       uint32_t* ptr = gprtBufferGetHostPointer(buffer);
-      for (uint32_t i = 0; i < 1000000000 / 2; ++i) {
+      for (uint32_t i = 0; i < resizeCount / 2; ++i) {
         if (ptr[i] != i) {
             throw std::runtime_error("Error, buffer values not preserved!");
         }
