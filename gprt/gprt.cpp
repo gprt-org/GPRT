@@ -477,7 +477,6 @@ struct Context {
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
   uint32_t currentImageIndex;
-  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
   void acquireSwapchainImage() {
@@ -4841,11 +4840,6 @@ Context::destroy() {
     imgui.frameBuffer = nullptr;
   }
 
-  if (imageAvailableSemaphore) {
-    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    imageAvailableSemaphore = nullptr;
-  }
-
   if (inFlightFence) {
     vkDestroyFence(logicalDevice, inFlightFence, nullptr);
     inFlightFence = nullptr;
@@ -5836,17 +5830,13 @@ Context::Context(int32_t requestedDevice) {
   // scanModule = new Module(scanDeviceCode);
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
-  // Swapchain semaphores and fences
+  // Fence for host-side swapchain acquisition.
   if (requestedFeatures.window) {
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-      LOG_ERROR("Failed to create swapchain semaphores");
+    if (vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+      LOG_ERROR("Failed to create swapchain acquisition fence");
     }
   }
 
