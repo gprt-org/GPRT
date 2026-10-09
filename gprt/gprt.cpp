@@ -4764,6 +4764,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 void
 Context::destroy() {
   if (logicalDevice) {
+    VK_CHECK_RESULT(vkDeviceWaitIdle(logicalDevice));
     if (requestedFeatures.aiDenoiser.requested) {
       if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
         NVSDK_NGX_VULKAN_DestroyParameters(aiDenoising.ngxParameters);
@@ -4772,14 +4773,6 @@ Context::destroy() {
         aiDenoising.ngxHandle = nullptr;
       }
     }
-  }
-
-  if (GRTimelineSemaphore) {
-    vkDestroySemaphore(logicalDevice, GRTimelineSemaphore, nullptr);
-  }
-
-  if (CETimelineSemaphore) {
-    vkDestroySemaphore(logicalDevice, CETimelineSemaphore, nullptr);
   }
 
   if (descriptorSet) {
@@ -4797,12 +4790,16 @@ Context::destroy() {
     descriptorPool = nullptr;
   }
 
+  if (imgui.renderPass) {
+    ImGui_ImplVulkan_Shutdown();
+  }
   if (imguiPool) {
+    if (window) ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     vkDestroyDescriptorPool(logicalDevice, imguiPool, nullptr);
     imguiPool = nullptr;
   }
   if (imgui.renderPass) {
-    ImGui_ImplVulkan_Shutdown();
     vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
     imgui.renderPass = nullptr;
   }
@@ -4877,14 +4874,6 @@ Context::destroy() {
 
   descriptorPoolSize = {};
 
-  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 64, graphicsCommandBuffers);
-  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 64, computeCommandBuffers);
-  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 64, transferCommandBuffers);
-
-  vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
-  vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
-  vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
-
   // verify these are all cleared.
   for (uint32_t i = 0; i < geomTypes.size(); ++i) {
     if (geomTypes[i] != nullptr) {
@@ -4935,12 +4924,29 @@ Context::destroy() {
   }
   misses.resize(0);
 
+  for (auto callable : callables) {
+    if (callable) callable->destroy();
+  }
+  callables.clear();
+
   for (uint32_t i = 0; i < modules.size(); ++i) {
     if (modules[i] != nullptr) {
       modules[i]->destroy();
     }
   }
   modules.resize(0);
+
+  VK_CHECK_RESULT(vkDeviceWaitIdle(logicalDevice));
+  vkFreeCommandBuffers(logicalDevice, graphicsCommandPool, 64, graphicsCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, computeCommandPool, 64, computeCommandBuffers);
+  vkFreeCommandBuffers(logicalDevice, transferCommandPool, 64, transferCommandBuffers);
+  vkDestroyCommandPool(logicalDevice, graphicsCommandPool, nullptr);
+  vkDestroyCommandPool(logicalDevice, computeCommandPool, nullptr);
+  vkDestroyCommandPool(logicalDevice, transferCommandPool, nullptr);
+
+  for (auto semaphore : {GRTimelineSemaphore, CETimelineSemaphore, TRTimelineSemaphore})
+    if (semaphore) vkDestroySemaphore(logicalDevice, semaphore, nullptr);
+  GRTimelineSemaphore = CETimelineSemaphore = TRTimelineSemaphore = VK_NULL_HANDLE;
 
   vmaDestroyAllocator(allocator);
 
