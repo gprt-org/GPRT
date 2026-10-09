@@ -55,6 +55,7 @@
 #endif
 
 // library for windowing
+#include "gprt_terminal.h"
 #include <GLFW/glfw3.h>
 
 // For SPIRV reflection
@@ -116,8 +117,8 @@ static struct RequestedFeatures {
   /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
   bool window = false;
   struct Window {
-    uint32_t initialWidth;
-    uint32_t initialHeight;
+    uint32_t initialWidth = 0;
+    uint32_t initialHeight = 0;
     std::string title;
   } windowProperties;
 
@@ -464,7 +465,10 @@ struct Context {
   // optional windowing features
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   GLFWwindow *window = nullptr;
-  VkExtent2D windowExtent;
+  VkExtent2D windowExtent{};
+  gprt::terminal::Preview terminalPreview;
+  uint64_t headlessPresentCount = 0, headlessPollCount = 0;
+  uint64_t headlessFrameLimit = 1440;
   VkPresentModeKHR presentMode;
   VkSurfaceFormatKHR surfaceFormat;
   VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -891,6 +895,12 @@ struct Buffer {
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       mapped = nullptr;
     }
+  }
+
+  void unmapReadOnly() {
+    if (!mapped) return;
+    vmaUnmapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation);
+    mapped = nullptr;
   }
 
   // flushes from host to device
@@ -5014,6 +5024,10 @@ void Context::enumerateInstanceExtensions()
 }
 
 Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+  headlessFrameLimit = gprt::terminal::environmentCount("GPRT_HEADLESS_FRAME_LIMIT", 1440);
+  windowExtent = {requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight};
+  if (const char *headless = std::getenv("GPRT_HEADLESS_SURFACE"))
+    if (std::string(headless) == "1") requestedFeatures.window = false;
   enumerateInstanceValidationLayers();
   enumerateInstanceExtensions();
 
@@ -5118,12 +5132,18 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
                               requestedFeatures.windowProperties.title.c_str(), NULL, NULL);    
     // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
 
-    VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
-    if (err != VK_SUCCESS) {
-      LOG_ERROR("failed to create window surface! : \n" + errorString(err));
+    if (window) {
+      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create window surface! : \n" + errorString(err));
+      }
+      // Poll some initial event values
+      glfwPollEvents();
+    } else {
+      LOG_WARNING("Unable to create window. Falling back to headless mode.");
+      requestedFeatures.window = false;
+      glfwTerminate();
     }
-    // Poll some initial event values
-    glfwPollEvents();
   }
 
   // Setup debug printf callback
@@ -6055,7 +6075,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   // Init imgui
-  if (requestedFeatures.window) {
+  if (window || (windowExtent.width && windowExtent.height)) {
     // 1: create descriptor pool for IMGUI
     // the size of the pool is very oversize, but it's copied from imgui demo itself.
     VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
@@ -6085,7 +6105,11 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     ImGui::CreateContext();
 
     // this initializes imgui for SDL
-    ImGui_ImplGlfw_InitForVulkan(window, true);
+    if (window) ImGui_ImplGlfw_InitForVulkan(window, true);
+    else {
+      ImGui::GetIO().DisplaySize = ImVec2(float(windowExtent.width), float(windowExtent.height));
+      ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+    }
   }
 
   // Init denoisers
@@ -7035,7 +7059,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   ImGui_ImplVulkan_Init(&init_info);
   
   // Call new frame here to initialize some internal imgui data
-  ImGui_ImplGlfw_NewFrame();
+  if (window) ImGui_ImplGlfw_NewFrame();
   ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
 
   synchronizeGraphics();
@@ -7159,11 +7183,21 @@ gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32
 }
 
 GPRT_API bool
+gprtContextIsHeadless(GPRTContext _context) {
+  return !_context || !((Context *)_context)->window;
+}
+
+GPRT_API bool
 gprtWindowShouldClose(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
-    return true;
+  if (!context) return true;
+  if (!context->window) {
+    bool close = !context->windowExtent.width || !context->windowExtent.height ||
+                 std::max(context->headlessPresentCount, ++context->headlessPollCount) >= context->headlessFrameLimit;
+    if (!close && context->imgui.renderPass) ImGui_ImplVulkan_NewFrame();
+    return close;
+  }
 
   glfwPollEvents();
 
@@ -7180,7 +7214,7 @@ GPRT_API void
 gprtSetWindowTitle(GPRTContext _context, const char *title) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
 
   glfwSetWindowTitle(context->window, title);
@@ -7210,8 +7244,11 @@ GPRT_API void
 gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context)) {
+    if (xpos) *xpos = 0;
+    if (ypos) *ypos = 0;
     return;
+  }
 
   glfwGetCursorPos(context->window, xpos, ypos);
 }
@@ -7220,7 +7257,7 @@ GPRT_API void
 gprtGrabAndHideCursor(GPRTContext _context, bool enabled) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
 
   glfwSetInputMode(context->window, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -7230,7 +7267,7 @@ GPRT_API int
 gprtGetMouseButton(GPRTContext _context, int button) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return GPRT_RELEASE;
 
   return glfwGetMouseButton(context->window, button);
@@ -7240,7 +7277,7 @@ GPRT_API int
 gprtGetKey(GPRTContext _context, int key) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return GPRT_RELEASE;
 
   return glfwGetKey(context->window, key);
@@ -7250,8 +7287,8 @@ GPRT_API double
 gprtGetTime(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
-    return 0.0;
+  if (gprtContextIsHeadless(_context))
+    return context ? double(context->headlessPresentCount) / 60.0 : 0.0;
   return glfwGetTime();
 }
 
@@ -7278,7 +7315,7 @@ GPRT_API void gprtGetDenoiserOutputSize(GPRTContext _context, uint32_t *width, u
 GPRT_API void
 gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   LOG_API_CALL();
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
   Context *context = (Context *) _context;
   Texture *texture = (Texture *) _texture;
@@ -7431,8 +7468,23 @@ GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window) {
-    return context->GRTimelineCounter; 
+  if (!context || !_buffer) return 0;
+  if (!context->window) {
+    Buffer *buffer = (Buffer *)_buffer;
+    uint32_t width = context->windowExtent.width, height = context->windowExtent.height;
+    if (!width || !height || uint64_t(width) * height > buffer->size / sizeof(uint32_t)) {
+      LOG_WARNING("Terminal preview requires framebuffer dimensions and a matching BGRA8 buffer");
+      return context->GRTimelineCounter;
+    }
+    VK_CHECK_RESULT(context->synchronize());
+    bool wasMapped = buffer->mapped != nullptr;
+    if (wasMapped && !buffer->hostVisible) buffer->unmapReadOnly();
+    if (!buffer->mapped) VK_CHECK_RESULT(buffer->map());
+    if (buffer->hostVisible) buffer->invalidate();
+    context->terminalPreview.present((const uint8_t *)buffer->mapped, width, height);
+    if (!wasMapped) buffer->unmapReadOnly();
+    ++context->headlessPresentCount;
+    return context->GRTimelineCounter;
   }
   
   Buffer *buffer = (Buffer *) _buffer;

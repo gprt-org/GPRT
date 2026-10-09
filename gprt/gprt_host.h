@@ -631,11 +631,16 @@ GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags
  */
 GPRT_API void gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *title);
 
+// GPRT_HEADLESS_SURFACE=1 disables window creation while preserving these dimensions.
+// Null contexts are treated as headless by the window and input helpers.
+GPRT_API bool gprtContextIsHeadless(GPRTContext context);
+
 /** If a window was requested, @returns true if the window's close button
  * was clicked. This function can be called from any thread.
  *
- * If a window was not requested (ie headless), this function always @returns
- * true.
+ * Headless contexts close after 1440 presentations or calls to this function.
+ * GPRT_HEADLESS_FRAME_LIMIT overrides this positive frame limit. Invalid values
+ * use the default. Contexts without framebuffer dimensions close immediately.
  */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
@@ -839,6 +844,7 @@ GPRT_API int gprtGetKey(GPRTContext context, int key);
  * At the moment, if a window was not requested (ie headless), this function
  * will return 0.
  */
+// Headless time advances by 1/60 second per successful buffer presentation.
 GPRT_API double gprtGetTime(GPRTContext context);
 
 /**
@@ -2472,6 +2478,9 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  *
  * If a window was not requested (ie headless), this function does nothing.
  */
+// Headless presentation previews a BGRA8 sRGB framebuffer in the terminal.
+// It filters colors in linear space and preserves the source buffer. Set
+// GPRT_TERMINAL_ASCII=1 to force ASCII glyphs. Redirected output uses ASCII.
 GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 
 template <typename T>
