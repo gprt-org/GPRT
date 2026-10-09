@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <algorithm>
+#include <array>
 #include <assert.h>
 #include <charconv>
 #include <climits>
@@ -549,6 +550,17 @@ struct Context {
     uint32_t transfer;
   } queueFamilyIndices;
 
+  template<typename CreateInfo>
+  void setQueueSharing(CreateInfo &info, std::array<uint32_t, 3> &families) const {
+    families = {queueFamilyIndices.graphics, queueFamilyIndices.compute, queueFamilyIndices.transfer};
+    std::sort(families.begin(), families.end());
+    auto end = std::unique(families.begin(), families.end());
+    uint32_t count = uint32_t(end - families.begin());
+    info.sharingMode = count > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+    info.queueFamilyIndexCount = count > 1 ? count : 0;
+    info.pQueueFamilyIndices = count > 1 ? families.data() : nullptr;
+  }
+
   // Ring buffer 
   VkCommandBuffer graphicsCommandBuffers[64];
   VkCommandBuffer computeCommandBuffers[64];
@@ -975,6 +987,8 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
+        std::array<uint32_t, 3> families;
+        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1018,6 +1032,8 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
+        std::array<uint32_t, 3> families;
+        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1058,6 +1074,8 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
+        std::array<uint32_t, 3> families;
+        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -1092,6 +1110,8 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
+        std::array<uint32_t, 3> families;
+        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1155,6 +1175,8 @@ struct Buffer {
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.usage = usageFlags;
     bufferCreateInfo.size = size;
+    std::array<uint32_t, 3> families;
+    context->setQueueSharing(bufferCreateInfo, families);
 
     VmaAllocationCreateInfo allocInfo = {};
     if (hostVisible) {
@@ -1181,6 +1203,8 @@ struct Buffer {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
+      std::array<uint32_t, 3> stagingFamilies;
+      context->setQueueSharing(bufferCreateInfo, stagingFamilies);
       // VK_CHECK_RESULT(vkCreateBuffer(logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
 
       // VmaAllocationCreateInfo allocInfo = {};
@@ -1831,7 +1855,8 @@ struct Texture : public ImageResource {
 
     writable = ((usageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
 
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // (might need to be concurrent...)
+    std::array<uint32_t, 3> families;
+    context->setQueueSharing(imageInfo, families);
     
     // If this image were to be used with MSAA as an attachment, we'd set this
     // to something other than
@@ -1853,6 +1878,8 @@ struct Texture : public ImageResource {
       bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       bufferCreateInfo.usage = bufferUsageFlags;
       bufferCreateInfo.size = size;
+      std::array<uint32_t, 3> stagingFamilies;
+      context->setQueueSharing(bufferCreateInfo, stagingFamilies);
       VK_CHECK_RESULT(vkCreateBuffer(context->logicalDevice, &bufferCreateInfo, nullptr, &stagingBuffer.buffer));
     }
 
