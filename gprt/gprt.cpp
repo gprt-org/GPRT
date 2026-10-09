@@ -483,14 +483,9 @@ struct Context {
 
   void acquireSwapchainImage() {
     VkResult result = vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX,
-                                           imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex);
+                                           VK_NULL_HANDLE, inFlightFence, &currentImageIndex);
     if (result != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(result);
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &imageAvailableSemaphore;
-    submit.pWaitDstStageMask = &waitStage;
-    VK_CHECK_RESULT(vkQueueSubmit(graphicsQueue, 1, &submit, inFlightFence));
+    // Acquisition is a host wait; it need not drain preceding graphics submissions.
     VK_CHECK_RESULT(vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX));
     VK_CHECK_RESULT(vkResetFences(logicalDevice, 1, &inFlightFence));
   }
