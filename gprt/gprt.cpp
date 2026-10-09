@@ -498,6 +498,8 @@ struct Context {
   } aiDenoising;
 
   struct ImGuiData {
+    uint64_t submissions[2] = {};
+    uint32_t frameIndex = 0;
     uint32_t width = -1;
     uint32_t height = -1;
     VkRenderPass renderPass = VK_NULL_HANDLE;
@@ -6959,8 +6961,8 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   VkAttachmentDescription colorAttachment{};
   colorAttachment.format = colorTexture->format;
   colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  // Clear to transparent black using the value supplied by rasterizeGui.
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  // Preserve the caller's attachment contents; clearing is explicit.
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   // save rasterized fragments to memory
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   // not currently using a stencil
@@ -6973,7 +6975,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   VkAttachmentDescription depthAttachment{};
   depthAttachment.format = depthTexture->format;
   depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -6999,15 +7001,17 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   VkSubpassDependency dependency{};
   dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
   dependency.dstSubpass = 0;
-  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-  dependency.srcAccessMask = 0;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
   dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
   VkSubpassDependency outgoing{};
   outgoing.srcSubpass = 0;
   outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
-  outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                          VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
   outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
   outgoing.dstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
@@ -7066,9 +7070,19 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
 
 uint64_t
 Context::rasterizeGui() {
-  VK_CHECK_RESULT(synchronize());
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
+  bool drawable = int(draw_data->DisplaySize.x * draw_data->FramebufferScale.x) > 0 &&
+                  int(draw_data->DisplaySize.y * draw_data->FramebufferScale.y) > 0;
+  if (drawable) {
+    // Match the backend's two-frame vertex/index buffer ring.
+    imgui.frameIndex = (imgui.frameIndex + 1) % 2;
+    VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wait.semaphoreCount = 1;
+    wait.pSemaphores = &GRTimelineSemaphore;
+    wait.pValues = &imgui.submissions[imgui.frameIndex];
+    VK_CHECK_RESULT(vkWaitSemaphores(logicalDevice, &wait, requestedFeatures.syncTDR));
+  }
 
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -7078,10 +7092,8 @@ Context::rasterizeGui() {
   renderPassBeginInfo.renderArea.offset.y = 0;
   renderPassBeginInfo.renderArea.extent.width = imgui.width;
   renderPassBeginInfo.renderArea.extent.height = imgui.height;
-  VkClearValue clearValues[2]{};
-  clearValues[1].depthStencil.depth = 1.0f;
-  renderPassBeginInfo.clearValueCount = 2;
-  renderPassBeginInfo.pClearValues = clearValues;
+  renderPassBeginInfo.clearValueCount = 0;
+  renderPassBeginInfo.pClearValues = nullptr;
   renderPassBeginInfo.framebuffer = imgui.frameBuffer;
 
   VkCommandBuffer commandBuffer = beginGraphicsCommands();
@@ -7106,7 +7118,7 @@ Context::rasterizeGui() {
   // The render pass final layouts restore each attachment's tracked layout.
 
   endGraphicsCommands(commandBuffer);
-  VK_CHECK_RESULT(synchronizeGraphics());
+  if (drawable) imgui.submissions[imgui.frameIndex] = GRTimelineCounter;
   return GRTimelineCounter;
 }
 

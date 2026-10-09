@@ -871,8 +871,9 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
 /**
  * @brief If a window was requested, this function rasterizes the graphical user interface
  * into the texture attachments specified by gprtGuiSetRasterAttachments.
- * Clears color to transparent black and depth to 1 before rendering.
- * Waits for earlier context work and completes rasterization before returning.
+ * Preserves attachment contents. Use gprtTextureClear for an explicit clear.
+ * Returns the graphics completion value. Waits only when reusing ImGui's pending
+ * vertex/index buffer slot; callers must order accesses from other queues.
  *
  * @param context The GPRT context
  */
