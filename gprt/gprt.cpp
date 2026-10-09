@@ -7317,13 +7317,12 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Discard the acquired image contents and transition it to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // The copy overwrites the entire acquired image.
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
@@ -7395,8 +7394,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // The copy overwrites the entire acquired image.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
@@ -7426,7 +7424,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  // and revert the texture format back to its previous layout
+  // Restore the texture's tracked layout.
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
@@ -7443,8 +7441,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
+  // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
   if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
   context->acquireSwapchainImage();
@@ -7470,13 +7467,12 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Discard the acquired image contents and transition it to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // The copy overwrites the entire acquired image.
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
@@ -7536,8 +7532,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // The copy overwrites the entire acquired image.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
@@ -7580,8 +7575,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
+  // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
   if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
   context->acquireSwapchainImage();
