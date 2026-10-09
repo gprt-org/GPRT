@@ -705,7 +705,7 @@ struct Context {
   VkCommandBuffer beginTransferCommands();
   VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
   VkResult endComputeCommands(VkCommandBuffer commandBuffer);
-  VkResult endTransferCommands(VkCommandBuffer commandBuffer);
+  VkResult endTransferCommands(VkCommandBuffer commandBuffer, bool waitForProducers = false);
   VkResult synchronizeTransfer();
   VkResult synchronizeGraphics();
   VkResult synchronizeCompute();
@@ -848,12 +848,15 @@ struct Buffer {
   VkDeviceSize alignment = 16;
   void *mapped = nullptr;
 
-  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
-    VK_CHECK_RESULT(context->synchronize());
+  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0, bool initialized = true) {
     if (mapped)
       return VK_SUCCESS;
 
+    if (!initialized)
+      return vmaMapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation, &mapped);
+
     if (hostVisible) {
+      VK_CHECK_RESULT(context->synchronize());
       vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
       return vmaMapMemory(context->allocator, allocation, &mapped);
     } else {
@@ -865,7 +868,7 @@ struct Buffer {
       region.dstOffset = 0;
       region.size = (mapSize == VK_WHOLE_SIZE) ? size : mapSize;
       vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
-      context->endTransferCommands(commandBuffer);
+      context->endTransferCommands(commandBuffer, true);
       context->synchronizeTransfer();
 
       vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
@@ -990,7 +993,7 @@ struct Buffer {
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, buffer, newBuffer, 1, &region);
-        context->endTransferCommands(commandBuffer);
+        context->endTransferCommands(commandBuffer, true);
         context->synchronizeTransfer();
 
         // Free old buffer
@@ -1043,7 +1046,7 @@ struct Buffer {
         region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, buffer, stagingBuffer.buffer, 1, &region);
 
-        context->endTransferCommands(commandBuffer);
+        context->endTransferCommands(commandBuffer, true);
         context->synchronizeTransfer();
       }
 
@@ -1072,7 +1075,7 @@ struct Buffer {
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
-        context->endTransferCommands(commandBuffer);
+        context->endTransferCommands(commandBuffer, true);
         context->synchronizeTransfer();
       }
 
@@ -1197,7 +1200,7 @@ struct Buffer {
     // If a pointer to the buffer data has been passed, map the buffer and
     // copy over the data
     if (data != nullptr) {
-      map();
+      map(VK_WHOLE_SIZE, 0, false);
       memcpy(mapped, data, size);
       unmap();
     }
@@ -6807,7 +6810,7 @@ VkCommandBuffer Context::beginTransferCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer, bool waitForProducers) {
   VkResult result;
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
@@ -6820,7 +6823,7 @@ VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 2;
+  timelineInfo.waitSemaphoreValueCount = waitForProducers ? 2 : 0;
   timelineInfo.pWaitSemaphoreValues = values;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
@@ -6829,7 +6832,7 @@ VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 2;
+  submitInfo.waitSemaphoreCount = timelineInfo.waitSemaphoreValueCount;
   submitInfo.pWaitSemaphores = waits;
   submitInfo.pWaitDstStageMask = stages;
   submitInfo.signalSemaphoreCount = 1;
@@ -8601,7 +8604,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
       new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
-  buffer->map();
+  buffer->map(VK_WHOLE_SIZE, 0, false);
 
   if (init) {
     void *mapped = buffer->mapped;
@@ -8634,7 +8637,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   if (init) {
-    buffer->map();
+    buffer->map(VK_WHOLE_SIZE, 0, false);
     void *mapped = buffer->mapped;
     memcpy(mapped, init, size * count);
     buffer->unmap();
@@ -8670,7 +8673,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
-  buffer->map();
+  buffer->map(VK_WHOLE_SIZE, 0, false);
 
   if (init) {
     void *mapped = buffer->mapped;
