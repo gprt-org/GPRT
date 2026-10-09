@@ -650,6 +650,8 @@ struct Context {
 
   // TODO, we can probably refactor this...
   struct SortStages {
+    VkBuffer boundKeys = VK_NULL_HANDLE, boundValues = VK_NULL_HANDLE, boundScratch = VK_NULL_HANDLE;
+    VkDeviceSize boundSize = 0;
     Stage Count;
     Stage CountReduce;
     Stage Scan;
@@ -928,6 +930,7 @@ struct Buffer {
 
   /*! Calls vkDestroy on the buffer, and frees underlying memory */
   void destroy() {
+    invalidateSortBindings();
     // Free sampler slot for use by subsequently made buffers
     context->buffers[virtualAddress] = nullptr;
 
@@ -943,6 +946,15 @@ struct Buffer {
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
+    }
+  }
+
+  void invalidateSortBindings() {
+    auto &sort = context->sortStages;
+    if (buffer && (buffer == sort.boundKeys || buffer == sort.boundValues || buffer == sort.boundScratch)) {
+      VK_CHECK_RESULT(context->synchronizeCompute());
+      sort.boundKeys = sort.boundValues = sort.boundScratch = VK_NULL_HANDLE;
+      sort.boundSize = 0;
     }
   }
 
@@ -963,6 +975,8 @@ struct Buffer {
     // If the size is already okay, do nothing
     if (size == bytes)
       return;
+
+    invalidateSortBindings();
 
     if (hostVisible) {
       // if we are host visible, we need to create a new buffer before releasing the
@@ -8947,7 +8961,11 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
   };
 
   // Do binding setups
-  {
+  auto &sort = context->sortStages;
+  VkBuffer valueBuffer = values ? values->buffer : VK_NULL_HANDLE;
+  if (sort.boundKeys != keys->buffer || sort.boundValues != valueBuffer ||
+      sort.boundScratch != scratch->buffer || sort.boundSize != keys->size) {
+    VK_CHECK_RESULT(context->synchronizeCompute());
     VkBuffer BufferMaps[4];
     VkDeviceSize Offsets1[4] = {0, 0, 0, 0};
 
@@ -8990,6 +9008,10 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     BufferMaps[1] = scratch->buffer;
     VkDeviceSize Offsets4[4] = {scratchOffset, reducedScratchOffset, 0, 0};
     BindUAVBuffer(BufferMaps, Offsets4, context->sortStages.m_SortDescriptorSetScratch, 0, 2);
+    sort.boundKeys = keys->buffer;
+    sort.boundValues = valueBuffer;
+    sort.boundScratch = scratch->buffer;
+    sort.boundSize = keys->size;
   }
 
   // Transition barrier
