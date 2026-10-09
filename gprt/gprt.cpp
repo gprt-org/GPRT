@@ -2591,7 +2591,7 @@ struct TriangleGeom : public Geom {
   TriangleGeom(TriangleGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
-    // Allocate the variables for this geometry
+    // Allocate zero-initialized parameters for this geometry.
     this->SBTRecord = (uint8_t *) calloc(std::max(size_t(1), geomType->recordSize), 1);
     this->recordSize = geomType->recordSize;
   };
@@ -2642,7 +2642,7 @@ struct SphereGeom : public Geom {
   SphereGeom(SphereGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
-    // Allocate the variables for this geometry
+    // Allocate zero-initialized parameters for this geometry.
     this->SBTRecord = (uint8_t *) calloc(std::max(size_t(1), geomType->recordSize), 1);
     this->recordSize = geomType->recordSize;
   };
@@ -2698,7 +2698,7 @@ struct LSSGeom : public Geom {
   LSSGeom(LSSGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
-    // Allocate the variables for this geometry
+    // Allocate zero-initialized parameters for this geometry.
     this->SBTRecord = (uint8_t *) calloc(std::max(size_t(1), geomType->recordSize), 1);
     this->recordSize = geomType->recordSize;
   };
@@ -2768,7 +2768,7 @@ struct SolidGeom : public Geom {
   SolidGeom(SolidGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
-    // Allocate the variables for this geometry
+    // Allocate zero-initialized parameters for this geometry.
     this->SBTRecord = (uint8_t *) calloc(std::max(size_t(1), geomType->recordSize), 1);
     this->recordSize = geomType->recordSize;
   };
@@ -2829,7 +2829,7 @@ struct AABBGeom : public Geom {
   AABBGeom(AABBGeomType *_geomType) : Geom(_geomType->context) {
     geomType = (GeomType *) _geomType;
 
-    // Allocate the variables for this geometry
+    // Allocate zero-initialized parameters for this geometry.
     this->SBTRecord = (uint8_t *) calloc(std::max(size_t(1), geomType->recordSize), 1);
     this->recordSize = geomType->recordSize;
   };
@@ -4527,7 +4527,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         size_t recordStride = raygenRecordSize;
         size_t handleStride = handleSize;
 
-        // First, copy handle
+        // Clear the record, including padding, then copy the shader handle.
         size_t recordOffset = recordStride * idx;
         size_t handleOffset = handleStride * idx;
         memset(mapped + recordOffset, 0, recordStride);
@@ -4551,7 +4551,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         size_t recordStride = missRecordSize;
         size_t handleStride = handleSize;
 
-        // First, copy handle
+        // Clear the record, including padding, then copy the shader handle.
         size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
         size_t handleOffset = handleStride * idx + handleStride * numRayGens;
         memset(mapped + recordOffset, 0, recordStride);
@@ -4576,7 +4576,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
         size_t recordStride = callableRecordSize;
         size_t handleStride = handleSize;
 
-        // First, copy handle
+        // Clear the record, including padding, then copy the shader handle.
         size_t recordOffset = recordStride * idx;   // + recordStride * numRayGens;
         size_t handleOffset = handleStride * idx + handleStride * (numRayGens + numMissProgs);
         memset(mapped + recordOffset, 0, recordStride);
@@ -4606,7 +4606,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
           size_t recordStride = hitRecordSize;
           size_t handleStride = handleSize;
 
-          // First, copy handle
+          // Clear the record, including padding, then copy the shader handle.
           uint32_t handleIDX = ((rayType + requestedFeatures.numRayTypes * geom->geomType->address) + uint32_t(numRayGens + numMissProgs + numCallableProgs));
           size_t recordOffset = recordStride * (rayType + requestedFeatures.numRayTypes * geomID);
           size_t handleOffset = handleStride * size_t(handleIDX);
@@ -4700,7 +4700,7 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
       //             size_t recordStride = hitRecordSize;
       //             size_t handleStride = handleSize;
 
-      //             // First, copy handle
+      //             // Clear the record, including padding, then copy the shader handle.
       //             size_t recordOffset =
       //                 recordStride * (rayType + requestedFeatures.numRayTypes * geomID + instance.__gprtSBTOffset);
       //             size_t handleOffset =
