@@ -28,7 +28,7 @@ function(embed_devicecode)
   # processes arguments given to a function, and defines a set of variables
   #   which hold the values of the respective options
   set(oneArgs OUTPUT_TARGET)
-  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES HEADERS)
+  set(multiArgs SPIRV_LINK_LIBRARIES SOURCES HEADERS INCLUDE_DIRS)
   cmake_parse_arguments(EMBED_DEVICECODE "" "${oneArgs}" "${multiArgs}" ${ARGN})
 
   unset(EMBED_DEVICECODE_OUTPUTS)
@@ -37,6 +37,12 @@ function(embed_devicecode)
   set(EMBED_DEVICECODE_RELEASE_OPT_FLAG $<$<CONFIG:RelWithDebInfo,Release>:-O3>)
 
   set(EMBED_DEVICECODE_DEBUG_DEFINES $<$<CONFIG:Debug>:-D__DEBUG__>)
+
+  # build a list of all additional (external to GPRT) included directories
+  set(EMBED_DEVICECODE_INCLUDES)
+  foreach(dir ${EMBED_DEVICECODE_INCLUDE_DIRS})
+    list(APPEND EMBED_DEVICECODE_INCLUDES "-I" "${dir}")
+  endforeach()
 
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
@@ -58,6 +64,7 @@ function(embed_devicecode)
     ${EMBED_DEVICECODE_RELEASE_OPT_FLAG}
     -I ${GPRT_INCLUDE_DIR}
     ${EMBED_DEVICECODE_DEBUG_DEFINES}
+    ${EMBED_DEVICECODE_INCLUDES} 
     -o ${CMAKE_CURRENT_BINARY_DIR}/${EMBED_DEVICECODE_OUTPUT_TARGET}.spv
     DEPENDS ${EMBED_DEVICECODE_SOURCES} ${EMBED_DEVICECODE_HEADERS} ${GPRT_INCLUDE_DIR}/gprt.slang ${GPRT_INCLUDE_DIR}/gprt.h ${GPRT_INCLUDE_DIR}/gprt_shared.h
   )
