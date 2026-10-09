@@ -696,7 +696,7 @@ struct Context {
   VkCommandBuffer beginComputeCommands();
   VkCommandBuffer beginTransferCommands();
   VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
-  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer, uint64_t graphicsWait = 0);
   VkResult endTransferCommands(VkCommandBuffer commandBuffer);
   VkResult synchronizeTransfer();
   VkResult synchronizeGraphics();
@@ -3364,7 +3364,6 @@ public:
 
   virtual void build(GPRTBuildParams options) {};
   virtual void update() {
-    VK_CHECK_RESULT(context->synchronizeGraphics());
     if (buildMode == GPRT_BUILD_MODE_UNINITIALIZED) {
       LOG_ERROR("Tree not previously built!");
     }
@@ -3455,7 +3454,7 @@ public:
     VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
     recordBuildDependency(commandList);
     gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
-    context->endComputeCommands(commandList);
+    context->endComputeCommands(commandList, context->GRTimelineCounter);
 
     // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
     // updateDeviceAddress(isCompact);
@@ -6752,18 +6751,18 @@ VkCommandBuffer Context::beginComputeCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer, uint64_t graphicsWait) {
   VkResult err;
   err = vkEndCommandBuffer(commandBuffer);
   if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  uint64_t prevCounter = CETimelineCounter;
+  VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   CETimelineCounter++;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = graphicsWait ? 1 : 0;
+  timelineInfo.pWaitSemaphoreValues = &graphicsWait;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
 
@@ -6771,8 +6770,9 @@ VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.waitSemaphoreCount = timelineInfo.waitSemaphoreValueCount;
+  submitInfo.pWaitSemaphores = &GRTimelineSemaphore;
+  submitInfo.pWaitDstStageMask = &waitStage;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &CETimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
