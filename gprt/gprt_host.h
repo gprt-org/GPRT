@@ -624,50 +624,48 @@ gprtAABBsSetPositions(GPRTGeomOf<T1> aabbs, GPRTBufferOf<T2> positions, uint32_t
 
 GPRT_API void gprtBuildShaderBindingTable(GPRTContext context, GPRTBuildSBTFlags flags GPRT_IF_CPP(= GPRT_SBT_ALL));
 
-/** Tells the GPRT to create a window when once the context is made.
+/** Requests a window when the context is created.
+ * GPRT_HEADLESS_SURFACE=1 disables window creation while preserving these dimensions.
  * @param initialWidth The width of the window in screen coordinates
  * @param initialHeight The height of the window in screen coordinates
  * @param title The title to put in the top bar of the window
  */
 GPRT_API void gprtRequestWindow(uint32_t initialWidth, uint32_t initialHeight, const char *title);
 
-// GPRT_HEADLESS_SURFACE=1 disables window creation while preserving these dimensions.
-// Null contexts are treated as headless by the window and input helpers.
+/** Returns true if the context has no window or is null. */
 GPRT_API bool gprtContextIsHeadless(GPRTContext context);
 
-/** If a window was requested, @returns true if the window's close button
- * was clicked. This function can be called from any thread.
+/** If the context has a window, returns whether its close button was clicked.
  *
- * Headless contexts close after 1440 presentations or calls to this function.
- * GPRT_HEADLESS_FRAME_LIMIT overrides this positive frame limit. Invalid values
- * use the default. Contexts without framebuffer dimensions close immediately.
+ * Headless buffer presentations and calls to this function are counted separately.
+ * Returns true when either count reaches 1440. GPRT_HEADLESS_FRAME_LIMIT overrides
+ * this positive limit; invalid values use the default. Null contexts and contexts
+ * without framebuffer dimensions return true immediately.
  */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
 
-/** If a window was requested, this function sets the title in the top bar of
+/** If the context has a window, this function sets the title in the top bar of
  * the window to the given text.
  *
- * If a window was not requested (ie headless), this function does nothing
+ * If the context has no window, this function does nothing
  */
 GPRT_API void gprtSetWindowTitle(GPRTContext context, const char *title);
 
 // Seems to require a swapchain rebuild.
 // GPRT_API void gprtSetWindowFullScreen(GPRTContext context, bool fullScreen);
 
-/** If a window was requested, this function returns the position of the cursor
+/** If the context has a window, this function returns the position of the cursor
  * in screen coordinates relative to the upper left corner.
  *
- * If a window was not requested (ie headless), position arguments will be
- * set to NULL.
+ * If the context has no window, non-null output arguments are set to zero.
  */
 GPRT_API void gprtGetCursorPos(GPRTContext context, double *xpos, double *ypos);
 
-/** If a window was requested and enabled is true, this function hides and grabs the cursor, 
+/** If the context has a window and enabled is true, this function hides and grabs the cursor,
  * providing virtual and unlimited cursor movement. This is useful for implementing 3D 
- * camera controls. If enabled is fase, the cursor will be made visible and will be released.
+ * camera controls. If enabled is false, the cursor will be made visible and will be released.
  *
- * If a window was not requested (ie headless), position arguments will be
- * set to NULL.
+ * If the context has no window, this function does nothing.
  */
 GPRT_API void gprtGrabAndHideCursor(GPRTContext context, bool enabled);
 
@@ -691,11 +689,11 @@ GPRT_API void gprtGetDenoiserOutputSize(GPRTContext context, uint32_t *width, ui
 #define GPRT_MOUSE_BUTTON_RIGHT  GPRT_MOUSE_BUTTON_2
 #define GPRT_MOUSE_BUTTON_MIDDLE GPRT_MOUSE_BUTTON_3
 
-/** If a window was requested, this function returns the last state reported
+/** If the context has a window, this function returns the last state reported
  * for the given mouse button. The returned state is one of GPRT_PRESS or
  * GPRT_RELEASE.
  *
- * If a window was not requested (ie headless), this function will return
+ * If the context has no window, this function will return
  * GPRT_RELEASE.
  */
 GPRT_API int gprtGetMouseButton(GPRTContext context, int button);
@@ -829,27 +827,27 @@ GPRT_API int gprtGetMouseButton(GPRTContext context, int button);
 
 #define GPRT_KEY_LAST GPRT_KEY_MENU
 
-/** If a window was requested, this function returns the last state reported
+/** If the context has a window, this function returns the last state reported
  * for the given keyboard button. The returned state is one of GPRT_PRESS or
  * GPRT_RELEASE.
  *
- * If a window was not requested (ie headless), this function will return
+ * If the context has no window, this function will return
  * GPRT_RELEASE.
  */
 GPRT_API int gprtGetKey(GPRTContext context, int key);
 
-/** If a window was requested, this function returns the time elapsed (in seconds)
+/** If the context has a window, this function returns the time elapsed (in seconds)
  * since GPRT was initialized.
  *
- * At the moment, if a window was not requested (ie headless), this function
- * will return 0.
+ * Headless time starts at zero and advances by 1/60 second per successful
+ * buffer presentation. A null context returns zero.
  */
-// Headless time advances by 1/60 second per successful buffer presentation.
 GPRT_API double gprtGetTime(GPRTContext context);
 
 /**
- * @brief If a window was requested, this function configures which textures
- * should be used when rasterizing the graphical user interface (using gprtGuiRasterize).
+ * @brief Configures the textures used by gprtGuiRasterize.
+ * For headless GUI rendering, request framebuffer dimensions with gprtRequestWindow
+ * before creating the context.
  *
  * @param context The GPRT context
  * @param colorAttachment The color attachment to rasterize the GUI into
@@ -859,8 +857,9 @@ GPRT_API void gprtGuiSetRasterAttachments(GPRTContext context, GPRTTexture color
                                           GPRTTexture depthAttachment);
 
 /**
- * @brief  If a window was requested, this function configures which textures
- * should be used when rasterizing the graphical user interface (using gprtGuiRasterize).
+ * @brief Configures the textures used by gprtGuiRasterize.
+ * For headless GUI rendering, request framebuffer dimensions with gprtRequestWindow
+ * before creating the context.
  *
  * @tparam T1 The type of the color attachment.
  * @tparam T2 The type of the depth attachment
@@ -875,7 +874,7 @@ gprtGuiSetRasterAttachments(GPRTContext context, GPRTTextureOf<T1> colorAttachme
 }
 
 /**
- * @brief If a window was requested, this function rasterizes the graphical user interface
+ * @brief Rasterizes the graphical user interface for windowed or headless contexts
  * into the texture attachments specified by gprtGuiSetRasterAttachments.
  *
  * @param context The GPRT context
@@ -1826,10 +1825,10 @@ GPRT_API size_t gprtTextureGetDepthPitch(GPRTTexture texture);
 // Generates mipmaps for the specified texture object.
 GPRT_API void gprtTextureGenerateMipmap(GPRTTexture texture);
 
-/** If a window was requested, this call presents the contents of the texture
+/** If the context has a window, this call presents the contents of the texture
  * to the window, potentially waiting for the screen to update before swapping.
  *
- * If a window was not requested (ie headless), this function does nothing.
+ * If the context has no window, this function does nothing.
  */
 GPRT_API void gprtTexturePresent(GPRTContext context, GPRTTexture texture);
 
@@ -2472,15 +2471,16 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
 //   return gprtBufferGetDeviceAddress((GPRTBuffer) buffer, deviceID);
 // }
 
-/** If a window was requested, this call interprets the given buffer as
+/** If the context has a window, this call interprets the given buffer as
  * a B8G8R8A8 SRGB image sorted in row major buffer, and presents the contents
  * to the window, potentially waiting for the screen to update before swapping.
  *
- * If a window was not requested (ie headless), this function does nothing.
+ * Headless presentation previews a BGRA8 sRGB framebuffer in the terminal using
+ * the dimensions requested by gprtRequestWindow. Missing dimensions or an
+ * undersized buffer skip the preview. Colors are filtered in linear space, and
+ * the source buffer is preserved. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs;
+ * redirected output also uses ASCII.
  */
-// Headless presentation previews a BGRA8 sRGB framebuffer in the terminal.
-// It filters colors in linear space and preserves the source buffer. Set
-// GPRT_TERMINAL_ASCII=1 to force ASCII glyphs. Redirected output uses ASCII.
 GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 
 template <typename T>

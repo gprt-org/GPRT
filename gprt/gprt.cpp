@@ -6104,7 +6104,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     // this initializes the core structures of imgui
     ImGui::CreateContext();
 
-    // this initializes imgui for SDL
+    // Use GLFW for windowed input; initialize display size and time directly when headless.
     if (window) ImGui_ImplGlfw_InitForVulkan(window, true);
     else {
       ImGui::GetIO().DisplaySize = ImVec2(float(windowExtent.width), float(windowExtent.height));
