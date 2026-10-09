@@ -9478,6 +9478,12 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 }
 
 uint64_t
+_gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+                   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+  return _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants, {});
+}
+
+uint64_t
 _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants, GPRTLaunchDependencies dependencies) {
   Compute *compute = (Compute *) _compute;

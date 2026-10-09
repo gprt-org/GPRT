@@ -2562,8 +2562,10 @@ struct GPRTLaunchDependencies {
 
 // Declaration for the internal compute launch implementation.
 uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+                        std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
                         std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants,
-                        GPRTLaunchDependencies dependencies = {});
+                        GPRTLaunchDependencies dependencies);
 
 // Launch asynchronously and return a compute timeline value. Use
 // gprtComputeLaunchAfter to order access to data produced by earlier launches.
