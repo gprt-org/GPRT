@@ -69,7 +69,7 @@ main(int ac, char **av) {
     gprtContextDestroy(context);
   }
 
-  // Resize, but don't preserve contents (host)
+  // Resize, but don't preserve contents (device)
   {
     // Arrange
     GPRTContext context = gprtContextCreate(nullptr, 1);
