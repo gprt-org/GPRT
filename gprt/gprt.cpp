@@ -1823,7 +1823,8 @@ struct Texture : public ImageResource {
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     imageInfo.usage = usageFlags;
-    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT && format == GPRT_FORMAT_R8G8B8A8_SRGB)
+    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT &&
+        (format == GPRT_FORMAT_R8G8B8A8_SRGB || format == GPRT_FORMAT_R8G8B8A8_UNORM))
       imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
       imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -6960,7 +6961,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
   // clear here says to clear the values to a constant at start.
   // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   // save rasterized fragments to memory
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   // not currently using a stencil
@@ -6968,17 +6969,17 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   // Initial and final layouts of the texture
   colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+  colorAttachment.finalLayout = colorTexture->layout;
 
   VkAttachmentDescription depthAttachment{};
   depthAttachment.format = depthTexture->format;
   depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
   depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-  depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+  depthAttachment.finalLayout = depthTexture->layout;
 
   std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
 
@@ -7004,6 +7005,16 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
   dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
+  VkSubpassDependency outgoing{};
+  outgoing.srcSubpass = 0;
+  outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
+  outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  outgoing.dstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+  outgoing.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+  VkSubpassDependency dependencies[] = {dependency, outgoing};
+
   VkRenderPassCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
   createInfo.pNext = nullptr;
@@ -7011,10 +7022,10 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   createInfo.pAttachments = attachments.data();
   createInfo.subpassCount = 1;
   createInfo.pSubpasses = &subpass;
-  createInfo.dependencyCount = 1;
-  createInfo.pDependencies = &dependency;
+  createInfo.dependencyCount = 2;
+  createInfo.pDependencies = dependencies;
 
-  vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
+  VK_CHECK_RESULT(vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass));
 
   VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
 
@@ -7037,6 +7048,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.PhysicalDevice = physicalDevice;
   init_info.Device = logicalDevice;
   init_info.Queue = graphicsQueue;
+  init_info.QueueFamily = queueFamilyIndices.graphics;
   init_info.DescriptorPool = imguiPool;
   init_info.MinImageCount = 2;
   init_info.ImageCount = 2;
@@ -7055,6 +7067,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
 
 uint64_t
 Context::rasterizeGui() {
+  VK_CHECK_RESULT(synchronize());
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
 
@@ -7066,8 +7079,10 @@ Context::rasterizeGui() {
   renderPassBeginInfo.renderArea.offset.y = 0;
   renderPassBeginInfo.renderArea.extent.width = imgui.width;
   renderPassBeginInfo.renderArea.extent.height = imgui.height;
-  renderPassBeginInfo.clearValueCount = 0;
-  renderPassBeginInfo.pClearValues = nullptr;
+  VkClearValue clearValues[2]{};
+  clearValues[1].depthStencil.depth = 1.0f;
+  renderPassBeginInfo.clearValueCount = 2;
+  renderPassBeginInfo.pClearValues = clearValues;
   renderPassBeginInfo.framebuffer = imgui.frameBuffer;
 
   VkCommandBuffer commandBuffer = beginGraphicsCommands();
@@ -7090,15 +7105,10 @@ Context::rasterizeGui() {
   vkCmdEndRenderPass(commandBuffer);
 
   // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                        imgui.colorAttachment->layout,
-                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
-
-  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                        imgui.depthAttachment->layout,
-                                        {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+  // The render pass final layouts perform these transitions.
 
   endGraphicsCommands(commandBuffer);
+  VK_CHECK_RESULT(synchronizeGraphics());
   return GRTimelineCounter;
 }
 
