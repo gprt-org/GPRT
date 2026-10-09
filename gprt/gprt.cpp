@@ -7394,7 +7394,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // The copy overwrites the entire acquired image.
+    // Preserve the transferred contents while transitioning for presentation.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
@@ -7532,7 +7532,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // The copy overwrites the entire acquired image.
+    // Preserve the transferred contents while transitioning for presentation.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
