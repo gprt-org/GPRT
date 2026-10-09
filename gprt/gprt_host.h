@@ -2478,7 +2478,8 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  * Headless presentation previews a BGRA8 sRGB framebuffer in the terminal using
  * the dimensions requested by gprtRequestWindow. Missing dimensions or an
  * undersized buffer skip the preview. Colors are filtered in linear space, and
- * the source buffer is preserved. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs;
+ * the source buffer is preserved. An existing device mapping is previewed as-is,
+ * including pending host edits. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs;
  * redirected output also uses ASCII.
  */
 GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
