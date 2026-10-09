@@ -703,8 +703,8 @@ struct Context {
   VkCommandBuffer beginGraphicsCommands();
   VkCommandBuffer beginComputeCommands();
   VkCommandBuffer beginTransferCommands();
-  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
-  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
+  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer, uint64_t computeWait = 0);
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer, GPRTLaunchDependencies dependencies = {});
   VkResult endTransferCommands(VkCommandBuffer commandBuffer);
   VkResult synchronizeTransfer();
   VkResult synchronizeGraphics();
@@ -6696,18 +6696,18 @@ VkCommandBuffer Context::beginGraphicsCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer, uint64_t computeWait) {
+  if (computeWait > CETimelineCounter) throw std::invalid_argument("Compute dependency has not been submitted");
   VkResult result;
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
 
-  uint64_t prevCounter = GRTimelineCounter;
   GRTimelineCounter++;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = computeWait ? 1 : 0;
+  timelineInfo.pWaitSemaphoreValues = &computeWait;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
 
@@ -6715,8 +6715,10 @@ VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  submitInfo.waitSemaphoreCount = timelineInfo.waitSemaphoreValueCount;
+  submitInfo.pWaitSemaphores = &CETimelineSemaphore;
+  submitInfo.pWaitDstStageMask = &waitStage;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
@@ -6753,18 +6755,24 @@ VkCommandBuffer Context::beginComputeCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer, GPRTLaunchDependencies dependencies) {
+  if (dependencies.compute > CETimelineCounter || dependencies.graphics > GRTimelineCounter)
+    throw std::invalid_argument("Launch dependency has not been submitted in this context");
   VkResult err;
   err = vkEndCommandBuffer(commandBuffer);
   if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  uint64_t prevCounter = CETimelineCounter;
   CETimelineCounter++;
+
+  VkSemaphore waits[2] = {CETimelineSemaphore, GRTimelineSemaphore};
+  uint64_t values[2] = {dependencies.compute, dependencies.graphics};
+  VkPipelineStageFlags stages[2] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+  uint32_t waitCount = dependencies.compute || dependencies.graphics ? 2 : 0;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = waitCount;
+  timelineInfo.pWaitSemaphoreValues = values;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
 
@@ -6772,8 +6780,9 @@ VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.waitSemaphoreCount = waitCount;
+  submitInfo.pWaitSemaphores = waits;
+  submitInfo.pWaitDstStageMask = stages;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &CETimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
@@ -9464,15 +9473,17 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
     vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
   }
 
-  context->endGraphicsCommands(commandBuffer);
+  context->endGraphicsCommands(commandBuffer, context->CETimelineCounter);
   return context->GRTimelineCounter;
 }
 
 uint64_t
 _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
-                   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+                   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants, GPRTLaunchDependencies dependencies) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
+  if (dependencies.compute > context->CETimelineCounter || dependencies.graphics > context->GRTimelineCounter)
+    throw std::invalid_argument("Launch dependency has not been submitted in this context");
 
   // Build / update the compute pipeline if required
   if (compute->pipeline == VK_NULL_HANDLE) {
@@ -9507,7 +9518,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
     vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
   }
 
-  err = context->endComputeCommands(commandBuffer);
+  err = context->endComputeCommands(commandBuffer, dependencies);
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
@@ -9531,7 +9542,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
   //   LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
 
   // err = vkQueueWaitIdle(context->graphicsQueue);
-  return 0;
+  return context->CETimelineCounter;
 }
 
 GPRT_API uint64_t 
@@ -9541,7 +9552,7 @@ gprtComputeSynchronize(GPRTContext _context)
   assert(_context);
   Context *context = (Context *) _context;
   context->synchronizeCompute();
-  return 0;
+  return context->CETimelineCounter;
 }
 
 GPRT_API uint64_t 
@@ -9551,7 +9562,7 @@ gprtGraphicsSynchronize(GPRTContext _context)
   assert(_context);
   Context *context = (Context *) _context;
   context->synchronizeGraphics();
-  return 0;
+  return context->GRTimelineCounter;
 }
 
 GPRT_API uint64_t 

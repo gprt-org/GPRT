@@ -2552,8 +2552,15 @@ gprtRayGenLaunch3D(GPRTContext context, GPRTRayGenOf<RecordType> rayGen, uint32_
 }
 
 // declaration for internal implementation
+// Values must come from the matching queue in the same context. Zero means no wait.
+struct GPRTLaunchDependencies {
+  uint64_t compute = 0;
+  uint64_t graphics = 0;
+};
+
 uint64_t _gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
-                        std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants);
+                        std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants,
+                        GPRTLaunchDependencies dependencies = {});
 
 // Case where compute program uniforms are not known at compilation time
 template <typename... Uniforms>
@@ -2602,6 +2609,30 @@ gprtComputeLaunch(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 gro
 }
 
 GPRT_API uint64_t gprtComputeSynchronize(GPRTContext context);
+// Launch after the specified submissions complete on the GPU. Independent
+// gprtComputeLaunch calls remain asynchronous. The return value is a compute
+// timeline value; ray-generation launches return graphics timeline values.
+template <typename... Uniforms>
+uint64_t gprtComputeLaunchAfter(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
+                               GPRTLaunchDependencies dependencies, Uniforms... uniforms) {
+  static_assert(totalSizeOf<Uniforms...>() <= PUSH_CONSTANTS_LIMIT,
+                "Total size of arguments exceeds PUSH_CONSTANTS_LIMIT bytes");
+  runtime_assert(numGroups[0] <= WORKGROUP_LIMIT && numGroups[1] <= WORKGROUP_LIMIT && numGroups[2] <= WORKGROUP_LIMIT,
+                 "Workgroup count exceeds WORKGROUP_LIMIT");
+  runtime_assert(groupSize[0] * groupSize[1] * groupSize[2] <= THREADGROUP_LIMIT,
+                 "Thread count per group exceeds THREADGROUP_LIMIT");
+  std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants{};
+  size_t offset = 0;
+  (handleArg(pushConstants, offset, uniforms), ...);
+  return _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants, dependencies);
+}
+
+template <typename... Uniforms>
+uint64_t gprtComputeLaunchAfter(GPRTComputeOf<Uniforms...> compute, uint3 numGroups, uint3 groupSize,
+                               GPRTLaunchDependencies dependencies, Uniforms... uniforms) {
+  return gprtComputeLaunchAfter((GPRTCompute)compute, numGroups, groupSize, dependencies, uniforms...);
+}
+
 GPRT_API uint64_t gprtGraphicsSynchronize(GPRTContext context);
 GPRT_API uint64_t gprtDeviceSynchronize(GPRTContext context);
 
