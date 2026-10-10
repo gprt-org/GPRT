@@ -979,7 +979,8 @@ GPRT_API void gprtRequestMotionBlur();
 
   GPRT_VISIBLE_DEVICES optionally specifies comma-separated Vulkan device
   ordinals in preference order. An empty value or -1 hides all devices;
-  malformed, duplicate, and out-of-range ordinals are errors.
+  malformed, duplicate, and out-of-range ordinals are errors. Rejected device
+  selection uses LOG_ERROR and returns null if the error handler returns.
 
   requestedDeviceIDs[0] indexes the usable devices after this filtering.
   A null list or numDevices == 0 selects the first usable device. The selected
