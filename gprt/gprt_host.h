@@ -2494,8 +2494,8 @@ gprtBufferSaveImage(GPRTBufferOf<T> buffer, uint32_t width, uint32_t height, con
   gprtBufferSaveImage((GPRTBuffer) buffer, width, height, imageName);
 }
 
-// Ray-generation launches wait for previously submitted compute work and return
-// a graphics timeline value. These semantics also apply to the 2D and 3D variants.
+// Ray-generation launches return a graphics timeline value. Callers must
+// synchronize producers on other queues before launching dependent ray tracing.
 GPRT_API uint64_t gprtRayGenLaunch1D(GPRTContext context, GPRTRayGen rayGen, uint32_t dims_x,
                                  size_t pushConstantsSize GPRT_IF_CPP(= 0), void *pushConstants GPRT_IF_CPP(= 0));
 
