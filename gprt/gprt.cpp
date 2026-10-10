@@ -848,12 +848,9 @@ struct Buffer {
   VkDeviceSize alignment = 16;
   void *mapped = nullptr;
 
-  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0, bool initialized = true) {
+  VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
     if (mapped)
       return VK_SUCCESS;
-
-    if (!initialized)
-      return vmaMapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation, &mapped);
 
     if (hostVisible) {
       VkResult result = vmaMapMemory(context->allocator, allocation, &mapped);
@@ -1118,7 +1115,7 @@ struct Buffer {
   ~Buffer() {};
 
   Buffer(Context* context, VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
-         void *data = nullptr) {
+         const void *data = nullptr) {
     this->context = context;
 
     // Hunt for an existing free virtual address for this buffer
@@ -1201,7 +1198,8 @@ struct Buffer {
     // If a pointer to the buffer data has been passed, map the buffer and
     // copy over the data
     if (data != nullptr) {
-      map(VK_WHOLE_SIZE, 0, false);
+      // New allocations have no contents to read back before initialization.
+      VK_CHECK_RESULT(vmaMapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation, &mapped));
       memcpy(mapped, data, size);
       unmap();
     }
@@ -8598,7 +8596,7 @@ gprtHostBufferCreate(GPRTContext _context, size_t size, size_t count, const void
       new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
-  buffer->map(VK_WHOLE_SIZE, 0, false);
+  buffer->map();
 
   if (init) {
     void *mapped = buffer->mapped;
@@ -8628,14 +8626,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
-
-  if (init) {
-    buffer->map(VK_WHOLE_SIZE, 0, false);
-    void *mapped = buffer->mapped;
-    memcpy(mapped, init, size * count);
-    buffer->unmap();
-  }
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment, init);
   return (GPRTBuffer) buffer;
 }
 
@@ -8667,7 +8658,7 @@ gprtSharedBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
       new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
 
   // Pin the buffer to the host
-  buffer->map(VK_WHOLE_SIZE, 0, false);
+  buffer->map();
 
   if (init) {
     void *mapped = buffer->mapped;
