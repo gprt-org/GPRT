@@ -42,9 +42,18 @@ struct ParallelSortCB
     uint32_t NumScanValues;
 
     uint32_t CShiftBit;
+    uint32_t padding;
+
+    uint64_t *SrcBuffer;
+    uint64_t *DstBuffer;
+    uint64_t *SrcPayload;
+    uint64_t *DstPayload;
+    uint32_t *SumTable;
+    uint32_t *ReduceTable;
 };
 
 #ifndef __SLANG_COMPILER__
+    static_assert(sizeof(ParallelSortCB) == 80, "Sort push constants must match the shader layout");
 	void ParallelSort_CalculateScratchResourceSize(uint32_t MaxNumKeys, uint64_t& ScratchBufferSize, uint64_t& ReduceScratchBufferSize)
 	{
 		uint64_t BlockSize = PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE;
