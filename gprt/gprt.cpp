@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include <algorithm>
-#include <array>
 #include <assert.h>
 #include <charconv>
 #include <climits>
@@ -550,12 +549,15 @@ struct Context {
     uint32_t transfer;
   } queueFamilyIndices;
 
+  // Buffers support copies on graphics/transfer queues and shader access on graphics/compute queues.
+  std::vector<uint32_t> bufferQueueFamilies;
+  // Texture uploads and copies use graphics; shaders can also access textures on compute.
+  std::vector<uint32_t> textureQueueFamilies;
+
   template<typename CreateInfo>
-  void setQueueSharing(CreateInfo &info, std::array<uint32_t, 3> &families) const {
-    families = {queueFamilyIndices.graphics, queueFamilyIndices.compute, queueFamilyIndices.transfer};
-    std::sort(families.begin(), families.end());
-    auto end = std::unique(families.begin(), families.end());
-    uint32_t count = uint32_t(end - families.begin());
+  void setQueueSharing(CreateInfo &info, const std::vector<uint32_t> &families) const {
+    uint32_t count = uint32_t(families.size());
+    // Concurrent sharing requires at least two families with the enabled device features.
     info.sharingMode = count > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     info.queueFamilyIndexCount = count > 1 ? count : 0;
     info.pQueueFamilyIndices = count > 1 ? families.data() : nullptr;
@@ -987,8 +989,7 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
-        std::array<uint32_t, 3> families;
-        context->setQueueSharing(bufferCreateInfo, families);
+        context->setQueueSharing(bufferCreateInfo, context->bufferQueueFamilies);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1032,8 +1033,7 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
-        std::array<uint32_t, 3> families;
-        context->setQueueSharing(bufferCreateInfo, families);
+        context->setQueueSharing(bufferCreateInfo, context->bufferQueueFamilies);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1074,8 +1074,7 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
-        std::array<uint32_t, 3> families;
-        context->setQueueSharing(bufferCreateInfo, families);
+        context->setQueueSharing(bufferCreateInfo, context->bufferQueueFamilies);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -1173,8 +1172,7 @@ struct Buffer {
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.usage = usageFlags;
     bufferCreateInfo.size = size;
-    std::array<uint32_t, 3> families;
-    context->setQueueSharing(bufferCreateInfo, families);
+    context->setQueueSharing(bufferCreateInfo, context->bufferQueueFamilies);
 
     VmaAllocationCreateInfo allocInfo = {};
     if (hostVisible) {
@@ -1851,8 +1849,7 @@ struct Texture : public ImageResource {
 
     writable = ((usageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
 
-    std::array<uint32_t, 3> families;
-    context->setQueueSharing(imageInfo, families);
+    context->setQueueSharing(imageInfo, context->textureQueueFamilies);
     
     // If this image were to be used with MSAA as an attachment, we'd set this
     // to something other than
@@ -5675,6 +5672,12 @@ Context::Context(int32_t requestedDevice) {
   //   // Else we use the same queue
   //   queueFamilyIndices.transfer = queueFamilyIndices.graphics;
   // }
+
+  for (const auto &queueInfo : queueCreateInfos)
+    bufferQueueFamilies.push_back(queueInfo.queueFamilyIndex);
+  textureQueueFamilies.push_back(queueFamilyIndices.graphics);
+  if (queueFamilyIndices.compute != queueFamilyIndices.graphics)
+    textureQueueFamilies.push_back(queueFamilyIndices.compute);
 
   /// 3. Create the logical device representation
 
