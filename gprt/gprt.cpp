@@ -434,8 +434,6 @@ PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructur
 
 PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT;
 PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT;
-VkDebugUtilsMessengerEXT debugUtilsMessenger;
-VkDebugUtilsMessengerEXT validationMessenger;
 
 // Note, the following were deprecated and shouldn't be used
 // PFN_vkCreateDebugReportCallbackEXT vkCreateDebugReportCallbackEXT;
@@ -456,6 +454,8 @@ struct Stage {
 };
 
 struct Context {
+  VkDebugUtilsMessengerEXT debugUtilsMessenger = VK_NULL_HANDLE;
+  VkDebugUtilsMessengerEXT validationMessenger = VK_NULL_HANDLE;
   bool linearSweptSpheres = requestedFeatures.linearSweptSpheres;
   // For convenience, an opaque handle to the context
   GPRTContext context = (GPRTContext) this;
@@ -4986,14 +4986,14 @@ Context::destroy() {
 
 void
 Context::freeDebugCallback(VkInstance instance) {
-  if (gprt::debugUtilsMessenger != VK_NULL_HANDLE) {
-    gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::debugUtilsMessenger, nullptr);
-    gprt::debugUtilsMessenger = VK_NULL_HANDLE;
+  if (debugUtilsMessenger != VK_NULL_HANDLE) {
+    gprt::vkDestroyDebugUtilsMessengerEXT(instance, debugUtilsMessenger, nullptr);
+    debugUtilsMessenger = VK_NULL_HANDLE;
   }
 
-  if (gprt::validationMessenger != VK_NULL_HANDLE) {
-    gprt::vkDestroyDebugUtilsMessengerEXT(instance, gprt::validationMessenger, nullptr);
-    gprt::validationMessenger = VK_NULL_HANDLE;
+  if (validationMessenger != VK_NULL_HANDLE) {
+    gprt::vkDestroyDebugUtilsMessengerEXT(instance, validationMessenger, nullptr);
+    validationMessenger = VK_NULL_HANDLE;
   }
 }
 
@@ -5162,7 +5162,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
         VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
     debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessengerCallback;
     VkResult result =
-        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::debugUtilsMessenger);
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &debugUtilsMessenger);
     assert(result == VK_SUCCESS);
   }
 
@@ -5182,7 +5182,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
     debugUtilsMessengerCI.pfnUserCallback = validationMessengerCallback;
     VkResult result =
-        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &gprt::validationMessenger);
+        gprt::vkCreateDebugUtilsMessengerEXT(instance, &debugUtilsMessengerCI, nullptr, &validationMessenger);
     assert(result == VK_SUCCESS);
   }
 
