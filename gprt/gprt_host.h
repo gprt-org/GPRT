@@ -2605,7 +2605,42 @@ GPRT_API uint64_t gprtComputeSynchronize(GPRTContext context);
 GPRT_API uint64_t gprtGraphicsSynchronize(GPRTContext context);
 GPRT_API uint64_t gprtDeviceSynchronize(GPRTContext context);
 
-GPRT_API void gprtBeginProfile(GPRTContext context);
+enum GPRTQueue { GPRT_QUEUE_GRAPHICS, GPRT_QUEUE_COMPUTE, GPRT_QUEUE_TRANSFER };
 
-// returned results are in milliseconds
-GPRT_API float gprtEndProfile(GPRTContext context);
+// A submitted timeline point. The context owns the semaphore; do not destroy or
+// signal it. Events and their dependencies must belong to the same live context.
+struct GPRTEvent { VkSemaphore semaphore; uint64_t value; };
+
+// Capture the last submitted point without waiting or submitting work.
+// Compute: compute launches, sorts, and acceleration builds/updates/compaction.
+// Graphics: ray generation, GUI, buffer/texture copies, and presentation copies.
+// Transfer: device-buffer uploads and readbacks, including map/unmap operations.
+// Operations may use several queues internally; AS compaction also queries the
+// graphics queue. No-argument EndProfile covers all of these submissions.
+GPRT_API GPRTEvent gprtGetQueueEvent(GPRTContext context, GPRTQueue queue);
+
+// Order subsequent commands on this queue after the specified events on the GPU.
+// This supplies graph edges for APIs that do not accept dependencies themselves.
+// Duplicate semaphores use the greatest value. Unsubmitted values are rejected.
+GPRT_API GPRTEvent gprtQueueWait(GPRTContext context, GPRTQueue queue,
+                               uint32_t numEvents, const GPRTEvent *events);
+
+// Write the start timestamp after the optional dependencies. Subsequent GPRT
+// submissions wait on this event without serializing independent queues.
+// One region may be active per context. Invalid calls use LOG_ERROR and return
+// an empty event if the error handler returns.
+GPRT_API GPRTEvent gprtBeginProfile(GPRTContext context,
+                                  uint32_t numEvents GPRT_IF_CPP(= 0),
+                                  const GPRTEvent *events GPRT_IF_CPP(= nullptr));
+
+// Write the end timestamp after the supplied graph leaves and wait for it.
+// With no events, include all GPRT submissions since BeginProfile. With explicit
+// events, callers must cover every leaf whose completion they want to measure.
+// Both timestamps use the graphics queue. Results are elapsed milliseconds,
+// including host submission gaps and waits, or zero for an empty region.
+// Presentation covers GPU copy/render work; display scanout is not measured.
+// Errors return -1 if LOG_ERROR returns. After a completion timeout, retry EndProfile
+// before starting another region so pending queries cannot be reset.
+GPRT_API float gprtEndProfile(GPRTContext context,
+                             uint32_t numEvents GPRT_IF_CPP(= 0),
+                             const GPRTEvent *events GPRT_IF_CPP(= nullptr));

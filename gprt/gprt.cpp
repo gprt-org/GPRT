@@ -590,6 +590,11 @@ struct Context {
   VkQueryPool queryPool;
   VkQueryPool compactedSizeQueryPool;
   bool queryRequested = false;
+  GPRTEvent profileStart = {}, profileEnd = {};
+  uint64_t profileComputeStart = 0, profileTransferStart = 0;
+  bool profileEmpty = false;
+  VkResult submitCommands(VkCommandBuffer commands, GPRTQueue queue,
+                          uint32_t numEvents = 0, const GPRTEvent *events = nullptr);
 
   /** @brief Pipeline stages used to wait at for graphics queue submissions */
   VkPipelineStageFlags submitPipelineStages =
@@ -6697,33 +6702,7 @@ VkCommandBuffer Context::beginGraphicsCommands() {
 }
 
 VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
-  VkResult result;
-  result = vkEndCommandBuffer(commandBuffer);
-  if (result != VK_SUCCESS) return result;
-
-  uint64_t prevCounter = GRTimelineCounter;
-  GRTimelineCounter++;
-
-  VkTimelineSemaphoreSubmitInfo timelineInfo{};
-  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
-  timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
-  submitInfo.pNext = &timelineInfo;
-
-  VkResult err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit graphics queue! : \n" + errorString(err));
-  return err;
+  return submitCommands(commandBuffer, GPRT_QUEUE_GRAPHICS);
 }
 
 VkCommandBuffer Context::beginComputeCommands() {
@@ -6754,33 +6733,7 @@ VkCommandBuffer Context::beginComputeCommands() {
 }
 
 VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
-  VkResult err;
-  err = vkEndCommandBuffer(commandBuffer);
-  if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  uint64_t prevCounter = CETimelineCounter;
-  CETimelineCounter++;
-
-  VkTimelineSemaphoreSubmitInfo timelineInfo{};
-  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
-  timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &CETimelineSemaphore;
-  submitInfo.pNext = &timelineInfo;
-
-  err = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit compute queue! : \n" + errorString(err));
-  return err;
+  return submitCommands(commandBuffer, GPRT_QUEUE_COMPUTE);
 }
 
 VkCommandBuffer Context::beginTransferCommands() {
@@ -6810,30 +6763,7 @@ VkCommandBuffer Context::beginTransferCommands() {
 }
 
 VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
-  VkResult result;
-  result = vkEndCommandBuffer(commandBuffer);
-  if (result != VK_SUCCESS) return result;
-
-  TRTimelineCounter++;
-
-  VkTimelineSemaphoreSubmitInfo timelineInfo{};
-  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &TRTimelineSemaphore;
-  submitInfo.pNext = &timelineInfo;
-
-  VkResult err = vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit transfer queue! : \n" + errorString(err));
-  return err;
+  return submitCommands(commandBuffer, GPRT_QUEUE_TRANSFER);
 }
 
 VkResult Context::synchronizeGraphics()
@@ -6891,6 +6821,67 @@ VkResult Context::synchronize()
   VkResult err = vkWaitSemaphores(logicalDevice, &info, /*1min*/uint64_t(12e10f));
   if (err) LOG_ERROR("failed to synchronize device! : \n" + errorString(err));
   return err;
+}
+
+VkResult
+Context::submitCommands(VkCommandBuffer commands, GPRTQueue queue,
+                        uint32_t numEvents, const GPRTEvent *events) {
+  VkQueue queues[] = {graphicsQueue, computeQueue, transferQueue};
+  VkSemaphore semaphores[] = {GRTimelineSemaphore, CETimelineSemaphore, TRTimelineSemaphore};
+  uint64_t *counters[] = {&GRTimelineCounter, &CETimelineCounter, &TRTimelineCounter};
+  if (queue < GPRT_QUEUE_GRAPHICS || queue > GPRT_QUEUE_TRANSFER || (numEvents && !events)) {
+    LOG_ERROR("Invalid queue or null event array");
+    return VK_ERROR_UNKNOWN;
+  }
+
+  // Coalesce repeated points on each timeline, including the profile start.
+  uint64_t values[3] = {queryRequested ? profileStart.value : 0, 0, 0};
+  for (uint32_t i = 0; i < numEvents; ++i) {
+    if (!events[i].value) continue;
+    uint32_t source = 0;
+    while (source < 3 && events[i].semaphore != semaphores[source]) ++source;
+    if (source == 3 || events[i].value > *counters[source]) {
+      LOG_ERROR("Event must reference a submitted value in this context");
+      return VK_ERROR_UNKNOWN;
+    }
+    values[source] = std::max(values[source], events[i].value);
+  }
+  VkSemaphore waits[3];
+  uint64_t waitValues[3];
+  VkPipelineStageFlags stages[3];
+  uint32_t waitCount = 0;
+  for (uint32_t i = 0; i < 3; ++i) {
+    if (!values[i]) continue;
+    waits[waitCount] = semaphores[i];
+    waitValues[waitCount] = values[i];
+    stages[waitCount++] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  }
+  if (commands) {
+    VkResult result = vkEndCommandBuffer(commands);
+    if (result != VK_SUCCESS) {
+      LOG_ERROR("Failed to end command buffer");
+      return result;
+    }
+  }
+  uint64_t next = *counters[queue] + 1;
+  VkTimelineSemaphoreSubmitInfo timeline{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+  timeline.waitSemaphoreValueCount = waitCount;
+  timeline.pWaitSemaphoreValues = waitCount ? waitValues : nullptr;
+  timeline.signalSemaphoreValueCount = 1;
+  timeline.pSignalSemaphoreValues = &next;
+  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submit.pNext = &timeline;
+  submit.waitSemaphoreCount = waitCount;
+  submit.pWaitSemaphores = waitCount ? waits : nullptr;
+  submit.pWaitDstStageMask = waitCount ? stages : nullptr;
+  submit.commandBufferCount = commands ? 1 : 0;
+  submit.pCommandBuffers = commands ? &commands : nullptr;
+  submit.signalSemaphoreCount = 1;
+  submit.pSignalSemaphores = &semaphores[queue];
+  VkResult result = vkQueueSubmit(queues[queue], 1, &submit, VK_NULL_HANDLE);
+  if (result == VK_SUCCESS) *counters[queue] = next;
+  else LOG_ERROR("Failed to submit queue: " + errorString(result));
+  return result;
 }
 
 void
@@ -9370,10 +9361,6 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
                           context->raytracingPipelineLayout, 0, (uint32_t) descriptorSets.size(), descriptorSets.data(),
                           0, NULL);
 
-  if (context->queryRequested) {
-    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
-  }
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                     context->raytracingPipeline);
@@ -9460,9 +9447,6 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
   gprt::vkCmdTraceRays(commandBuffer, &raygenShaderSbtEntry, &missShaderSbtEntry, &hitShaderSbtEntry,
                        &callableShaderSbtEntry, dims_x, dims_y, dims_z);
 
-  if (context->queryRequested) {
-    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
-  }
 
   context->endGraphicsCommands(commandBuffer);
   return context->GRTimelineCounter;
@@ -9481,13 +9465,9 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   VkResult err;
 
-  // Temporary... Ultimately want to move to the compute queue...
+  // Record this dispatch on the compute queue.
   VkCommandBuffer commandBuffer = context->beginComputeCommands();
 
-  if (context->queryRequested) {
-    vkCmdResetQueryPool(commandBuffer, context->queryPool, 0, 2);
-    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, context->queryPool, 0);
-  }
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute->pipeline);
 
@@ -9503,9 +9483,6 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   vkCmdDispatch(commandBuffer, uint32_t(numGroups[0]), uint32_t(numGroups[1]), uint32_t(numGroups[2]));
 
-  if (context->queryRequested) {
-    vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
-  }
 
   err = context->endComputeCommands(commandBuffer);
   if (err)
@@ -9564,38 +9541,92 @@ gprtDeviceSynchronize(GPRTContext _context)
   return 0;
 }
 
-GPRT_API void
-gprtBeginProfile(GPRTContext _context) {
+GPRT_API GPRTEvent
+gprtGetQueueEvent(GPRTContext _context, GPRTQueue queue) {
+  assert(_context);
+  Context *context = (Context *) _context;
+  switch (queue) {
+  case GPRT_QUEUE_GRAPHICS: return {context->GRTimelineSemaphore, context->GRTimelineCounter};
+  case GPRT_QUEUE_COMPUTE: return {context->CETimelineSemaphore, context->CETimelineCounter};
+  case GPRT_QUEUE_TRANSFER: return {context->TRTimelineSemaphore, context->TRTimelineCounter};
+  default: LOG_ERROR("Invalid queue"); return {};
+  }
+}
+
+GPRT_API GPRTEvent
+gprtQueueWait(GPRTContext _context, GPRTQueue queue, uint32_t numEvents, const GPRTEvent *events) {
+  assert(_context);
+  Context *context = (Context *) _context;
+  if (context->submitCommands(VK_NULL_HANDLE, queue, numEvents, events) != VK_SUCCESS) return {};
+  return gprtGetQueueEvent(_context, queue);
+}
+
+GPRT_API GPRTEvent
+gprtBeginProfile(GPRTContext _context, uint32_t numEvents, const GPRTEvent *events) {
   LOG_API_CALL();
   assert(_context);
   Context *context = (Context *) _context;
+  if (context->queryRequested) {
+    LOG_ERROR("Profiling regions cannot be nested");
+    return {};
+  }
+  if (!context->queueFamilyProperties[context->queueFamilyIndices.graphics].timestampValidBits) {
+    LOG_ERROR("The graphics queue does not support timestamps");
+    return {};
+  }
+  VkCommandBuffer commands = context->beginGraphicsCommands();
+  vkCmdResetQueryPool(commands, context->queryPool, 0, 2);
+  vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 0);
+  if (context->submitCommands(commands, GPRT_QUEUE_GRAPHICS, numEvents, events) != VK_SUCCESS) return {};
+  context->profileStart = gprtGetQueueEvent(_context, GPRT_QUEUE_GRAPHICS);
+  context->profileEnd = {};
+  context->profileComputeStart = context->CETimelineCounter;
+  context->profileTransferStart = context->TRTimelineCounter;
   context->queryRequested = true;
+  return context->profileStart;
 }
 
 GPRT_API float
-gprtEndProfile(GPRTContext _context) {
+gprtEndProfile(GPRTContext _context, uint32_t numEvents, const GPRTEvent *events) {
   LOG_API_CALL();
   assert(_context);
   Context *context = (Context *) _context;
-
-  if (context->queryRequested != true)
+  if (!context->queryRequested) {
     LOG_ERROR("Requested profile data without calling gprtBeginProfile");
+    return -1.0f;
+  }
+  if (!context->profileEnd.value) {
+    GPRTEvent leaves[] = {gprtGetQueueEvent(_context, GPRT_QUEUE_GRAPHICS),
+                         gprtGetQueueEvent(_context, GPRT_QUEUE_COMPUTE),
+                         gprtGetQueueEvent(_context, GPRT_QUEUE_TRANSFER)};
+    context->profileEmpty = leaves[0].value == context->profileStart.value &&
+                            leaves[1].value == context->profileComputeStart &&
+                            leaves[2].value == context->profileTransferStart;
+    // Preserve no-argument profiling across every GPRT queue.
+    if (!numEvents) { numEvents = 3; events = leaves; }
+    VkCommandBuffer commands = context->beginGraphicsCommands();
+    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
+    if (context->submitCommands(commands, GPRT_QUEUE_GRAPHICS, numEvents, events) != VK_SUCCESS) return -1.0f;
+    context->profileEnd = gprtGetQueueEvent(_context, GPRT_QUEUE_GRAPHICS);
+  }
+  VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+  wait.semaphoreCount = 1;
+  wait.pSemaphores = &context->profileEnd.semaphore;
+  wait.pValues = &context->profileEnd.value;
+  if (vkWaitSemaphores(context->logicalDevice, &wait, requestedFeatures.syncTDR) != VK_SUCCESS) {
+    LOG_ERROR("Failed to wait for the profile end");
+    return -1.0f;
+  }
   context->queryRequested = false;
+  if (context->profileEmpty) return 0.0f;
 
-  uint64_t timestampsResults[2];
-  VkResult result =
-      vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(uint64_t) * 2, timestampsResults,
-                            sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-  if (result != VK_SUCCESS)
-    LOG_ERROR("Failed to receive query results!");
-
-  VkPhysicalDeviceProperties deviceProperties;
-  vkGetPhysicalDeviceProperties(context->physicalDevice, &deviceProperties);
-  float nanosecondsInTimestamp = deviceProperties.limits.timestampPeriod;
-  float timestampValueInMilliseconds =
-      ((timestampsResults[1] - timestampsResults[0]) * nanosecondsInTimestamp) / 1000000.f;
-
-  // I'm not sure why, but the results above seem to change a lot between windows and linux...
-  // They seem accurate above for windows systems.
-  return timestampValueInMilliseconds;
+  uint64_t timestamps[2];
+  if (vkGetQueryPoolResults(context->logicalDevice, context->queryPool, 0, 2, sizeof(timestamps), timestamps,
+                           sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
+    LOG_ERROR("Failed to receive profile timestamps");
+    return -1.0f;
+  }
+  uint32_t bits = context->queueFamilyProperties[context->queueFamilyIndices.graphics].timestampValidBits;
+  uint64_t mask = bits == 64 ? UINT64_MAX : (uint64_t(1) << bits) - 1;
+  return float(double((timestamps[1] - timestamps[0]) & mask) * context->deviceProperties.limits.timestampPeriod / 1e6);
 }
