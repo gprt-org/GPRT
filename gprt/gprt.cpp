@@ -857,8 +857,9 @@ struct Buffer {
 
     if (hostVisible) {
       VK_CHECK_RESULT(context->synchronize());
-      vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(context->allocator, allocation, &mapped);
+      VkResult result = vmaMapMemory(context->allocator, allocation, &mapped);
+      if (result != VK_SUCCESS) return result;
+      return vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
     } else {
       VkCommandBuffer commandBuffer = context->beginTransferCommands();
       
@@ -871,8 +872,9 @@ struct Buffer {
       context->endTransferCommands(commandBuffer, true);
       context->synchronizeTransfer();
 
-      vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
+      VkResult result = vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
+      if (result != VK_SUCCESS) return result;
+      return vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
     }
   }
 
@@ -1075,7 +1077,7 @@ struct Buffer {
         region.dstOffset = 0;
         region.size = std::min(size, VkDeviceSize(bytes));
         vkCmdCopyBuffer(commandBuffer, stagingBuffer.buffer, buffer, 1, &region);
-        context->endTransferCommands(commandBuffer, true);
+        context->endTransferCommands(commandBuffer);
         context->synchronizeTransfer();
       }
 
