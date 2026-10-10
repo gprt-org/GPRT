@@ -14,6 +14,7 @@ int main() {
   auto texture = gprtDeviceTextureCreate<uint32_t>(context, params, pixels.data());
   for (int i = 0; i < 16; ++i) {
     gprtBufferPresent(context, buffer);
+    gprtTextureClear(texture);
     gprtTexturePresent(context, texture);
   }
   gprtDeviceSynchronize(context);
