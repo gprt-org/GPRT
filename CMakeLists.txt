@@ -55,6 +55,7 @@ endif()
 # Configuration Options
 # ------------------------------------------------------------------
 option(GPRT_BUILD_SHARED "Build GPRT as a shared library? (otherwise static)" OFF)
+option(GPRT_ENABLE_DLSS "Build the DLSS denoiser and its sample" OFF)
 option(GPRT_USE_INCLUDED_GLFW "Build GPRT including the submoduled GLFW? (otherwise, system GLFW will be found)" ON)  
 
 # ------------------------------------------------------------------

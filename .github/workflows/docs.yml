@@ -13,19 +13,19 @@ permissions:
 
 jobs:
   docs:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Prepare Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
           cache: 'pip' # caching pip dependencies
       - run: pip install -r ./docs/requirements.txt
 
@@ -60,14 +60,14 @@ jobs:
           cmake .. -DBUILD_DOC=ON
           cmake --build . --target sphinx --config Release
       - name: Setup Pages
-        uses: actions/configure-pages@v2
+        uses: actions/configure-pages@v5
   #     - name: Setup tmate session
   #       uses: mxschmitt/action-tmate@v3
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
+          # Upload the generated documentation
           path: './build/html'
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v1
+        uses: actions/deploy-pages@v4

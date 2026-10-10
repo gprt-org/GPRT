@@ -967,6 +967,7 @@ GPRT_API void gprtRequestMaxPayloadSize(uint32_t payloadSize);
 /** Tells the GPRT to initialize a vendor-supplied denoising model. 
  * Different vendors have different denoising requirements, and image 
  * quality will vary. 
+ * Requires GPRT_ENABLE_DLSS=ON at build time; otherwise reports an error and aborts.
  */
 GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags);
 

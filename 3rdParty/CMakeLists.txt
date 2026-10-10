@@ -218,4 +218,6 @@ add_subdirectory(generator)
 endif()
 
 # Find DLSS interface
-add_subdirectory(dlss)
+if(GPRT_ENABLE_DLSS)
+  add_subdirectory(dlss)
+endif()

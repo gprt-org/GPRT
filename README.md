@@ -66,6 +66,9 @@ and built with
 cmake --build .
 ```
 
+DLSS denoising and its sample are disabled by default. To include them, configure
+with `-DGPRT_ENABLE_DLSS=ON`. The normal build does not link the NVIDIA NGX library.
+
 ## Ubuntu Dependencies
 
 The following apt-packages should be installed:

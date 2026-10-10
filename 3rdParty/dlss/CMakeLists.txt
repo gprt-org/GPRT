@@ -42,7 +42,7 @@ target_link_libraries(dlss INTERFACE
   $<$<CONFIG:RelWithDebInfo,Release>:${CMAKE_CURRENT_LIST_DIR}/nvsdk_ngx_d.lib>
   $<$<CONFIG:Debug>:${CMAKE_CURRENT_LIST_DIR}/nvsdk_ngx_d_dbg.lib>
 )
-ELSEIF(LINUX)
+ELSEIF(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 target_link_libraries(dlss INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/libnvsdk_ngx.a
 )

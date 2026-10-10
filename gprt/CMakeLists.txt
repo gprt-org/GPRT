@@ -102,10 +102,14 @@ target_link_libraries(gprt
     stb_image
     vma
     imgui
-    dlss
     Threads::Threads
     ${OPENGL_gl_LIBRARY}
 )
+
+if(GPRT_ENABLE_DLSS)
+  target_link_libraries(gprt PRIVATE dlss)
+  target_compile_definitions(gprt PRIVATE GPRT_ENABLE_DLSS)
+endif()
 
 set_target_properties(gprt PROPERTIES LINKER_LANGUAGE CXX)
 

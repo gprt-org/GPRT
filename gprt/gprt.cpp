@@ -101,12 +101,14 @@ static inline std::string getVendorString(uint32_t vendorID) {
 #include "gprt_fallbacks.h"
 
 // For DLSS RR
+#ifdef GPRT_ENABLE_DLSS
 #include "nvsdk_ngx_vk.h"
 #include "nvsdk_ngx_helpers.h"
 #include "nvsdk_ngx_helpers_vk.h"
 
 #include "nvsdk_ngx_helpers_dlssd.h"
 #include "nvsdk_ngx_helpers_dlssd_vk.h"
+#endif
 
 /** @brief A collection of features that are requested to support before
  * creating a GPRT context. These features might not be available on all
@@ -286,6 +288,7 @@ errorString(VkResult errorCode) {
   }
 }
 
+#ifdef GPRT_ENABLE_DLSS
 std::string ngxResultToString(NVSDK_NGX_Result result)
 {
     char buf[1024];
@@ -293,6 +296,7 @@ std::string ngxResultToString(NVSDK_NGX_Result result)
     buf[sizeof(buf) - 1] = '\0';
     return std::string(buf);
 }
+#endif
 
 #define VK_CHECK_RESULT(f)                                                                                             \
   {                                                                                                                    \
@@ -304,6 +308,7 @@ std::string ngxResultToString(NVSDK_NGX_Result result)
     }                                                                                                                  \
   }
 
+#ifdef GPRT_ENABLE_DLSS
 #define NGX_CHECK_RESULT(f)                                                                                         \
 {                                                                                                                   \
   NVSDK_NGX_Result res = (f);                                                                                       \
@@ -312,6 +317,7 @@ std::string ngxResultToString(NVSDK_NGX_Result result)
     assert(res == NVSDK_NGX_Result_Success);                                                                        \
   }                                                                                                                 \
 }
+#endif
 
 VKAPI_ATTR VkBool32 VKAPI_CALL
 debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -476,9 +482,11 @@ struct Context {
   VkFence inFlightFence = VK_NULL_HANDLE;
 
   struct AIDenoising {
+#ifdef GPRT_ENABLE_DLSS
     const uint64_t kAppID = 231313132;
     NVSDK_NGX_Parameter* ngxParameters = nullptr;
     NVSDK_NGX_Handle* ngxHandle = nullptr;
+#endif
 
     struct OptimalSettings
     {
@@ -4775,6 +4783,7 @@ void
 Context::destroy() {
   if (logicalDevice) {
     VK_CHECK_RESULT(vkDeviceWaitIdle(logicalDevice));
+#ifdef GPRT_ENABLE_DLSS
     if (requestedFeatures.aiDenoiser.requested) {
       if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
         NVSDK_NGX_VULKAN_DestroyParameters(aiDenoising.ngxParameters);
@@ -4783,6 +4792,7 @@ Context::destroy() {
         aiDenoising.ngxHandle = nullptr;
       }
     }
+#endif
   }
 
   if (descriptorSet) {
@@ -6089,6 +6099,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   // Init denoisers
+#ifdef GPRT_ENABLE_DLSS
   if (requestedFeatures.aiDenoiser.requested) {
     if (deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
       NGX_CHECK_RESULT(NVSDK_NGX_VULKAN_Init(aiDenoising.kAppID, L".", instance, physicalDevice, logicalDevice));
@@ -6171,6 +6182,7 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
       LOG_ERROR("Unimplemented");
     }
   }
+#endif
 
   // Finally, setup the internal shader stages and build an initial shader binding table
   setupInternalPrograms();
@@ -7121,10 +7133,15 @@ gprtRequestMaxPayloadSize(uint32_t payloadSize) {
 GPRT_API void
 gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, GPRTDenoiseFlags flags) {
   LOG_API_CALL();
+#ifdef GPRT_ENABLE_DLSS
   requestedFeatures.aiDenoiser.requested = true;
   requestedFeatures.aiDenoiser.flags = flags;
   requestedFeatures.aiDenoiser.outputWidth = outputWidth;
   requestedFeatures.aiDenoiser.outputHeight = outputHeight;
+#else
+  LOG_ERROR("DLSS support is disabled; configure with GPRT_ENABLE_DLSS=ON to enable denoising.");
+  std::abort();
+#endif
 }
 
 GPRT_API void 
@@ -8282,6 +8299,7 @@ GPRT_API uint64_t
 gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
 {
   LOG_API_CALL();
+#ifdef GPRT_ENABLE_DLSS
   Context *context = (Context *) _context;
 
   uint32_t inputW, inputH, outputW, outputH;
@@ -8523,6 +8541,10 @@ gprtTextureDenoise(GPRTContext _context, const GPRTDenoiseParams &params)
 
   // Default behavior
   return 0;
+#else
+  LOG_ERROR("DLSS support is disabled; configure with GPRT_ENABLE_DLSS=ON to enable denoising.");
+  std::abort();
+#endif
 }
 
 GPRT_API void
