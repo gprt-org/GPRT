@@ -27,10 +27,12 @@ int main(int argc, char **) {
   for (int frame = 0; frame < 128; ++frame) {
     if (frame == 64) gprtGuiSetRasterAttachments(context, color, depth);
     gprtWindowShouldClose(context);
+    auto displaySize = ImGui::GetIO().DisplaySize;
     if (frame % 7 == 0) ImGui::GetIO().DisplaySize = ImVec2(0, 0);
     ImGui::NewFrame();
     ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), ImVec2(8, 8), 0xffffffff);
     auto submitted = gprtGuiRasterize(context);
+    ImGui::GetIO().DisplaySize = displaySize;
     if (submitted <= previous) throw std::runtime_error("GUI completion value did not advance");
     previous = submitted;
   }
