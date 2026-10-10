@@ -704,7 +704,7 @@ struct Context {
   VkCommandBuffer beginComputeCommands();
   VkCommandBuffer beginTransferCommands();
   VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
-  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer, uint64_t graphicsWait = 0);
   VkResult endTransferCommands(VkCommandBuffer commandBuffer);
   VkResult synchronizeTransfer();
   VkResult synchronizeGraphics();
@@ -2899,6 +2899,17 @@ struct Accel {
   VkAccelerationStructureGeometryKHR accelerationStructureGeometry = {};
   uint32_t maxPrimitiveCount = 0;
 
+  void recordBuildDependency(VkCommandBuffer commandBuffer) {
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                            VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+  }
+
 private:
   Buffer *scratchBuffer = nullptr;   // Can we make this static? That way, all trees could share the scratch...
   Buffer *accelBuffer = nullptr;
@@ -3306,6 +3317,7 @@ public:
       //   LOG_ERROR("failed to begin command buffer for triangle accel build! : \n" + errorString(err));
 
       VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+      recordBuildDependency(commandList);
       gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
 
       err = context->endComputeCommands(commandList);
@@ -3451,8 +3463,9 @@ public:
 
     VkCommandBuffer commandList = context->beginComputeCommands();
     VkAccelerationStructureBuildRangeInfoKHR* rangePtr = &accelerationBuildStructureRangeInfo;
+    recordBuildDependency(commandList);
     gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
-    context->endComputeCommands(commandList);
+    context->endComputeCommands(commandList, context->GRTimelineCounter);
 
     // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
     // updateDeviceAddress(isCompact);
@@ -6753,18 +6766,18 @@ VkCommandBuffer Context::beginComputeCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer, uint64_t graphicsWait) {
   VkResult err;
   err = vkEndCommandBuffer(commandBuffer);
   if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
-  uint64_t prevCounter = CETimelineCounter;
+  VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   CETimelineCounter++;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = graphicsWait ? 1 : 0;
+  timelineInfo.pWaitSemaphoreValues = &graphicsWait;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
 
@@ -6772,8 +6785,9 @@ VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.waitSemaphoreCount = timelineInfo.waitSemaphoreValueCount;
+  submitInfo.pWaitSemaphores = &GRTimelineSemaphore;
+  submitInfo.pWaitDstStageMask = &waitStage;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &CETimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
