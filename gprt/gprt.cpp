@@ -30,6 +30,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 
 #include <regex>
 
@@ -956,7 +957,8 @@ struct Buffer {
     wait.semaphoreCount = 1;
     wait.pSemaphores = &context->CETimelineSemaphore;
     wait.pValues = &lastSortSubmission;
-    VK_CHECK_RESULT(vkWaitSemaphores(context->logicalDevice, &wait, requestedFeatures.syncTDR));
+    if (vkWaitSemaphores(context->logicalDevice, &wait, requestedFeatures.syncTDR) != VK_SUCCESS)
+      throw std::runtime_error("Failed to wait for the buffer's pending sort");
     lastSortSubmission = 0;
   }
 
@@ -8958,7 +8960,7 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
     vkUpdateDescriptorSets(context->logicalDevice, 1, &write_set, 0, nullptr);
   };
 
-  // beginComputeCommands waits only when this command-buffer slot is still in use.
+  // Retire this command-buffer slot before updating its descriptor sets.
   VkCommandBuffer commandList = context->beginComputeCommands();
   auto &bindings = context->sortStages.bindings[context->CETimelineCounter % 64];
   {
