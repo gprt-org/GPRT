@@ -37,7 +37,7 @@ main(int ac, char **av) {
     // Arrange
     std::vector<uint32_t> dataHost(numItems, 1); 
     
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> data = gprtDeviceBufferCreate<uint32_t>(context, numItems, dataHost.data());
     GPRTBufferOf<uint32_t> exclusiveSum = gprtDeviceBufferCreate<uint32_t>(context, numItems);
     GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);
@@ -100,7 +100,7 @@ main(int ac, char **av) {
       dataHost[i] = i * ((i & 1) ? 1 : -1);
     }
     
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<int32_t> data = gprtDeviceBufferCreate<int32_t>(context, numItems, dataHost.data());
     GPRTBufferOf<int32_t> partition = gprtDeviceBufferCreate<int32_t>(context, numItems);
     GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);
@@ -180,7 +180,7 @@ main(int ac, char **av) {
       dataHost[i] = i * ((i & 1) ? 1 : -1);
     }
     
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<int32_t> data = gprtDeviceBufferCreate<int32_t>(context, numItems, dataHost.data());
     GPRTBufferOf<int32_t> partition = gprtDeviceBufferCreate<int32_t>(context, numItems);
     GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);

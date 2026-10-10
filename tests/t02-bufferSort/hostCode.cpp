@@ -38,7 +38,7 @@ main(int ac, char **av) {
   // Sort Keys
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> data = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
     GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);
     
@@ -79,7 +79,7 @@ main(int ac, char **av) {
   // Sort Keys and Values
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> keys = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
     GPRTBufferOf<uint32_t> values = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
     GPRTBufferOf<uint32_t> scratch = gprtDeviceBufferCreate<uint32_t>(context);

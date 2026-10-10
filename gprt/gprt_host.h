@@ -975,18 +975,20 @@ GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, G
  * capabilities. Otherwise, GPRT will use a software intersector fallback. */
 GPRT_API void gprtRequestMotionBlur();
 
-/** Creates a context on one usable GPU. Multi-GPU contexts are not supported.
+/** Creates a context on one usable GPU.
 
   GPRT_VISIBLE_DEVICES optionally specifies comma-separated Vulkan device
   ordinals in preference order. An empty value or -1 hides all devices;
   malformed, duplicate, and out-of-range ordinals are errors. Rejected device
   selection uses LOG_ERROR and returns null if the error handler returns.
 
-  requestedDeviceIDs[0] indexes the usable devices after this filtering.
-  A null list or numDevices == 0 selects the first usable device. The selected
-  GPU is device 0 in subsequent GPRT calls. */
-GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(= nullptr),
-                                       int numDevices GPRT_IF_CPP(= 1));
+  requestedDevice indexes the usable devices after this filtering and defaults
+  to 0, the first usable device. The selected GPU is device 0 in subsequent
+  GPRT calls. For example, GPRT_VISIBLE_DEVICES=1,0 makes gprtContextCreate(0)
+  select Vulkan device 1 if that device is usable.
+
+  The former device-list and device-count arguments are no longer supported. */
+GPRT_API GPRTContext gprtContextCreate(int32_t requestedDevice GPRT_IF_CPP(= 0));
 
 GPRT_API void gprtContextDestroy(GPRTContext context);
 

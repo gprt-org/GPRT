@@ -34,7 +34,7 @@ int main(int ac, char **av) {
   // create a context on the first device:
   gprtRequestMaxAttributeSize(2 * sizeof(float4));
   gprtRequestWindow(fbSize.x, fbSize.y, "S04 Compute AABB");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s5_0_deviceCode);
 
   // ##################################################################
