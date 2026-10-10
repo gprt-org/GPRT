@@ -853,8 +853,9 @@ struct Buffer {
       return VK_SUCCESS;
 
     if (hostVisible) {
-      vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(context->allocator, allocation, &mapped);
+      VkResult result = vmaMapMemory(context->allocator, allocation, &mapped);
+      if (result != VK_SUCCESS) return result;
+      return vmaInvalidateAllocation(context->allocator, allocation, 0, VK_WHOLE_SIZE);
     } else {
       VkCommandBuffer commandBuffer = context->beginTransferCommands();
       
@@ -867,8 +868,9 @@ struct Buffer {
       context->endTransferCommands(commandBuffer);
       context->synchronizeTransfer();
 
-      vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
-      return vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
+      VkResult result = vmaMapMemory(context->allocator, stagingBuffer.allocation, &mapped);
+      if (result != VK_SUCCESS) return result;
+      return vmaInvalidateAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
     }
   }
 
@@ -883,6 +885,7 @@ struct Buffer {
         mapped = nullptr;
       }
     } else {
+      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       VkCommandBuffer commandBuffer = context->beginTransferCommands();
       
       // To do, consider allowing users to specify offsets here...
@@ -895,7 +898,6 @@ struct Buffer {
       context->endTransferCommands(commandBuffer);
       context->synchronizeTransfer();
 
-      vmaFlushAllocation(context->allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE);
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       mapped = nullptr;
     }
@@ -1113,7 +1115,7 @@ struct Buffer {
   ~Buffer() {};
 
   Buffer(Context* context, VkBufferUsageFlags _usageFlags, VkMemoryPropertyFlags _memoryPropertyFlags, VkDeviceSize _size, VkDeviceSize _alignment,
-         void *data = nullptr) {
+         const void *data = nullptr) {
     this->context = context;
 
     // Hunt for an existing free virtual address for this buffer
@@ -1196,7 +1198,8 @@ struct Buffer {
     // If a pointer to the buffer data has been passed, map the buffer and
     // copy over the data
     if (data != nullptr) {
-      map();
+      // New allocations have no contents to read back before initialization.
+      VK_CHECK_RESULT(vmaMapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation, &mapped));
       memcpy(mapped, data, size);
       unmap();
     }
@@ -6782,7 +6785,7 @@ VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
 
 VkCommandBuffer Context::beginTransferCommands() {
   VkResult err;
-  VkCommandBuffer commandBuffer = transferCommandBuffers[GRTimelineCounter % 64];
+  VkCommandBuffer commandBuffer = transferCommandBuffers[TRTimelineCounter % 64];
 
   uint64_t currentCounterValue;
   err = vkGetSemaphoreCounterValue(logicalDevice, TRTimelineSemaphore, &currentCounterValue);
@@ -6811,13 +6814,10 @@ VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
 
-  uint64_t prevCounter = TRTimelineCounter;
   TRTimelineCounter++;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
 
@@ -8626,14 +8626,7 @@ gprtDeviceBufferCreate(GPRTContext _context, size_t size, size_t count, const vo
 
   Context *context = (Context *) _context;
   Buffer *buffer =
-      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment);
-
-  if (init) {
-    buffer->map();
-    void *mapped = buffer->mapped;
-    memcpy(mapped, init, size * count);
-    buffer->unmap();
-  }
+      new Buffer(context, bufferUsageFlags, memoryUsageFlags, size * count, alignment, init);
   return (GPRTBuffer) buffer;
 }
 
