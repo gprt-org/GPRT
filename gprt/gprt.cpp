@@ -30,7 +30,6 @@
 #include <map>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 
 #include <regex>
 
@@ -658,20 +657,7 @@ struct Context {
     Stage Scatter;
     Stage ScatterPayload;
 
-    // For now, copied over from sample
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutInputOutputs;
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutScan;
-    VkDescriptorSetLayout m_SortDescriptorSetLayoutScratch;
-
-    struct Bindings {
-      VkDescriptorSet m_SortDescriptorSetInputOutput[2];
-      VkDescriptorSet m_SortDescriptorSetScanSets[2];
-      VkDescriptorSet m_SortDescriptorSetScratch;
-    } bindings[64]; // One set per compute command buffer; reuse follows its completion.
-
     VkPipelineLayout layout;
-
-    VkDescriptorPool pool = VK_NULL_HANDLE;
   };
   SortStages sortStages;
 
@@ -849,7 +835,6 @@ struct Buffer {
 
   VkDeviceSize size = 0;
   VkDeviceSize alignment = 16;
-  uint64_t lastSortSubmission = 0;
   void *mapped = nullptr;
 
   VkResult map(VkDeviceSize mapSize = VK_WHOLE_SIZE, VkDeviceSize offset = 0) {
@@ -932,7 +917,6 @@ struct Buffer {
 
   /*! Calls vkDestroy on the buffer, and frees underlying memory */
   void destroy() {
-    waitForSort();
     // Free sampler slot for use by subsequently made buffers
     context->buffers[virtualAddress] = nullptr;
 
@@ -949,17 +933,6 @@ struct Buffer {
       // vkDestroyBuffer(device, stagingBuffer.buffer, nullptr);
       stagingBuffer.buffer = VK_NULL_HANDLE;
     }
-  }
-
-  void waitForSort() {
-    if (!lastSortSubmission) return;
-    VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
-    wait.semaphoreCount = 1;
-    wait.pSemaphores = &context->CETimelineSemaphore;
-    wait.pValues = &lastSortSubmission;
-    if (vkWaitSemaphores(context->logicalDevice, &wait, requestedFeatures.syncTDR) != VK_SUCCESS)
-      throw std::runtime_error("Failed to wait for the buffer's pending sort");
-    lastSortSubmission = 0;
   }
 
   /* Sets all bytes to 0 */
@@ -979,8 +952,6 @@ struct Buffer {
     // If the size is already okay, do nothing
     if (size == bytes)
       return;
-
-    waitForSort();
 
     if (hostVisible) {
       // if we are host visible, we need to create a new buffer before releasing the
@@ -6275,88 +6246,12 @@ Context::setupInternalPrograms() {
     // currently not using cache.
     VkPipelineCache cache = VK_NULL_HANDLE;
 
-    VkDescriptorPoolSize poolSize;
-    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = 16 * 64;
-
-    VkDescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolInfo.poolSizeCount = 1;
-    descriptorPoolInfo.pPoolSizes = &poolSize;
-    descriptorPoolInfo.maxSets = 5 * 64;
-    descriptorPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    VK_CHECK_RESULT(vkCreateDescriptorPool(logicalDevice, &descriptorPoolInfo, nullptr, &sortStages.pool));
-
     sortStages.Count.entryPoint = "Count";
     sortStages.CountReduce.entryPoint = "CountReduce";
     sortStages.Scan.entryPoint = "Scan";
     sortStages.ScanAdd.entryPoint = "ScanAdd";
     sortStages.Scatter.entryPoint = "Scatter";
     sortStages.ScatterPayload.entryPoint = "ScatterPayload";
-
-    // Create binding for Radix sort passes
-    VkDescriptorSetLayoutBinding layout_bindings_set_InputOutputs[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // SrcBuffer (sort)
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstBuffer (sort)
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScrPayload (sort only)
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // DstPayload (sort only)
-    };
-
-    VkDescriptorSetLayoutBinding layout_bindings_set_Scan[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanSrc
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanDst
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // ScanScratch
-    };
-
-    VkDescriptorSetLayoutBinding layout_bindings_set_Scratch[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (sort only)
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},   // Scratch (reduced)
-    };
-
-    auto AllocDescriptor = [&](VkDescriptorPool pool, VkDescriptorSetLayout layout, VkDescriptorSet *descriptorSet) {
-      VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-      descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-      descriptorSetAllocateInfo.descriptorPool = pool;
-      descriptorSetAllocateInfo.pSetLayouts = &layout;
-      descriptorSetAllocateInfo.descriptorSetCount = 1;
-      descriptorSetAllocateInfo.pNext = nullptr;
-      VkResult err = vkAllocateDescriptorSets(logicalDevice, &descriptorSetAllocateInfo, descriptorSet);
-      if (err != VK_SUCCESS) {
-        LOG_ERROR("failed to allocate descriptor! \n" + errorString(err));
-      }
-    };
-
-    VkResult vkResult;
-
-    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    descriptor_set_layout_create_info.pNext = nullptr;
-    descriptor_set_layout_create_info.flags = 0;
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_InputOutputs;
-    descriptor_set_layout_create_info.bindingCount = 4;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutInputOutputs);
-    VK_CHECK_RESULT(vkResult);
-    for (auto &binding : sortStages.bindings)
-      for (auto &set : binding.m_SortDescriptorSetInputOutput)
-        AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutInputOutputs, &set);
-
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scan;
-    descriptor_set_layout_create_info.bindingCount = 3;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutScan);
-    VK_CHECK_RESULT(vkResult);
-    for (auto &binding : sortStages.bindings)
-      for (auto &set : binding.m_SortDescriptorSetScanSets)
-        AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScan, &set);
-
-    descriptor_set_layout_create_info.pBindings = layout_bindings_set_Scratch;
-    descriptor_set_layout_create_info.bindingCount = 2;
-    vkResult = vkCreateDescriptorSetLayout(logicalDevice, &descriptor_set_layout_create_info, nullptr,
-                                           &sortStages.m_SortDescriptorSetLayoutScratch);
-    VK_CHECK_RESULT(vkResult);
-    for (auto &binding : sortStages.bindings)
-      AllocDescriptor(sortStages.pool, sortStages.m_SortDescriptorSetLayoutScratch, &binding.m_SortDescriptorSetScratch);
 
     // Create constant range representing our static constant
     VkPushConstantRange constant_range;
@@ -6368,11 +6263,6 @@ Context::setupInternalPrograms() {
     VkPipelineLayoutCreateInfo layout_create_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_create_info.pNext = nullptr;
     layout_create_info.flags = 0;
-    layout_create_info.setLayoutCount = 3;
-    VkDescriptorSetLayout layouts[] = {sortStages.m_SortDescriptorSetLayoutInputOutputs,
-                                       sortStages.m_SortDescriptorSetLayoutScan,
-                                       sortStages.m_SortDescriptorSetLayoutScratch};
-    layout_create_info.pSetLayouts = layouts;
     layout_create_info.pushConstantRangeCount = 1;
     layout_create_info.pPushConstantRanges = &constant_range;
 
@@ -6627,14 +6517,6 @@ Context::destroyInternalPrograms() {
 
     vkDestroyPipelineLayout(logicalDevice, sortStages.layout, nullptr);
     sortStages.layout = VK_NULL_HANDLE;
-
-    // Destroying the pool below releases all command-buffer descriptor sets.
-
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScratch, nullptr);
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutScan, nullptr);
-    vkDestroyDescriptorSetLayout(logicalDevice, sortStages.m_SortDescriptorSetLayoutInputOutputs, nullptr);
-
-    vkDestroyDescriptorPool(logicalDevice, sortStages.pool, nullptr);
   }
 
   std::vector<std::string> progNames;
@@ -8894,245 +8776,83 @@ bufferSort(GPRTContext _context, GPRTBuffer _keys, GPRTBuffer _values, GPRTBuffe
   Context *context = (Context *) _context;
   Buffer *keys = (Buffer *) _keys;
   Buffer *values = (Buffer *) _values;
+  bool bHasPayload = values != nullptr;
+  if (values && keys->getSize() != values->getSize()) {
+    LOG_ERROR("Keys and Values buffers must be equal in size\n");
+    return;
+  }
+  uint32_t numKeys = uint32_t(keys->getSize() / sizeof(uint64_t));
+  if (!numKeys) return;
   Buffer *scratch = _scratch ? (Buffer *)_scratch : (Buffer *)gprtDeviceBufferCreate<uint64_t>(_context);
 
-  bool bHasPayload = false;
-  if (values) {
-    if (keys->getSize() != values->getSize())
-      LOG_ERROR("Keys and Values buffers must be equal in size\n");
-
-    bHasPayload = true;
-  }
-
-  uint32_t numKeys = uint32_t(keys->getSize() / sizeof(uint64_t));
-  uint32_t maxNumThreadgroups = 800;
-  ParallelSortCB constantBufferData = {0};
-
-  // Allocate the scratch buffers needed for radix sort
-  auto alignedSize = [](size_t value, size_t alignment) -> size_t {
-    return (value + alignment - 1) & ~(alignment - 1);
-  };
-  uint32_t offsetAlignment = (uint32_t) context->deviceProperties.limits.minStorageBufferOffsetAlignment;
-
-  uint64_t scratchBufferSize;
-  uint64_t reducedScratchBufferSize;
+  auto alignedSize = [](size_t value) -> size_t { return (value + 7) & ~size_t(7); };
+  uint64_t scratchBufferSize, reducedScratchBufferSize;
   ParallelSort_CalculateScratchResourceSize(numKeys, scratchBufferSize, reducedScratchBufferSize);
-  scratchBufferSize = alignedSize(scratchBufferSize, offsetAlignment);
-  reducedScratchBufferSize = alignedSize(reducedScratchBufferSize, offsetAlignment);
-
-  uint64_t keysSize = alignedSize(keys->size, offsetAlignment);
-  uint64_t valuesSize = ((bHasPayload) ? alignedSize(values->size, offsetAlignment) : 0);
-
-  size_t requiredScratch = keysSize + valuesSize + scratchBufferSize + reducedScratchBufferSize;
-  if (scratch->size < requiredScratch) scratch->resize(requiredScratch, false);
-  // All offsets must be a multiple of device limit VkPhysicalDeviceLimits::minStorageBufferOffseteAlignment
-  size_t valuesOffset = keysSize;
+  uint64_t keysSize = alignedSize(keys->size);
+  uint64_t valuesSize = values ? alignedSize(values->size) : 0;
   size_t scratchOffset = keysSize + valuesSize;
-  size_t reducedScratchOffset = keysSize + valuesSize + scratchBufferSize;
+  size_t reducedScratchOffset = scratchOffset + alignedSize(scratchBufferSize);
+  size_t requiredScratch = reducedScratchOffset + alignedSize(reducedScratchBufferSize);
+  if (scratch->size < requiredScratch) {
+    // Complete compute uses before replacing an existing scratch allocation.
+    if (scratch->size && context->synchronizeCompute() != VK_SUCCESS) return;
+    scratch->resize(requiredScratch, false);
+  }
 
-  uint32_t NumThreadgroupsToRun;
-  uint32_t NumReducedThreadgroupsToRun;
-  ParallelSort_SetConstantAndDispatchData(numKeys, maxNumThreadgroups, constantBufferData, NumThreadgroupsToRun,
+  ParallelSortCB constantBufferData = {};
+  uint32_t NumThreadgroupsToRun, NumReducedThreadgroupsToRun;
+  ParallelSort_SetConstantAndDispatchData(numKeys, 800, constantBufferData, NumThreadgroupsToRun,
                                           NumReducedThreadgroupsToRun);
+  uint64_t scratchAddress = scratch->getDeviceAddress();
+  constantBufferData.SrcBuffer = (uint64_t *)keys->getDeviceAddress();
+  constantBufferData.DstBuffer = (uint64_t *)scratchAddress;
+  constantBufferData.SrcPayload = values ? (uint64_t *)values->getDeviceAddress() : nullptr;
+  constantBufferData.DstPayload = values ? (uint64_t *)(scratchAddress + keysSize) : nullptr;
+  constantBufferData.SumTable = (uint32_t *)(scratchAddress + scratchOffset);
+  constantBufferData.ReduceTable = (uint32_t *)(scratchAddress + reducedScratchOffset);
 
-  auto BindUAVBuffer = [&](VkBuffer *pBuffer, VkDeviceSize *Offsets, VkDescriptorSet &DescriptorSet,
-                           uint32_t Binding /*=0*/, uint32_t Count /*=1*/) {
-    std::vector<VkDescriptorBufferInfo> bufferInfos;
-    for (uint32_t i = 0; i < Count; i++) {
-      VkDescriptorBufferInfo bufferInfo;
-      bufferInfo.buffer = pBuffer[i];
-      bufferInfo.offset = Offsets[i];
-      bufferInfo.range = VK_WHOLE_SIZE;
-      bufferInfos.push_back(bufferInfo);
-    }
-
-    VkWriteDescriptorSet write_set = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write_set.pNext = nullptr;
-    write_set.dstSet = DescriptorSet;
-    write_set.dstBinding = Binding;
-    write_set.dstArrayElement = 0;
-    write_set.descriptorCount = Count;
-    write_set.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    write_set.pImageInfo = nullptr;
-    write_set.pBufferInfo = bufferInfos.data();
-    write_set.pTexelBufferView = nullptr;
-
-    vkUpdateDescriptorSets(context->logicalDevice, 1, &write_set, 0, nullptr);
-  };
-
-  // Retire this command-buffer slot before updating its descriptor sets.
   VkCommandBuffer commandList = context->beginComputeCommands();
-  auto &bindings = context->sortStages.bindings[context->CETimelineCounter % 64];
-  {
-    VkBuffer BufferMaps[4];
-    VkDeviceSize Offsets1[4] = {0, 0, 0, 0};
-
-    // Map inputs/outputs
-    BufferMaps[0] = keys->buffer;
-    BufferMaps[1] = scratch->buffer;
-    if (bHasPayload) {
-      BufferMaps[2] = values->buffer;
-      BufferMaps[3] = scratch->buffer;
-      Offsets1[2] = 0;
-      Offsets1[3] = valuesOffset;
-    }
-    BindUAVBuffer(BufferMaps, Offsets1, bindings.m_SortDescriptorSetInputOutput[0], 0,
-                  (bHasPayload) ? 4 : 2);
-
-    BufferMaps[0] = scratch->buffer;
-    BufferMaps[1] = keys->buffer;
-    if (bHasPayload) {
-      BufferMaps[2] = scratch->buffer;
-      BufferMaps[3] = values->buffer;
-      Offsets1[2] = valuesOffset;
-      Offsets1[3] = 0;
-    }
-    BindUAVBuffer(BufferMaps, Offsets1, bindings.m_SortDescriptorSetInputOutput[1], 0,
-                  (bHasPayload) ? 4 : 2);
-
-    // Map scan sets (reduced, scratch)
-    VkDeviceSize Offsets2[4] = {reducedScratchOffset, reducedScratchOffset, 0, 0};
-    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
-    BufferMaps[2] = scratch->buffer;
-    BindUAVBuffer(BufferMaps, Offsets2, bindings.m_SortDescriptorSetScanSets[0], 0, 3);
-
-    BufferMaps[0] = BufferMaps[1] = scratch->buffer;
-    BufferMaps[2] = scratch->buffer;
-    VkDeviceSize Offsets3[4] = {scratchOffset, scratchOffset, reducedScratchOffset, 0};
-    BindUAVBuffer(BufferMaps, Offsets3, bindings.m_SortDescriptorSetScanSets[1], 0, 3);
-
-    // Map Scratch areas (fixed)
-    BufferMaps[0] = scratch->buffer;
-    BufferMaps[1] = scratch->buffer;
-    VkDeviceSize Offsets4[4] = {scratchOffset, reducedScratchOffset, 0, 0};
-    BindUAVBuffer(BufferMaps, Offsets4, bindings.m_SortDescriptorSetScratch, 0, 2);
-  }
-
-  // Transition barrier
-  auto BufferTransition = [](VkBuffer buffer, VkAccessFlags before, VkAccessFlags after, VkDeviceSize offset,
-                             VkDeviceSize size) {
-    VkBufferMemoryBarrier bufferBarrier = {};
-    bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    bufferBarrier.srcAccessMask = before;
-    bufferBarrier.dstAccessMask = after;
-    bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarrier.buffer = buffer;
-    bufferBarrier.size = VK_WHOLE_SIZE;
-    // bufferBarrier.offset = offset;
-    // bufferBarrier.size = size;
-
-    return bufferBarrier;
+  auto computeBarrier = [&]() {
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
   };
+  // Order accesses after earlier compute submissions, including reused scratch.
+  computeBarrier();
+  for (uint32_t shift = 0; shift < 64; shift += PARALLELSORT_SORT_BITS_PER_PASS) {
+    constantBufferData.CShiftBit = shift;
+    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0,
+                       sizeof(ParallelSortCB), &constantBufferData);
 
-  // Bind the scratch descriptor sets
-  vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 2, 1,
-                          &bindings.m_SortDescriptorSetScratch, 0, nullptr);
+    // Count keys in each radix bin, then reduce the counts.
+    vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Count.pipeline);
+    vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    computeBarrier();
+    vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.CountReduce.pipeline);
+    vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+    computeBarrier();
 
-  // Push the data into the constant buffer and bind
-  vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, 0, sizeof(ParallelSortCB),
-                     &constantBufferData);
+    // Scan the reduced counts, then add those prefixes to the histogram.
+    vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Scan.pipeline);
+    assert(NumReducedThreadgroupsToRun < PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE);
+    vkCmdDispatch(commandList, 1, 1, 1);
+    computeBarrier();
+    vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.ScanAdd.pipeline);
+    vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
+    computeBarrier();
 
-  // Perform Radix Sort (currently only support 64-bit key/payload sorting
-  uint32_t inputSet = 0;
-  VkBufferMemoryBarrier Barriers[3];
-  for (uint64_t Shift = 0; Shift < 64u; Shift += PARALLELSORT_SORT_BITS_PER_PASS) {
-    // Update the bit shift
-    vkCmdPushConstants(commandList, context->sortStages.layout, VK_SHADER_STAGE_ALL, sizeof(ParallelSortCB) - 4, 4,
-                       &Shift);
-    //     vkCmdPushConstants(commandList, m_SortPipelineLayout, VK_SHADER_STAGE_ALL, 0, 4, &Shift);
-
-    // Bind input/output for this pass
-    vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 0, 1,
-                            &bindings.m_SortDescriptorSetInputOutput[inputSet], 0, nullptr);
-
-    // Sort Count
-    {
-      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Count.pipeline);
-      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
-    }
-
-    // UAV barrier on the sum table
-    Barriers[0] =
-        BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratchOffset, scratchBufferSize);
-    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 1, Barriers, 0, nullptr);
-
-    // Sort Reduce
-    {
-      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.CountReduce.pipeline);
-      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
-    }
-    // UAV barrier on the reduced sum table
-    Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                                   VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, reducedScratchOffset,
-                                   reducedScratchBufferSize);
-    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 1, Barriers, 0, nullptr);
-
-    // Sort Scan
-    {
-      // First do scan prefix of reduced values
-      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1,
-                              &bindings.m_SortDescriptorSetScanSets[0], 0, nullptr);
-      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.Scan.pipeline);
-      assert(NumReducedThreadgroupsToRun < PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE &&
-             "Need to account for bigger reduced histogram scan");
-      vkCmdDispatch(commandList, 1, 1, 1);
-
-      // UAV barrier on the reduced sum table
-      Barriers[0] = BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                                     VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, reducedScratchOffset,
-                                     reducedScratchBufferSize);
-      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                           nullptr, 1, Barriers, 0, nullptr);
-
-      // Next do scan prefix on the histogram with partial sums that we just did
-      vkCmdBindDescriptorSets(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.layout, 1, 1,
-                              &bindings.m_SortDescriptorSetScanSets[1], 0, nullptr);
-      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE, context->sortStages.ScanAdd.pipeline);
-      vkCmdDispatch(commandList, NumReducedThreadgroupsToRun, 1, 1);
-    }
-
-    // UAV barrier on the sum table
-    Barriers[0] =
-        BufferTransition(scratch->buffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, scratchOffset, scratchBufferSize);
-    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 1, Barriers, 0, nullptr);
-
-    // Sort Scatter
-    {
-      vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE,
-                        bHasPayload ? context->sortStages.ScatterPayload.pipeline
-                                    : context->sortStages.Scatter.pipeline);
-      vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
-    }
-
-    // Finish doing everything and barrier for the next pass
-    VkBuffer keysBuffer = (inputSet) ? scratch->buffer : keys->buffer;
-    Barriers[0] = BufferTransition(keysBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                                   VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, 0, keysSize);
-    vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 1, Barriers, 0, nullptr);
-
-    if (bHasPayload) {
-      VkBuffer valsBuffer = (inputSet) ? scratch->buffer : values->buffer;
-      VkDeviceSize offset = (inputSet) ? valuesOffset : 0;
-      Barriers[0] = BufferTransition(valsBuffer, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                                     VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, offset, valuesSize);
-      vkCmdPipelineBarrier(commandList, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                           nullptr, 1, Barriers, 0, nullptr);
-    }
-
-    // Swap read/write sources
-    inputSet = !inputSet;
+    vkCmdBindPipeline(commandList, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      bHasPayload ? context->sortStages.ScatterPayload.pipeline : context->sortStages.Scatter.pipeline);
+    vkCmdDispatch(commandList, NumThreadgroupsToRun, 1, 1);
+    computeBarrier();
+    std::swap(constantBufferData.SrcBuffer, constantBufferData.DstBuffer);
+    std::swap(constantBufferData.SrcPayload, constantBufferData.DstPayload);
   }
-  context->endComputeCommands(commandList);
-  keys->lastSortSubmission = scratch->lastSortSubmission = context->CETimelineCounter;
-  if (values) values->lastSortSubmission = context->CETimelineCounter;
-  if (!_scratch) gprtBufferDestroy((GPRTBuffer)scratch);
+  if (context->endComputeCommands(commandList) != VK_SUCCESS) return;
+  if (!_scratch && context->synchronizeCompute() == VK_SUCCESS)
+    gprtBufferDestroy((GPRTBuffer)scratch);
 }
 
 GPRT_API void

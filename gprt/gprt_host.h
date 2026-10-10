@@ -2397,6 +2397,9 @@ gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositiv
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
+// Sorts run on the compute queue. Callers synchronize before reading, resizing,
+// or destroying buffers used by pending work, and before access from other queues.
+// Scratch growth and internal scratch release wait on the existing compute timeline.
 GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
@@ -2429,6 +2432,7 @@ gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> sc
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
+// Uses the same compute synchronization contract as gprtBufferSort.
 GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values,
                                     GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
