@@ -2101,7 +2101,7 @@ template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int d
 }
 
 /**
- * @brief Maps a buffer for host CPU access, waiting for producers on a fresh mapping.
+ * @brief Maps a buffer for host CPU access.
  * 
  * This function makes a device buffer's memory accessible to the CPU for 
  * reading and/or writing. After mapping, use gprtBufferGetHostPointer() to 
@@ -2111,9 +2111,10 @@ template <typename T> T * gprtBufferGetHostPointer(GPRTBufferOf<T> buffer, int d
  * @param buffer The buffer to map for CPU access
  * @param deviceID The device ID containing the buffer (default: 0)
  * 
- * @note Device buffers use staging memory for host access. Host and shared
+ * @note Synchronize pending GPU accesses to this buffer before mapping. Device buffers use
+ *       staging memory and wait for the readback copy to complete. Host and shared
  *       buffers are mapped directly. An existing mapping is reused without a wait
- *       or a new readback; synchronize explicitly before reading a persistent mapping.
+ *       or a new readback; synchronize before reading a persistent mapping.
  * @see gprtBufferUnmap() to unmap after modifications
  * @see gprtBufferGetHostPointer() to get the mapped pointer
  */

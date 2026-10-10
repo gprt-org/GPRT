@@ -25,9 +25,11 @@ int main() {
         for (uint32_t i = 0; i < 32; ++i) gprtBufferGetHostPointer(source)[i] = iteration * 32 + i;
         gprtBufferUnmap(source);
         gprtBufferCopy(context, source, destination, 0, 0, 32);
+        gprtGraphicsSynchronize(context);
       } else {
         gprtComputeLaunch(compute, uint3(32, 1, 1), uint3(1),
                           gprtBufferGetDevicePointer(destination), iteration * 32);
+        gprtComputeSynchronize(context);
       }
       gprtBufferMap(destination);
       auto mapped = gprtBufferGetHostPointer(destination);
@@ -42,11 +44,12 @@ int main() {
     }
     if (hostVisible) gprtBufferMap(destination);
     gprtComputeLaunch(compute, uint3(32, 1, 1), uint3(1), gprtBufferGetDevicePointer(destination), 8192u);
+    gprtComputeSynchronize(context);
     gprtBufferResize(context, destination, 64, true);
     gprtBufferMap(destination);
     for (uint32_t i = 0; i < 32; ++i)
       if (gprtBufferGetHostPointer(destination)[i] != 8192u + i)
-        throw std::runtime_error("Preserving resize lost pending GPU writes");
+        throw std::runtime_error("Preserving resize lost completed GPU writes");
     gprtBufferUnmap(destination);
     gprtBufferDestroy(destination);
   }
