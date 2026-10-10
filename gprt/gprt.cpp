@@ -473,7 +473,7 @@ struct Context {
   VkExtent2D windowExtent{};
   gprt::terminal::Preview terminalPreview;
   uint64_t headlessPresentCount = 0, headlessPollCount = 0;
-  uint64_t headlessFrameLimit = 1440;
+  uint64_t headlessFrameLimit = 1;
   VkPresentModeKHR presentMode;
   VkSurfaceFormatKHR surfaceFormat;
   VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -5165,7 +5165,7 @@ Context::requestPhysicalDevice(int32_t requestedDevice) {
 
 Context::Context(int32_t requestedDevice) {
   bool windowRequested = requestedFeatures.window;
-  headlessFrameLimit = gprt::terminal::environmentCount("GPRT_HEADLESS_FRAME_LIMIT", 1440);
+  headlessFrameLimit = gprt::terminal::environmentCount("GPRT_HEADLESS_FRAME_LIMIT", 1);
   windowExtent = {requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight};
   if (const char *headless = std::getenv("GPRT_HEADLESS_SURFACE"))
     if (std::string(headless) == "1") windowRequested = false;
@@ -7180,8 +7180,8 @@ gprtWindowShouldClose(GPRTContext _context) {
   if (!context) return true;
   if (!context->window) {
     bool close = !context->windowExtent.width || !context->windowExtent.height ||
-                 (context->headlessPresentCount ? context->headlessPresentCount >= context->headlessFrameLimit
-                                                : ++context->headlessPollCount > context->headlessFrameLimit);
+                 context->headlessPresentCount >= context->headlessFrameLimit ||
+                 ++context->headlessPollCount > context->headlessFrameLimit;
     if (!close && context->imgui.renderPass) ImGui_ImplVulkan_NewFrame();
     return close;
   }
@@ -7495,14 +7495,16 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
       LOG_WARNING("Terminal preview requires framebuffer dimensions and a matching BGRA8 buffer");
       return context->GRTimelineCounter;
     }
-    VK_CHECK_RESULT(context->synchronize());
+    if (context->synchronize() != VK_SUCCESS)
+      throw std::runtime_error("Failed to wait for terminal presentation");
     bool wasMapped = buffer->mapped != nullptr;
-    // An existing device mapping may contain unflushed edits; preserve its pointer and contents.
-    if (!buffer->mapped) VK_CHECK_RESULT(buffer->map());
-    if (buffer->hostVisible) buffer->invalidate();
+    // An existing mapping may contain unflushed edits; preserve its pointer and contents.
+    if (!wasMapped && buffer->map() != VK_SUCCESS)
+      throw std::runtime_error("Failed to map the terminal framebuffer");
     context->terminalPreview.present((const uint8_t *)buffer->mapped, width, height);
     if (!wasMapped) buffer->unmapReadOnly();
     ++context->headlessPresentCount;
+    context->headlessPollCount = 0;
     return context->GRTimelineCounter;
   }
   if (context->currentImageIndex == UINT32_MAX) return context->GRTimelineCounter;

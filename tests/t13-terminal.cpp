@@ -2,6 +2,15 @@
 #include "gprt_terminal.h"
 #include <stdexcept>
 
+void environment(const char *name, const char *value) {
+#ifdef _WIN32
+  _putenv_s(name, value);
+#else
+  if (*value) setenv(name, value, 1);
+  else unsetenv(name);
+#endif
+}
+
 // Run with GPRT_HEADLESS_SURFACE=1 and GPRT_HEADLESS_FRAME_LIMIT=3.
 int main(int argc, char **) {
   uint32_t pixels[] = {0xff000000, 0xffffffff};
@@ -28,18 +37,33 @@ int main(int argc, char **) {
     throw std::runtime_error("Preview discarded an existing mapping or host edits");
   gprtBufferUnmap(buffer);
   gprtBufferDestroy(buffer);
+  auto hostBuffer = gprtHostBufferCreate<uint32_t>(context, 2, pixels);
+  auto hostMapping = gprtBufferGetHostPointer(hostBuffer);
+  hostMapping[0] = 0xff123456;
+  gprtBufferPresent(context, hostBuffer);
+  if (gprtBufferGetHostPointer(hostBuffer) != hostMapping || hostMapping[0] != 0xff123456)
+    throw std::runtime_error("Preview discarded host-visible edits");
+  gprtBufferDestroy(hostBuffer);
   gprtContextDestroy(context);
   context = gprtContextCreate();
   for (int poll = 0; poll < 4; ++poll)
     if (gprtWindowShouldClose(context) != (poll == 3)) throw std::runtime_error("Polling-only loop is unbounded");
+  buffer = gprtDeviceBufferCreate<uint32_t>(context, 2, pixels);
+  gprtBufferPresent(context, buffer);
+  for (int poll = 0; poll < 4; ++poll)
+    if (gprtWindowShouldClose(context) != (poll == 3)) throw std::runtime_error("Loop stopped presenting but did not close");
+  gprtBufferDestroy(buffer);
   gprtContextDestroy(context);
   if (!gprtWindowShouldClose(nullptr)) throw std::runtime_error("Null context should close");
+  environment("GPRT_HEADLESS_FRAME_LIMIT", "");
+  context = gprtContextCreate();
+  buffer = gprtDeviceBufferCreate<uint32_t>(context, 2, pixels);
+  gprtBufferPresent(context, buffer);
+  if (!gprtWindowShouldClose(context)) throw std::runtime_error("Default headless run must close after one frame");
+  gprtBufferDestroy(buffer);
+  gprtContextDestroy(context);
   if (argc > 1) {
-#ifdef _WIN32
-    _putenv_s("GPRT_HEADLESS_SURFACE", "");
-#else
-    unsetenv("GPRT_HEADLESS_SURFACE");
-#endif
+    environment("GPRT_HEADLESS_SURFACE", "");
     context = gprtContextCreate();
     if (gprtContextIsHeadless(context)) throw std::runtime_error("Headless override changed later context defaults");
     gprtContextDestroy(context);

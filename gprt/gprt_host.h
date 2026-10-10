@@ -637,9 +637,10 @@ GPRT_API bool gprtContextIsHeadless(GPRTContext context);
 
 /** If the context has a window, returns whether its close button was clicked.
  *
- * Headless execution closes after 1440 buffer presentations. Before the first
- * presentation, it permits 1440 polls that return false. GPRT_HEADLESS_FRAME_LIMIT
- * overrides this positive limit; invalid values use the default. Null contexts and contexts
+ * Headless execution defaults to one frame. GPRT_HEADLESS_FRAME_LIMIT sets a
+ * positive buffer presentation limit; invalid values use the default. A loop
+ * without presentations closes after that many polls return false. Each
+ * presentation resets this poll count. Null contexts and contexts
  * without framebuffer dimensions return true immediately.
  */
 GPRT_API bool gprtWindowShouldClose(GPRTContext context);
@@ -2483,7 +2484,7 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  * Headless presentation previews a BGRA8 sRGB framebuffer in the terminal using
  * the dimensions requested by gprtRequestWindow. Missing dimensions or an
  * undersized buffer skip the preview. Colors are filtered in linear space, and
- * the source buffer is preserved. An existing device mapping is previewed as-is,
+ * the source buffer is preserved. An existing mapping is previewed as-is,
  * including pending host edits. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs;
  * redirected output also uses ASCII.
  */

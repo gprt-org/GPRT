@@ -76,20 +76,18 @@ struct Preview {
       columns = info.srWindow.Right - info.srWindow.Left + 1;
       rows = info.srWindow.Bottom - info.srWindow.Top + 1;
     }
-    if (!initialized) {
-      DWORD mode;
-      if (GetConsoleMode(console, &mode)) {
-        SetConsoleMode(console, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-        unicode = SetConsoleOutputCP(CP_UTF8) != 0;
-      }
-    }
+    DWORD mode = 0;
+    bool ansi = GetConsoleMode(console, &mode) && SetConsoleMode(console, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    unicode = ansi && GetConsoleOutputCP() == CP_UTF8;
 #else
     winsize size{};
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0) {
       if (size.ws_col) columns = size.ws_col;
       if (size.ws_row) rows = size.ws_row;
     }
-    unicode = isatty(STDOUT_FILENO) != 0;
+    const char *term = std::getenv("TERM");
+    bool ansi = isatty(STDOUT_FILENO) && (!term || std::string(term) != "dumb");
+    unicode = ansi;
 #endif
     if (const char *ascii = std::getenv("GPRT_TERMINAL_ASCII"))
       if (std::string(ascii) == "1") unicode = false;
@@ -98,7 +96,7 @@ struct Preview {
     double scale = std::min(double(columns) / width, double(rows) / height);
     columns = std::max(1u, std::min(columns, uint32_t(width * scale)));
     rows = std::max(1u, std::min(rows, uint32_t(height * scale)));
-    std::string output = initialized ? "\x1b[H" : "\x1b[2J\x1b[H";
+    std::string output = ansi ? (initialized ? "\x1b[H" : "\x1b[2J\x1b[H") : "";
     initialized = true;
     const char *blocks[] = {"\xe2\x96\x91", "\xe2\x96\x92", "\xe2\x96\x93", "\xe2\x96\x88"};
     const char *ascii[] = {".", ":", "*", "#"};
@@ -112,11 +110,16 @@ struct Preview {
         if (rgb[0] == rgb[1] && rgb[1] == rgb[2])
           color = rgb[0] < 8 ? 16 : rgb[0] > 248 ? 231 : 232 + ((rgb[0] - 8) * 24 + 123) / 247;
         const char *glyph = unicode ? blocks[uint32_t(brightness) * 3 / 255] : ascii[uint32_t(brightness) * 3 / 255];
-        output += "\x1b[38;5;" + std::to_string(color) + "m" + glyph + glyph;
+        if (ansi) output += "\x1b[38;5;" + std::to_string(color) + "m";
+        output += std::string(glyph) + glyph;
       }
-      output += "\x1b[0m\n";
+      if (ansi) output += "\x1b[0m";
+      output += '\n';
     }
     std::cout << output << std::flush;
+#ifdef _WIN32
+    if (ansi) SetConsoleMode(console, mode);
+#endif
   }
 };
 
