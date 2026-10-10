@@ -51,6 +51,18 @@ int main() {
       if (gprtBufferGetHostPointer(destination)[i] != 8192u + i)
         throw std::runtime_error("Preserving resize lost completed GPU writes");
     gprtBufferUnmap(destination);
+    for (bool preserve : {true, false}) {
+      gprtBufferResize(context, destination, preserve ? 128 : 64, preserve);
+      gprtBufferCopy(context, source, destination, 0, 0, 32);
+      gprtGraphicsSynchronize(context);
+      gprtComputeLaunch(compute, uint3(32, 1, 1), uint3(1), gprtBufferGetDevicePointer(destination), 16384u);
+      gprtComputeSynchronize(context);
+      gprtBufferMap(destination);
+      for (uint32_t i = 0; i < 32; ++i)
+        if (gprtBufferGetHostPointer(destination)[i] != 16384u + i)
+          throw std::runtime_error("Resized buffer lost writes across queue families");
+      gprtBufferUnmap(destination);
+    }
     gprtBufferDestroy(destination);
   }
   gprtBufferDestroy(source);

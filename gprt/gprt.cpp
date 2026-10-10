@@ -987,6 +987,8 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
+        std::array<uint32_t, 3> families;
+        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -1108,8 +1110,6 @@ struct Buffer {
         bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferCreateInfo.usage = usageFlags;
         bufferCreateInfo.size = bytes;
-        std::array<uint32_t, 3> families;
-        context->setQueueSharing(bufferCreateInfo, families);
 
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
