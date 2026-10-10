@@ -979,15 +979,20 @@ GPRT_API void gprtRequestMotionBlur();
 
   GPRT_VISIBLE_DEVICES optionally specifies comma-separated Vulkan device
   ordinals in preference order. An empty value or -1 hides all devices;
-  malformed, duplicate, and out-of-range ordinals are errors. Rejected device
-  selection uses LOG_ERROR and returns null if the error handler returns.
+  malformed and out-of-range ordinals are errors. Duplicate ordinals are
+  ignored with a warning, preserving the order of their first occurrence.
+  Rejected device selection uses LOG_ERROR and returns null if the error
+  handler returns.
 
   requestedDevice indexes the usable devices after this filtering and defaults
   to 0, the first usable device. The selected GPU is device 0 in subsequent
   GPRT calls. For example, GPRT_VISIBLE_DEVICES=1,0 makes gprtContextCreate(0)
   select Vulkan device 1 if that device is usable.
 
-  The former device-list and device-count arguments are no longer supported. */
+  For multiple GPUs, call gprtContextCreate(requestedDevice) once per device.
+  Pass the corresponding context as the first argument to operations that
+  take a context. Synchronization between contexts is planned; current
+  synchronization operations apply within one context. */
 GPRT_API GPRTContext gprtContextCreate(int32_t requestedDevice GPRT_IF_CPP(= 0));
 
 GPRT_API void gprtContextDestroy(GPRTContext context);

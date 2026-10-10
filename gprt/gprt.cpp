@@ -22,12 +22,14 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <charconv>
 #include <climits>
 #include <fstream>
 #include <gprt_host.h>
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <set>
 #include <sstream>
 
@@ -5053,37 +5055,28 @@ Context::requestPhysicalDevice(int32_t requestedDevice) {
   };
   std::vector<UsableDevice> usableDevices;
 
-  std::vector<uint32_t> visibleDevices;
-  if (const char *selection = std::getenv("GPRT_VISIBLE_DEVICES")) {
-    std::string list(selection);
-    if (!list.empty() && list != "-1") {
-      if (list.back() == ',') {
-        LOG_WARNING("GPRT_VISIBLE_DEVICES contains an empty ordinal");
+  std::vector<uint32_t> visibleDevices(gpuCount);
+  std::iota(visibleDevices.begin(), visibleDevices.end(), 0u);
+  if (const char *visibleDevicesEnv = std::getenv("GPRT_VISIBLE_DEVICES")) {
+    visibleDevices.clear();
+    std::string list(visibleDevicesEnv);
+    // An empty value or -1 hides all devices, so context creation cannot proceed.
+    if (list.empty() || list == "-1") return VK_ERROR_INITIALIZATION_FAILED;
+    if (list.back() == ',') return VK_ERROR_INITIALIZATION_FAILED;
+
+    std::istringstream entries(list);
+    std::string entry;
+    while (std::getline(entries, entry, ',')) {
+      uint32_t ordinal = 0;
+      auto parsed = std::from_chars(entry.data(), entry.data() + entry.size(), ordinal);
+      if (parsed.ec != std::errc{} || parsed.ptr != entry.data() + entry.size() || ordinal >= gpuCount)
         return VK_ERROR_INITIALIZATION_FAILED;
+      if (std::find(visibleDevices.begin(), visibleDevices.end(), ordinal) != visibleDevices.end()) {
+        LOG_WARNING("Ignoring duplicate GPRT_VISIBLE_DEVICES ordinal " << ordinal);
+        continue;
       }
-      std::istringstream entries(list);
-      std::string entry;
-      while (std::getline(entries, entry, ',')) {
-        if (entry.empty() || entry.find_first_not_of("0123456789") != std::string::npos) {
-          LOG_WARNING("GPRT_VISIBLE_DEVICES requires unsigned decimal ordinals");
-          return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        std::istringstream value(entry);
-        uint32_t ordinal;
-        char trailing;
-        if (!(value >> ordinal) || (value >> trailing) || ordinal >= gpuCount) {
-          LOG_WARNING("GPRT_VISIBLE_DEVICES contains an invalid Vulkan device ordinal");
-          return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        if (std::find(visibleDevices.begin(), visibleDevices.end(), ordinal) != visibleDevices.end()) {
-          LOG_WARNING("GPRT_VISIBLE_DEVICES contains a duplicate ordinal");
-          return VK_ERROR_INITIALIZATION_FAILED;
-        }
-        visibleDevices.push_back(ordinal);
-      }
+      visibleDevices.push_back(ordinal);
     }
-  } else {
-    for (uint32_t i = 0; i < gpuCount; ++i) visibleDevices.push_back(i);
   }
 
   LOG_INFO("Searching for usable Vulkan physical device...");
@@ -5137,10 +5130,7 @@ Context::requestPhysicalDevice(int32_t requestedDevice) {
   }
 
   if (usableDevices.empty()) return VK_ERROR_INITIALIZATION_FAILED;
-  if (requestedDevice < 0 || size_t(requestedDevice) >= usableDevices.size()) {
-    LOG_WARNING("Requested device is out of range");
-    return VK_ERROR_INITIALIZATION_FAILED;
-  }
+  if (requestedDevice < 0 || size_t(requestedDevice) >= usableDevices.size()) return VK_ERROR_INITIALIZATION_FAILED;
 
   if (usableDevices[requestedDevice].fallback.lss) {
     LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
