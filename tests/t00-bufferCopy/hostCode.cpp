@@ -30,7 +30,7 @@ main(int ac, char **av) {
   // Full copy from A to B
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> A = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
     GPRTBufferOf<uint32_t> B = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
 
@@ -66,7 +66,7 @@ main(int ac, char **av) {
   // Offset partial copy 1 from A to B
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> A = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
     GPRTBufferOf<uint32_t> B = gprtDeviceBufferCreate<uint32_t>(context, 100000000);
 

@@ -116,7 +116,7 @@ int main(int ac, char **av) {
   gprtRequestDenoiser(fbSize.x, fbSize.y, GPRTDenoiseFlags(GPRT_DENOISE_FLAGS_MVLOWRES | GPRT_DENOISE_FLAGS_DEPTH_INVERTED));
   gprtRequestRecordSizes(2048, 256, 256, 256);
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Antialiasing");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s7_0_deviceCode);
   PushConstants pc;
   pc.now = 0.f;

@@ -64,7 +64,7 @@ int main(int ac, char **av) {
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S08 Multiple Geometry");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s3_2_deviceCode);
 
   // ##################################################################

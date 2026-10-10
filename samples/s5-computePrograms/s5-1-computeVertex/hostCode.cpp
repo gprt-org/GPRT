@@ -23,7 +23,7 @@ int main(int ac, char **av) {
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S05 Compute Vertex");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s5_1_deviceCode);
 
   // Structure of parameters that change each frame. We can edit these

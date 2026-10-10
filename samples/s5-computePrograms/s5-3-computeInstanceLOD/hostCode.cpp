@@ -82,7 +82,7 @@ int main(int ac, char **av) {
 
   // create a context on the first device:
   gprtRequestWindow(fbSize.x, fbSize.y, "S07 Compute Instance Level of Detail");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s5_3_deviceCode);
 
   // Structure of parameters that change each frame. We can edit these
