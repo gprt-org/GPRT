@@ -30,6 +30,8 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <initializer_list>
 
 #include <regex>
 
@@ -703,9 +705,12 @@ struct Context {
   VkCommandBuffer beginGraphicsCommands();
   VkCommandBuffer beginComputeCommands();
   VkCommandBuffer beginTransferCommands();
-  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
-  VkResult endComputeCommands(VkCommandBuffer commandBuffer);
-  VkResult endTransferCommands(VkCommandBuffer commandBuffer);
+  struct TimelineEvent { VkSemaphore semaphore; uint64_t value; };
+  VkResult endCommands(VkCommandBuffer commandBuffer, VkQueue queue, VkSemaphore signal, uint64_t &counter,
+                       std::initializer_list<TimelineEvent> dependencies);
+  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies = {});
+  VkResult endComputeCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies = {});
+  VkResult endTransferCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies = {});
   VkResult synchronizeTransfer();
   VkResult synchronizeGraphics();
   VkResult synchronizeCompute();
@@ -6696,34 +6701,51 @@ VkCommandBuffer Context::beginGraphicsCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endCommands(VkCommandBuffer commandBuffer, VkQueue queue, VkSemaphore signal, uint64_t &counter,
+                              std::initializer_list<TimelineEvent> dependencies) {
+  VkSemaphore waits[3];
+  uint64_t values[3];
+  uint32_t waitCount = 0;
+  for (auto event : dependencies) {
+    if (!event.value) continue;
+    if (waitCount == 3) throw std::invalid_argument("Too many queue dependencies");
+    waits[waitCount] = event.semaphore;
+    values[waitCount++] = event.value;
+  }
+  VkPipelineStageFlags stages[3] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
   VkResult result;
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
 
-  uint64_t prevCounter = GRTimelineCounter;
-  GRTimelineCounter++;
+  uint64_t nextCounter = counter + 1;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = waitCount;
+  timelineInfo.pWaitSemaphoreValues = waitCount ? values : nullptr;
   timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
+  timelineInfo.pSignalSemaphoreValues = &nextCounter;
 
   VkSubmitInfo submitInfo{};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  submitInfo.waitSemaphoreCount = timelineInfo.waitSemaphoreValueCount;
+  submitInfo.pWaitSemaphores = waitCount ? waits : nullptr;
+  submitInfo.pWaitDstStageMask = waitCount ? stages : nullptr;
   submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
+  submitInfo.pSignalSemaphores = &signal;
   submitInfo.pNext = &timelineInfo;
 
-  VkResult err = vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit graphics queue! : \n" + errorString(err));
+  VkResult err = vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+  if (err == VK_SUCCESS) counter = nextCounter;
+  else LOG_ERROR("failed to submit queue! : \n" + errorString(err));
   return err;
+}
+
+VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies) {
+  return endCommands(commandBuffer, graphicsQueue, GRTimelineSemaphore, GRTimelineCounter, dependencies);
 }
 
 VkCommandBuffer Context::beginComputeCommands() {
@@ -6753,34 +6775,8 @@ VkCommandBuffer Context::beginComputeCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer) {
-  VkResult err;
-  err = vkEndCommandBuffer(commandBuffer);
-  if (err) LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
-
-  uint64_t prevCounter = CETimelineCounter;
-  CETimelineCounter++;
-
-  VkTimelineSemaphoreSubmitInfo timelineInfo{};
-  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
-  timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &CETimelineCounter;
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &CETimelineSemaphore;
-  submitInfo.pNext = &timelineInfo;
-
-  err = vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit compute queue! : \n" + errorString(err));
-  return err;
+VkResult Context::endComputeCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies) {
+  return endCommands(commandBuffer, computeQueue, CETimelineSemaphore, CETimelineCounter, dependencies);
 }
 
 VkCommandBuffer Context::beginTransferCommands() {
@@ -6809,31 +6805,8 @@ VkCommandBuffer Context::beginTransferCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer) {
-  VkResult result;
-  result = vkEndCommandBuffer(commandBuffer);
-  if (result != VK_SUCCESS) return result;
-
-  TRTimelineCounter++;
-
-  VkTimelineSemaphoreSubmitInfo timelineInfo{};
-  timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.signalSemaphoreValueCount = 1;
-  timelineInfo.pSignalSemaphoreValues = &TRTimelineCounter;
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
-  submitInfo.signalSemaphoreCount = 1;
-  submitInfo.pSignalSemaphores = &TRTimelineSemaphore;
-  submitInfo.pNext = &timelineInfo;
-
-  VkResult err = vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  if (err) LOG_ERROR("failed to submit transfer queue! : \n" + errorString(err));
-  return err;
+VkResult Context::endTransferCommands(VkCommandBuffer commandBuffer, std::initializer_list<TimelineEvent> dependencies) {
+  return endCommands(commandBuffer, transferQueue, TRTimelineSemaphore, TRTimelineCounter, dependencies);
 }
 
 VkResult Context::synchronizeGraphics()
@@ -9469,10 +9442,18 @@ gprtRayGenLaunch3D(GPRTContext _context, GPRTRayGen _rayGen, uint32_t dims_x, ui
 }
 
 uint64_t
-_gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
+_gprtComputeLaunch(GPRTCompute compute, uint3 numGroups, uint3 groupSize,
                    std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants) {
+  return _gprtComputeLaunch(compute, numGroups, groupSize, pushConstants, {});
+}
+
+uint64_t
+_gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
+                   std::array<char, PUSH_CONSTANTS_LIMIT> pushConstants, GPRTLaunchDependencies dependencies) {
   Compute *compute = (Compute *) _compute;
   Context *context = compute->context;
+  if (dependencies.compute > context->CETimelineCounter || dependencies.graphics > context->GRTimelineCounter)
+    throw std::invalid_argument("Launch dependency has not been submitted in this context");
 
   // Build / update the compute pipeline if required
   if (compute->pipeline == VK_NULL_HANDLE) {
@@ -9481,7 +9462,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
 
   VkResult err;
 
-  // Temporary... Ultimately want to move to the compute queue...
+  // Record this dispatch on the compute queue.
   VkCommandBuffer commandBuffer = context->beginComputeCommands();
 
   if (context->queryRequested) {
@@ -9507,7 +9488,8 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
     vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, context->queryPool, 1);
   }
 
-  err = context->endComputeCommands(commandBuffer);
+  err = context->endComputeCommands(commandBuffer, {{context->CETimelineSemaphore, dependencies.compute},
+                                                    {context->GRTimelineSemaphore, dependencies.graphics}});
   if (err)
     LOG_ERROR("failed to end command buffer! : \n" + errorString(err));
 
@@ -9531,7 +9513,7 @@ _gprtComputeLaunch(GPRTCompute _compute, uint3 numGroups, uint3 groupSize,
   //   LOG_ERROR("failed to submit to queue! : \n" + errorString(err));
 
   // err = vkQueueWaitIdle(context->graphicsQueue);
-  return 0;
+  return context->CETimelineCounter;
 }
 
 GPRT_API uint64_t 
@@ -9541,7 +9523,7 @@ gprtComputeSynchronize(GPRTContext _context)
   assert(_context);
   Context *context = (Context *) _context;
   context->synchronizeCompute();
-  return 0;
+  return context->CETimelineCounter;
 }
 
 GPRT_API uint64_t 
@@ -9551,7 +9533,7 @@ gprtGraphicsSynchronize(GPRTContext _context)
   assert(_context);
   Context *context = (Context *) _context;
   context->synchronizeGraphics();
-  return 0;
+  return context->GRTimelineCounter;
 }
 
 GPRT_API uint64_t 
