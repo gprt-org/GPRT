@@ -254,38 +254,35 @@ gprtRaise_impl(std::string str) {
 
 std::string
 errorString(VkResult errorCode) {
-  switch (errorCode) {
-#define STR(r)                                                                                                         \
-  case VK_##r:                                                                                                         \
-    return #r
-    STR(NOT_READY);
-    STR(TIMEOUT);
-    STR(EVENT_SET);
-    STR(EVENT_RESET);
-    STR(INCOMPLETE);
-    STR(ERROR_OUT_OF_HOST_MEMORY);
-    STR(ERROR_OUT_OF_DEVICE_MEMORY);
-    STR(ERROR_INITIALIZATION_FAILED);
-    STR(ERROR_DEVICE_LOST);
-    STR(ERROR_MEMORY_MAP_FAILED);
-    STR(ERROR_LAYER_NOT_PRESENT);
-    STR(ERROR_EXTENSION_NOT_PRESENT);
-    STR(ERROR_FEATURE_NOT_PRESENT);
-    STR(ERROR_INCOMPATIBLE_DRIVER);
-    STR(ERROR_TOO_MANY_OBJECTS);
-    STR(ERROR_FORMAT_NOT_SUPPORTED);
-    STR(ERROR_SURFACE_LOST_KHR);
-    STR(ERROR_NATIVE_WINDOW_IN_USE_KHR);
-    STR(SUBOPTIMAL_KHR);
-    STR(ERROR_OUT_OF_DATE_KHR);
-    STR(ERROR_INCOMPATIBLE_DISPLAY_KHR);
-    STR(ERROR_VALIDATION_FAILED_EXT);
-    STR(ERROR_INVALID_SHADER_NV);
-    STR(ERROR_OUT_OF_POOL_MEMORY);
-#undef STR
-  default:
-    return "UNKNOWN_ERROR";
-  }
+  static const std::map<VkResult, const char *> names = {
+      {VK_SUCCESS, "SUCCESS"},
+      {VK_NOT_READY, "NOT_READY"},
+      {VK_TIMEOUT, "TIMEOUT"},
+      {VK_EVENT_SET, "EVENT_SET"},
+      {VK_EVENT_RESET, "EVENT_RESET"},
+      {VK_INCOMPLETE, "INCOMPLETE"},
+      {VK_ERROR_OUT_OF_HOST_MEMORY, "ERROR_OUT_OF_HOST_MEMORY"},
+      {VK_ERROR_OUT_OF_DEVICE_MEMORY, "ERROR_OUT_OF_DEVICE_MEMORY"},
+      {VK_ERROR_INITIALIZATION_FAILED, "ERROR_INITIALIZATION_FAILED"},
+      {VK_ERROR_DEVICE_LOST, "ERROR_DEVICE_LOST"},
+      {VK_ERROR_MEMORY_MAP_FAILED, "ERROR_MEMORY_MAP_FAILED"},
+      {VK_ERROR_LAYER_NOT_PRESENT, "ERROR_LAYER_NOT_PRESENT"},
+      {VK_ERROR_EXTENSION_NOT_PRESENT, "ERROR_EXTENSION_NOT_PRESENT"},
+      {VK_ERROR_FEATURE_NOT_PRESENT, "ERROR_FEATURE_NOT_PRESENT"},
+      {VK_ERROR_INCOMPATIBLE_DRIVER, "ERROR_INCOMPATIBLE_DRIVER"},
+      {VK_ERROR_TOO_MANY_OBJECTS, "ERROR_TOO_MANY_OBJECTS"},
+      {VK_ERROR_FORMAT_NOT_SUPPORTED, "ERROR_FORMAT_NOT_SUPPORTED"},
+      {VK_ERROR_SURFACE_LOST_KHR, "ERROR_SURFACE_LOST_KHR"},
+      {VK_ERROR_NATIVE_WINDOW_IN_USE_KHR, "ERROR_NATIVE_WINDOW_IN_USE_KHR"},
+      {VK_SUBOPTIMAL_KHR, "SUBOPTIMAL_KHR"},
+      {VK_ERROR_OUT_OF_DATE_KHR, "ERROR_OUT_OF_DATE_KHR"},
+      {VK_ERROR_INCOMPATIBLE_DISPLAY_KHR, "ERROR_INCOMPATIBLE_DISPLAY_KHR"},
+      {VK_ERROR_VALIDATION_FAILED_EXT, "ERROR_VALIDATION_FAILED_EXT"},
+      {VK_ERROR_INVALID_SHADER_NV, "ERROR_INVALID_SHADER_NV"},
+      {VK_ERROR_OUT_OF_POOL_MEMORY, "ERROR_OUT_OF_POOL_MEMORY"},
+  };
+  auto name = names.find(errorCode);
+  return name != names.end() ? name->second : "UNKNOWN_ERROR";
 }
 
 #ifdef GPRT_ENABLE_DLSS
@@ -507,7 +504,7 @@ struct Context {
   } imgui;
 
   // Physical device (GPU) that Vulkan will use
-  VkPhysicalDevice physicalDevice;
+  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
   // Stores physical device properties (for e.g. checking device limits)
   VkPhysicalDeviceProperties deviceProperties;
   VkPhysicalDeviceProperties2 deviceProperties2;
@@ -679,7 +676,9 @@ struct Context {
   void enumerateInstanceValidationLayers();
   void enumerateInstanceExtensions();
 
-  Context(int32_t *requestedDeviceIDs, int numRequestedDevices);
+  VkResult requestPhysicalDevice(int32_t requestedDevice);
+
+  Context(int32_t requestedDevice);
 
   void destroy();
 
@@ -5026,7 +5025,136 @@ void Context::enumerateInstanceExtensions()
   }
 }
 
-Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+// Returns an error before assigning physicalDevice if selection fails.
+VkResult
+Context::requestPhysicalDevice(int32_t requestedDevice) {
+  uint32_t gpuCount = 0;
+  VkResult err = vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
+  if (err != VK_SUCCESS) return err;
+  if (gpuCount == 0) return VK_ERROR_INITIALIZATION_FAILED;
+  std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
+  err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
+  if (err != VK_SUCCESS) return err;
+
+  static const std::map<VkPhysicalDeviceType, const char *> deviceTypeNames = {
+      {VK_PHYSICAL_DEVICE_TYPE_OTHER, "OTHER"},
+      {VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU, "INTEGRATED_GPU"},
+      {VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, "DISCRETE_GPU"},
+      {VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU, "VIRTUAL_GPU"},
+      {VK_PHYSICAL_DEVICE_TYPE_CPU, "CPU"},
+  };
+  struct FallbackRequests {
+    bool lss = false;
+    bool motionBlur = false;
+  };
+  struct UsableDevice {
+    VkPhysicalDevice device;
+    FallbackRequests fallback;
+  };
+  std::vector<UsableDevice> usableDevices;
+
+  std::vector<uint32_t> visibleDevices;
+  if (const char *selection = std::getenv("GPRT_VISIBLE_DEVICES")) {
+    std::string list(selection);
+    if (!list.empty() && list != "-1") {
+      if (list.back() == ',') {
+        LOG_WARNING("GPRT_VISIBLE_DEVICES contains an empty ordinal");
+        return VK_ERROR_INITIALIZATION_FAILED;
+      }
+      std::istringstream entries(list);
+      std::string entry;
+      while (std::getline(entries, entry, ',')) {
+        if (entry.empty() || entry.find_first_not_of("0123456789") != std::string::npos) {
+          LOG_WARNING("GPRT_VISIBLE_DEVICES requires unsigned decimal ordinals");
+          return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        std::istringstream value(entry);
+        uint32_t ordinal;
+        char trailing;
+        if (!(value >> ordinal) || (value >> trailing) || ordinal >= gpuCount) {
+          LOG_WARNING("GPRT_VISIBLE_DEVICES contains an invalid Vulkan device ordinal");
+          return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        if (std::find(visibleDevices.begin(), visibleDevices.end(), ordinal) != visibleDevices.end()) {
+          LOG_WARNING("GPRT_VISIBLE_DEVICES contains a duplicate ordinal");
+          return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        visibleDevices.push_back(ordinal);
+      }
+    }
+  } else {
+    for (uint32_t i = 0; i < gpuCount; ++i) visibleDevices.push_back(i);
+  }
+
+  LOG_INFO("Searching for usable Vulkan physical device...");
+  for (uint32_t i : visibleDevices) {
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
+
+    std::string message =
+        std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
+    auto typeName = deviceTypeNames.find(deviceProperties.deviceType);
+    message += std::string(", Type : ") +
+               (typeName != deviceTypeNames.end() ? typeName->second : "UNKNOWN_DEVICE_TYPE");
+    message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".") +
+               std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".") +
+               std::to_string(deviceProperties.apiVersion & 0xfff);
+    LOG_INFO(message);
+
+    std::set<std::string> missingExtensions(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end());
+    if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
+      // If NVIDIA, these are needed to use DLSS
+      missingExtensions.insert(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
+      missingExtensions.insert(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
+    }
+    else if (requestedFeatures.aiDenoiser.requested) {
+      LOG_WARNING("\tDevice unusable... (GPRT missing AI denoising support for vendor \"" + getVendorString(deviceProperties.vendorID) + "\")");
+      continue;
+    }
+    uint32_t extensionCount = 0;
+    err = vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &extensionCount, nullptr);
+    if (err != VK_SUCCESS) return err;
+    std::vector<VkExtensionProperties> extensions(extensionCount);
+    err = vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &extensionCount, extensions.data());
+    if (err != VK_SUCCESS) return err;
+    extensions.resize(extensionCount);
+    for (const auto &extension : extensions) missingExtensions.erase(extension.extensionName);
+
+    FallbackRequests fallback;
+    fallback.lss = requestedFeatures.linearSweptSpheres &&
+                   missingExtensions.erase(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME) != 0;
+    fallback.motionBlur = requestedFeatures.motionBlur &&
+                          missingExtensions.count(VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME) != 0;
+    // Keep motion blur required until its software fallback is implemented.
+    if (fallback.motionBlur) LOG_WARNING("Motion blur fallback requested but not implemented.");
+    for (const auto &extension : missingExtensions) {
+      LOG_WARNING("\tDevice unusable... Requested device extension \"" << extension << "\" is not present.");
+    }
+    if (missingExtensions.empty()) {
+      usableDevices.push_back({physicalDevices[i], fallback});
+      LOG_INFO("\tFound usable device");
+    }
+  }
+
+  if (usableDevices.empty()) return VK_ERROR_INITIALIZATION_FAILED;
+  if (requestedDevice < 0 || size_t(requestedDevice) >= usableDevices.size()) {
+    LOG_WARNING("Requested device is out of range");
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
+
+  if (usableDevices[requestedDevice].fallback.lss) {
+    LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
+    requestedFeatures.linearSweptSpheres = false;
+    enabledDeviceExtensions.erase(
+        std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
+                    std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
+        enabledDeviceExtensions.end());
+  }
+  physicalDevice = usableDevices[requestedDevice].device;
+  return VK_SUCCESS;
+}
+
+Context::Context(int32_t requestedDevice) {
   enumerateInstanceValidationLayers();
   enumerateInstanceExtensions();
 
@@ -5118,27 +5246,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     LOG_ERROR("failed to create instance! : \n" + errorString(err));
   }
 
-  /// 1.5 - create a window and surface if requested
-  if (requestedFeatures.window) {
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    // todo, allow the window to resize and recreate swapchain
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    // glfwSwapInterval(1);
-    // GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-    // const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
-    window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
-                              requestedFeatures.windowProperties.initialHeight,
-                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);    
-    // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
-
-    VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
-    if (err != VK_SUCCESS) {
-      LOG_ERROR("failed to create window surface! : \n" + errorString(err));
-    }
-    // Poll some initial event values
-    glfwPollEvents();
-  }
-
   // Setup debug printf callback
   if (requestedFeatures.debugPrintf) {
     gprt::vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
@@ -5183,77 +5290,6 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   }
 
   /// 2. Select a Physical Device
-
-  // Physical device
-  uint32_t gpuCount = 0;
-  // Get number of available physical devices
-  VK_CHECK_RESULT(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
-  if (gpuCount == 0) {
-    LOG_ERROR("No device with Vulkan support found : \n" + errorString(err));
-  }
-  // Enumerate devices
-  std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-  err = vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data());
-  if (err) {
-    LOG_ERROR("Could not enumerate physical devices : \n" + errorString(err));
-  }
-
-  // GPU selection
-
-  auto physicalDeviceTypeString = [](VkPhysicalDeviceType type) -> std::string {
-    switch (type) {
-#define STR(r)                                                                                                         \
-  case VK_PHYSICAL_DEVICE_TYPE_##r:                                                                                    \
-    return #r
-      STR(OTHER);
-      STR(INTEGRATED_GPU);
-      STR(DISCRETE_GPU);
-      STR(VIRTUAL_GPU);
-      STR(CPU);
-#undef STR
-    default:
-      return "UNKNOWN_DEVICE_TYPE";
-    }
-  };
-
-  auto extensionSupported = [](std::string extension, std::vector<std::string> supportedExtensions) -> bool {
-    return (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end());
-  };
-
-  /* function that checks if the selected physical device meets requirements
-   */
-  struct FallbackRequests {
-    bool lss = false;
-  };
-
-  auto checkDeviceExtensionSupport = [](VkPhysicalDevice device, std::vector<const char *> deviceExtensions, FallbackRequests &fallbackRequests) -> bool {
-    uint32_t extensionCount;
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-
-    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
-    std::set<std::string> requiredExtensions;
-    for (auto &cstr : deviceExtensions) {
-      requiredExtensions.insert(std::string(cstr));
-    }
-
-    for (const auto &extension : availableExtensions) {
-      requiredExtensions.erase(extension.extensionName);
-    }
-
-    if (requestedFeatures.linearSweptSpheres) {
-      if (requiredExtensions.find(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME) != requiredExtensions.end()) {
-        if (requiredExtensions.find(VK_NV_RAY_TRACING_EXTENSION_NAME) == requiredExtensions.end()) {
-          requiredExtensions.erase(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME);
-          fallbackRequests.lss = true;
-        }
-      }
-    }
-
-    return requiredExtensions.empty();
-  };
-
   // For ray tracing validation on NVIDIA
   if (requestedFeatures.rayTracingValidation && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
     enabledDeviceExtensions.push_back(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME);
@@ -5342,91 +5378,36 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   enabledDeviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 #endif
 
-  // Select physical device to be used
-  // Defaults to the first device unless specified by command line
-  uint32_t selectedDevice = -1;   // TODO
-
-  std::vector<uint32_t> usableDevices;
-  std::vector<FallbackRequests> usableDeviceFallbackRequests;
-
-  LOG_INFO("Searching for usable Vulkan physical device...");
-  for (uint32_t i = 0; i < gpuCount; i++) {
-    VkPhysicalDeviceProperties deviceProperties;
-    vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProperties);
-
-    std::string message =
-        std::string("Device [") + std::to_string(i) + std::string("] : ") + std::string(deviceProperties.deviceName);
-    message += std::string(", Type : ") + physicalDeviceTypeString(deviceProperties.deviceType);
-    message += std::string(", API : ") + std::to_string(deviceProperties.apiVersion >> 22) + std::string(".") +
-               std::to_string(((deviceProperties.apiVersion >> 12) & 0x3ff)) + std::string(".") +
-               std::to_string(deviceProperties.apiVersion & 0xfff);
-    LOG_INFO(message);
-
-    std::vector<const char *> currentExtensionsList = enabledDeviceExtensions;
-    if (requestedFeatures.aiDenoiser.requested && deviceProperties.vendorID == VENDOR_ID_NVIDIA) {
-      // If NVIDIA, these are needed to use DLSS
-      currentExtensionsList.push_back(VK_NVX_BINARY_IMPORT_EXTENSION_NAME);
-      currentExtensionsList.push_back(VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME);
-    }
-    else if (requestedFeatures.aiDenoiser.requested) {
-      LOG_WARNING("\tDevice unusable... (GPRT missing AI denoising support for vendor \"" + getVendorString(deviceProperties.vendorID) + "\")");
-      continue;
-    }
-    
-    FallbackRequests fallbackRequests;
-    if (checkDeviceExtensionSupport(physicalDevices[i], currentExtensionsList, fallbackRequests)) {
-      usableDevices.push_back(i);
-      usableDeviceFallbackRequests.push_back(fallbackRequests);
-      LOG_INFO("\tFound usable device");
-    } else {
-      // Get list of supported extensions
-      uint32_t devExtCount = 0;
-      vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, nullptr);
-      std::vector<VkExtensionProperties> extensions(devExtCount);
-      std::vector<std::string> supportedExtensions;
-      if (vkEnumerateDeviceExtensionProperties(physicalDevices[i], nullptr, &devExtCount, &extensions.front()) ==
-          VK_SUCCESS) {
-        for (auto ext : extensions) {
-          supportedExtensions.push_back(ext.extensionName);
-        }
-      }
-
-      for (const char *enabledExtension : currentExtensionsList) {
-        if (!extensionSupported(enabledExtension, supportedExtensions)) {
-          LOG_WARNING("\tDevice unusable... Requested device extension \"" << enabledExtension << "\" is not present.");
-        }
-      }
-    }
+  err = requestPhysicalDevice(requestedDevice);
+  if (err != VK_SUCCESS) {
+    // GLFW supplies instance extensions before selection, but no window exists yet.
+    if (requestedFeatures.window) glfwTerminate();
+    freeDebugCallback(instance);
+    vkDestroyInstance(instance, nullptr);
+    LOG_ERROR("failed to select physical device! : \n" + errorString(err));
+    return;
   }
 
-  if (usableDevices.size() == 0) {
-    LOG_ERROR("Unable to find physical device meeting requirements");
-  } else {
-    uint32_t requestedDevice = 0;
+  /// 2.5 - create a window and surface if requested
+  if (requestedFeatures.window) {
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    // todo, allow the window to resize and recreate swapchain
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // glfwSwapInterval(1);
+    // GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+    // const GLFWvidmode *mode = glfwGetVideoMode(monitor); // can be used to query the width and height of the monitor.
+    window = glfwCreateWindow(requestedFeatures.windowProperties.initialWidth,
+                              requestedFeatures.windowProperties.initialHeight,
+                              requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
+    // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
 
-    if (numRequestedDevices == 0 || requestedDeviceIDs == nullptr) {
-      LOG_INFO("Selecting first usable device");
-      if (usableDeviceFallbackRequests[0].lss ) {
-        LOG_WARNING("Hardware acceleration for LSS unavailable. Using software fallback.");
-        requestedFeatures.linearSweptSpheres = false;
-        enabledDeviceExtensions.erase(
-            std::remove(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), std::string(VK_NV_RAY_TRACING_LINEAR_SWEPT_SPHERES_EXTENSION_NAME)),
-            enabledDeviceExtensions.end()
-        );
-
-      }
-    } else if (numRequestedDevices > 1) {
-      LOG_ERROR("Multi-GPU support not yet implemented (on the backlog)");
-    } else {
-      requestedDevice = requestedDeviceIDs[0];
-      if (requestedDevice > usableDevices.size()) {
-        LOG_ERROR("Requested device is out of range!");
-      }
+    VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+    if (err != VK_SUCCESS) {
+      LOG_ERROR("failed to create window surface! : \n" + errorString(err));
     }
-    selectedDevice = usableDevices[requestedDevice];
+    // Poll some initial event values
+    glfwPollEvents();
   }
-
-  physicalDevice = physicalDevices[selectedDevice];
 
   // Store properties (including limits), features and memory properties of
   // the physical device Device properties also contain limits and sparse
@@ -7599,9 +7580,14 @@ gprtGuiRasterize(GPRTContext _context) {
 }
 
 GPRT_API GPRTContext
-gprtContextCreate(int32_t *requestedDeviceIDs, int numRequestedDevices) {
+gprtContextCreate(int32_t requestedDevice) {
   LOG_API_CALL();
-  Context *context = new Context(requestedDeviceIDs, numRequestedDevices);
+  Context *context = new Context(requestedDevice);
+  // LOG_ERROR can return in Release builds after rejecting device selection.
+  if (context->physicalDevice == VK_NULL_HANDLE) {
+    delete context;
+    return nullptr;
+  }
   return (GPRTContext) context;
 }
 

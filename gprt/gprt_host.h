@@ -975,23 +975,20 @@ GPRT_API void gprtRequestDenoiser(uint32_t outputWidth, uint32_t outputHeight, G
  * capabilities. Otherwise, GPRT will use a software intersector fallback. */
 GPRT_API void gprtRequestMotionBlur();
 
-/** creates a new device context with the gives list of devices.
+/** Creates a context on one usable GPU.
 
-  If requested device IDs list if null it implicitly refers to the
-  list "0,1,2,...."; if numDevices <= 0 it automatically refers to
-  "all devices you can find". Examples:
+  GPRT_VISIBLE_DEVICES optionally specifies comma-separated Vulkan device
+  ordinals in preference order. An empty value or -1 hides all devices;
+  malformed, duplicate, and out-of-range ordinals are errors. Rejected device
+  selection uses LOG_ERROR and returns null if the error handler returns.
 
-  - gprtContextCreate(nullptr,1) creates one device on the first GPU
+  requestedDevice indexes the usable devices after this filtering and defaults
+  to 0, the first usable device. The selected GPU is device 0 in subsequent
+  GPRT calls. For example, GPRT_VISIBLE_DEVICES=1,0 makes gprtContextCreate(0)
+  select Vulkan device 1 if that device is usable.
 
-  - gprtContextCreate(nullptr,0) creates a context across all GPUs in
-  the system
-
-  - int gpu=2;gprtContextCreate(&gpu,1) will create a context on GPU #2
-  (where 2 refers to the vulkan device ordinal; from that point on, from
-  gprt's standpoint (eg, during gprtBufferGetHostPointer() this GPU will
-  from that point on be known as device #0 */
-GPRT_API GPRTContext gprtContextCreate(int32_t *requestedDeviceIDs GPRT_IF_CPP(= nullptr),
-                                       int numDevices GPRT_IF_CPP(= 1));
+  The former device-list and device-count arguments are no longer supported. */
+GPRT_API GPRTContext gprtContextCreate(int32_t requestedDevice GPRT_IF_CPP(= 0));
 
 GPRT_API void gprtContextDestroy(GPRTContext context);
 

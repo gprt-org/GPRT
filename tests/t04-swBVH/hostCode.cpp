@@ -40,7 +40,7 @@ main(int ac, char **av) {
 
   // Build a point LBVH
   {
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
 
     // Seed with a real random value, if available
     std::random_device r;

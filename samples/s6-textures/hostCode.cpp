@@ -82,7 +82,7 @@ int main(int ac, char **av) {
   stbi_uc *pixels = stbi_load(ASSETS_DIRECTORY "checkerboard.png", &texParams.width, &texParams.height, &texParams.channels, STBI_rgb_alpha);
 
   gprtRequestWindow(fbSize.x, fbSize.y, "S09 Single Texture");
-  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, s6_0_deviceCode);
   PushConstants pc;
   pc.now = 0.f;

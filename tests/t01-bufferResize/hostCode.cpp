@@ -28,7 +28,7 @@ int
 main(int ac, char **av) {
   // Exercise aligned growth and shrinkage without exceeding device allocation limits.
   for (bool deviceLocal : {false, true}) {
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     uint32_t initial[64];
     for (uint32_t i = 0; i < 64; ++i) initial[i] = i + 1;
     auto buffer = deviceLocal ? gprtDeviceBufferCreate<uint32_t>(context, 64, initial, 4096)
@@ -51,7 +51,7 @@ main(int ac, char **av) {
   // Resize, but don't preserve contents (host)
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, resizeCount / 2);
 
     // Act
@@ -72,7 +72,7 @@ main(int ac, char **av) {
   // Resize, but don't preserve contents (device)
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, resizeCount / 2);
 
     // Act
@@ -94,7 +94,7 @@ main(int ac, char **av) {
   // Resize and preserve contents (Host pinned)
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> buffer = gprtHostBufferCreate<uint32_t>(context, resizeCount / 2);
 
     {
@@ -130,7 +130,7 @@ main(int ac, char **av) {
   // Resize and preserve contents (Device)
   {
     // Arrange
-    GPRTContext context = gprtContextCreate(nullptr, 1);
+    GPRTContext context = gprtContextCreate();
     GPRTBufferOf<uint32_t> buffer = gprtDeviceBufferCreate<uint32_t>(context, resizeCount / 2);
 
     {
