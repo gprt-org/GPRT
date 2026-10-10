@@ -2397,13 +2397,16 @@ gprtBufferSelect(GPRTContext context, GPRTBufferOf<T1> input, bool selectPositiv
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
+// Sorts run on the compute queue. Callers synchronize before reading, resizing,
+// or destroying buffers used by pending work, and before access from other queues.
+// Scratch growth and internal scratch release wait on the existing compute timeline.
 GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
 /**
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
  *
- * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T1 The key type (uint64_t)
  * @tparam T2 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
@@ -2412,7 +2415,7 @@ GPRT_API void gprtBufferSort(GPRTContext context, GPRTBuffer buffer, GPRTBuffer 
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-template <typename T1, typename T2>
+template <typename T1, typename T2 = uint8_t>
 void
 gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> scratch GPRT_IF_CPP(= 0)) {
   gprtBufferSort(context, (GPRTBuffer) buffer, (GPRTBuffer) scratch);
@@ -2429,6 +2432,7 @@ gprtBufferSort(GPRTContext context, GPRTBufferOf<T1> buffer, GPRTBufferOf<T2> sc
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
+// Uses the same compute synchronization contract as gprtBufferSort.
 GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBuffer values,
                                     GPRTBuffer scratch GPRT_IF_CPP(= 0));
 
@@ -2436,18 +2440,18 @@ GPRT_API void gprtBufferSortPayload(GPRTContext context, GPRTBuffer keys, GPRTBu
  * @brief Sorts the input buffer using a GPU-parallel radix sorter.
  * Radix sort requires a temporary "scratch" space
  *
- * @tparam T1 The template type of the given buffer (currently only uint32_t is supported)
- * @tparam T2 The template type of the given buffer (currently only uint32_t is supported)
+ * @tparam T1 The key type (uint64_t)
+ * @tparam T2 The payload type (64 bits)
  * @tparam T3 The template type of the scratch buffer (uint8_t is assumed)
  *
  * @param context The GPRT context
- * @param keys A buffer of 32-bit unsigned integer keys
- * @param values A buffer of 32-bit values
+ * @param keys A buffer of 64-bit unsigned integer keys
+ * @param values A buffer of 64-bit values
  * @param scratch A scratch buffer to facilitate the sort. If null, scratch memory will be allocated and released
  * internally. If a buffer is given, then if that buffer is undersized, the buffer will be allocated / resized and
  * returned by reference. Otherwise, the scratch buffer will be used directly without any device side allocations.
  */
-template <typename T1, typename T2, typename T3>
+template <typename T1, typename T2, typename T3 = uint8_t>
 void
 gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T2> values,
                       GPRTBufferOf<T3> scratch GPRT_IF_CPP(= 0)) {
