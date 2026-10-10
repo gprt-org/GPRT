@@ -498,6 +498,8 @@ struct Context {
   } aiDenoising;
 
   struct ImGuiData {
+    uint64_t submissions[2] = {};
+    uint32_t frameIndex = 0;
     uint32_t width = -1;
     uint32_t height = -1;
     VkRenderPass renderPass = VK_NULL_HANDLE;
@@ -1823,7 +1825,8 @@ struct Texture : public ImageResource {
       imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     imageInfo.usage = usageFlags;
-    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT && format == GPRT_FORMAT_R8G8B8A8_SRGB)
+    if (aspectFlagBits == VK_IMAGE_ASPECT_COLOR_BIT &&
+        (format == GPRT_FORMAT_R8G8B8A8_SRGB || format == GPRT_FORMAT_R8G8B8A8_UNORM))
       imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (aspectFlagBits == VK_IMAGE_ASPECT_DEPTH_BIT)
       imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -6955,30 +6958,42 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   imgui.colorAttachment = colorTexture;
   imgui.depthAttachment = depthTexture;
 
+  if (imgui.renderPass) {
+    if (synchronizeGraphics() != VK_SUCCESS)
+      throw std::runtime_error("Failed to wait before replacing GUI attachments");
+    // Vulkan backend shutdown also releases the platform viewport data.
+    if (window) ImGui_ImplGlfw_Shutdown();
+    ImGui_ImplVulkan_Shutdown();
+    if (window) ImGui_ImplGlfw_InitForVulkan(window, true);
+    vkDestroyFramebuffer(logicalDevice, imgui.frameBuffer, nullptr);
+    vkDestroyRenderPass(logicalDevice, imgui.renderPass, nullptr);
+    imgui.submissions[0] = imgui.submissions[1] = 0;
+    imgui.frameIndex = 0;
+  }
+
   VkAttachmentDescription colorAttachment{};
   colorAttachment.format = colorTexture->format;
   colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  // clear here says to clear the values to a constant at start.
-  // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // DONT_CARE;
+  // Preserve the caller's attachment contents; clearing is explicit.
+  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   // save rasterized fragments to memory
   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   // not currently using a stencil
   colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   // Initial and final layouts of the texture
-  colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+  colorAttachment.initialLayout = colorTexture->layout;
+  colorAttachment.finalLayout = colorTexture->layout;
 
   VkAttachmentDescription depthAttachment{};
   depthAttachment.format = depthTexture->format;
   depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // VK_ATTACHMENT_LOAD_OP_CLEAR;
+  depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
   depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-  depthAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+  depthAttachment.initialLayout = depthTexture->layout;
+  depthAttachment.finalLayout = depthTexture->layout;
 
   std::vector<VkAttachmentDescription> attachments = {colorAttachment, depthAttachment};
 
@@ -6999,10 +7014,22 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   VkSubpassDependency dependency{};
   dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
   dependency.dstSubpass = 0;
-  dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-  dependency.srcAccessMask = 0;
-  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+  VkSubpassDependency outgoing{};
+  outgoing.srcSubpass = 0;
+  outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
+  outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                          VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  outgoing.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  outgoing.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+  VkSubpassDependency dependencies[] = {dependency, outgoing};
 
   VkRenderPassCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -7011,10 +7038,10 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   createInfo.pAttachments = attachments.data();
   createInfo.subpassCount = 1;
   createInfo.pSubpasses = &subpass;
-  createInfo.dependencyCount = 1;
-  createInfo.pDependencies = &dependency;
+  createInfo.dependencyCount = 2;
+  createInfo.pDependencies = dependencies;
 
-  vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass);
+  VK_CHECK_RESULT(vkCreateRenderPass(logicalDevice, &createInfo, nullptr, &imgui.renderPass));
 
   VkImageView attachmentViews[] = {imgui.colorAttachment->imageView, imgui.depthAttachment->imageView};
 
@@ -7037,6 +7064,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   init_info.PhysicalDevice = physicalDevice;
   init_info.Device = logicalDevice;
   init_info.Queue = graphicsQueue;
+  init_info.QueueFamily = queueFamilyIndices.graphics;
   init_info.DescriptorPool = imguiPool;
   init_info.MinImageCount = 2;
   init_info.ImageCount = 2;
@@ -7057,6 +7085,19 @@ uint64_t
 Context::rasterizeGui() {
   ImGui::Render();
   ImDrawData *draw_data = ImGui::GetDrawData();
+  bool drawable = int(draw_data->DisplaySize.x * draw_data->FramebufferScale.x) > 0 &&
+                  int(draw_data->DisplaySize.y * draw_data->FramebufferScale.y) > 0;
+  if (drawable) {
+    // Match the backend's two-frame vertex/index buffer ring.
+    uint32_t nextFrame = (imgui.frameIndex + 1) % 2;
+    VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    wait.semaphoreCount = 1;
+    wait.pSemaphores = &GRTimelineSemaphore;
+    wait.pValues = &imgui.submissions[nextFrame];
+    if (vkWaitSemaphores(logicalDevice, &wait, requestedFeatures.syncTDR) != VK_SUCCESS)
+      throw std::runtime_error("Failed to wait for the GUI vertex/index buffers");
+    imgui.frameIndex = nextFrame;
+  }
 
   VkRenderPassBeginInfo renderPassBeginInfo = {};
   renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -7072,16 +7113,7 @@ Context::rasterizeGui() {
 
   VkCommandBuffer commandBuffer = beginGraphicsCommands();
 
-  // Transition our attachments into optimal attachment formats
-  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image,
-                                        imgui.colorAttachment->layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
-
-  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image,
-                                        imgui.depthAttachment->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                                        {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
-
-  // This will clear the color and depth attachment
+  // The render pass transitions and loads the caller's attachments.
   vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
   // Record dear imgui primitives into command buffer
@@ -7089,16 +7121,10 @@ Context::rasterizeGui() {
 
   vkCmdEndRenderPass(commandBuffer);
 
-  // At the end of the renderpass, we'll transition the layout back to it's previous layout
-  imgui.colorAttachment->setImageLayout(commandBuffer, imgui.colorAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                        imgui.colorAttachment->layout,
-                                        {VK_IMAGE_ASPECT_COLOR_BIT, 0, imgui.colorAttachment->mipLevels, 0, 1});
-
-  imgui.depthAttachment->setImageLayout(commandBuffer, imgui.depthAttachment->image, VK_IMAGE_LAYOUT_GENERAL,
-                                        imgui.depthAttachment->layout,
-                                        {VK_IMAGE_ASPECT_DEPTH_BIT, 0, imgui.depthAttachment->mipLevels, 0, 1});
+  // The render pass final layouts restore each attachment's tracked layout.
 
   endGraphicsCommands(commandBuffer);
+  if (drawable) imgui.submissions[imgui.frameIndex] = GRTimelineCounter;
   return GRTimelineCounter;
 }
 
