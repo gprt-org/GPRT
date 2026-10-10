@@ -477,9 +477,27 @@ struct Context {
   uint32_t surfaceImageCount;
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
-  uint32_t currentImageIndex;
-  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  uint32_t currentImageIndex = UINT32_MAX;
   VkFence inFlightFence = VK_NULL_HANDLE;
+
+  void acquireSwapchainImage() {
+    currentImageIndex = UINT32_MAX;
+    uint32_t imageIndex;
+    VkResult result = vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX,
+                                           VK_NULL_HANDLE, inFlightFence, &imageIndex);
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      VK_CHECK_RESULT(result);
+      return;
+    }
+    // Acquisition is a host wait; it need not drain preceding graphics submissions.
+    result = vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+    VK_CHECK_RESULT(result);
+    if (result != VK_SUCCESS) return;
+    result = vkResetFences(logicalDevice, 1, &inFlightFence);
+    VK_CHECK_RESULT(result);
+    if (result != VK_SUCCESS) return;
+    currentImageIndex = imageIndex;
+  }
 
   struct AIDenoising {
 #ifdef GPRT_ENABLE_DLSS
@@ -4831,11 +4849,6 @@ Context::destroy() {
     imgui.frameBuffer = nullptr;
   }
 
-  if (imageAvailableSemaphore) {
-    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    imageAvailableSemaphore = nullptr;
-  }
-
   if (inFlightFence) {
     vkDestroyFence(logicalDevice, inFlightFence, nullptr);
     inFlightFence = nullptr;
@@ -5856,17 +5869,13 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
   // scanModule = new Module(scanDeviceCode);
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
-  // Swapchain semaphores and fences
+  // Fence for host-side swapchain acquisition.
   if (requestedFeatures.window) {
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-      LOG_ERROR("Failed to create swapchain semaphores");
+    if (vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+      LOG_ERROR("Failed to create swapchain acquisition fence");
     }
   }
 
@@ -5974,15 +5983,8 @@ Context::Context(int32_t *requestedDeviceIDs, int numRequestedDevices) {
     swapchainImages.resize(surfaceImageCount);
     vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
 
-    /* Transition all images to presentable */
-    for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
-      transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    }
-
     // And acquire the first image to use
-    vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE,
-                          &currentImageIndex);
+    acquireSwapchainImage();
   }
 
   // Allocate resource heap
@@ -7299,6 +7301,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     return;
   Context *context = (Context *) _context;
   Texture *texture = (Texture *) _texture;
+  if (context->currentImageIndex == UINT32_MAX) return;
 
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -7309,14 +7312,13 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Discard the acquired image contents and transition it to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
-    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    // The copy overwrites the entire acquired image.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -7336,18 +7338,28 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;
 
-    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = 0;
 
     destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  // transfer the texture to a transfer source
-  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
+  // Order prior graphics-queue writes, including shader writes in GENERAL layout, before the blit.
+  VkImageMemoryBarrier sourceBarrier{};
+  sourceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  sourceBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+  sourceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceBarrier.oldLayout = texture->layout;
+  sourceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.image = texture->image;
+  sourceBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1};
+  vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &sourceBarrier);
 
   // now do the transfer
   {
@@ -7356,15 +7368,15 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     region.srcOffsets[0].x = 0;
     region.srcOffsets[0].y = 0;
     region.srcOffsets[0].z = 0;
-    region.srcOffsets[1].x = context->windowExtent.width;
-    region.srcOffsets[1].y = context->windowExtent.height;
+    region.srcOffsets[1].x = texture->width;
+    region.srcOffsets[1].y = texture->height;
     region.srcOffsets[1].z = 1;
 
     region.dstOffsets[0].x = 0;
     region.dstOffsets[0].y = 0;
     region.dstOffsets[0].z = 0;
-    region.dstOffsets[1].x = texture->width;
-    region.dstOffsets[1].y = texture->height;
+    region.dstOffsets[1].x = context->windowExtent.width;
+    region.dstOffsets[1].y = context->windowExtent.height;
     region.dstOffsets[1].z = 1;
 
     region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -7387,8 +7399,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // Preserve the transferred contents while transitioning for presentation.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
@@ -7410,19 +7421,25 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     VkPipelineStageFlags destinationStage;
 
     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    barrier.dstAccessMask = 0;
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  // and revert the texture format back to its previous layout
+  // Restore the texture's tracked layout.
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
-  context->endGraphicsCommands(commandBuffer);
+  VkResult result = context->endGraphicsCommands(commandBuffer);
+  if (result == VK_SUCCESS) result = context->synchronizeGraphics();
+  VK_CHECK_RESULT(result);
+  if (result != VK_SUCCESS) {
+    context->currentImageIndex = UINT32_MAX;
+    return;
+  }
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7434,21 +7451,19 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
+  // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
-
-  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, VK_NULL_HANDLE,
-                                        context->inFlightFence, &context->currentImageIndex);
-  vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
-  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  context->currentImageIndex = UINT32_MAX;
+  if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
+  if (err1 != VK_SUCCESS && err1 != VK_SUBOPTIMAL_KHR) return;
+  context->acquireSwapchainImage();
 }
 
 GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window) {
+  if (!requestedFeatures.window || context->currentImageIndex == UINT32_MAX) {
     return context->GRTimelineCounter; 
   }
   
@@ -7464,14 +7479,13 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Discard the acquired image contents and transition it to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
-    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    // The copy overwrites the entire acquired image.
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -7491,11 +7505,11 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;
 
-    sourceStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    barrier.srcAccessMask = 0;
 
     destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
@@ -7530,8 +7544,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-    // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
-    // of the original image. I'm assuming this is ok.
+    // Preserve the transferred contents while transitioning for presentation.
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
     // The new layout for the image
@@ -7553,15 +7566,21 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     VkPipelineStageFlags destinationStage;
 
     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-    destinationStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    barrier.dstAccessMask = 0;
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  context->endGraphicsCommands(commandBuffer);
+  VkResult result = context->endGraphicsCommands(commandBuffer);
+  if (result == VK_SUCCESS) result = context->synchronizeGraphics();
+  VK_CHECK_RESULT(result);
+  if (result != VK_SUCCESS) {
+    context->currentImageIndex = UINT32_MAX;
+    return context->GRTimelineCounter;
+  }
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7573,14 +7592,12 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
+  // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
-
-  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, VK_NULL_HANDLE,
-                                        context->inFlightFence, &context->currentImageIndex);
-  vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
-  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  context->currentImageIndex = UINT32_MAX;
+  if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
+  if (err1 != VK_SUCCESS && err1 != VK_SUBOPTIMAL_KHR) return context->GRTimelineCounter;
+  context->acquireSwapchainImage();
   return context->GRTimelineCounter;
 }
 

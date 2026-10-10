@@ -1826,6 +1826,7 @@ GPRT_API void gprtTextureGenerateMipmap(GPRTTexture texture);
  *
  * If a window was not requested (ie headless), this function does nothing.
  */
+// Synchronize texture producers on other queues before presenting.
 GPRT_API void gprtTexturePresent(GPRTContext context, GPRTTexture texture);
 
 template <typename T>
