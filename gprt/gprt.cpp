@@ -477,16 +477,26 @@ struct Context {
   uint32_t surfaceImageCount;
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
-  uint32_t currentImageIndex;
+  uint32_t currentImageIndex = UINT32_MAX;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
   void acquireSwapchainImage() {
+    currentImageIndex = UINT32_MAX;
+    uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX,
-                                           VK_NULL_HANDLE, inFlightFence, &currentImageIndex);
-    if (result != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(result);
+                                           VK_NULL_HANDLE, inFlightFence, &imageIndex);
+    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      VK_CHECK_RESULT(result);
+      return;
+    }
     // Acquisition is a host wait; it need not drain preceding graphics submissions.
-    VK_CHECK_RESULT(vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX));
-    VK_CHECK_RESULT(vkResetFences(logicalDevice, 1, &inFlightFence));
+    result = vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+    VK_CHECK_RESULT(result);
+    if (result != VK_SUCCESS) return;
+    result = vkResetFences(logicalDevice, 1, &inFlightFence);
+    VK_CHECK_RESULT(result);
+    if (result != VK_SUCCESS) return;
+    currentImageIndex = imageIndex;
   }
 
   struct AIDenoising {
@@ -7291,7 +7301,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     return;
   Context *context = (Context *) _context;
   Texture *texture = (Texture *) _texture;
-  VK_CHECK_RESULT(context->synchronize());
+  if (context->currentImageIndex == UINT32_MAX) return;
 
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -7337,9 +7347,19 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  // transfer the texture to a transfer source
-  texture->setImageLayout(commandBuffer, texture->image, texture->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                          {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
+  // Order prior graphics-queue writes, including shader writes in GENERAL layout, before the blit.
+  VkImageMemoryBarrier sourceBarrier{};
+  sourceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  sourceBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+  sourceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceBarrier.oldLayout = texture->layout;
+  sourceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.image = texture->image;
+  sourceBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1};
+  vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       0, 0, nullptr, 0, nullptr, 1, &sourceBarrier);
 
   // now do the transfer
   {
@@ -7413,8 +7433,13 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
-  VK_CHECK_RESULT(context->endGraphicsCommands(commandBuffer));
-  VK_CHECK_RESULT(context->synchronizeGraphics());
+  VkResult result = context->endGraphicsCommands(commandBuffer);
+  if (result == VK_SUCCESS) result = context->synchronizeGraphics();
+  VK_CHECK_RESULT(result);
+  if (result != VK_SUCCESS) {
+    context->currentImageIndex = UINT32_MAX;
+    return;
+  }
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7428,7 +7453,9 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+  context->currentImageIndex = UINT32_MAX;
   if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
+  if (err1 != VK_SUCCESS && err1 != VK_SUBOPTIMAL_KHR) return;
   context->acquireSwapchainImage();
 }
 
@@ -7436,7 +7463,7 @@ GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window) {
+  if (!requestedFeatures.window || context->currentImageIndex == UINT32_MAX) {
     return context->GRTimelineCounter; 
   }
   
@@ -7547,8 +7574,13 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  VK_CHECK_RESULT(context->endGraphicsCommands(commandBuffer));
-  VK_CHECK_RESULT(context->synchronizeGraphics());
+  VkResult result = context->endGraphicsCommands(commandBuffer);
+  if (result == VK_SUCCESS) result = context->synchronizeGraphics();
+  VK_CHECK_RESULT(result);
+  if (result != VK_SUCCESS) {
+    context->currentImageIndex = UINT32_MAX;
+    return context->GRTimelineCounter;
+  }
 
   presentInfo.waitSemaphoreCount = 0;
   presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
@@ -7562,7 +7594,9 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   // The transfer and transition to PRESENT_SRC_KHR have completed.
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
+  context->currentImageIndex = UINT32_MAX;
   if (err1 != VK_SUBOPTIMAL_KHR) VK_CHECK_RESULT(err1);
+  if (err1 != VK_SUCCESS && err1 != VK_SUBOPTIMAL_KHR) return context->GRTimelineCounter;
   context->acquireSwapchainImage();
   return context->GRTimelineCounter;
 }
