@@ -197,7 +197,7 @@ int main(int ac, char **av) {
     // If a window exists, presents the framebuffer here to that window
     gprtBufferPresent(context, frameBuffer);
   }
-  // returns true if "X" pressed or if in "headless" mode
+  // Exit when the window closes or the headless frame limit is reached.
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image

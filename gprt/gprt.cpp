@@ -57,6 +57,7 @@
 #endif
 
 // library for windowing
+#include "gprt_terminal.h"
 #include <GLFW/glfw3.h>
 
 // For SPIRV reflection
@@ -120,8 +121,8 @@ static struct RequestedFeatures {
   /** A window (VK_KHR_SURFACE, SWAPCHAIN, etc...)*/
   bool window = false;
   struct Window {
-    uint32_t initialWidth;
-    uint32_t initialHeight;
+    uint32_t initialWidth = 0;
+    uint32_t initialHeight = 0;
     std::string title;
   } windowProperties;
 
@@ -469,7 +470,10 @@ struct Context {
   // optional windowing features
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   GLFWwindow *window = nullptr;
-  VkExtent2D windowExtent;
+  VkExtent2D windowExtent{};
+  gprt::terminal::Preview terminalPreview;
+  uint64_t headlessPresentCount = 0, headlessPollCount = 0;
+  uint64_t headlessFrameLimit = 1;
   VkPresentModeKHR presentMode;
   VkSurfaceFormatKHR surfaceFormat;
   VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -902,6 +906,12 @@ struct Buffer {
       vmaUnmapMemory(context->allocator, stagingBuffer.allocation);
       mapped = nullptr;
     }
+  }
+
+  void unmapReadOnly() {
+    if (!mapped) return;
+    vmaUnmapMemory(context->allocator, hostVisible ? allocation : stagingBuffer.allocation);
+    mapped = nullptr;
   }
 
   // flushes from host to device
@@ -2956,22 +2966,17 @@ public:
 
   ~Accel() {};
 
-  // Acceleration structure handles will change only when the backing memory changes.
-  // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
-  // where primitive counts increase.
+  // Refits and rebuilds that reuse this acceleration structure preserve its address.
+  // Compaction or replacing the allocation requires callers to refresh their references.
   uint64_t getDeviceAddress() {
-    Buffer *backingBuffer;
-    if (this->isCompact) {
-      if (!compactBuffer)
-        LOG_ERROR("compactBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = compactBuffer;
-    } else {
-      if (!accelBuffer)
-        LOG_ERROR("accelBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = accelBuffer;
+    VkAccelerationStructureDeviceAddressInfoKHR info{};
+    info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    info.accelerationStructure = isCompact ? compactAccelerationStructure : accelerationStructure;
+    if (!info.accelerationStructure) {
+      LOG_ERROR("Build the acceleration structure before requesting its address");
+      return 0;
     }
-
-    return backingBuffer->getDeviceAddress();
+    return gprt::vkGetAccelerationStructureDeviceAddress(context->logicalDevice, &info);
   }
 
   VkDeviceAddress getScratchDeviceAddress() {
@@ -3071,16 +3076,11 @@ public:
       else
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
-      // To enable reusing the device address...
-      accelerationStructureCreateInfo.createFlags =
-          VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
-      
       // To enable motion blur
       if (params.hasMotionBlur) 
       {
         accelerationStructureCreateInfo.createFlags |= VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV ;
       }
-      accelerationStructureCreateInfo.deviceAddress = accelBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &accelerationStructure);
       if (err)
@@ -3149,10 +3149,6 @@ public:
       else
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
-      // To enable reusing the device address...
-      accelerationStructureCreateInfo.createFlags =
-          VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
-      accelerationStructureCreateInfo.deviceAddress = compactBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &compactAccelerationStructure);
       if (err)
@@ -3466,8 +3462,7 @@ public:
     gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
     context->endComputeCommands(commandList);
 
-    // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
-    // updateDeviceAddress(isCompact);
+    // This in-place update preserves the acceleration structure and its device address.
 
     // If we're minimizing memory usage, free scratch now
     if (minimizeMemory) {
@@ -5154,6 +5149,11 @@ Context::requestPhysicalDevice(int32_t requestedDevice) {
 }
 
 Context::Context(int32_t requestedDevice) {
+  bool windowRequested = requestedFeatures.window;
+  headlessFrameLimit = gprt::terminal::environmentCount("GPRT_HEADLESS_FRAME_LIMIT", 1);
+  windowExtent = {requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight};
+  if (const char *headless = std::getenv("GPRT_HEADLESS_SURFACE"))
+    if (std::string(headless) == "1") windowRequested = false;
   enumerateInstanceValidationLayers();
   enumerateInstanceExtensions();
 
@@ -5193,10 +5193,10 @@ Context::Context(int32_t requestedDevice) {
 
   uint32_t glfwExtensionCount = 0;
   const char **glfwExtensions;
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     if (!glfwInit()) {
       LOG_WARNING("Unable to create window. Falling back to headless mode.");
-      requestedFeatures.window = false;
+      windowRequested = false;
     } else {
       if (!glfwVulkanSupported()) {
         LOG_ERROR("Window requested but unsupported!");
@@ -5347,7 +5347,7 @@ Context::Context(int32_t requestedDevice) {
   // Required for vkCmdPushDescriptor (Now included with Vulkan 1.4)
   enabledDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     // If the device will be used for presenting to a display via a swapchain
     // we need to request the swapchain extension
     enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -5383,7 +5383,7 @@ Context::Context(int32_t requestedDevice) {
   err = requestPhysicalDevice(requestedDevice);
   if (err != VK_SUCCESS) {
     // GLFW supplies instance extensions before selection, but no window exists yet.
-    if (requestedFeatures.window) glfwTerminate();
+    if (windowRequested) glfwTerminate();
     freeDebugCallback(instance);
     vkDestroyInstance(instance, nullptr);
     LOG_ERROR("failed to select physical device! : \n" + errorString(err));
@@ -5391,7 +5391,7 @@ Context::Context(int32_t requestedDevice) {
   }
 
   /// 2.5 - create a window and surface if requested
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // todo, allow the window to resize and recreate swapchain
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -5403,12 +5403,18 @@ Context::Context(int32_t requestedDevice) {
                               requestedFeatures.windowProperties.title.c_str(), NULL, NULL);
     // glfwSetWindowMonitor(window, monitor, 0, 0, requestedFeatures.windowProperties.initialWidth, requestedFeatures.windowProperties.initialHeight /*mode->width*/, mode->refreshRate);
 
-    VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
-    if (err != VK_SUCCESS) {
-      LOG_ERROR("failed to create window surface! : \n" + errorString(err));
+    if (window) {
+      VkResult err = glfwCreateWindowSurface(instance, window, nullptr, &surface);
+      if (err != VK_SUCCESS) {
+        LOG_ERROR("failed to create window surface! : \n" + errorString(err));
+      }
+      // Poll some initial event values
+      glfwPollEvents();
+    } else {
+      LOG_WARNING("Unable to create window. Falling back to headless mode.");
+      windowRequested = false;
+      glfwTerminate();
     }
-    // Poll some initial event values
-    glfwPollEvents();
   }
 
   // Store properties (including limits), features and memory properties of
@@ -5843,7 +5849,7 @@ Context::Context(int32_t requestedDevice) {
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
   // Swapchain setup
-  if (requestedFeatures.window) {
+  if (windowRequested) {
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCapabilities);
 
@@ -6036,7 +6042,7 @@ Context::Context(int32_t requestedDevice) {
   }
 
   // Init imgui
-  if (requestedFeatures.window) {
+  if (window || (windowExtent.width && windowExtent.height)) {
     // 1: create descriptor pool for IMGUI
     // the size of the pool is very oversize, but it's copied from imgui demo itself.
     VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
@@ -6065,8 +6071,12 @@ Context::Context(int32_t requestedDevice) {
     // this initializes the core structures of imgui
     ImGui::CreateContext();
 
-    // this initializes imgui for SDL
-    ImGui_ImplGlfw_InitForVulkan(window, true);
+    // Use GLFW for windowed input; initialize display size and time directly when headless.
+    if (window) ImGui_ImplGlfw_InitForVulkan(window, true);
+    else {
+      ImGui::GetIO().DisplaySize = ImVec2(float(windowExtent.width), float(windowExtent.height));
+      ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+    }
   }
 
   // Init denoisers
@@ -7015,7 +7025,7 @@ Context::setRasterAttachments(Texture *colorTexture, Texture *depthTexture) {
   ImGui_ImplVulkan_Init(&init_info);
   
   // Call new frame here to initialize some internal imgui data
-  ImGui_ImplGlfw_NewFrame();
+  if (window) ImGui_ImplGlfw_NewFrame();
   ImGui_ImplVulkan_NewFrame(); // Needed to allocate fonts on first frame.
 
   synchronizeGraphics();
@@ -7144,11 +7154,22 @@ gprtRequestRecordSizes(uint32_t raygenRecordSize, uint32_t hitRecordSize, uint32
 }
 
 GPRT_API bool
+gprtContextIsHeadless(GPRTContext _context) {
+  return !_context || !((Context *)_context)->window;
+}
+
+GPRT_API bool
 gprtWindowShouldClose(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
-    return true;
+  if (!context) return true;
+  if (!context->window) {
+    bool close = !context->windowExtent.width || !context->windowExtent.height ||
+                 context->headlessPresentCount >= context->headlessFrameLimit ||
+                 ++context->headlessPollCount > context->headlessFrameLimit;
+    if (!close && context->imgui.renderPass) ImGui_ImplVulkan_NewFrame();
+    return close;
+  }
 
   glfwPollEvents();
 
@@ -7165,7 +7186,7 @@ GPRT_API void
 gprtSetWindowTitle(GPRTContext _context, const char *title) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
 
   glfwSetWindowTitle(context->window, title);
@@ -7195,8 +7216,11 @@ GPRT_API void
 gprtGetCursorPos(GPRTContext _context, double *xpos, double *ypos) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context)) {
+    if (xpos) *xpos = 0;
+    if (ypos) *ypos = 0;
     return;
+  }
 
   glfwGetCursorPos(context->window, xpos, ypos);
 }
@@ -7205,7 +7229,7 @@ GPRT_API void
 gprtGrabAndHideCursor(GPRTContext _context, bool enabled) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
 
   glfwSetInputMode(context->window, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -7215,7 +7239,7 @@ GPRT_API int
 gprtGetMouseButton(GPRTContext _context, int button) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return GPRT_RELEASE;
 
   return glfwGetMouseButton(context->window, button);
@@ -7225,7 +7249,7 @@ GPRT_API int
 gprtGetKey(GPRTContext _context, int key) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return GPRT_RELEASE;
 
   return glfwGetKey(context->window, key);
@@ -7235,8 +7259,8 @@ GPRT_API double
 gprtGetTime(GPRTContext _context) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window)
-    return 0.0;
+  if (gprtContextIsHeadless(_context))
+    return context ? double(context->headlessPresentCount) / 60.0 : 0.0;
   return glfwGetTime();
 }
 
@@ -7263,7 +7287,7 @@ GPRT_API void gprtGetDenoiserOutputSize(GPRTContext _context, uint32_t *width, u
 GPRT_API void
 gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   LOG_API_CALL();
-  if (!requestedFeatures.window)
+  if (gprtContextIsHeadless(_context))
     return;
   Context *context = (Context *) _context;
   Texture *texture = (Texture *) _texture;
@@ -7448,9 +7472,31 @@ GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window || context->currentImageIndex == UINT32_MAX) {
-    return context->GRTimelineCounter; 
+  if (!context || !_buffer) return 0;
+  if (!context->window) {
+    Buffer *buffer = (Buffer *)_buffer;
+    uint32_t width = context->windowExtent.width, height = context->windowExtent.height;
+    if (!width || !height || uint64_t(width) * height > buffer->size / sizeof(uint32_t)) {
+      LOG_WARNING("Terminal preview requires framebuffer dimensions and a matching BGRA8 buffer");
+      return context->GRTimelineCounter;
+    }
+    if (context->synchronize() != VK_SUCCESS) {
+      LOG_ERROR("Failed to wait for terminal presentation");
+      return context->GRTimelineCounter;
+    }
+    bool wasMapped = buffer->mapped != nullptr;
+    // An existing mapping may contain unflushed edits; preserve its pointer and contents.
+    if (!wasMapped && buffer->map() != VK_SUCCESS) {
+      LOG_ERROR("Failed to map the terminal framebuffer");
+      return context->GRTimelineCounter;
+    }
+    context->terminalPreview.present((const uint8_t *)buffer->mapped, width, height);
+    if (!wasMapped) buffer->unmapReadOnly();
+    ++context->headlessPresentCount;
+    context->headlessPollCount = 0;
+    return context->GRTimelineCounter;
   }
+  if (context->currentImageIndex == UINT32_MAX) return context->GRTimelineCounter;
   
   Buffer *buffer = (Buffer *) _buffer;
   VkPresentInfoKHR presentInfo{};

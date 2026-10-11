@@ -464,7 +464,7 @@ int main(int ac, char **av) {
     raygenData->projPrev = raygenData->projCurr;
     raygenData->prevViewProj = mul(raygenData->viewPrev, raygenData->projPrev);
   }
-  // returns true if "X" pressed or if in "headless" mode
+  // Exit when the window closes or the headless frame limit is reached.
   while (!gprtWindowShouldClose(context));
 
   gprtTextureSaveImage(denoised, outFileName);

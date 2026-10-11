@@ -1,0 +1,74 @@
+name: CPU sample rendering
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  lavapipe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        version: 1.4.350.0
+        cache: true
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build llvm-18-dev libclang-18-dev libdrm-dev \
+          libelf-dev libzstd-dev zlib1g-dev flex bison xorg-dev libglu1-mesa-dev python3-venv
+        python3 -m venv "$RUNNER_TEMP/python"
+        "$RUNNER_TEMP/python/bin/pip" install meson==1.9.1 mako pyyaml packaging pillow
+        echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+    - uses: actions/cache/restore@v4
+      id: mesa
+      with:
+        path: mesa-install
+        key: lavapipe-26.2.4-ubuntu24-llvm18-v1
+    - name: Build Lavapipe with ray tracing and maintenance11
+      if: steps.mesa.outputs.cache-hit != 'true'
+      run: |
+        curl --fail --location https://archive.mesa3d.org/mesa-26.2.4.tar.xz -o mesa.tar.xz
+        echo 'bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9  mesa.tar.xz' | sha256sum --check
+        tar xf mesa.tar.xz
+        meson setup mesa-build mesa-26.2.4 --prefix="$GITHUB_WORKSPACE/mesa-install" \
+          --libdir=lib --buildtype=release -Dvulkan-drivers=swrast -Dgallium-drivers= \
+          -Dplatforms= -Dglx=disabled -Degl=disabled -Dgbm=disabled \
+          -Dgles1=disabled -Dgles2=disabled -Dopengl=false -Dllvm=enabled \
+          -Dshared-llvm=enabled -Dbuild-tests=false
+        ninja -C mesa-build -j4 install
+    - uses: actions/cache/save@v4
+      if: steps.mesa.outputs.cache-hit != 'true'
+      with:
+        path: mesa-install
+        key: lavapipe-26.2.4-ubuntu24-llvm18-v1
+    - name: Build samples and terminal test
+      run: |
+        export LD_LIBRARY_PATH="$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
+        cmake -S . -B bld-cpu -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DGPRT_BUILD_TESTS=ON -DGPRT_ENABLE_DLSS=OFF \
+          -DVulkan_LIBRARY="$VULKAN_SDK/lib/VulkanLoader/lib/libvulkan.so"
+        cmake --build bld-cpu -j4
+    - name: Render samples on the CPU
+      run: |
+        export LD_LIBRARY_PATH="$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
+        export VK_DRIVER_FILES="$(find "$GITHUB_WORKSPACE/mesa-install/share/vulkan/icd.d" -name '*lvp*.json' -print -quit)"
+        test -f "$VK_DRIVER_FILES"
+        validation_layer=$(find "$VULKAN_SDK" -name VkLayer_khronos_validation.json -print -quit)
+        test -f "$validation_layer"
+        export VK_LAYER_PATH="$(dirname "$validation_layer")"
+        vulkaninfo --summary
+        python tests/render_samples.py bld-cpu
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: cpu-sample-images-and-logs
+        path: sample-results/
+        if-no-files-found: warn

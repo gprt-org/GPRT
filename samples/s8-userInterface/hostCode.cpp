@@ -248,7 +248,7 @@ int main(int ac, char **av) {
 
     // gprtDeviceSynchronize(context);
   }
-  // returns true if "X" pressed or if in "headless" mode
+  // Exit when the window closes or the headless frame limit is reached.
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image

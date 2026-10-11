@@ -38,9 +38,9 @@ int main() {
   // Render loop: repeatedly launch the ray generation shader
   do {
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
-    gprtBufferPresent(context, frameBuffer); // Display to window if available
+    gprtBufferPresent(context, frameBuffer); // Display to the window or terminal.
   }
-  // returns true if "X" pressed or if in "headless" mode
+  // Exit when the window closes or the headless frame limit is reached.
   while (!gprtWindowShouldClose(context));
 
   // Save the final image to a file
