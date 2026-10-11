@@ -8,10 +8,11 @@ import sys
 
 from PIL import Image
 
+sys.stdout.reconfigure(encoding="utf-8")
 build = Path(sys.argv[1]).resolve()
 output = Path("sample-results").resolve()
 env = dict(os.environ, GPRT_HEADLESS_SURFACE="1", GPRT_HEADLESS_FRAME_LIMIT="2",
-           GPRT_TERMINAL_ASCII="1", COLUMNS="100", LINES="34",
+           GPRT_TERMINAL_COLOR="1", GPRT_TERMINAL_ASCII="0", COLUMNS="160", LINES="50",
            VK_LOADER_LAYERS_DISABLE="~implicit~",
            VK_LAYER_ENABLES="VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT")
 samples = sorted(p for p in build.glob("s[0-9]_*") if p.is_file() and p.suffix in ("", ".exe"))
@@ -45,8 +46,10 @@ for exe in [terminal_test, *samples]:
             raise RuntimeError("GPRT or Vulkan validation reported an error")
         if "VK_LAYER_KHRONOS_validation is not present" in log:
             raise RuntimeError("Vulkan validation is unavailable")
-        if not any(re.fullmatch(r"[.:*#]{2,}", line) for line in log.splitlines()):
-            raise RuntimeError("no ASCII preview was printed")
+        if not re.search(r"\x1b\[38;5;\d+m[\u2591-\u2593\u2588]{2}", log):
+            raise RuntimeError("no colored block preview was printed")
+        if "\x1b[2J" in log or "\x1b[H" in log:
+            raise RuntimeError("redirected previews must preserve earlier log output")
         if exe == terminal_test:
             print("PASS terminal frame limits, filtering, and mapped contents", flush=True)
             continue

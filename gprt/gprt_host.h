@@ -2485,8 +2485,10 @@ gprtBufferSortPayload(GPRTContext context, GPRTBufferOf<T1> keys, GPRTBufferOf<T
  * the dimensions requested by gprtRequestWindow. Missing dimensions or an
  * undersized buffer skip the preview. Colors are filtered in linear space, and
  * the source buffer is preserved. An existing mapping is previewed as-is,
- * including pending host edits. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs;
- * redirected output also uses ASCII.
+ * including pending host edits. GPRT_TERMINAL_ASCII=1 forces ASCII glyphs.
+ * GPRT_TERMINAL_COLOR=1 enables colored Unicode blocks in redirected output,
+ * including CI logs. Redirected output otherwise uses plain ASCII and never
+ * clears earlier output.
  */
 GPRT_API uint64_t gprtBufferPresent(GPRTContext context, GPRTBuffer buffer);
 

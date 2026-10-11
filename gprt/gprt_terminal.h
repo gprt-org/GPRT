@@ -89,6 +89,9 @@ struct Preview {
     bool ansi = isatty(STDOUT_FILENO) && (!term || std::string(term) != "dumb");
     unicode = ansi;
 #endif
+    const bool interactive = ansi;
+    if (const char *color = std::getenv("GPRT_TERMINAL_COLOR"))
+      if (std::string(color) == "1") ansi = unicode = true;
     if (const char *ascii = std::getenv("GPRT_TERMINAL_ASCII"))
       if (std::string(ascii) == "1") unicode = false;
     columns = std::max(1u, columns / 2);
@@ -96,7 +99,7 @@ struct Preview {
     double scale = std::min(double(columns) / width, double(rows) / height);
     columns = std::max(1u, std::min(columns, uint32_t(width * scale)));
     rows = std::max(1u, std::min(rows, uint32_t(height * scale)));
-    std::string output = ansi ? (initialized ? "\x1b[H" : "\x1b[2J\x1b[H") : "";
+    std::string output = interactive ? (initialized ? "\x1b[H" : "\x1b[2J\x1b[H") : "";
     initialized = true;
     const char *blocks[] = {"\xe2\x96\x91", "\xe2\x96\x92", "\xe2\x96\x93", "\xe2\x96\x88"};
     const char *ascii[] = {".", ":", "*", "#"};
@@ -118,7 +121,7 @@ struct Preview {
     }
     std::cout << output << std::flush;
 #ifdef _WIN32
-    if (ansi) SetConsoleMode(console, mode);
+    if (interactive) SetConsoleMode(console, mode);
 #endif
   }
 };
