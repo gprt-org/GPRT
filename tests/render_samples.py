@@ -25,7 +25,8 @@ excluded = {
     "s9_0_differentiable": "existing GUI attachment READ_AFTER_WRITE validation errors",
 }
 terminal_test = build / ("t13_terminal.exe" if os.name == "nt" else "t13_terminal")
-for exe in [terminal_test, *samples]:
+address_test = build / ("t15_accelAddress.exe" if os.name == "nt" else "t15_accelAddress")
+for exe in [terminal_test, address_test, *samples]:
     if exe.stem in excluded:
         print(f"SKIP {exe.stem}: {excluded[exe.stem]}", flush=True)
         continue
@@ -51,6 +52,9 @@ for exe in [terminal_test, *samples]:
             raise RuntimeError("GPRT or Vulkan validation reported an error")
         if "VK_LAYER_KHRONOS_validation is not present" in log:
             raise RuntimeError("Vulkan validation is unavailable")
+        if exe == address_test:
+            print("PASS cached acceleration structure addresses after refits and rebuilds", flush=True)
+            continue
         if not previews:
             raise RuntimeError("no colored block preview was printed")
         if "\x1b[2J" in log or "\x1b[H" in log:

@@ -2966,7 +2966,8 @@ public:
 
   ~Accel() {};
 
-  // The address remains valid until the acceleration structure is replaced.
+  // Refits and rebuilds that reuse this acceleration structure preserve its address.
+  // Compaction or replacing the allocation requires callers to refresh their references.
   uint64_t getDeviceAddress() {
     VkAccelerationStructureDeviceAddressInfoKHR info{};
     info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
@@ -3461,8 +3462,7 @@ public:
     gprt::vkCmdBuildAccelerationStructures(commandList, 1, &accelerationBuildGeometryInfo, &rangePtr);
     context->endComputeCommands(commandList);
 
-    // Don't need to update device address, as neither our VkAccelerationStructure has not changed.
-    // updateDeviceAddress(isCompact);
+    // This in-place update preserves the acceleration structure and its device address.
 
     // If we're minimizing memory usage, free scratch now
     if (minimizeMemory) {

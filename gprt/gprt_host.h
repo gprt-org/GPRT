@@ -1563,6 +1563,11 @@ GPRT_API size_t gprtAccelGetSize(GPRTAccel _accel, int deviceID GPRT_IF_CPP(= 0)
 
 // GPRT_API gprt::Accel gprtAccelGetHandle(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
+/** Returns the device address of a built instance acceleration structure.
+ * Refits preserve the address. Rebuilds preserve it while reusing the allocation.
+ * After compaction or a rebuild that replaces the allocation, retrieve the address
+ * again and refresh any shader parameters that store it.
+ */
 GPRT_API const void* gprtAccelGetDeviceAddress(GPRTAccel accel, int deviceID GPRT_IF_CPP(= 0));
 
 /**
