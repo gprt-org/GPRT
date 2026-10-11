@@ -61,6 +61,9 @@ jobs:
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
         export VK_DRIVER_FILES="$(find "$GITHUB_WORKSPACE/mesa-install/share/vulkan/icd.d" -name '*lvp*.json' -print -quit)"
         test -f "$VK_DRIVER_FILES"
+        validation_layer=$(find "$VULKAN_SDK" -name VkLayer_khronos_validation.json -print -quit)
+        test -f "$validation_layer"
+        export VK_LAYER_PATH="$(dirname "$validation_layer")"
         vulkaninfo --summary
         python tests/render_samples.py bld-cpu
     - uses: actions/upload-artifact@v4

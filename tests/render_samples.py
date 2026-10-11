@@ -43,6 +43,8 @@ for exe in [terminal_test, *samples]:
             raise RuntimeError(f"exited with {result.returncode}")
         if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[|#gprt error:", log):
             raise RuntimeError("GPRT or Vulkan validation reported an error")
+        if "VK_LAYER_KHRONOS_validation is not present" in log:
+            raise RuntimeError("Vulkan validation is unavailable")
         if not any(re.fullmatch(r"[.:*#]{2,}", line) for line in log.splitlines()):
             raise RuntimeError("no ASCII preview was printed")
         if exe == terminal_test:
