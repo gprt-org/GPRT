@@ -12,6 +12,11 @@ int main() {
   params.width = 256;
   params.height = 256;
   auto texture = gprtDeviceTextureCreate<uint32_t>(context, params, pixels.data());
+  for (int i = 0; i < 130; ++i)
+    gprtTexturePresent(context, texture);
+  for (int i = 0; i < 65; ++i)
+    gprtTextureClear(texture);
+  gprtTexturePresent(context, texture);
   for (int i = 0; i < 16; ++i) {
     gprtBufferPresent(context, buffer);
     gprtTextureClear(texture);
