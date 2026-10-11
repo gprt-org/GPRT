@@ -1360,14 +1360,15 @@ struct Texture : public ImageResource {
     // Source access mask controls actions that have to be finished on the old
     // layout before it will be transitioned to the new layout
     switch (oldImageLayout) {
-    case VK_IMAGE_LAYOUT_GENERAL:
-      imageMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-      break;
     case VK_IMAGE_LAYOUT_UNDEFINED:
       // Image layout is undefined (or does not matter)
       // Only valid as initial layout
       // No flags required, listed only for completeness
       imageMemoryBarrier.srcAccessMask = 0;
+      break;
+
+    case VK_IMAGE_LAYOUT_GENERAL:
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
       break;
 
     case VK_IMAGE_LAYOUT_PREINITIALIZED:    
