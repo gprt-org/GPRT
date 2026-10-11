@@ -480,18 +480,6 @@ struct Context {
   std::vector<VkSemaphore> presentSemaphores;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
-  void acquireSwapchainImage() {
-    VkResult result = vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, VK_NULL_HANDLE,
-                                           inFlightFence, &currentImageIndex);
-    if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-      currentImageIndex = UINT32_MAX;
-      VK_CHECK_RESULT(result);
-      return;
-    }
-    vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-    vkResetFences(logicalDevice, 1, &inFlightFence);
-  }
-
   struct AIDenoising {
 #ifdef GPRT_ENABLE_DLSS
     const uint64_t kAppID = 231313132;
@@ -5963,7 +5951,16 @@ Context::Context(int32_t requestedDevice) {
       VK_CHECK_RESULT(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &semaphore));
 
     // And acquire the first image to use
-    acquireSwapchainImage();
+    VkAcquireNextImageInfoKHR acquireInfo{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR, nullptr,
+        swapchain, UINT64_MAX, VK_NULL_HANDLE, inFlightFence, /*deviceMask=*/1};
+    err = vkAcquireNextImage2KHR(logicalDevice, &acquireInfo, &currentImageIndex);
+    if (err == VK_SUCCESS || err == VK_SUBOPTIMAL_KHR) {
+      vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+      vkResetFences(logicalDevice, 1, &inFlightFence);
+    } else {
+      currentImageIndex = UINT32_MAX;
+      VK_CHECK_RESULT(err);
+    }
   }
 
   // Allocate resource heap
@@ -7430,7 +7427,16 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
 
-  context->acquireSwapchainImage();
+  VkAcquireNextImageInfoKHR acquireInfo{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR, nullptr,
+      context->swapchain, UINT64_MAX, VK_NULL_HANDLE, context->inFlightFence, /*deviceMask=*/1};
+  VkResult err2 = vkAcquireNextImage2KHR(context->logicalDevice, &acquireInfo, &context->currentImageIndex);
+  if (err2 == VK_SUCCESS || err2 == VK_SUBOPTIMAL_KHR) {
+    vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  } else {
+    context->currentImageIndex = UINT32_MAX;
+    VK_CHECK_RESULT(err2);
+  }
 }
 
 GPRT_API uint64_t
@@ -7576,7 +7582,16 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
 
-  context->acquireSwapchainImage();
+  VkAcquireNextImageInfoKHR acquireInfo{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR, nullptr,
+      context->swapchain, UINT64_MAX, VK_NULL_HANDLE, context->inFlightFence, /*deviceMask=*/1};
+  VkResult err2 = vkAcquireNextImage2KHR(context->logicalDevice, &acquireInfo, &context->currentImageIndex);
+  if (err2 == VK_SUCCESS || err2 == VK_SUBOPTIMAL_KHR) {
+    vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
+  } else {
+    context->currentImageIndex = UINT32_MAX;
+    VK_CHECK_RESULT(err2);
+  }
   return context->GRTimelineCounter;
 }
 
