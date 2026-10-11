@@ -39,20 +39,27 @@ for exe in [terminal_test, *samples]:
         result = subprocess.run([str(exe)], cwd=work, env=test_env, capture_output=True, timeout=180)
         log = (result.stdout + result.stderr).decode("utf-8", errors="replace")
         (work / "output.log").write_text(log, encoding="utf-8")
-        print(log, flush=True)
+        previews = list(re.finditer(r"(?:^(?:\x1b\[38;2;\d+;\d+;\d+m\u2588{2})+\x1b\[0m\r?\n)+", log, re.MULTILINE))
+        # Show the final frame in Actions; keep every frame in the saved log.
+        display_log = log
+        for preview in reversed(previews[:-1]):
+            display_log = display_log[:preview.start()] + display_log[preview.end():]
+        print(display_log, flush=True)
         if result.returncode:
             raise RuntimeError(f"exited with {result.returncode}")
         if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[|#gprt error:", log):
             raise RuntimeError("GPRT or Vulkan validation reported an error")
         if "VK_LAYER_KHRONOS_validation is not present" in log:
             raise RuntimeError("Vulkan validation is unavailable")
-        if not re.search(r"\x1b\[38;5;\d+m[\u2591-\u2593\u2588]{2}", log):
+        if not previews:
             raise RuntimeError("no colored block preview was printed")
         if "\x1b[2J" in log or "\x1b[H" in log:
             raise RuntimeError("redirected previews must preserve earlier log output")
         if exe == terminal_test:
             print("PASS terminal frame limits, filtering, and mapped contents", flush=True)
             continue
+        if len(previews) != 2:
+            raise RuntimeError(f"expected two rendered frames, got {len(previews)}")
         images = list(work.glob("*.png"))
         if not images:
             raise RuntimeError("no PNG was saved")

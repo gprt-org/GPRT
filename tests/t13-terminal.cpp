@@ -1,5 +1,6 @@
 #include <gprt.h>
 #include "gprt_terminal.h"
+#include <sstream>
 #include <stdexcept>
 
 void environment(const char *name, const char *value) {
@@ -17,6 +18,24 @@ int main(int argc, char **) {
   auto color = gprt::terminal::filteredColor((const uint8_t *)pixels, 2, 1, 1, 1, 0, 0);
   if (color != std::array<uint8_t, 3>{188, 188, 188})
     throw std::runtime_error("Terminal filter must average in linear space");
+  for (uint32_t value = 0; value < 256; ++value) {
+    uint32_t gray = 0xff000000 | value * 0x010101;
+    if (gprt::terminal::filteredColor((const uint8_t *)&gray, 1, 1, 1, 1, 0, 0) !=
+        std::array<uint8_t, 3>{uint8_t(value), uint8_t(value), uint8_t(value)})
+      throw std::runtime_error("Terminal filter changed an sRGB gray level");
+  }
+  environment("GPRT_TERMINAL_COLOR", "1");
+  environment("GPRT_TERMINAL_ASCII", "0");
+  const uint32_t swatches[] = {0xffff0000, 0xff00ff00, 0xff0000ff, 0xff808080, 0xff123456};
+  const char *expected[] = {"255;0;0", "0;255;0", "0;0;255", "128;128;128", "18;52;86"};
+  for (int i = 0; i < 5; ++i) {
+    std::ostringstream output;
+    auto previous = std::cout.rdbuf(output.rdbuf());
+    gprt::terminal::Preview{}.present((const uint8_t *)&swatches[i], 1, 1);
+    std::cout.rdbuf(previous);
+    if (output.str().find(std::string("\x1b[38;2;") + expected[i] + "m\xe2\x96\x88\xe2\x96\x88") == std::string::npos)
+      throw std::runtime_error("Terminal preview changed the color or block coverage");
+  }
   gprtRequestWindow(2, 1, "Terminal regression");
   auto context = gprtContextCreate();
   if (!gprtContextIsHeadless(context)) throw std::runtime_error("Expected headless context");

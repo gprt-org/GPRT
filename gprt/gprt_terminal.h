@@ -101,24 +101,21 @@ struct Preview {
     rows = std::max(1u, std::min(rows, uint32_t(height * scale)));
     std::string output = interactive ? (initialized ? "\x1b[H" : "\x1b[2J\x1b[H") : "";
     initialized = true;
-    const char *blocks[] = {"\xe2\x96\x91", "\xe2\x96\x92", "\xe2\x96\x93", "\xe2\x96\x88"};
     const char *ascii[] = {".", ":", "*", "#"};
     for (uint32_t y = 0; y < rows; ++y) {
       for (uint32_t x = 0; x < columns; ++x) {
         auto rgb = filteredColor(pixels, width, height, columns, rows, x, y);
         auto brightness = byte(0.267f * rgb[0] + 0.642f * rgb[1] + 0.091f * rgb[2]);
-        float average = (float(rgb[0]) + rgb[1] + rgb[2]) / 3.0f;
-        for (auto &channel : rgb) channel = byte(average + (channel - average) * 1.3f);
-        uint32_t color = 16 + 36 * ((rgb[0] + 25) / 51) + 6 * ((rgb[1] + 25) / 51) + ((rgb[2] + 25) / 51);
-        if (rgb[0] == rgb[1] && rgb[1] == rgb[2])
-          color = rgb[0] < 8 ? 16 : rgb[0] > 248 ? 231 : 232 + ((rgb[0] - 8) * 24 + 123) / 247;
-        const char *glyph = unicode ? blocks[uint32_t(brightness) * 3 / 255] : ascii[uint32_t(brightness) * 3 / 255];
-        if (ansi) output += "\x1b[38;5;" + std::to_string(color) + "m";
+        // Solid blocks preserve color brightness without mixing in the terminal background.
+        const char *glyph = unicode ? "\xe2\x96\x88" : ascii[uint32_t(brightness) * 3 / 255];
+        if (ansi) output += "\x1b[38;2;" + std::to_string(rgb[0]) + ";" + std::to_string(rgb[1]) + ";" +
+                            std::to_string(rgb[2]) + "m";
         output += std::string(glyph) + glyph;
       }
       if (ansi) output += "\x1b[0m";
       output += '\n';
     }
+    if (!interactive) output += '\n';
     std::cout << output << std::flush;
 #ifdef _WIN32
     if (interactive) SetConsoleMode(console, mode);
