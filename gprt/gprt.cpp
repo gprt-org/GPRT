@@ -2966,22 +2966,16 @@ public:
 
   ~Accel() {};
 
-  // Acceleration structure handles will change only when the backing memory changes.
-  // Backing memory will never change for BVH updates, and will generally (only?) change for rebuilds
-  // where primitive counts increase.
+  // The address remains valid until the acceleration structure is replaced.
   uint64_t getDeviceAddress() {
-    Buffer *backingBuffer;
-    if (this->isCompact) {
-      if (!compactBuffer)
-        LOG_ERROR("compactBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = compactBuffer;
-    } else {
-      if (!accelBuffer)
-        LOG_ERROR("accelBuffer is nullptr! Was the tree built before this address was requested?");
-      backingBuffer = accelBuffer;
+    VkAccelerationStructureDeviceAddressInfoKHR info{};
+    info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    info.accelerationStructure = isCompact ? compactAccelerationStructure : accelerationStructure;
+    if (!info.accelerationStructure) {
+      LOG_ERROR("Build the acceleration structure before requesting its address");
+      return 0;
     }
-
-    return backingBuffer->getDeviceAddress();
+    return gprt::vkGetAccelerationStructureDeviceAddress(context->logicalDevice, &info);
   }
 
   VkDeviceAddress getScratchDeviceAddress() {
@@ -3081,16 +3075,11 @@ public:
       else
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
-      // To enable reusing the device address...
-      accelerationStructureCreateInfo.createFlags =
-          VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
-      
       // To enable motion blur
       if (params.hasMotionBlur) 
       {
         accelerationStructureCreateInfo.createFlags |= VK_ACCELERATION_STRUCTURE_CREATE_MOTION_BIT_NV ;
       }
-      accelerationStructureCreateInfo.deviceAddress = accelBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &accelerationStructure);
       if (err)
@@ -3159,10 +3148,6 @@ public:
       else
         accelerationStructureCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
-      // To enable reusing the device address...
-      accelerationStructureCreateInfo.createFlags =
-          VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
-      accelerationStructureCreateInfo.deviceAddress = compactBuffer->deviceAddress;
       VkResult err = gprt::vkCreateAccelerationStructure(context->logicalDevice, &accelerationStructureCreateInfo,
                                                          nullptr, &compactAccelerationStructure);
       if (err)
