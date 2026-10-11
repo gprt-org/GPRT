@@ -7495,12 +7495,16 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
       LOG_WARNING("Terminal preview requires framebuffer dimensions and a matching BGRA8 buffer");
       return context->GRTimelineCounter;
     }
-    if (context->synchronize() != VK_SUCCESS)
-      throw std::runtime_error("Failed to wait for terminal presentation");
+    if (context->synchronize() != VK_SUCCESS) {
+      LOG_ERROR("Failed to wait for terminal presentation");
+      return context->GRTimelineCounter;
+    }
     bool wasMapped = buffer->mapped != nullptr;
     // An existing mapping may contain unflushed edits; preserve its pointer and contents.
-    if (!wasMapped && buffer->map() != VK_SUCCESS)
-      throw std::runtime_error("Failed to map the terminal framebuffer");
+    if (!wasMapped && buffer->map() != VK_SUCCESS) {
+      LOG_ERROR("Failed to map the terminal framebuffer");
+      return context->GRTimelineCounter;
+    }
     context->terminalPreview.present((const uint8_t *)buffer->mapped, width, height);
     if (!wasMapped) buffer->unmapReadOnly();
     ++context->headlessPresentCount;

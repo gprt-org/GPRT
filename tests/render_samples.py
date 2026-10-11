@@ -1,0 +1,56 @@
+"""Run built samples without a window and retain their images and terminal output."""
+
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+from PIL import Image
+
+build = Path(sys.argv[1]).resolve()
+output = Path("sample-results").resolve()
+env = dict(os.environ, GPRT_HEADLESS_SURFACE="1", GPRT_HEADLESS_FRAME_LIMIT="2",
+           GPRT_TERMINAL_ASCII="1", COLUMNS="100", LINES="34",
+           VK_LOADER_LAYERS_DISABLE="~implicit~",
+           VK_LAYER_ENABLES="VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT")
+samples = sorted(p for p in build.glob("s[0-9]_*") if p.is_file() and p.suffix in ("", ".exe"))
+if not samples:
+    raise SystemExit(f"No sample executables in {build}")
+failed = []
+for exe in samples:
+    # This sample requires VK_NV_ray_tracing_motion_blur, which Lavapipe does not expose.
+    if exe.stem == "s4_0_mbtriangles":
+        print(f"SKIP {exe.stem}: requires VK_NV_ray_tracing_motion_blur", flush=True)
+        continue
+    work = output / exe.stem
+    work.mkdir(parents=True, exist_ok=True)
+    for old_image in work.glob("*.png"):
+        old_image.unlink()
+    print(f"::group::{exe.stem}", flush=True)
+    try:
+        result = subprocess.run([str(exe)], cwd=work, env=env, capture_output=True, timeout=180)
+        log = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+        (work / "output.log").write_text(log, encoding="utf-8")
+        print(log, flush=True)
+        if result.returncode:
+            raise RuntimeError(f"exited with {result.returncode}")
+        if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[", log):
+            raise RuntimeError("Vulkan validation reported an error")
+        if not re.search(r"^[.:*#]{2,}$", log, re.MULTILINE):
+            raise RuntimeError("no ASCII preview was printed")
+        images = list(work.glob("*.png"))
+        if not images:
+            raise RuntimeError("no PNG was saved")
+        for path in images:
+            with Image.open(path) as image:
+                if all(low == high for low, high in image.convert("RGB").getextrema()):
+                    raise RuntimeError(f"{path.name} contains a uniform image")
+                print(f"PASS {path.name}: {image.width} x {image.height}", flush=True)
+    except (subprocess.TimeoutExpired, RuntimeError, OSError) as error:
+        failed.append(exe.stem)
+        print(f"::error::{exe.stem}: {error}", flush=True)
+    finally:
+        print("::endgroup::", flush=True)
+if failed:
+    raise SystemExit("Failed samples: " + ", ".join(failed))
