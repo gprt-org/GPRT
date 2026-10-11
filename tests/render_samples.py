@@ -67,6 +67,12 @@ for exe in [terminal_test, *samples]:
             with Image.open(path) as image:
                 if all(low == high for low, high in image.convert("RGB").getextrema()):
                     raise RuntimeError(f"{path.name} contains a uniform image")
+                if exe.stem == "s2_4_solids":
+                    # At the initial animation phase, blue and cyan should cover at least 1% of the image.
+                    colors = image.convert("RGB").getcolors(image.width * image.height)
+                    blue_pixels = sum(count for count, (r, g, b) in colors if b > r + 32)
+                    if blue_pixels < image.width * image.height // 100:
+                        raise RuntimeError(f"{path.name} is missing the expected solids color variation")
                 print(f"PASS {path.name}: {image.width} x {image.height}", flush=True)
     except subprocess.TimeoutExpired as error:
         failed.append(exe.stem)

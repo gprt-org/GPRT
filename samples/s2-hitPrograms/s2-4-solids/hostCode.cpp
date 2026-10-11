@@ -92,7 +92,8 @@ int main(int ac, char **av) {
   PushConstants pc;
   pc.frameID = 0;
   do {
-    pc.time = float(gprtGetTime(context));
+    // Start with distinct vertex values so the first frame shows color interpolation.
+    pc.time = 1.0f + float(gprtGetTime(context));
     pc.frameID = (pc.frameID + 1) % 128;
 
     // Calls the GPU raygen kernel function
