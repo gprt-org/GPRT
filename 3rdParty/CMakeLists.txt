@@ -27,8 +27,8 @@ find_package(Vulkan REQUIRED)
 if (Vulkan_LIBRARY)
 message(STATUS "Found Vulkan version: ${Vulkan_VERSION}")
 
-if(${Vulkan_VERSION} VERSION_LESS 1.4.309)
-  message(FATAL_ERROR "Vulkan 1.4.309 or higher is required!")
+if(${Vulkan_VERSION} VERSION_LESS 1.4.350)
+  message(FATAL_ERROR "Vulkan headers 1.4.350 or higher are required for VK_KHR_maintenance11.")
 endif()
 endif()
 

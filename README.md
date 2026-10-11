@@ -30,7 +30,8 @@ launching work on the GPU.
 
   - CMake
   - C++17
-  - Vulkan SDK (>= 1.4.309.0)
+  - Vulkan SDK (>= 1.4.350.0)
+  - GPU driver with `VK_KHR_maintenance11` support
 
 ## Documentation
 GPRT's documentation can be found [here](https://gprt-org.github.io/GPRT/).
@@ -51,7 +52,7 @@ git submodule update
 
 ## Build Instructions
 
-Install the [Vulkan SDK](https://vulkan.lunarg.com/) for your platform (version 1.4.309.0 or greater).
+Install the [Vulkan SDK](https://vulkan.lunarg.com/) for your platform (version 1.4.350.0 or greater).
 
 GPRT uses CMake for configuration. For an empty directory, `build`, in the top
 directory of this repository, the project can be configured with

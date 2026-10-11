@@ -549,17 +549,6 @@ struct Context {
     uint32_t transfer;
   } queueFamilyIndices;
 
-  std::vector<uint32_t> sharedQueueFamilies;
-
-  template<typename CreateInfo>
-  void setQueueSharing(CreateInfo &info) const {
-    // Without maintenance11, concurrent sharing requires at least two families.
-    if (sharedQueueFamilies.size() < 2) return;
-    info.sharingMode = VK_SHARING_MODE_CONCURRENT;
-    info.queueFamilyIndexCount = uint32_t(sharedQueueFamilies.size());
-    info.pQueueFamilyIndices = sharedQueueFamilies.data();
-  }
-
   // Ring buffer 
   VkCommandBuffer graphicsCommandBuffers[64];
   VkCommandBuffer computeCommandBuffers[64];
@@ -976,18 +965,23 @@ struct Buffer {
     if (size == bytes)
       return;
 
+    uint32_t queueFamilies[] = {context->queueFamilyIndices.graphics, context->queueFamilyIndices.compute,
+                               context->queueFamilyIndices.transfer};
+    std::sort(queueFamilies, queueFamilies + 3);
+    VkBufferCreateInfo bufferCreateInfo{};
+    bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferCreateInfo.usage = usageFlags;
+    bufferCreateInfo.size = bytes;
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    bufferCreateInfo.queueFamilyIndexCount = uint32_t(std::unique(queueFamilies, queueFamilies + 3) - queueFamilies);
+    bufferCreateInfo.pQueueFamilyIndices = queueFamilies;
+
     if (hostVisible) {
       // if we are host visible, we need to create a new buffer before releasing the
       // previous one to preserve values...
 
       if (preserveContents) {
         // Create the new buffer handle
-        VkBufferCreateInfo bufferCreateInfo{};
-        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferCreateInfo.usage = usageFlags;
-        bufferCreateInfo.size = bytes;
-        context->setQueueSharing(bufferCreateInfo);
-
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
@@ -1026,12 +1020,6 @@ struct Buffer {
         vmaDestroyBuffer(context->allocator, buffer, allocation);
 
         // Create the new buffer handle
-        VkBufferCreateInfo bufferCreateInfo{};
-        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferCreateInfo.usage = usageFlags;
-        bufferCreateInfo.size = bytes;
-        context->setQueueSharing(bufferCreateInfo);
-
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
@@ -1067,12 +1055,6 @@ struct Buffer {
 
       {
         // Create the new buffer handle
-        VkBufferCreateInfo bufferCreateInfo{};
-        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferCreateInfo.usage = usageFlags;
-        bufferCreateInfo.size = bytes;
-        context->setQueueSharing(bufferCreateInfo);
-
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         VK_CHECK_RESULT(vmaCreateBufferWithAlignment(context->allocator, &bufferCreateInfo, &allocInfo, alignment,
@@ -1165,11 +1147,16 @@ struct Buffer {
       hostVisible = false;
 
     // Create the buffer handle
+    uint32_t queueFamilies[] = {context->queueFamilyIndices.graphics, context->queueFamilyIndices.compute,
+                               context->queueFamilyIndices.transfer};
+    std::sort(queueFamilies, queueFamilies + 3);
     VkBufferCreateInfo bufferCreateInfo{};
     bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCreateInfo.usage = usageFlags;
     bufferCreateInfo.size = size;
-    context->setQueueSharing(bufferCreateInfo);
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    bufferCreateInfo.queueFamilyIndexCount = uint32_t(std::unique(queueFamilies, queueFamilies + 3) - queueFamilies);
+    bufferCreateInfo.pQueueFamilyIndices = queueFamilies;
 
     VmaAllocationCreateInfo allocInfo = {};
     if (hostVisible) {
@@ -1846,7 +1833,12 @@ struct Texture : public ImageResource {
 
     writable = ((usageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
 
-    context->setQueueSharing(imageInfo);
+    uint32_t queueFamilies[] = {context->queueFamilyIndices.graphics, context->queueFamilyIndices.compute,
+                               context->queueFamilyIndices.transfer};
+    std::sort(queueFamilies, queueFamilies + 3);
+    imageInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    imageInfo.queueFamilyIndexCount = uint32_t(std::unique(queueFamilies, queueFamilies + 3) - queueFamilies);
+    imageInfo.pQueueFamilyIndices = queueFamilies;
     
     // If this image were to be used with MSAA as an attachment, we'd set this
     // to something other than
@@ -5306,6 +5298,9 @@ Context::Context(int32_t requestedDevice) {
   // For timeline semaphores
   enabledDeviceExtensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
 
+  // Allow concurrent sharing with a single queue family.
+  enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE_11_EXTENSION_NAME);
+
   // For -spirv-reflect support.
   enabledDeviceExtensions.push_back(VK_GOOGLE_USER_TYPE_EXTENSION_NAME);
 
@@ -5439,7 +5434,9 @@ Context::Context(int32_t requestedDevice) {
   vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
 
   // Features should be checked by the end application before using them
-  void *pNext = nullptr;
+  VkPhysicalDeviceMaintenance11FeaturesKHR maintenance11Features{
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_11_FEATURES_KHR};
+  void *pNext = &maintenance11Features;
   // VkPhysicalDeviceFloatControlsPropertiesKHR floatControlsProperties = {
   //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR};
   // floatControlsProperties.denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL;
@@ -5550,6 +5547,7 @@ Context::Context(int32_t requestedDevice) {
   // fill in above structs
   vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
   vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+  if (!maintenance11Features.maintenance11) LOG_ERROR("The selected device does not support maintenance11.");
 
   // Memory properties are used regularly for creating all kinds of buffers
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
@@ -5669,9 +5667,6 @@ Context::Context(int32_t requestedDevice) {
   //   // Else we use the same queue
   //   queueFamilyIndices.transfer = queueFamilyIndices.graphics;
   // }
-
-  for (const auto &queueInfo : queueCreateInfos)
-    sharedQueueFamilies.push_back(queueInfo.queueFamilyIndex);
 
   /// 3. Create the logical device representation
 
