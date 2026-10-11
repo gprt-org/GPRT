@@ -22,22 +22,8 @@
 #define HLSL
 #include "gprt_sort.h"
 
-// [[vk::binding(/*binding*/, /*set*/)]] 
-
-[[vk::push_constant]] ParallelSortCB rootConstData;								// Store the shift bit directly in the root signature
-
-[[vk::binding(0, 0)]] RWStructuredBuffer<uint64_t>	SrcBuffer		;					// The unsorted keys or scan data
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint64_t>	SrcPayload		;					// The payload data
-				 
-[[vk::binding(0, 2)]] RWStructuredBuffer<uint32_t>	SumTable		;					// The sum table we will write sums to
-[[vk::binding(1, 2)]] RWStructuredBuffer<uint32_t>	ReduceTable		;					// The reduced sum table we will write sums to
-				 
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint64_t>	DstBuffer		;					// The sorted keys or prefixed data
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint64_t>	DstPayload		;					// the sorted payload data
-				 
-[[vk::binding(0, 1)]] RWStructuredBuffer<uint32_t>	ScanSrc			;					// Source for Scan Data
-[[vk::binding(1, 1)]] RWStructuredBuffer<uint32_t>	ScanDst			;					// Destination for Scan Data
-[[vk::binding(2, 1)]] RWStructuredBuffer<uint32_t>	ScanScratch		;					// Scratch data for Scan
+// Device addresses are recorded with each dispatch's sort parameters.
+[[vk::push_constant]] ParallelSortCB rootConstData;
 				 
 
 groupshared uint64_t gs_PARALLELSORT_LDSKeys[PARALLELSORT_THREADGROUP_SIZE];
@@ -109,6 +95,8 @@ uint32_t ParallelSort_BlockScanPrefix(uint32_t localSum, uint32_t localID)
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint64_t *SrcBuffer = rootConstData.SrcBuffer;
+	uint32_t *SumTable = rootConstData.SumTable;
 	// Call the uint32_t version of the count part of the algorithm
 	// ParallelSort_Count_uint(localID, groupID, CBuffer, rootConstData.CShiftBit, SrcBuffer, SumTable);  
 	
@@ -179,6 +167,8 @@ void Count(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint32_t *SumTable = rootConstData.SumTable;
+	uint32_t *ReduceTable = rootConstData.ReduceTable;
 	// Call the reduce part of the algorithm
 	// ParallelSort_ReduceCount(localID, groupID, CBuffer,  SumTable, ReduceTable);
 
@@ -212,6 +202,9 @@ void CountReduce(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_Grou
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint32_t *ScanSrc = rootConstData.ReduceTable;
+	uint32_t *ScanDst = rootConstData.ReduceTable;
+	uint32_t *ScanScratch = rootConstData.ReduceTable;
 	uint32_t BaseIndex = PARALLELSORT_ELEMENTS_PER_THREAD * PARALLELSORT_THREADGROUP_SIZE * groupID;
 	// ParallelSort_ScanPrefix(rootConstData.NumScanValues, localID, groupID, 0, BaseIndex, false,
 	// 							CBuffer, ScanSrc, ScanDst, ScanScratch);
@@ -279,6 +272,9 @@ void Scan(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint32_t *ScanSrc = rootConstData.SumTable;
+	uint32_t *ScanDst = rootConstData.SumTable;
+	uint32_t *ScanScratch = rootConstData.ReduceTable;
 	// When doing adds, we need to access data differently because reduce 
 	// has a more specialized access pattern to match optimized count
 	// Access needs to be done similarly to reduce
@@ -353,6 +349,9 @@ void ScanAdd(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint64_t *SrcBuffer = rootConstData.SrcBuffer;
+	uint64_t *DstBuffer = rootConstData.DstBuffer;
+	uint32_t *SumTable = rootConstData.SumTable;
 	uint32_t ShiftBit = rootConstData.CShiftBit;
 
 	// Load the sort bin threadgroup offsets into LDS for faster referencing
@@ -491,6 +490,11 @@ void Scatter(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 [numthreads(PARALLELSORT_THREADGROUP_SIZE, 1, 1)] [shader("compute")]
 void ScatterPayload(uint32_t localID : SV_GroupThreadID, uint32_t groupID : SV_GroupID)
 {
+	uint64_t *SrcBuffer = rootConstData.SrcBuffer;
+	uint64_t *DstBuffer = rootConstData.DstBuffer;
+	uint64_t *SrcPayload = rootConstData.SrcPayload;
+	uint64_t *DstPayload = rootConstData.DstPayload;
+	uint32_t *SumTable = rootConstData.SumTable;
 	uint32_t ShiftBit = rootConstData.CShiftBit;
 
 	// Load the sort bin threadgroup offsets into LDS for faster referencing
