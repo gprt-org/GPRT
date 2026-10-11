@@ -477,7 +477,7 @@ struct Context {
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
   uint32_t currentImageIndex;
-  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+  std::vector<VkSemaphore> presentSemaphores;
   VkFence inFlightFence = VK_NULL_HANDLE;
 
   void acquireSwapchainImage() {
@@ -4847,10 +4847,9 @@ Context::destroy() {
     imgui.frameBuffer = nullptr;
   }
 
-  if (imageAvailableSemaphore) {
-    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    imageAvailableSemaphore = nullptr;
-  }
+  for (auto semaphore : presentSemaphores)
+    vkDestroySemaphore(logicalDevice, semaphore, nullptr);
+  presentSemaphores.clear();
 
   if (inFlightFence) {
     vkDestroyFence(logicalDevice, inFlightFence, nullptr);
@@ -5842,17 +5841,13 @@ Context::Context(int32_t requestedDevice) {
   // scanModule = new Module(scanDeviceCode);
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
-  // Swapchain semaphores and fences
+  // Swapchain acquisition fence
   if (requestedFeatures.window) {
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-      LOG_ERROR("Failed to create swapchain semaphores");
+    if (vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+      LOG_ERROR("Failed to create swapchain acquisition fence");
     }
   }
 
@@ -5959,6 +5954,12 @@ Context::Context(int32_t requestedDevice) {
     vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, nullptr);
     swapchainImages.resize(surfaceImageCount);
     vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
+
+    // Reuse each presentation semaphore only after its image is acquired again.
+    presentSemaphores.resize(surfaceImageCount);
+    VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    for (auto &semaphore : presentSemaphores)
+      VK_CHECK_RESULT(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &semaphore));
 
     // And acquire the first image to use
     acquireSwapchainImage();
@@ -7403,10 +7404,21 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
   context->endGraphicsCommands(commandBuffer);
-  context->synchronizeGraphics();
 
-  presentInfo.waitSemaphoreCount = 0;
-  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+  // Wait for the copy on the GPU, then signal the binary semaphore required by presentation.
+  VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->GRTimelineSemaphore, context->GRTimelineCounter, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->presentSemaphores[context->currentImageIndex], 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &wait;
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signal;
+  VkResult result = vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to submit presentation wait: " + errorString(result));
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &context->presentSemaphores[context->currentImageIndex];
 
   VkSwapchainKHR swapchains[] = {context->swapchain};
   presentInfo.swapchainCount = 1;
@@ -7538,10 +7550,21 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   }
 
   context->endGraphicsCommands(commandBuffer);
-  context->synchronizeGraphics();
 
-  presentInfo.waitSemaphoreCount = 0;
-  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+  // Wait for the copy on the GPU, then signal the binary semaphore required by presentation.
+  VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->GRTimelineSemaphore, context->GRTimelineCounter, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->presentSemaphores[context->currentImageIndex], 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &wait;
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signal;
+  VkResult result = vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to submit presentation wait: " + errorString(result));
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &context->presentSemaphores[context->currentImageIndex];
 
   VkSwapchainKHR swapchains[] = {context->swapchain};
   presentInfo.swapchainCount = 1;
