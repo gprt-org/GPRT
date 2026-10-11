@@ -23,7 +23,7 @@ jobs:
     - name: Prepare Vulkan SDK
       uses: humbletim/install-vulkan-sdk@v1.2
       with:
-        version: 1.4.309.0
+        version: 1.4.350.0
         cache: true
 
     - name: Apt dependencies
@@ -47,21 +47,21 @@ jobs:
     - name: Build Shared
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:$LD_LIBRARY_PATH
         mkdir bld-shared
         cd bld-shared
         cmake --version
-        cmake .. -DGPRT_BUILD_SHARED=ON
+        cmake .. -DGPRT_BUILD_SHARED=ON -DVulkan_LIBRARY="$VULKAN_SDK/lib/VulkanLoader/lib/libvulkan.so"
         make VERBOSE=1 -j4
 
     - name: Build Static
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:$LD_LIBRARY_PATH
         mkdir bld-static
         cd bld-static
         cmake --version
-        cmake ..
+        cmake .. -DVulkan_LIBRARY="$VULKAN_SDK/lib/VulkanLoader/lib/libvulkan.so"
         make VERBOSE=1 -j4
 
     # Useful for debugging
@@ -78,10 +78,15 @@ jobs:
         submodules: recursive
 
     - name: Prepare Vulkan SDK
-      uses: humbletim/install-vulkan-sdk@v1.2
-      with:
-        version: 1.4.309.0
-        cache: true
+      shell: pwsh
+      run: |
+        $installer = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+        $sdk = Join-Path $env:RUNNER_TEMP 'VulkanSDK'
+        Invoke-WebRequest 'https://sdk.lunarg.com/sdk/download/1.4.350.0/windows/vulkan_sdk.exe' -OutFile $installer
+        $install = Start-Process $installer -ArgumentList "--root `"$sdk`" --accept-licenses --default-answer --confirm-command install copy_only=1" -Wait -PassThru -WindowStyle Hidden
+        if ($install.ExitCode) { exit $install.ExitCode }
+        "VULKAN_SDK=$sdk" >> $env:GITHUB_ENV
+        "$sdk\Bin" >> $env:GITHUB_PATH
 
     - name: Update CMake
       uses: ssrobins/install-cmake@v1

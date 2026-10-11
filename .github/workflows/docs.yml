@@ -32,7 +32,7 @@ jobs:
       - name: Prepare Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
-          version: 1.4.309.0
+          version: 1.4.350.0
           cache: true
 
       - name: Apt dependencies
@@ -57,7 +57,7 @@ jobs:
           mkdir bld
           cd bld
           cmake --version
-          cmake .. -DBUILD_DOC=ON
+          cmake .. -DBUILD_DOC=ON -DVulkan_LIBRARY="$VULKAN_SDK/lib/VulkanLoader/lib/libvulkan.so"
           cmake --build . --target sphinx --config Release
       - name: Setup Pages
         uses: actions/configure-pages@v5
