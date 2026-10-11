@@ -476,9 +476,9 @@ struct Context {
   uint32_t surfaceImageCount;
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
-  uint32_t currentImageIndex;
-  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-  VkFence inFlightFence = VK_NULL_HANDLE;
+  uint32_t currentImageIndex = 0;
+  std::vector<VkSemaphore> presentSemaphores;
+  std::vector<std::pair<VkSemaphore, uint64_t>> acquireSemaphores;
 
   struct AIDenoising {
 #ifdef GPRT_ENABLE_DLSS
@@ -1355,6 +1355,10 @@ struct Texture : public ImageResource {
       // Only valid as initial layout
       // No flags required, listed only for completeness
       imageMemoryBarrier.srcAccessMask = 0;
+      break;
+
+    case VK_IMAGE_LAYOUT_GENERAL:
+      imageMemoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
       break;
 
     case VK_IMAGE_LAYOUT_PREINITIALIZED:    
@@ -4839,15 +4843,13 @@ Context::destroy() {
     imgui.frameBuffer = nullptr;
   }
 
-  if (imageAvailableSemaphore) {
-    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-    imageAvailableSemaphore = nullptr;
-  }
+  for (auto semaphore : presentSemaphores)
+    vkDestroySemaphore(logicalDevice, semaphore, nullptr);
+  presentSemaphores.clear();
 
-  if (inFlightFence) {
-    vkDestroyFence(logicalDevice, inFlightFence, nullptr);
-    inFlightFence = nullptr;
-  }
+  for (auto &semaphore : acquireSemaphores)
+    vkDestroySemaphore(logicalDevice, semaphore.first, nullptr);
+  acquireSemaphores.clear();
 
   if (swapchain) {
     vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
@@ -5840,20 +5842,6 @@ Context::Context(int32_t requestedDevice) {
   // scanModule = new Module(scanDeviceCode);
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
-  // Swapchain semaphores and fences
-  if (requestedFeatures.window) {
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-      LOG_ERROR("Failed to create swapchain semaphores");
-    }
-  }
-
   // Swapchain setup
   if (requestedFeatures.window) {
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -5958,15 +5946,11 @@ Context::Context(int32_t requestedDevice) {
     swapchainImages.resize(surfaceImageCount);
     vkGetSwapchainImagesKHR(logicalDevice, swapchain, &surfaceImageCount, swapchainImages.data());
 
-    /* Transition all images to presentable */
-    for (uint32_t i = 0; i < swapchainImages.size(); ++i) {
-      transitionImageLayout(swapchainImages[i], surfaceFormat.format, VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    }
-
-    // And acquire the first image to use
-    vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE,
-                          &currentImageIndex);
+    // Reuse each presentation semaphore only after its image is acquired again.
+    presentSemaphores.resize(surfaceImageCount);
+    VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    for (auto &semaphore : presentSemaphores)
+      VK_CHECK_RESULT(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &semaphore));
   }
 
   // Allocate resource heap
@@ -7283,6 +7267,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     return;
   Context *context = (Context *) _context;
   Texture *texture = (Texture *) _texture;
+  if (context->currentImageIndex == UINT32_MAX) return;
 
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -7293,14 +7278,42 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Reuse acquisition semaphores whose graphics work has completed.
+  uint64_t completed;
+  VK_CHECK_RESULT(vkGetSemaphoreCounterValue(context->logicalDevice, context->GRTimelineSemaphore, &completed));
+  size_t acquisition = 0;
+  while (acquisition < context->acquireSemaphores.size() &&
+         context->acquireSemaphores[acquisition].second > completed) ++acquisition;
+  if (acquisition == context->acquireSemaphores.size()) {
+    VkSemaphore semaphore;
+    VkSemaphoreCreateInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VK_CHECK_RESULT(vkCreateSemaphore(context->logicalDevice, &info, nullptr, &semaphore));
+    context->acquireSemaphores.emplace_back(semaphore, 0);
+  }
+  auto &acquireSemaphore = context->acquireSemaphores[acquisition];
+  VkAcquireNextImageInfoKHR acquireInfo{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR, nullptr,
+      context->swapchain, UINT64_MAX, acquireSemaphore.first, VK_NULL_HANDLE, /*deviceMask=*/1};
+  VkResult acquired = vkAcquireNextImage2KHR(context->logicalDevice, &acquireInfo, &context->currentImageIndex);
+  if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
+    context->currentImageIndex = UINT32_MAX;
+    VK_CHECK_RESULT(acquired);
+    return;
+  }
+  VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      acquireSemaphore.first, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &wait;
+  VK_CHECK_RESULT(vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE));
+
+  // Transition the acquired image to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
     // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
     // of the original image. I'm assuming this is ok.
-    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -7408,8 +7421,18 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   context->endGraphicsCommands(commandBuffer);
 
-  presentInfo.waitSemaphoreCount = 0;
-  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+  // Wait for the copy on the GPU, then signal the binary semaphore required by presentation.
+  acquireSemaphore.second = context->GRTimelineCounter;
+  wait.semaphore = context->GRTimelineSemaphore;
+  wait.value = context->GRTimelineCounter;
+  VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->presentSemaphores[context->currentImageIndex], 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signal;
+  VkResult result = vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to submit presentation wait: " + errorString(result));
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &context->presentSemaphores[context->currentImageIndex];
 
   VkSwapchainKHR swapchains[] = {context->swapchain};
   presentInfo.swapchainCount = 1;
@@ -7418,21 +7441,14 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
-
-  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, VK_NULL_HANDLE,
-                                        context->inFlightFence, &context->currentImageIndex);
-  vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
-  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
 }
 
 GPRT_API uint64_t
 gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
   LOG_API_CALL();
   Context *context = (Context *) _context;
-  if (!requestedFeatures.window) {
+  if (!requestedFeatures.window || context->currentImageIndex == UINT32_MAX) {
     return context->GRTimelineCounter; 
   }
   
@@ -7448,14 +7464,42 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   VkCommandBuffer commandBuffer = context->beginGraphicsCommands();
 
-  // transition image layout from PRESENT_SRC to TRANSFER_DST
+  // Reuse acquisition semaphores whose graphics work has completed.
+  uint64_t completed;
+  VK_CHECK_RESULT(vkGetSemaphoreCounterValue(context->logicalDevice, context->GRTimelineSemaphore, &completed));
+  size_t acquisition = 0;
+  while (acquisition < context->acquireSemaphores.size() &&
+         context->acquireSemaphores[acquisition].second > completed) ++acquisition;
+  if (acquisition == context->acquireSemaphores.size()) {
+    VkSemaphore semaphore;
+    VkSemaphoreCreateInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VK_CHECK_RESULT(vkCreateSemaphore(context->logicalDevice, &info, nullptr, &semaphore));
+    context->acquireSemaphores.emplace_back(semaphore, 0);
+  }
+  auto &acquireSemaphore = context->acquireSemaphores[acquisition];
+  VkAcquireNextImageInfoKHR acquireInfo{VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR, nullptr,
+      context->swapchain, UINT64_MAX, acquireSemaphore.first, VK_NULL_HANDLE, /*deviceMask=*/1};
+  VkResult acquired = vkAcquireNextImage2KHR(context->logicalDevice, &acquireInfo, &context->currentImageIndex);
+  if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
+    context->currentImageIndex = UINT32_MAX;
+    VK_CHECK_RESULT(acquired);
+    return context->GRTimelineCounter;
+  }
+  VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      acquireSemaphore.first, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = 1;
+  submit.pWaitSemaphoreInfos = &wait;
+  VK_CHECK_RESULT(vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE));
+
+  // Transition the acquired image to TRANSFER_DST.
   {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
     // If this layout is "VK_IMAGE_LAYOUT_UNDEFINED", we might lose the contents
     // of the original image. I'm assuming this is ok.
-    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // The new layout for the image
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -7547,8 +7591,18 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   context->endGraphicsCommands(commandBuffer);
 
-  presentInfo.waitSemaphoreCount = 0;
-  presentInfo.pWaitSemaphores = VK_NULL_HANDLE;
+  // Wait for the copy on the GPU, then signal the binary semaphore required by presentation.
+  acquireSemaphore.second = context->GRTimelineCounter;
+  wait.semaphore = context->GRTimelineSemaphore;
+  wait.value = context->GRTimelineCounter;
+  VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+      context->presentSemaphores[context->currentImageIndex], 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+  submit.signalSemaphoreInfoCount = 1;
+  submit.pSignalSemaphoreInfos = &signal;
+  VkResult result = vkQueueSubmit2(context->graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+  if (result != VK_SUCCESS) LOG_ERROR("Failed to submit presentation wait: " + errorString(result));
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &context->presentSemaphores[context->currentImageIndex];
 
   VkSwapchainKHR swapchains[] = {context->swapchain};
   presentInfo.swapchainCount = 1;
@@ -7557,14 +7611,8 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
 
   presentInfo.pResults = nullptr;
 
-  // currently throwing an error because the images given by the swapchain don't
-  // have a defined layout...
   VkResult err1 = vkQueuePresentKHR(context->graphicsQueue, &presentInfo);
 
-  VkResult err2 = vkAcquireNextImageKHR(context->logicalDevice, context->swapchain, UINT64_MAX, VK_NULL_HANDLE,
-                                        context->inFlightFence, &context->currentImageIndex);
-  vkWaitForFences(context->logicalDevice, 1, &context->inFlightFence, true, UINT_MAX);
-  vkResetFences(context->logicalDevice, 1, &context->inFlightFence);
   return context->GRTimelineCounter;
 }
 
