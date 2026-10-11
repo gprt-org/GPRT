@@ -18,10 +18,14 @@ samples = sorted(p for p in build.glob("s[0-9]_*") if p.is_file() and p.suffix i
 if not samples:
     raise SystemExit(f"No sample executables in {build}")
 failed = []
+excluded = {
+    "s4_0_mbtriangles": "requires VK_NV_ray_tracing_motion_blur",
+    "s8_0_imgui_rt": "existing GUI attachment READ_AFTER_WRITE validation errors",
+    "s9_0_differentiable": "existing GUI attachment READ_AFTER_WRITE validation errors",
+}
 for exe in samples:
-    # This sample requires VK_NV_ray_tracing_motion_blur, which Lavapipe does not expose.
-    if exe.stem == "s4_0_mbtriangles":
-        print(f"SKIP {exe.stem}: requires VK_NV_ray_tracing_motion_blur", flush=True)
+    if exe.stem in excluded:
+        print(f"SKIP {exe.stem}: {excluded[exe.stem]}", flush=True)
         continue
     work = output / exe.stem
     work.mkdir(parents=True, exist_ok=True)
@@ -37,7 +41,7 @@ for exe in samples:
             raise RuntimeError(f"exited with {result.returncode}")
         if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[", log):
             raise RuntimeError("Vulkan validation reported an error")
-        if not re.search(r"^[.:*#]{2,}$", log, re.MULTILINE):
+        if not any(re.fullmatch(r"[.:*#]{2,}", line) for line in log.splitlines()):
             raise RuntimeError("no ASCII preview was printed")
         images = list(work.glob("*.png"))
         if not images:

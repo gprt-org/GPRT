@@ -27,7 +27,7 @@ jobs:
         python3 -m venv "$RUNNER_TEMP/python"
         "$RUNNER_TEMP/python/bin/pip" install meson==1.9.1 mako pyyaml packaging pillow
         echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
-    - uses: actions/cache@v4
+    - uses: actions/cache/restore@v4
       id: mesa
       with:
         path: mesa-install
@@ -44,6 +44,11 @@ jobs:
           -Dgles1=disabled -Dgles2=disabled -Dopengl=false -Dllvm=enabled \
           -Dshared-llvm=enabled -Dbuild-tests=false
         ninja -C mesa-build -j4 install
+    - uses: actions/cache/save@v4
+      if: steps.mesa.outputs.cache-hit != 'true'
+      with:
+        path: mesa-install
+        key: lavapipe-26.2.4-ubuntu24-llvm18-v1
     - name: Build samples and terminal test
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib/VulkanLoader/lib:$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
