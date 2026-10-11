@@ -62,7 +62,6 @@ jobs:
         export VK_DRIVER_FILES="$(find "$GITHUB_WORKSPACE/mesa-install/share/vulkan/icd.d" -name '*lvp*.json' -print -quit)"
         test -f "$VK_DRIVER_FILES"
         vulkaninfo --summary
-        GPRT_HEADLESS_SURFACE=1 GPRT_HEADLESS_FRAME_LIMIT=3 ./bld-cpu/t13_terminal
         python tests/render_samples.py bld-cpu
     - uses: actions/upload-artifact@v4
       if: always()

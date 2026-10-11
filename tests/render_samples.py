@@ -23,7 +23,8 @@ excluded = {
     "s8_0_imgui_rt": "existing GUI attachment READ_AFTER_WRITE validation errors",
     "s9_0_differentiable": "existing GUI attachment READ_AFTER_WRITE validation errors",
 }
-for exe in samples:
+terminal_test = build / ("t13_terminal.exe" if os.name == "nt" else "t13_terminal")
+for exe in [terminal_test, *samples]:
     if exe.stem in excluded:
         print(f"SKIP {exe.stem}: {excluded[exe.stem]}", flush=True)
         continue
@@ -33,16 +34,20 @@ for exe in samples:
         old_image.unlink()
     print(f"::group::{exe.stem}", flush=True)
     try:
-        result = subprocess.run([str(exe)], cwd=work, env=env, capture_output=True, timeout=180)
+        test_env = dict(env, GPRT_HEADLESS_FRAME_LIMIT="3") if exe == terminal_test else env
+        result = subprocess.run([str(exe)], cwd=work, env=test_env, capture_output=True, timeout=180)
         log = (result.stdout + result.stderr).decode("utf-8", errors="replace")
         (work / "output.log").write_text(log, encoding="utf-8")
         print(log, flush=True)
         if result.returncode:
             raise RuntimeError(f"exited with {result.returncode}")
-        if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[", log):
-            raise RuntimeError("Vulkan validation reported an error")
+        if re.search(r"Validation Error|SYNC-HAZARD|ERROR: \[|#gprt error:", log):
+            raise RuntimeError("GPRT or Vulkan validation reported an error")
         if not any(re.fullmatch(r"[.:*#]{2,}", line) for line in log.splitlines()):
             raise RuntimeError("no ASCII preview was printed")
+        if exe == terminal_test:
+            print("PASS terminal frame limits, filtering, and mapped contents", flush=True)
+            continue
         images = list(work.glob("*.png"))
         if not images:
             raise RuntimeError("no PNG was saved")
@@ -51,7 +56,13 @@ for exe in samples:
                 if all(low == high for low, high in image.convert("RGB").getextrema()):
                     raise RuntimeError(f"{path.name} contains a uniform image")
                 print(f"PASS {path.name}: {image.width} x {image.height}", flush=True)
-    except (subprocess.TimeoutExpired, RuntimeError, OSError) as error:
+    except subprocess.TimeoutExpired as error:
+        failed.append(exe.stem)
+        log = ((error.stdout or b"") + (error.stderr or b"")).decode("utf-8", errors="replace")
+        (work / "output.log").write_text(log, encoding="utf-8")
+        print(log, flush=True)
+        print(f"::error::{exe.stem}: exceeded 180 seconds", flush=True)
+    except (RuntimeError, OSError) as error:
         failed.append(exe.stem)
         print(f"::error::{exe.stem}: {error}", flush=True)
     finally:
