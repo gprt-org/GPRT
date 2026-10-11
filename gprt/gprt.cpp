@@ -477,24 +477,17 @@ struct Context {
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> swapchainImages;
   uint32_t currentImageIndex = UINT32_MAX;
-  VkFence inFlightFence = VK_NULL_HANDLE;
+  VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
 
   void acquireSwapchainImage() {
     currentImageIndex = UINT32_MAX;
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(logicalDevice, swapchain, UINT64_MAX,
-                                           VK_NULL_HANDLE, inFlightFence, &imageIndex);
+                                           imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
       VK_CHECK_RESULT(result);
       return;
     }
-    // Acquisition is a host wait; it need not drain preceding graphics submissions.
-    result = vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-    VK_CHECK_RESULT(result);
-    if (result != VK_SUCCESS) return;
-    result = vkResetFences(logicalDevice, 1, &inFlightFence);
-    VK_CHECK_RESULT(result);
-    if (result != VK_SUCCESS) return;
     currentImageIndex = imageIndex;
   }
 
@@ -722,7 +715,7 @@ struct Context {
   VkCommandBuffer beginGraphicsCommands();
   VkCommandBuffer beginComputeCommands();
   VkCommandBuffer beginTransferCommands();
-  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer);
+  VkResult endGraphicsCommands(VkCommandBuffer commandBuffer, VkSemaphore imageAvailable = VK_NULL_HANDLE);
   VkResult endComputeCommands(VkCommandBuffer commandBuffer);
   VkResult endTransferCommands(VkCommandBuffer commandBuffer);
   VkResult synchronizeTransfer();
@@ -4804,6 +4797,9 @@ Context::buildSBT(GPRTBuildSBTFlags flags) {
 void
 Context::destroy() {
   if (logicalDevice) {
+    // Consume the last acquisition even if the caller does not present another frame.
+    if (currentImageIndex != UINT32_MAX)
+      VK_CHECK_RESULT(endGraphicsCommands(beginGraphicsCommands(), imageAvailableSemaphore));
     VK_CHECK_RESULT(vkDeviceWaitIdle(logicalDevice));
 #ifdef GPRT_ENABLE_DLSS
     if (requestedFeatures.aiDenoiser.requested) {
@@ -4850,9 +4846,9 @@ Context::destroy() {
     imgui.frameBuffer = nullptr;
   }
 
-  if (inFlightFence) {
-    vkDestroyFence(logicalDevice, inFlightFence, nullptr);
-    inFlightFence = nullptr;
+  if (imageAvailableSemaphore) {
+    vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+    imageAvailableSemaphore = nullptr;
   }
 
   if (swapchain) {
@@ -5840,13 +5836,13 @@ Context::Context(int32_t requestedDevice) {
   // scanModule = new Module(scanDeviceCode);
   fallbacksModule = new Module(this, fallbacksDeviceCode);
 
-  // Fence for host-side swapchain acquisition.
+  // Acquisition semaphores must be binary; graphics completion uses the timeline.
   if (requestedFeatures.window) {
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    if (vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-      LOG_ERROR("Failed to create swapchain acquisition fence");
+    if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS) {
+      LOG_ERROR("Failed to create swapchain acquisition semaphore");
     }
   }
 
@@ -6669,18 +6665,17 @@ VkCommandBuffer Context::beginGraphicsCommands() {
   return commandBuffer;
 }
 
-VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
+VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer, VkSemaphore imageAvailable) {
   VkResult result;
   result = vkEndCommandBuffer(commandBuffer);
   if (result != VK_SUCCESS) return result;
 
-  uint64_t prevCounter = GRTimelineCounter;
   GRTimelineCounter++;
 
   VkTimelineSemaphoreSubmitInfo timelineInfo{};
   timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-  timelineInfo.waitSemaphoreValueCount = 1;
-  timelineInfo.pWaitSemaphoreValues = &prevCounter;
+  timelineInfo.waitSemaphoreValueCount = 0;
+  timelineInfo.pWaitSemaphoreValues = nullptr;
   timelineInfo.signalSemaphoreValueCount = 1;
   timelineInfo.pSignalSemaphoreValues = &GRTimelineCounter;
 
@@ -6688,8 +6683,11 @@ VkResult Context::endGraphicsCommands(VkCommandBuffer commandBuffer) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer;
-  submitInfo.waitSemaphoreCount = 0;
-  submitInfo.pWaitSemaphores = nullptr;
+  // Presentation first accesses the acquired image in the transfer stage.
+  VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  submitInfo.waitSemaphoreCount = imageAvailable ? 1 : 0;
+  submitInfo.pWaitSemaphores = imageAvailable ? &imageAvailable : nullptr;
+  submitInfo.pWaitDstStageMask = imageAvailable ? &waitStage : nullptr;
   submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &GRTimelineSemaphore;
   submitInfo.pNext = &timelineInfo;
@@ -7339,15 +7337,15 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
     region.srcOffsets[0].x = 0;
     region.srcOffsets[0].y = 0;
     region.srcOffsets[0].z = 0;
-    region.srcOffsets[1].x = texture->width;
-    region.srcOffsets[1].y = texture->height;
+    region.srcOffsets[1].x = context->windowExtent.width;
+    region.srcOffsets[1].y = context->windowExtent.height;
     region.srcOffsets[1].z = 1;
 
     region.dstOffsets[0].x = 0;
     region.dstOffsets[0].y = 0;
     region.dstOffsets[0].z = 0;
-    region.dstOffsets[1].x = context->windowExtent.width;
-    region.dstOffsets[1].y = context->windowExtent.height;
+    region.dstOffsets[1].x = texture->width;
+    region.dstOffsets[1].y = texture->height;
     region.dstOffsets[1].z = 1;
 
     region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -7404,7 +7402,7 @@ gprtTexturePresent(GPRTContext _context, GPRTTexture _texture) {
   texture->setImageLayout(commandBuffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture->layout,
                           {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture->mipLevels, 0, 1});
 
-  VkResult result = context->endGraphicsCommands(commandBuffer);
+  VkResult result = context->endGraphicsCommands(commandBuffer, context->imageAvailableSemaphore);
   if (result == VK_SUCCESS) result = context->synchronizeGraphics();
   VK_CHECK_RESULT(result);
   if (result != VK_SUCCESS) {
@@ -7545,7 +7543,7 @@ gprtBufferPresent(GPRTContext _context, GPRTBuffer _buffer) {
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
   }
 
-  VkResult result = context->endGraphicsCommands(commandBuffer);
+  VkResult result = context->endGraphicsCommands(commandBuffer, context->imageAvailableSemaphore);
   if (result == VK_SUCCESS) result = context->synchronizeGraphics();
   VK_CHECK_RESULT(result);
   if (result != VK_SUCCESS) {

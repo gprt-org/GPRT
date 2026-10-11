@@ -9,8 +9,8 @@ int main() {
   GPRTTextureParams params;
   params.type = GPRT_IMAGE_TYPE_2D;
   params.format = GPRT_FORMAT_R8G8B8A8_SRGB;
-  params.width = 32;
-  params.height = 32;
+  params.width = 256;
+  params.height = 256;
   auto texture = gprtDeviceTextureCreate<uint32_t>(context, params, pixels.data());
   for (int i = 0; i < 16; ++i) {
     gprtBufferPresent(context, buffer);
